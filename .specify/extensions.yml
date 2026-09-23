@@ -1,0 +1,24 @@
+# Registers a before_specify hook so a Linear issue ID (e.g. AIE-1234) in the
+# feature description drives spec directory naming (specs/AIE-1234-slug),
+# instead of always falling back to sequential specs/NNN-slug numbering.
+#
+# The hook command is a local project command (not a bundled Spec Kit
+# extension), documented in .claude/commands/speckit-local-create-feature.md.
+# It wraps .specify/scripts/bash/create-new-feature.sh, which already
+# contains the Linear-ID naming logic.
+installed:
+  - local
+
+hooks:
+  before_specify:
+    - extension: local
+      command: speckit.local.create-feature
+      enabled: true
+      optional: false
+      priority: 10
+      description: >-
+        Resolves the feature directory via
+        .specify/scripts/bash/create-new-feature.sh (honoring a Linear ID
+        such as AIE-1234 in the description) and persists the result to
+        .specify/feature.json so /speckit-plan, /speckit-tasks, and
+        /speckit-implement resolve the same feature directory.
