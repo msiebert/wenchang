@@ -32,9 +32,46 @@ print(str(bool(data.get('$field', False))).lower())
 }
 
 STOP_HOOK_ACTIVE="$(extract_bool_field stop_hook_active)"
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-    exit 0
+
+# The counter lives in the git dir so it survives across hook invocations but
+# not across clones/checkouts of the repo elsewhere.
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null || echo .git)"
+COUNTER_FILE="${GIT_DIR}/claude-stop-gate-count"
+
+reset_counter() {
+    rm -f "$COUNTER_FILE" 2>/dev/null || true
+}
+
+# A fresh stop chain (stop_hook_active == false) starts with a clean counter.
+if [ "$STOP_HOOK_ACTIVE" != "true" ]; then
+    reset_counter
 fi
+
+pass() {
+    reset_counter
+    exit 0
+}
+
+# Increment the consecutive-block counter and either block (exit 2) or, once
+# the cap is exceeded, allow the stop through (exit 0) so a human can step in.
+block() {
+    local reason="$1"
+    local count=0
+    if [ -f "$COUNTER_FILE" ]; then
+        count="$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)"
+    fi
+    case "$count" in
+        ''|*[!0-9]*) count=0 ;;
+    esac
+    count=$((count + 1))
+    if [ "$count" -gt 3 ]; then
+        echo "Stop gate has blocked 3 times; allowing stop so a human can intervene. Unresolved: ${reason}" >&2
+        reset_counter
+        exit 0
+    fi
+    printf '%s' "$count" > "$COUNTER_FILE"
+    exit 2
+}
 
 # Resolve a base to diff against: prefer the merge-base with main, else HEAD.
 if git rev-parse --verify main >/dev/null 2>&1; then
@@ -49,7 +86,7 @@ CHANGED_FILES="$(git diff --name-only "$BASE_REF" -- src tests 2>/dev/null || tr
 UNTRACKED_FILES="$(git ls-files --others --exclude-standard -- src tests 2>/dev/null || true)"
 
 if [ -z "$CHANGED_FILES" ] && [ -z "$UNTRACKED_FILES" ]; then
-    exit 0
+    pass
 fi
 
 # --- Test tampering detection -------------------------------------------
@@ -107,7 +144,7 @@ fi
 if [ -n "$TAMPER_REASONS" ]; then
     ALLOWED=false
     CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-    LINEAR_ID="$(printf '%s' "$CURRENT_BRANCH" | grep -Eo 'AIE-[0-9]+' | head -1 || true)"
+    LINEAR_ID="$(printf '%s' "$CURRENT_BRANCH" | grep -Eio 'AIE-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || true)"
     if [ -n "$LINEAR_ID" ]; then
         for spec_file in "$REPO_ROOT"/specs/"$LINEAR_ID"*/spec.md; do
             [ -f "$spec_file" ] || continue
@@ -124,7 +161,7 @@ if [ -n "$TAMPER_REASONS" ]; then
         echo "Restore the affected tests, or if the spec for this issue explicitly" >&2
         echo "requires this change, add a line 'Allow-test-changes:' to the spec's" >&2
         echo "spec.md explaining why, then retry." >&2
-        exit 2
+        block "possible test tampering detected"
     fi
 fi
 
@@ -134,13 +171,13 @@ fi
 if ! command -v make >/dev/null 2>&1; then
     echo "Stop blocked: 'make' was not found on PATH, so 'make check' cannot be run." >&2
     echo "Install make, or otherwise ensure 'make check' can run, then retry." >&2
-    exit 2
+    block "'make' not found on PATH"
 fi
 
 if [ ! -f Makefile ] || ! grep -q '^check:' Makefile 2>/dev/null; then
     echo "Stop blocked: no 'check:' target found in Makefile, so 'make check' cannot be verified." >&2
     echo "Add a 'check:' target to the Makefile, then retry." >&2
-    exit 2
+    block "no 'check:' target found in Makefile"
 fi
 
 CHECK_STATUS=0
@@ -150,7 +187,7 @@ if [ "$CHECK_STATUS" -ne 0 ]; then
     echo "Stop blocked: 'make check' failed. Fix the issues before stopping." >&2
     echo "--- tail of make check output ---" >&2
     printf '%s\n' "$CHECK_OUTPUT" | tail -60 >&2
-    exit 2
+    block "'make check' failed"
 fi
 
-exit 0
+pass

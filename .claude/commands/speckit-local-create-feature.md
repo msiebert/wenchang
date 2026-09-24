@@ -25,7 +25,7 @@ before writing the spec. It is not normally run standalone.
    This script contains the Linear-ID naming logic: if the description
    (case-insensitively) contains `AIE-<digits>`, the feature directory
    becomes `specs/AIE-<DIGITS>-<slug>/` and the suggested branch name
-   becomes `msiebert-AIE-<DIGITS>-<slug>`; otherwise it falls back to
+   becomes `AIE-<DIGITS>-<slug>`; otherwise it falls back to
    sequential `specs/NNN-<slug>/` numbering. In non-dry-run mode it also
    creates the directory, copies the spec template into `spec.md`, and
    persists the resolved path to `.specify/feature.json`. That persistence

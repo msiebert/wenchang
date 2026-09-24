@@ -2,6 +2,10 @@
 
 <!-- e.g. https://linear.app/mixpanel/issue/AIE-XXXX -->
 
+## Review summary
+
+<!-- Link to specs/AIE-XXXX-slug/review-pr.md (and its published artifact URL, if any). -->
+
 ## Why
 
 <!-- Why this change is needed, in a sentence or two. -->

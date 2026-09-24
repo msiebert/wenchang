@@ -56,6 +56,15 @@ When acceptance criteria are ambiguous or silent on a case the implementation
 must handle, stop and ask a human rather than inferring intent. Guessing
 wrong here is more expensive than a short pause.
 
+### XI. Readable Review Checkpoints
+Every human review point produces a concise, standalone summary rather than
+requiring the human to read raw spec text or a full diff. At the spec
+checkpoint, `specs/AIE-XXXX-slug/review-spec.md` summarizes what will be
+built, why, its acceptance criteria, key design decisions, and open
+questions. At the PR, `specs/AIE-XXXX-slug/review-pr.md` summarizes what
+changed, why, and the acceptance-criteria-to-test mapping. Both are published
+as artifacts when the tooling to do so is available.
+
 ## Governance
 
 This constitution supersedes ad hoc practice. Any PR that touches the areas
@@ -63,4 +72,4 @@ in Principle VII must show the corresponding ADR/ARCHITECTURE update, or
 justify in the PR description why none was needed. Amendments to this
 document require a PR against it, reviewed like any other change.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-23
+**Version**: 1.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-24

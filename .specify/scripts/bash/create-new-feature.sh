@@ -259,8 +259,8 @@ generate_branch_name() {
 # Detect a Linear issue ID (e.g. AIE-1038) in the description or an explicit
 # --short-name. When present, it drives naming instead of sequential numbering:
 # spec dir becomes specs/AIE-XXXX-slug and the suggested branch name becomes
-# msiebert-AIE-XXXX-slug (git branch creation itself happens downstream, e.g.
-# in the /implement-issue command).
+# AIE-XXXX-slug (git branch creation itself happens downstream, e.g. in the
+# /implement-issue command).
 LINEAR_ID=""
 LINEAR_SOURCE="$FEATURE_DESCRIPTION"
 [ -n "$SHORT_NAME" ] && LINEAR_SOURCE="$SHORT_NAME $FEATURE_DESCRIPTION"
@@ -296,7 +296,7 @@ fi
 if [ -n "$LINEAR_ID" ]; then
     FEATURE_NUM="$LINEAR_ID"
     SPEC_DIR_NAME="${LINEAR_ID}-${BRANCH_SUFFIX}"
-    BRANCH_NAME="msiebert-${LINEAR_ID}-${BRANCH_SUFFIX}"
+    BRANCH_NAME="${LINEAR_ID}-${BRANCH_SUFFIX}"
 elif [ "$USE_TIMESTAMP" = true ]; then
     FEATURE_NUM=$(date +%Y%m%d-%H%M%S)
     BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
