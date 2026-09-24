@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --locked
+      - run: make check
+
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      STORAGE_EMULATOR_HOST: http://localhost:4443
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --locked
+      - name: Start fake-gcs-server
+        run: |
+          docker run -d --name fake-gcs-server -p 4443:4443 \
+            fsouza/fake-gcs-server -scheme http -port 4443
+      - name: Wait for fake-gcs-server
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4443/storage/v1/b >/dev/null && exit 0
+            sleep 1
+          done
+          echo "fake-gcs-server did not become ready" >&2
+          exit 1
+      - name: Run integration tests
+        run: |
+          set +e
+          uv run pytest -m integration
+          status=$?
+          set -e
+          # Exit code 5 = pytest collected no tests; allowed until integration
+          # tests exist. Run pytest directly (not via `make test-integration`)
+          # so this sees pytest's real exit code -- GNU Make always exits 2 on
+          # a failing recipe rather than propagating the child's exit status.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 5 ]; then
+            exit "$status"
+          fi
+      - name: Stop fake-gcs-server
+        if: always()
+        run: docker stop fake-gcs-server
+
+  docs-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for ARCHITECTURE/ADR updates when public modules change
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -q '^src/wenchang/'; then
+            if ! echo "$CHANGED" | grep -qE '^(ARCHITECTURE\.md|docs/adr/)'; then
+              echo "::warning::This PR changes src/wenchang/** but neither ARCHITECTURE.md nor docs/adr/** were updated. Confirm whether a docs update is needed."
+            fi
+          fi
