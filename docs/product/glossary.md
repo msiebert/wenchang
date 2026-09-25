@@ -41,6 +41,12 @@ Terms as used throughout wenchang and its spec.
   surfaces have written to the file; free-form strings, not an enum.
 - **Confidence label** — one of `stated`, `observed`, `inferred`, `system`,
   marking how a fact came to be known.
+- **Body line** — a parsed line of a file's body: either a fact, or a
+  verbatim non-fact line (heading, blank line, prose) tolerated by the
+  parser but not part of the format presented to the agent.
+- **Metadata map** — the flat string-to-string map holding a file's
+  metadata as GCS custom object metadata, keyed by `description`,
+  `aliases`, `sources`, `last-updated`.
 - **Recoverable error** — an error category whose instance carries its own
   repair material (e.g. current content and version); the caller corrects
   and retries in the same turn without asking the user.
