@@ -11,9 +11,9 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-two implemented cross-cutting modules, `errors` and `version_token`. The
-module map below is the intended shape; each remaining module is marked
-**(planned)** until implemented.
+three implemented modules: the cross-cutting `errors` and `version_token`,
+and the dependency-free `file_format`. The module map below is the intended
+shape; each remaining module is marked **(planned)** until implemented.
 
 ## Module map
 
@@ -28,12 +28,21 @@ module map below is the intended shape; each remaining module is marked
   [ADR 0005](docs/adr/0005-error-taxonomy-as-exceptions.md).
 - **version_token** — `VersionToken`, an opaque `NewType` over `str` used
   wherever a caller needs to prove which version of a file it read.
-- **core** *(planned)* — file format: parsing/serializing markdown with its
-  four metadata fields (`description`, `aliases`, `sources`,
-  `last-updated`) and leading-bracket confidence-label fact lines. Also the
-  core API functions (`read_file`, `write_file`, `append_line`,
-  `replace_fact`, `list_prefix`, `delete_file`, `get_memory_index`) with
-  optimistic concurrency.
+- **file_format** — parsing and serializing a memory file's body and
+  metadata, with no dependency on storage, transport, scope, or agent
+  frameworks; used by `core` and `storage`. `ConfidenceLabel` (the four
+  labels) and `Fact` (label + single-line text), with `parse_fact` /
+  `format_fact` converting a single line. `BodyLine` (`Fact | str`) with
+  `parse_body` / `serialize_body` converting a whole body losslessly,
+  keeping non-fact lines verbatim. `FileMetadata` (description, aliases,
+  sources, last-updated) with `metadata_to_map` / `metadata_from_map`
+  converting to and from the flat string map stored as GCS custom object
+  metadata; malformed input raises `MetadataFormatError`. See
+  [ADR 0006](docs/adr/0006-file-format-and-metadata-encoding.md).
+- **core** *(planned)* — the core API functions (`read_file`, `write_file`,
+  `append_line`, `replace_fact`, `list_prefix`, `delete_file`,
+  `get_memory_index`) with optimistic concurrency, built on `file_format`
+  and `storage`.
 - **storage** *(planned)* — an internal storage protocol mirroring GCS
   object semantics (custom metadata, generation numbers,
   `ifGenerationMatch` preconditions), with a GCS implementation and an
@@ -64,7 +73,7 @@ flowchart TB
         transport[transport: abstract client\nin-process now, remote later]
     end
     subgraph Core
-        core[core: file format + API functions\noptimistic concurrency]
+        core[core: API functions\noptimistic concurrency]
         scope[scope / identity:\nresolver, path construction,\nwrite-restriction, system/ enforcement]
     end
     subgraph Storage
@@ -83,7 +92,9 @@ flowchart TB
 ```
 
 `errors` and `version_token` are cross-cutting (imported by every layer
-above) and are omitted from the diagram to keep it readable.
+above) and are omitted from the diagram to keep it readable. `file_format`
+is dependency-free and used by `core` and `storage`; it is also omitted
+from the diagram since it isn't wired into the request path shown there.
 
 ## Key invariants
 
@@ -101,6 +112,11 @@ above) and are omitted from the diagram to keep it readable.
 - **`append_line` carries no version guard** — appends at different offsets
   commute, but a retried append can duplicate a line (acceptable, per the
   error taxonomy).
+- **Metadata rides beside the body, never inside it.** The four metadata
+  fields are stored as flat string object custom metadata attached to the
+  file, committed atomically with the body; the markdown body itself is
+  fact lines and tolerated non-fact lines only. The body parser is
+  lossless: `serialize_body(parse_body(s)) == s` for every string `s`.
 
 ## Cross-cutting: error taxonomy
 
