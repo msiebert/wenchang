@@ -41,3 +41,11 @@ Terms as used throughout wenchang and its spec.
   surfaces have written to the file; free-form strings, not an enum.
 - **Confidence label** — one of `stated`, `observed`, `inferred`, `system`,
   marking how a fact came to be known.
+- **Recoverable error** — an error category whose instance carries its own
+  repair material (e.g. current content and version); the caller corrects
+  and retries in the same turn without asking the user.
+- **Permanent error** — an error category signaling the call cannot succeed
+  as given; the caller must stop and not retry.
+- **Transient error** — an error category signaling a temporary condition
+  where retrying is appropriate; a version-guarded retry safely degrades to
+  a recoverable version conflict if the first attempt actually landed.

@@ -10,12 +10,24 @@ exposed to the agent through a small set of tools (`read_file`, `write_file`,
 authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
-Today the repository holds only the project skeleton (tooling, tests,
-docs). No library code exists yet. The module map below is the intended
-shape; each module is marked **(planned)** until implemented.
+Today the repository holds the project skeleton (tooling, tests, docs) plus
+two implemented cross-cutting modules, `errors` and `version_token`. The
+module map below is the intended shape; each remaining module is marked
+**(planned)** until implemented.
 
 ## Module map
 
+- **errors** — the exception hierarchy every core API function will raise:
+  `WenchangError` (base) and one class per category —
+  `RecoverableError`, `PermanentError`, `TransientError` — each fixing that
+  category's next-action guidance text. Concrete kinds: recoverable
+  `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
+  `NotFoundError`; permanent `RestrictedScopeError`, `ResolverFailureError`;
+  transient `BackendUnavailableError`. See
+  [Cross-cutting: error taxonomy](#cross-cutting-error-taxonomy) and
+  [ADR 0005](docs/adr/0005-error-taxonomy-as-exceptions.md).
+- **version_token** — `VersionToken`, an opaque `NewType` over `str` used
+  wherever a caller needs to prove which version of a file it read.
 - **core** *(planned)* — file format: parsing/serializing markdown with its
   four metadata fields (`description`, `aliases`, `sources`,
   `last-updated`) and leading-bracket confidence-label fact lines. Also the
@@ -70,6 +82,9 @@ flowchart TB
     storageiface --> fake
 ```
 
+`errors` and `version_token` are cross-cutting (imported by every layer
+above) and are omitted from the diagram to keep it readable.
+
 ## Key invariants
 
 - **Optimistic concurrency via generation.** Every mutating call except
@@ -90,17 +105,22 @@ flowchart TB
 ## Cross-cutting: error taxonomy
 
 Errors are categorized by what the agent should do next, not by underlying
-cause:
+cause. Defined in `wenchang.errors` (see [ADR
+0005](docs/adr/0005-error-taxonomy-as-exceptions.md)):
 
-- **Recoverable** — the error carries its own repair material (e.g. a
-  version conflict returns current content and version; an oversize write
-  returns current size and limit). The agent corrects and retries in the
-  same turn.
-- **Permanent** — stop, do not retry (e.g. a `system/` write, a
-  write-restricted scope, or identity resolution failure).
-- **Transient** — retry is appropriate (e.g. timeout or backend
-  unavailability); a version-guarded retry safely degrades to a category-1
-  conflict if the first attempt actually landed.
+- **Recoverable** (`RecoverableError`) — the error carries its own repair
+  material (e.g. `VersionConflictError` returns current content and
+  version; `OversizeWriteError` returns current size and limit;
+  `ReplaceFactMatchError` returns content, version, and match count;
+  `NotFoundError` distinguishes an invalid path from a valid path with no
+  file yet). The agent corrects and retries in the same turn.
+- **Permanent** (`PermanentError`) — stop, do not retry
+  (`RestrictedScopeError` for a `system/` write or a role-gated scope;
+  `ResolverFailureError` for identity resolution failure).
+- **Transient** (`TransientError`) — retry is appropriate
+  (`BackendUnavailableError`, distinguishing timeout from unavailability); a
+  version-guarded retry safely degrades to a recoverable version conflict if
+  the first attempt actually landed.
 
 This taxonomy is expected to apply uniformly across the core API, the
 transport layer, and tool-facing error messages.
