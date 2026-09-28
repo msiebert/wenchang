@@ -47,6 +47,11 @@ Terms as used throughout wenchang and its spec.
 - **Metadata map** — the flat string-to-string map holding a file's
   metadata as GCS custom object metadata, keyed by `description`,
   `aliases`, `sources`, `last-updated`.
+- **Memory path** — a file's address, `{scope}/{entity_id}/{area}/{name}.md`,
+  relative to the storage root; exactly four non-empty segments, checked
+  only syntactically.
+- **Storage root** — the base a memory path is relative to; one storage
+  instance (for GCS, one bucket).
 - **Recoverable error** — an error category whose instance carries its own
   repair material (e.g. current content and version); the caller corrects
   and retries in the same turn without asking the user.

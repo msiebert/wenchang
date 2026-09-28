@@ -12,6 +12,10 @@ All hands-on code and test writing is delegated to the `test-writer` and
 `implementer` subagents. Work through these steps in order. Do not skip the
 checkpoint in step (c).
 
+Linear status changes (`mcp__claude_ai_Linear__save_issue` with `state`) are
+routine bookkeeping and require no user confirmation, unlike Linear comments,
+which still need explicit confirmation before posting.
+
 Every delegation prompt you write for a subagent must be self-contained —
 subagents start with no memory of this conversation. Include, at minimum:
 the Linear ID, the spec directory path (`specs/AIE-XXXX-slug/`), the
@@ -35,6 +39,12 @@ or prior art rather than searching yourself.
 4. If you need to know where related code already lives, delegate to
    `explorer` with the specific question — don't explore `src/` yourself
    beyond what's needed to write the spec.
+5. Before starting, find issues in the same Linear project with status "In
+   Review" (`mcp__claude_ai_Linear__list_issues` with `project` and `state`).
+   For each whose PR has merged into `main` (check with `gh pr list --state
+   merged --search "<ID>"` or equivalent), move it to Done with
+   `mcp__claude_ai_Linear__save_issue`. No confirmation needed for these
+   status changes.
 
 ## (b) Branch and spec directory setup
 
@@ -49,13 +59,14 @@ You do this step yourself. Do it before running any Spec Kit command:
 4. `git checkout -b AIE-XXXX-<slug>` (substituting the real issue number and
    a short slug for the feature), per this repo's branch-naming convention
    (see `AGENTS.md`).
-5. Run `.specify/scripts/bash/create-new-feature.sh --json "AIE-XXXX <short
+5. Move the issue to "In Progress" with `mcp__claude_ai_Linear__save_issue`.
+6. Run `.specify/scripts/bash/create-new-feature.sh --json "AIE-XXXX <short
    feature description>"` (or trust the `before_specify` hook registered in
    `.specify/extensions.yml` to run it automatically when `/speckit-specify`
    is invoked next — either path calls the same script). Because the
    description contains the Linear ID, the script names the spec directory
    `specs/AIE-XXXX-slug/` and persists that path to `.specify/feature.json`.
-6. Verify `specs/AIE-XXXX-*/` now exists before continuing. If it does not,
+7. Verify `specs/AIE-XXXX-*/` now exists before continuing. If it does not,
    stop and investigate rather than proceeding with a mis-named or missing
    spec directory.
 
@@ -165,8 +176,15 @@ You do this step yourself.
      Artifact tool).
    - Include an acceptance-criteria → test mapping table.
    - Include a "Why" section.
+3. Once the PR is open, move the issue to "In Review" with
+   `mcp__claude_ai_Linear__save_issue`.
 
 ## (i) Close out
 
 With explicit confirmation, post a summary comment to the Linear issue,
 posted plainly with no special prefix.
+
+Move the issue to "Done" once its PR merges: if the PR has already merged by
+the end of this session, do it now with `mcp__claude_ai_Linear__save_issue`
+(no confirmation needed); otherwise leave it in "In Review" — step (a) of the
+next run catches it.
