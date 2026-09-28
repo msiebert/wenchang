@@ -11,9 +11,12 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-three implemented modules: the cross-cutting `errors` and `version_token`,
-and the dependency-free `file_format`. The module map below is the intended
-shape; each remaining module is marked **(planned)** until implemented.
+six implemented modules: the cross-cutting `errors` and `version_token`; the
+dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
+fake and a GCS implementation behind one protocol); and `core`, whose only
+implemented operation so far is `read_file`. The module map below is the
+intended shape; each remaining module is marked **(planned)** until
+implemented.
 
 ## Module map
 
@@ -39,15 +42,33 @@ shape; each remaining module is marked **(planned)** until implemented.
   converting to and from the flat string map stored as GCS custom object
   metadata; malformed input raises `MetadataFormatError`. See
   [ADR 0006](docs/adr/0006-file-format-and-metadata-encoding.md).
-- **core** *(planned)* — the core API functions (`read_file`, `write_file`,
-  `append_line`, `replace_fact`, `list_prefix`, `delete_file`,
-  `get_memory_index`) with optimistic concurrency, built on `file_format`
-  and `storage`.
-- **storage** *(planned)* — an internal storage protocol mirroring GCS
-  object semantics (custom metadata, generation numbers,
-  `ifGenerationMatch` preconditions), with a GCS implementation and an
-  in-memory fake for unit tests. See
-  [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md).
+- **paths** — `is_valid_path(path)`, a syntactic check for
+  `{scope}/{entity_id}/{area}/{name}.md`: exactly four non-empty segments,
+  none `.` or `..`, none containing a backslash or a Unicode control
+  character, the last ending in `.md` with a non-empty stem. Paths are
+  relative to the storage root; the check never inspects storage or
+  interprets the segments (scope validity, authorization) — see [ADR
+  0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
+- **storage** — an internal protocol mirroring GCS object semantics (custom
+  metadata, a generation-backed version token): `Storage` (`get`, `put`) and
+  `StoredObject` (bytes, metadata map, `VersionToken`), with two
+  implementations behind it, held identical by one shared conformance
+  suite. `InMemoryStorage` is the unit-test fake. `GcsStorage` is the only
+  module that imports `google.cloud`; it maps client timeouts and
+  server/connection unavailability to `BackendUnavailableError`, and pins
+  each `get` to the generation `get_blob` fetched so content and metadata
+  always come from the same write, retrying on a generation race. `put` is
+  unconditional in both implementations; generation-match preconditions are
+  not yet present. See
+  [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md)
+  and [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
+- **core** — `MemoryStore(storage)`, holding the core API as methods on one
+  object (so later operations can share configuration such as a size limit
+  or index cap). `read_file(path) -> MemoryFile` is implemented: it
+  validates the path, fetches the object, and returns content, metadata,
+  path, and version token. `write_file`, `append_line`, `replace_fact`,
+  `list_prefix`, `delete_file`, and `get_memory_index` are *(planned)*. See
+  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.
@@ -117,6 +138,15 @@ from the diagram since it isn't wired into the request path shown there.
   file, committed atomically with the body; the markdown body itself is
   fact lines and tolerated non-fact lines only. The body parser is
   lossless: `serialize_body(parse_body(s)) == s` for every string `s`.
+- **The storage root is the storage instance.** `{root}` in the path layout
+  is one storage instance — for GCS, one bucket — and every path a caller
+  gives `core` is relative to it; the storage protocol takes that path as
+  its key unchanged. A key prefix within a bucket, if ever needed, is
+  addable without changing callers.
+- **Version tokens convert to and from a GCS generation in exactly one
+  place.** The `Storage` protocol and every caller above it speak
+  `VersionToken` only; `GcsStorage` is the sole module that turns a token
+  into (or out of) an integer generation.
 
 ## Cross-cutting: error taxonomy
 
