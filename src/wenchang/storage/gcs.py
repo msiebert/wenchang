@@ -27,7 +27,7 @@ from wenchang.version_token import VersionToken
 
 _GET_RETRY_ATTEMPTS = 3
 _CONTENT_TYPE = "text/markdown; charset=utf-8"
-_GENERATION_TOKEN_RE = re.compile(r"^[1-9][0-9]*$")
+_GENERATION_TOKEN_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _map_backend_error(exc: Exception) -> BackendUnavailableError | None:
@@ -117,7 +117,7 @@ class GcsStorage:
         if expected is None:
             generation = 0
         else:
-            if not _GENERATION_TOKEN_RE.match(expected):
+            if not _GENERATION_TOKEN_RE.fullmatch(expected):
                 raise PreconditionFailedError(key)
             generation = int(expected)
         blob = self._bucket.blob(key)  # pyright: ignore[reportUnknownMemberType]

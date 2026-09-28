@@ -233,6 +233,26 @@ class StorageConformance:
         assert dict(result.metadata) == {"a": "1"}
         assert result.version == original_token
 
+    def test_put_if_version_with_trailing_newline_on_valid_token_raises_and_leaves_object_unchanged(
+        self, storage: Storage
+    ) -> None:
+        """A token equal to the current version's digits plus a trailing
+        newline is not the canonical decimal form of a positive integer, so
+        put_if_version must raise PreconditionFailedError(key) and leave the
+        object unchanged — even though `int()` would parse it and it targets
+        the matching generation (AIE-1033).
+        """
+        original_token = storage.put("k", b"original", {"a": "1"})
+        bad_token = VersionToken(f"{original_token}\n")
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.put_if_version("k", b"new", {"a": "2"}, bad_token)
+        assert excinfo.value.key == "k"
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"original"
+        assert dict(result.metadata) == {"a": "1"}
+        assert result.version == original_token
+
     def test_put_if_version_mutating_callers_metadata_dict_after_put_does_not_affect_storage(
         self, storage: Storage
     ) -> None:

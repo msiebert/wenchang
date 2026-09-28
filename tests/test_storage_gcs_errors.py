@@ -373,13 +373,16 @@ def test_put_if_version_with_token_uploads_with_matching_generation() -> None:
     assert blob.upload_if_generation_match == 42
 
 
-@pytest.mark.parametrize("bogus_token", ["", "abc", "0", "-1", "007", "4.2", " 42"])
+@pytest.mark.parametrize(
+    "bogus_token", ["", "abc", "0", "-1", "007", "4.2", " 42", "42\n", "42\r\n"]
+)
 def test_put_if_version_with_non_canonical_token_raises_without_upload(
     bogus_token: str,
 ) -> None:
-    """A non-canonical expected token (not matching ^[1-9][0-9]*$) raises
-    PreconditionFailedError(key) without calling bucket.blob or uploading
-    (AIE-1033).
+    """A non-canonical expected token (not matching ^[1-9][0-9]*$ as a whole
+    string, including trailing-newline variants which `re.match` with a bare
+    `$` would wrongly accept) raises PreconditionFailedError(key) without
+    calling bucket.blob or uploading (AIE-1033).
     """
     bucket = _StubBucket()
     storage = _make_storage(bucket)
