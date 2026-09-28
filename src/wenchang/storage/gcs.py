@@ -5,6 +5,7 @@ The only module under `src/wenchang` that imports `google.cloud`,
 through the `Storage` protocol.
 """
 
+import re
 from collections.abc import Mapping
 
 import requests.exceptions
@@ -21,11 +22,12 @@ from google.api_core.exceptions import (
 from google.cloud.storage import Bucket  # pyright: ignore[reportMissingTypeStubs]
 
 from wenchang.errors import BackendUnavailableError, TransientReason
-from wenchang.storage import StoredObject
+from wenchang.storage import PreconditionFailedError, StoredObject
 from wenchang.version_token import VersionToken
 
 _GET_RETRY_ATTEMPTS = 3
 _CONTENT_TYPE = "text/markdown; charset=utf-8"
+_GENERATION_TOKEN_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _map_backend_error(exc: Exception) -> BackendUnavailableError | None:
@@ -98,6 +100,34 @@ class GcsStorage:
             blob.upload_from_string(  # pyright: ignore[reportUnknownMemberType]
                 data, content_type=_CONTENT_TYPE
             )
+        except Exception as exc:
+            mapped = _map_backend_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
+        return VersionToken(str(blob.generation))  # pyright: ignore[reportUnknownMemberType]
+
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        if expected is None:
+            generation = 0
+        else:
+            if not _GENERATION_TOKEN_RE.fullmatch(expected):
+                raise PreconditionFailedError(key)
+            generation = int(expected)
+        blob = self._bucket.blob(key)  # pyright: ignore[reportUnknownMemberType]
+        blob.metadata = dict(metadata)
+        try:
+            blob.upload_from_string(  # pyright: ignore[reportUnknownMemberType]
+                data, content_type=_CONTENT_TYPE, if_generation_match=generation
+            )
+        except PreconditionFailed as exc:
+            raise PreconditionFailedError(key) from exc
         except Exception as exc:
             mapped = _map_backend_error(exc)
             if mapped is None:

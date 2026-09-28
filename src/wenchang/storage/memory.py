@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 
-from wenchang.storage import StoredObject
+from wenchang.storage import PreconditionFailedError, StoredObject
 from wenchang.version_token import VersionToken
 
 
@@ -31,3 +31,16 @@ class InMemoryStorage:
         self._next_token += 1
         self._objects[key] = StoredObject(data=data, metadata=dict(metadata), version=token)
         return token
+
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        current = self._objects.get(key)
+        current_token = current.version if current is not None else None
+        if current_token != expected:
+            raise PreconditionFailedError(key)
+        return self.put(key, data, metadata)
