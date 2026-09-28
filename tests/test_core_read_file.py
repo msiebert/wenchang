@@ -66,6 +66,15 @@ class _StubStorage:
     def put(self, key: str, data: bytes, metadata: Mapping[str, str]) -> VersionToken:
         raise NotImplementedError("not exercised by these tests")
 
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        raise NotImplementedError("not exercised by these tests")
+
 
 def _as_storage(stub: _StubStorage) -> Storage:
     return stub

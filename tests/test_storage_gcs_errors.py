@@ -26,8 +26,9 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ReadTimeout
 
 from wenchang.errors import BackendUnavailableError, TransientReason
-from wenchang.storage import Storage
+from wenchang.storage import PreconditionFailedError, Storage
 from wenchang.storage.gcs import GcsStorage
+from wenchang.version_token import VersionToken
 
 pytestmark = pytest.mark.unit
 
@@ -70,9 +71,12 @@ class _StubBlob:
             raise self._download_raises.pop(0)
         return self._data
 
-    def upload_from_string(self, data: bytes, *, content_type: str) -> None:
+    def upload_from_string(
+        self, data: bytes, *, content_type: str, if_generation_match: int | None = None
+    ) -> None:
         self.uploaded_data = data
         self.uploaded_content_type = content_type
+        self.upload_if_generation_match = if_generation_match
 
 
 class _StubBucket:
@@ -172,7 +176,9 @@ class _RaisingOnUploadBlob(_StubBlob):
         super().__init__(generation=generation)
         self._upload_raises = upload_raises
 
-    def upload_from_string(self, data: bytes, *, content_type: str) -> None:
+    def upload_from_string(
+        self, data: bytes, *, content_type: str, if_generation_match: int | None = None
+    ) -> None:
         raise self._upload_raises
 
 
@@ -311,6 +317,143 @@ def test_put_sets_metadata_copy_content_type_and_returns_generation_token() -> N
     assert blob.metadata is not metadata
     assert blob.uploaded_data == b"payload"
     assert blob.uploaded_content_type == "text/markdown; charset=utf-8"
+
+
+class _StubBlobForPutIfVersion(_StubBlob):
+    """Stub blob whose upload_from_string records if_generation_match."""
+
+    def __init__(
+        self,
+        generation: int,
+        upload_raises: BaseException | None = None,
+    ) -> None:
+        super().__init__(generation=generation)
+        self._upload_raises = upload_raises
+        self.upload_if_generation_match: int | None = None
+
+    def upload_from_string(
+        self, data: bytes, *, content_type: str, if_generation_match: int | None = None
+    ) -> None:
+        self.upload_if_generation_match = if_generation_match
+        if self._upload_raises is not None:
+            raise self._upload_raises
+        self.uploaded_data = data
+        self.uploaded_content_type = content_type
+
+
+def test_put_if_version_none_uploads_with_generation_zero_and_returns_token() -> None:
+    """put_if_version(expected=None) sets blob.metadata, uploads with
+    if_generation_match=0, and returns VersionToken(str(blob.generation))
+    (AIE-1033).
+    """
+    blob = _StubBlobForPutIfVersion(generation=1)
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+
+    metadata = {"lang": "en"}
+    token = storage.put_if_version("k", b"payload", metadata, None)
+
+    assert blob.metadata == {"lang": "en"}
+    assert blob.upload_if_generation_match == 0
+    assert blob.uploaded_data == b"payload"
+    assert blob.uploaded_content_type == "text/markdown; charset=utf-8"
+    assert token == "1"
+
+
+def test_put_if_version_with_token_uploads_with_matching_generation() -> None:
+    """put_if_version(expected=VersionToken("42")) uploads with
+    if_generation_match=42 (AIE-1033).
+    """
+    blob = _StubBlobForPutIfVersion(generation=43)
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+
+    storage.put_if_version("k", b"payload", {}, VersionToken("42"))
+
+    assert blob.upload_if_generation_match == 42
+
+
+@pytest.mark.parametrize("bogus_token", ["", "abc", "0", "-1", "007", "4.2", " 42"])
+def test_put_if_version_with_non_canonical_token_raises_without_upload(
+    bogus_token: str,
+) -> None:
+    """A non-canonical expected token (not matching ^[1-9][0-9]*$) raises
+    PreconditionFailedError(key) without calling bucket.blob or uploading
+    (AIE-1033).
+    """
+    bucket = _StubBucket()
+    storage = _make_storage(bucket)
+
+    with pytest.raises(PreconditionFailedError) as excinfo:
+        storage.put_if_version("k", b"payload", {}, VersionToken(bogus_token))
+
+    assert excinfo.value.key == "k"
+    assert bucket.blob_calls == []
+
+
+def test_put_if_version_upload_precondition_failed_raises_precondition_failed_error() -> None:
+    """PreconditionFailed raised from upload_from_string() maps to
+    PreconditionFailedError(key) (AIE-1033).
+    """
+    blob = _StubBlobForPutIfVersion(
+        generation=1, upload_raises=PreconditionFailed("generation mismatch")
+    )
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(PreconditionFailedError) as excinfo:
+        storage.put_if_version("k", b"payload", {}, None)
+
+    assert excinfo.value.key == "k"
+
+
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_put_if_version_upload_timeout_exceptions_map_to_backend_unavailable_timeout(
+    exc: Exception,
+) -> None:
+    """Each timeout-class exception raised from upload_from_string() during
+    put_if_version() maps to BackendUnavailableError with reason TIMEOUT
+    (AIE-1033).
+    """
+    blob = _StubBlobForPutIfVersion(generation=1, upload_raises=exc)
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.put_if_version("k", b"payload", {}, None)
+
+    assert excinfo.value.reason is TransientReason.TIMEOUT
+
+
+@pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_put_if_version_upload_unavailable_exceptions_map_to_backend_unavailable_unavailable(
+    exc: Exception,
+) -> None:
+    """Each unavailable-class exception raised from upload_from_string()
+    during put_if_version() maps to BackendUnavailableError with reason
+    UNAVAILABLE (AIE-1033).
+    """
+    blob = _StubBlobForPutIfVersion(generation=1, upload_raises=exc)
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.put_if_version("k", b"payload", {}, None)
+
+    assert excinfo.value.reason is TransientReason.UNAVAILABLE
+
+
+def test_put_if_version_unmapped_exception_from_upload_propagates_unchanged() -> None:
+    """An exception not in the mapping (Forbidden) raised from
+    upload_from_string() during put_if_version() propagates unchanged, not
+    wrapped (AIE-1033).
+    """
+    blob = _StubBlobForPutIfVersion(generation=1, upload_raises=Forbidden("forbidden"))
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(Forbidden):
+        storage.put_if_version("k", b"payload", {}, None)
 
 
 def test_no_module_outside_storage_gcs_imports_google_cloud() -> None:

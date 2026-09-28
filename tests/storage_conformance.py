@@ -12,7 +12,10 @@ makes the bare import resolve from both `tests/test_storage_memory.py` and
 `tests/integration/test_storage_gcs.py`.
 """
 
-from wenchang.storage import Storage
+import pytest
+
+from wenchang.storage import PreconditionFailedError, Storage
+from wenchang.version_token import VersionToken
 
 
 class StorageConformance:
@@ -135,3 +138,126 @@ class StorageConformance:
         assert result.version == first_token
         second_token = storage.put("k", b"other", {})
         assert second_token != first_token
+
+    def test_put_if_version_none_on_missing_key_creates_object(self, storage: Storage) -> None:
+        """With no object at a key, put_if_version(expected=None) returns a
+        token and get() returns the object with that same bytes, metadata,
+        and token (AIE-1033, US7).
+        """
+        token = storage.put_if_version("k", b"data", {"a": "1"}, None)
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"data"
+        assert dict(result.metadata) == {"a": "1"}
+        assert result.version == token
+
+    def test_put_if_version_none_on_existing_key_raises_and_leaves_object_unchanged(
+        self, storage: Storage
+    ) -> None:
+        """With an object already at a key, put_if_version(expected=None)
+        raises PreconditionFailedError(key) and leaves the existing bytes,
+        metadata, and version unchanged (AIE-1033, US7).
+        """
+        original_token = storage.put("k", b"original", {"a": "1"})
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.put_if_version("k", b"new", {"a": "2"}, None)
+        assert excinfo.value.key == "k"
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"original"
+        assert dict(result.metadata) == {"a": "1"}
+        assert result.version == original_token
+
+    def test_put_if_version_with_current_token_succeeds_and_returns_new_token(
+        self, storage: Storage
+    ) -> None:
+        """With an object at version V, put_if_version(expected=V) succeeds,
+        returning a new token != V, and get() returns the new bytes and
+        metadata together (AIE-1033, US7).
+        """
+        v1 = storage.put("k", b"v1", {"which": "v1"})
+        v2 = storage.put_if_version("k", b"v2", {"which": "v2"}, v1)
+        assert v2 != v1
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"v2"
+        assert dict(result.metadata) == {"which": "v2"}
+        assert result.version == v2
+
+    def test_put_if_version_with_stale_token_raises_and_leaves_object_unchanged(
+        self, storage: Storage
+    ) -> None:
+        """With an object at version V2 (written after V1), put_if_version
+        using the stale V1 raises PreconditionFailedError and leaves the
+        object unchanged (AIE-1033, US7).
+        """
+        v1 = storage.put("k", b"v1", {"which": "v1"})
+        v2 = storage.put("k", b"v2", {"which": "v2"})
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.put_if_version("k", b"v3", {"which": "v3"}, v1)
+        assert excinfo.value.key == "k"
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"v2"
+        assert dict(result.metadata) == {"which": "v2"}
+        assert result.version == v2
+
+    def test_put_if_version_with_foreign_token_on_missing_key_raises_and_stays_missing(
+        self, storage: Storage
+    ) -> None:
+        """With no object at a key, put_if_version with a non-None token
+        (obtained from a different key) raises PreconditionFailedError and
+        the key remains absent afterwards (AIE-1033, US7).
+        """
+        other_token = storage.put("other-key", b"data", {})
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.put_if_version("k", b"data", {}, other_token)
+        assert excinfo.value.key == "k"
+        assert storage.get("k") is None
+
+    @pytest.mark.parametrize("bogus_token", ["abc", "0", "-1", "007", "", "999999999999"])
+    def test_put_if_version_with_token_no_put_produced_raises_and_leaves_object_unchanged(
+        self, storage: Storage, bogus_token: str
+    ) -> None:
+        """Using a token string that no put() ever produced against an
+        existing object raises PreconditionFailedError and leaves the object
+        unchanged (AIE-1033, US7).
+        """
+        original_token = storage.put("k", b"original", {"a": "1"})
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.put_if_version("k", b"new", {"a": "2"}, VersionToken(bogus_token))
+        assert excinfo.value.key == "k"
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"original"
+        assert dict(result.metadata) == {"a": "1"}
+        assert result.version == original_token
+
+    def test_put_if_version_mutating_callers_metadata_dict_after_put_does_not_affect_storage(
+        self, storage: Storage
+    ) -> None:
+        """The caller's metadata mapping passed to a successful
+        put_if_version is copied: mutating the dict afterwards does not
+        affect a later get() (AIE-1033, US7).
+        """
+        metadata: dict[str, str] = {"a": "1"}
+        storage.put_if_version("k", b"data", metadata, None)
+        metadata["a"] = "mutated"
+        metadata["b"] = "new"
+        result = storage.get("k")
+        assert result is not None
+        assert dict(result.metadata) == {"a": "1"}
+
+    def test_precondition_failed_error_is_not_a_wenchang_error(self, storage: Storage) -> None:
+        """PreconditionFailedError subclasses Exception directly, not
+        WenchangError (AIE-1033, US7).
+        """
+        from wenchang.errors import WenchangError
+
+        storage.put("k", b"data", {})
+        try:
+            storage.put_if_version("k", b"new", {}, None)
+        except PreconditionFailedError as error:
+            assert not isinstance(error, WenchangError)
+        else:
+            pytest.fail("expected PreconditionFailedError")

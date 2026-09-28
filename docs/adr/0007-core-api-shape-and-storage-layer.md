@@ -77,3 +77,9 @@ a key prefix) without breaking existing callers, since both are internal to
 generation-match precondition `put` still lacks, and any conflict-handling
 tests must account for `get`'s existing pinned-generation retry when
 composing read-modify-write flows.
+
+**Update (AIE-1033):** the "`put` is unconditional in this issue" decision
+above is superseded by `Storage.put_if_version` — see
+[ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md). `put`
+itself remains unconditional and unchanged; the new conditional put is an
+addition to the protocol, not a replacement.

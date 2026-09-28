@@ -13,10 +13,10 @@ no schema and does not search file content.
 Today the repository holds the project skeleton (tooling, tests, docs) plus
 six implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
-fake and a GCS implementation behind one protocol); and `core`, whose only
-implemented operation so far is `read_file`. The module map below is the
-intended shape; each remaining module is marked **(planned)** until
-implemented.
+fake and a GCS implementation behind one protocol); and `core`, whose
+implemented operations so far are `read_file` and `write_file`. The module
+map below is the intended shape; each remaining module is marked
+**(planned)** until implemented.
 
 ## Module map
 
@@ -50,25 +50,46 @@ implemented.
   interprets the segments (scope validity, authorization) — see [ADR
   0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
 - **storage** — an internal protocol mirroring GCS object semantics (custom
-  metadata, a generation-backed version token): `Storage` (`get`, `put`) and
-  `StoredObject` (bytes, metadata map, `VersionToken`), with two
-  implementations behind it, held identical by one shared conformance
-  suite. `InMemoryStorage` is the unit-test fake. `GcsStorage` is the only
-  module that imports `google.cloud`; it maps client timeouts and
+  metadata, a generation-backed version token): `Storage` (`get`, `put`,
+  `put_if_version`) and `StoredObject` (bytes, metadata map, `VersionToken`),
+  with two implementations behind it, held identical by one shared
+  conformance suite. `InMemoryStorage` is the unit-test fake. `GcsStorage` is
+  the only module that imports `google.cloud`; it maps client timeouts and
   server/connection unavailability to `BackendUnavailableError`, and pins
   each `get` to the generation `get_blob` fetched so content and metadata
   always come from the same write, retrying on a generation race. `put` is
-  unconditional in both implementations; generation-match preconditions are
-  not yet present. See
-  [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md)
-  and [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
-- **core** — `MemoryStore(storage)`, holding the core API as methods on one
-  object (so later operations can share configuration such as a size limit
-  or index cap). `read_file(path) -> MemoryFile` is implemented: it
-  validates the path, fetches the object, and returns content, metadata,
-  path, and version token. `write_file`, `append_line`, `replace_fact`,
-  `list_prefix`, `delete_file`, and `get_memory_index` are *(planned)*. See
-  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
+  unconditional in both implementations. `put_if_version(key, data, metadata,
+  expected)` is the conditional put: `expected=None` commits only if no
+  object exists at `key` (GCS `ifGenerationMatch=0`); a token commits only if
+  it equals the object's current version; any other case raises the
+  storage-internal `PreconditionFailedError(key)` and writes nothing. Tokens
+  are compared by string equality in `InMemoryStorage`; `GcsStorage` accepts
+  only the canonical decimal form of a positive integer as a token (so `"0"`
+  and other non-canonical strings fail the precondition locally, with no
+  client call, rather than being read as "must not exist"). See
+  [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md),
+  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md), and
+  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md).
+- **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...)`,
+  holding the core API as methods on one object (so later operations can
+  share configuration such as a size limit or index cap); `max_file_bytes`
+  must be positive, and `clock` (default current UTC) is injectable for
+  tests and for stamping `last-updated`. `read_file(path) -> MemoryFile` is
+  implemented: it validates the path, fetches the object, and returns
+  content, metadata, path, and version token. `write_file(path, content,
+  metadata, expected_version) -> MemoryFile` is implemented: it validates
+  the path, rejects content whose UTF-8 encoding exceeds `max_file_bytes`
+  with `OversizeWriteError` (checked before storage is consulted), stamps
+  `metadata.last_updated` from the clock (overriding the caller's value),
+  and issues one conditional put. On a precondition failure it fetches the
+  current object and raises `VersionConflictError(path, current_content,
+  current_version)`, or `NotFoundError(FILE_ABSENT)` if the file is now
+  absent; a corrupt object found on that fetch raises `MetadataFormatError`
+  or `UnicodeDecodeError` exactly as `read_file` does. `append_line`,
+  `replace_fact`, `list_prefix`, `delete_file`, and `get_memory_index` are
+  *(planned)*. See
+  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md) and
+  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.
@@ -123,9 +144,26 @@ from the diagram since it isn't wired into the request path shown there.
   `append_line` carries an expected version token; a stale token fails the
   call and returns current content plus current version so the caller can
   merge and retry in the same turn. The version token is opaque — no caller
-  parses, compares, or orders it.
+  parses, compares, or orders it. `write_file`'s `expected_version=None`
+  means "create; must not exist," the one mutating case with no prior token
+  to hold; a non-`None` token against an absent file is `NotFoundError
+  (FILE_ABSENT)`, not a conflict, since there is no current content to
+  return. Storage signals a failed precondition with its own
+  `PreconditionFailedError`, an internal signal never surfaced to agents;
+  `core` translates it into `VersionConflictError` by fetching the current
+  object. An unrecognized or non-numeric token is treated as a mismatch
+  (conflict), never a parse error — callers cannot be asked to supply
+  well-formed tokens since they never parse them.
 - **One lock, one token per file.** Content and metadata commit together;
   there is no metadata-only update.
+- **A per-file byte ceiling bounds writes, not reads.** `write_file` rejects
+  content whose UTF-8 encoding exceeds the store's `max_file_bytes` (default
+  16384, configurable, exactly the limit allowed) before consulting storage;
+  the ceiling counts content bytes only, never metadata.
+- **`last-updated` is stamped by `core`, not the caller.** Every write path
+  sets `metadata.last_updated` from the store's injectable clock, overriding
+  whatever the caller supplied, so the field stays reliable for index
+  ordering without every caller having to remember to refresh it.
 - **The `system/` area is read-only to the agent**, enforced at the tool
   layer as an exact path-prefix check, not by instruction.
 - **Metadata-only navigation.** `description` and `aliases` are the entire
