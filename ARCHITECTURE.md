@@ -15,8 +15,8 @@ six implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); and `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-and `list_prefix`. The module map below is the intended shape; each
-remaining module is marked **(planned)** until implemented.
+`list_prefix`, and `append_line`. The module map below is the intended
+shape; each remaining module is marked **(planned)** until implemented.
 
 ## Module map
 
@@ -140,12 +140,33 @@ remaining module is marked **(planned)** until implemented.
   malformed cursor or one issued for a different prefix raises `ValueError`.
   Listing is not a snapshot: a file written or deleted between two pages of
   the same listing is reflected at whatever page reads it (or not at all,
-  if deleted before its page). `append_line`, `delete_file`, and
-  `get_memory_index` are *(planned)*. See
+  if deleted before its page). `append_line(path, line, expected_version, *,
+  source) -> MemoryFile` is implemented: it appends one fact line to the end
+  of an existing file's content, only if the file is still at
+  `expected_version`. It reads the current object, checks the version,
+  inserts a `"\n"` separator first if the content is non-empty and doesn't
+  already end in one, and issues one conditional put; `line` must parse as
+  exactly one fact line (`parse_fact`) or `ValueError` is raised before
+  storage is consulted, as does an empty `source`. A stale `expected_version`
+  raises `VersionConflictError(path, current_content, current_version)`
+  immediately — unlike `replace_fact`, there is no automatic re-apply,
+  since re-applying an append always succeeds and would duplicate a landed
+  line on retry. A `PreconditionFailedError` re-reads; if the stored bytes
+  and metadata already equal exactly what this call tried to write (its own
+  write landed and a backend-level retry of the conditional upload then saw
+  the precondition fail), it returns that as success rather than raising or
+  writing again, otherwise it raises `VersionConflictError` with the
+  current content and version, or `NotFoundError(FILE_ABSENT)` if the
+  object is now gone. A missing file raises `NotFoundError(FILE_ABSENT)`
+  and is never created. Metadata is stamped the same way as `replace_fact`:
+  `source` unioned into `sources`, `last_updated` from the clock, other
+  fields unchanged. `delete_file` and `get_memory_index` are *(planned)*.
+  See
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
-  [ADR 0009](docs/adr/0009-replace-fact-semantics.md), and
-  [ADR 0010](docs/adr/0010-list-prefix-pagination.md).
+  [ADR 0009](docs/adr/0009-replace-fact-semantics.md),
+  [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
+  [ADR 0011](docs/adr/0011-append-line-version-guard.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.
@@ -196,20 +217,25 @@ from the diagram since it isn't wired into the request path shown there.
 
 ## Key invariants
 
-- **Optimistic concurrency via generation.** Every mutating call except
-  `append_line` carries an expected version token; a stale token fails the
-  call and returns current content plus current version so the caller can
-  merge and retry in the same turn. The version token is opaque — no caller
-  parses, compares, or orders it. `write_file`'s `expected_version=None`
-  means "create; must not exist," the one mutating case with no prior token
-  to hold; a non-`None` token against an absent file is `NotFoundError
-  (FILE_ABSENT)`, not a conflict, since there is no current content to
-  return. Storage signals a failed precondition with its own
-  `PreconditionFailedError`, an internal signal never surfaced to agents;
-  `core` translates it into `VersionConflictError` by fetching the current
-  object. An unrecognized or non-numeric token is treated as a mismatch
-  (conflict), never a parse error — callers cannot be asked to supply
-  well-formed tokens since they never parse them.
+- **Optimistic concurrency via generation.** Every mutating call carries an
+  expected version token; a stale token fails the call and returns current
+  content plus current version so the caller can merge and retry in the
+  same turn. The version token is opaque — no caller parses, compares, or
+  orders it. `write_file`'s `expected_version=None` means "create; must not
+  exist," the one mutating case with no prior token to hold; a non-`None`
+  token against an absent file is `NotFoundError(FILE_ABSENT)`, not a
+  conflict, since there is no current content to return. Storage signals a
+  failed precondition with its own `PreconditionFailedError`, an internal
+  signal never surfaced to agents; `core` translates it into
+  `VersionConflictError` by fetching the current object. An unrecognized or
+  non-numeric token is treated as a mismatch (conflict), never a parse
+  error — callers cannot be asked to supply well-formed tokens since they
+  never parse them. `replace_fact` re-applies a unique anchor match against
+  a newer version (absorbing a concurrent write elsewhere in the file);
+  `append_line` does not — a stale token always surfaces immediately as
+  `VersionConflictError`, since re-applying an append always succeeds and
+  would duplicate a landed line on retry (see
+  [ADR 0011](docs/adr/0011-append-line-version-guard.md)).
 - **One lock, one token per file.** Content and metadata commit together;
   there is no metadata-only update.
 - **A per-file byte ceiling bounds writes, not reads.** `write_file` rejects
@@ -232,9 +258,6 @@ from the diagram since it isn't wired into the request path shown there.
   Prefixes are segment-aligned (1-3 of the path's four segments, each
   followed by `/`); listing recurses through every deeper segment beneath
   the prefix given.
-- **`append_line` carries no version guard** — appends at different offsets
-  commute, but a retried append can duplicate a line (acceptable, per the
-  error taxonomy).
 - **Metadata rides beside the body, never inside it.** The four metadata
   fields are stored as flat string object custom metadata attached to the
   file, committed atomically with the body; the markdown body itself is
