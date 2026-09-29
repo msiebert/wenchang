@@ -1,9 +1,12 @@
 """Core memory operations over a Storage backend."""
 
+import base64
+import binascii
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import NewType
 
 from wenchang.errors import (
     NotFoundError,
@@ -13,13 +16,37 @@ from wenchang.errors import (
     VersionConflictError,
 )
 from wenchang.file_format import FileMetadata, metadata_from_map, metadata_to_map
-from wenchang.paths import is_valid_path
+from wenchang.paths import is_valid_path, is_valid_prefix
 from wenchang.storage import PreconditionFailedError, Storage
 from wenchang.version_token import VersionToken
 
 DEFAULT_MAX_FILE_BYTES: int = 16 * 1024
+DEFAULT_LIST_PAGE_SIZE: int = 100
 
 _MAX_REPLACE_ATTEMPTS = 3
+
+ListCursor = NewType("ListCursor", str)
+
+
+def _encode_cursor(key: str) -> ListCursor:
+    """Encode a storage key as an opaque cursor for resuming a listing."""
+    return ListCursor(base64.urlsafe_b64encode(key.encode("utf-8")).decode("ascii"))
+
+
+def _decode_cursor(cursor: ListCursor, prefix: str) -> str:
+    """Decode `cursor` to the key it was issued after.
+
+    Raises ValueError if `cursor` is not a well-formed cursor, or if it
+    decodes to a key that does not start with `prefix`.
+    """
+    try:
+        raw = base64.b64decode(cursor.encode("ascii"), altchars=b"-_", validate=True)
+        key = raw.decode("utf-8")
+    except (binascii.Error, UnicodeError) as exc:
+        raise ValueError(f"Malformed list cursor: {cursor!r}") from exc
+    if not key.startswith(prefix):
+        raise ValueError(f"Cursor {cursor!r} was not issued for prefix {prefix!r}")
+    return key
 
 
 def _count_occurrences(content: str, old_string: str) -> int:
@@ -48,11 +75,27 @@ class MemoryFile:
     version: VersionToken
 
 
+@dataclass(frozen=True)
+class FileEntry:
+    """One file's path, metadata, and version, as returned by list_prefix."""
+
+    path: str
+    metadata: FileMetadata
+    version: VersionToken
+
+
+@dataclass(frozen=True)
+class ListPage:
+    """One page of list_prefix results, with a cursor for the next page."""
+
+    entries: tuple[FileEntry, ...]
+    next_cursor: ListCursor | None
+
+
 class MemoryStore:
     """Core memory operations over a Storage backend.
 
-    Currently exposes read_file, write_file, and replace_fact; list and
-    other operations are added separately.
+    Exposes read_file, write_file, replace_fact, and list_prefix.
     """
 
     def __init__(
@@ -61,12 +104,16 @@ class MemoryStore:
         *,
         max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
         clock: Callable[[], datetime] = _utc_now,
+        list_page_size: int = DEFAULT_LIST_PAGE_SIZE,
     ) -> None:
         if max_file_bytes <= 0:
             raise ValueError("max_file_bytes must be positive")
+        if list_page_size <= 0:
+            raise ValueError("list_page_size must be positive")
         self._storage = storage
         self._max_file_bytes = max_file_bytes
         self._clock = clock
+        self._list_page_size = list_page_size
 
     def read_file(self, path: str) -> MemoryFile:
         """Read the memory file at `path`.
@@ -208,3 +255,30 @@ class MemoryStore:
             return MemoryFile(path=path, content=new_content, metadata=stamped, version=new_version)
 
         raise VersionConflictError(path, content, version)
+
+    def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
+        """List files under `prefix`, one page at a time.
+
+        Raises NotFoundError with reason INVALID_PATH if `prefix` is not a
+        well-formed prefix, without calling storage. `cursor`, if given,
+        must be a value previously returned as `next_cursor` for this same
+        `prefix`; otherwise raises ValueError. Entries are ordered
+        ascending by path; objects whose key is not a well-formed memory
+        path are omitted. Never calls storage.get. Propagates
+        MetadataFormatError and BackendUnavailableError unchanged.
+        """
+        if not is_valid_prefix(prefix):
+            raise NotFoundError(prefix, NotFoundReason.INVALID_PATH)
+
+        start_after = None if cursor is None else _decode_cursor(cursor, prefix)
+
+        objs = self._storage.list_page(prefix, start_after, self._list_page_size + 1)
+        page, more = objs[: self._list_page_size], len(objs) > self._list_page_size
+
+        entries = tuple(
+            FileEntry(obj.key, metadata_from_map(obj.metadata), obj.version)
+            for obj in page
+            if is_valid_path(obj.key)
+        )
+        next_cursor = _encode_cursor(page[-1].key) if more else None
+        return ListPage(entries=entries, next_cursor=next_cursor)

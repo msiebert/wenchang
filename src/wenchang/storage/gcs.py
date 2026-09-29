@@ -6,7 +6,7 @@ through the `Storage` protocol.
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import requests.exceptions
 from google.api_core.exceptions import (
@@ -22,7 +22,7 @@ from google.api_core.exceptions import (
 from google.cloud.storage import Bucket  # pyright: ignore[reportMissingTypeStubs]
 
 from wenchang.errors import BackendUnavailableError, TransientReason
-from wenchang.storage import PreconditionFailedError, StoredObject
+from wenchang.storage import ListedObject, PreconditionFailedError, StoredObject
 from wenchang.version_token import VersionToken
 
 _GET_RETRY_ATTEMPTS = 3
@@ -134,3 +134,33 @@ class GcsStorage:
                 raise
             raise mapped from exc
         return VersionToken(str(blob.generation))  # pyright: ignore[reportUnknownMemberType]
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        try:
+            if start_after is None:
+                blob_iter = self._bucket.list_blobs(prefix=prefix, max_results=limit + 1)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            else:
+                blob_iter = self._bucket.list_blobs(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+                    prefix=prefix, start_offset=start_after, max_results=limit + 1
+                )
+            blobs = list(blob_iter)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+        except Exception as exc:
+            mapped = _map_backend_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
+        results: list[ListedObject] = []
+        for blob in blobs:  # pyright: ignore[reportUnknownVariableType]
+            name: str = blob.name  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
+            if start_after is not None and name == start_after:
+                continue
+            results.append(
+                ListedObject(
+                    key=name,  # pyright: ignore[reportUnknownArgumentType]
+                    metadata=dict(
+                        blob.metadata or {}  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+                    ),
+                    version=VersionToken(str(blob.generation)),  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+                )
+            )
+        return results[:limit]

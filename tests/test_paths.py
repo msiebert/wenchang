@@ -5,7 +5,7 @@ Covers AIE-1032.
 
 import pytest
 
-from wenchang.paths import is_valid_path
+from wenchang.paths import is_valid_path, is_valid_prefix
 
 VALID_PATHS = (
     "user/u_42/preferences/editor.md",
@@ -104,3 +104,61 @@ def test_never_raises_on_arbitrary_input() -> None:
     )
     for value in weird_inputs:
         is_valid_path(value)
+
+
+VALID_PREFIXES = (
+    "a/",
+    "a/e/",
+    "a/e/x/",
+    "é/ü/",
+)
+
+INVALID_PREFIXES = (
+    "",
+    "a",
+    "a/e/x",
+    "a//",
+    "/a/",
+    "a/../",
+    "./",
+    "a/e/x/y/",
+    "a/e/x/1.md",
+    "a/b\\c/",
+    "a/b\nc/",
+    "a/b\x00c/",
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("prefix", VALID_PREFIXES)
+def test_valid_prefixes_accepted(prefix: str) -> None:
+    """1-3 valid segments each followed by '/' are accepted, including
+    unicode segments (AIE-1035, US3.1).
+    """
+    assert is_valid_prefix(prefix) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("prefix", INVALID_PREFIXES)
+def test_invalid_prefixes_rejected(prefix: str) -> None:
+    """Empty string, missing trailing slash, empty/dot segments, too many
+    segments, a non-prefix path, and segments with a backslash or control
+    character are all rejected (AIE-1035, US3.1).
+    """
+    assert is_valid_prefix(prefix) is False
+
+
+@pytest.mark.unit
+def test_is_valid_prefix_never_raises_on_arbitrary_input() -> None:
+    """is_valid_prefix never raises for any str input, including odd unicode
+    (AIE-1035, US3.1).
+    """
+    weird_inputs = (
+        "\x00\x00\x00",
+        "😀/😀/😀/",
+        "a" * 10000,
+        "///",
+        "a/" * 100,
+    )
+    for value in weird_inputs:
+        is_valid_prefix(value)

@@ -14,7 +14,7 @@ makes the bare import resolve from both `tests/test_storage_memory.py` and
 
 import pytest
 
-from wenchang.storage import PreconditionFailedError, Storage
+from wenchang.storage import ListedObject, PreconditionFailedError, Storage
 from wenchang.version_token import VersionToken
 
 
@@ -281,3 +281,121 @@ class StorageConformance:
             assert not isinstance(error, WenchangError)
         else:
             pytest.fail("expected PreconditionFailedError")
+
+    def test_list_page_returns_matching_keys_ascending_with_metadata_and_version(
+        self, storage: Storage
+    ) -> None:
+        """list_page(prefix, None, limit) returns ListedObject(key, metadata,
+        version) for every key starting with `prefix` (plain string prefix
+        match, including a key like `a/e/xy/1.md` under prefix `a/e/x`),
+        ascending by key, with metadata and version matching what get()
+        reports for that key (AIE-1035, US4).
+        """
+        storage.put("a/e/x", b"x-body", {"which": "x"})
+        storage.put("a/e/xy/1.md", b"xy-body", {"which": "xy"})
+        storage.put("a/e/y", b"y-body", {"which": "y"})
+        storage.put("a/f/z", b"z-body", {"which": "z"})
+
+        page = storage.list_page("a/e/x", None, 10)
+
+        assert [obj.key for obj in page] == ["a/e/x", "a/e/xy/1.md"]
+        for obj in page:
+            assert isinstance(obj, ListedObject)
+            expected = storage.get(obj.key)
+            assert expected is not None
+            assert dict(obj.metadata) == dict(expected.metadata)
+            assert obj.version == expected.version
+
+    def test_list_page_excludes_keys_at_or_before_start_after(self, storage: Storage) -> None:
+        """With start_after=k, only keys strictly greater than k are
+        returned; k itself is excluded whether or not an object exists there
+        (AIE-1035, US4).
+        """
+        storage.put("p/a", b"a", {})
+        storage.put("p/b", b"b", {})
+        storage.put("p/c", b"c", {})
+
+        page = storage.list_page("p/", "p/b", 10)
+        assert [obj.key for obj in page] == ["p/c"]
+
+        page_missing_start = storage.list_page("p/", "p/aa", 10)
+        assert [obj.key for obj in page_missing_start] == ["p/b", "p/c"]
+
+    def test_list_page_with_no_matching_keys_returns_empty_sequence(self, storage: Storage) -> None:
+        """When no key starts with `prefix`, list_page returns an empty
+        sequence (AIE-1035, US4).
+        """
+        storage.put("other/key", b"data", {})
+        assert list(storage.list_page("nope/", None, 10)) == []
+
+    def test_list_page_mutating_returned_metadata_dict_does_not_affect_storage(
+        self, storage: Storage
+    ) -> None:
+        """If a returned ListedObject's metadata mapping is mutable (e.g.
+        cast to dict), mutating it afterwards does not affect a subsequent
+        get() or list_page() (AIE-1035, US4).
+        """
+        storage.put("m/k", b"data", {"a": "1"})
+        page = storage.list_page("m/", None, 10)
+        assert len(page) == 1
+        metadata = page[0].metadata
+        if isinstance(metadata, dict):
+            metadata["a"] = "mutated"
+            metadata["b"] = "new"
+
+        result = storage.get("m/k")
+        assert result is not None
+        assert dict(result.metadata) == {"a": "1"}
+        reread = storage.list_page("m/", None, 10)
+        assert dict(reread[0].metadata) == {"a": "1"}
+
+    def test_list_page_limit_smaller_than_matches_truncates_to_first_n_in_order(
+        self, storage: Storage
+    ) -> None:
+        """When more keys match than `limit`, list_page returns only the
+        first `limit` keys in ascending order (AIE-1035, US4).
+        """
+        for key in ("q/1", "q/2", "q/3", "q/4"):
+            storage.put(key, b"data", {})
+
+        page = storage.list_page("q/", None, 2)
+        assert [obj.key for obj in page] == ["q/1", "q/2"]
+
+    def test_list_page_excludes_keys_outside_the_prefix_before_and_after(
+        self, storage: Storage
+    ) -> None:
+        """Keys that sort before the prefix range and keys that sort after
+        it, but do not start with it, are excluded (AIE-1035, US4).
+        """
+        storage.put("r-before", b"data", {})
+        storage.put("r/inside", b"data", {})
+        storage.put("r0after", b"data", {})
+
+        page = storage.list_page("r/", None, 10)
+        assert [obj.key for obj in page] == ["r/inside"]
+
+    def test_list_page_orders_multi_byte_unicode_keys_by_code_point(self, storage: Storage) -> None:
+        """A key containing a multi-byte unicode character sorts among other
+        matching keys by Python str (code point) comparison (AIE-1035, US4).
+        """
+        storage.put("u/a", b"data", {})
+        storage.put("u/café", b"data", {})
+        storage.put("u/z", b"data", {})
+
+        page = storage.list_page("u/", None, 10)
+        assert [obj.key for obj in page] == sorted(["u/a", "u/café", "u/z"])
+
+    def test_list_page_version_reflects_the_latest_put(self, storage: Storage) -> None:
+        """When a key has been put more than once, the version in its
+        ListedObject equals the token from the most recent put, matching
+        get() (AIE-1035, US4).
+        """
+        storage.put("v/k", b"first", {"which": "first"})
+        latest_token = storage.put("v/k", b"second", {"which": "second"})
+
+        page = storage.list_page("v/", None, 10)
+        assert len(page) == 1
+        assert page[0].version == latest_token
+        result = storage.get("v/k")
+        assert result is not None
+        assert result.version == latest_token

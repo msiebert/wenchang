@@ -4,7 +4,7 @@ Covers AIE-1032, US1 through US3 and edge cases for reading a memory file.
 """
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -18,7 +18,7 @@ from wenchang.errors import (
     WenchangError,
 )
 from wenchang.file_format import FileMetadata, MetadataFormatError, metadata_to_map
-from wenchang.storage import Storage, StoredObject
+from wenchang.storage import ListedObject, Storage, StoredObject
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.version_token import VersionToken
 
@@ -73,6 +73,9 @@ class _StubStorage:
         metadata: Mapping[str, str],
         expected: VersionToken | None,
     ) -> VersionToken:
+        raise NotImplementedError("not exercised by these tests")
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         raise NotImplementedError("not exercised by these tests")
 
 

@@ -1,8 +1,8 @@
 """In-memory fake implementation of the Storage protocol, for tests."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
-from wenchang.storage import PreconditionFailedError, StoredObject
+from wenchang.storage import ListedObject, PreconditionFailedError, StoredObject
 from wenchang.version_token import VersionToken
 
 
@@ -44,3 +44,17 @@ class InMemoryStorage:
         if current_token != expected:
             raise PreconditionFailedError(key)
         return self.put(key, data, metadata)
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        keys = sorted(k for k in self._objects if k.startswith(prefix))
+        if start_after is not None:
+            keys = [k for k in keys if k > start_after]
+        keys = keys[:limit]
+        return [
+            ListedObject(
+                key=key,
+                metadata=dict(self._objects[key].metadata),
+                version=self._objects[key].version,
+            )
+            for key in keys
+        ]
