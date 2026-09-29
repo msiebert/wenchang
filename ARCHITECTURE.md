@@ -14,9 +14,9 @@ Today the repository holds the project skeleton (tooling, tests, docs) plus
 six implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); and `core`, whose
-implemented operations so far are `read_file` and `write_file`. The module
-map below is the intended shape; each remaining module is marked
-**(planned)** until implemented.
+implemented operations so far are `read_file`, `write_file`, and
+`replace_fact`. The module map below is the intended shape; each remaining
+module is marked **(planned)** until implemented.
 
 ## Module map
 
@@ -85,11 +85,31 @@ map below is the intended shape; each remaining module is marked
   current object and raises `VersionConflictError(path, current_content,
   current_version)`, or `NotFoundError(FILE_ABSENT)` if the file is now
   absent; a corrupt object found on that fetch raises `MetadataFormatError`
-  or `UnicodeDecodeError` exactly as `read_file` does. `append_line`,
-  `replace_fact`, `list_prefix`, `delete_file`, and `get_memory_index` are
-  *(planned)*. See
-  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md) and
-  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md).
+  or `UnicodeDecodeError` exactly as `read_file` does. `replace_fact(path,
+  old_string, new_string, expected_version, *, source) -> MemoryFile` is
+  implemented: it changes one span of a file's content without the caller
+  resending the rest. `old_string` must match a unique anchor — every start
+  index counts, so overlapping occurrences (e.g. `"aa"` in `"aaa"`) count
+  separately. It reads the current object, counts occurrences of
+  `old_string`, and compares that count to 1: at the caller's own
+  `expected_version`, any count other than 1 raises
+  `ReplaceFactMatchError(path, content, version, count)`; at a stale
+  version, a unique match re-applies the edit against the current content
+  (absorbing a concurrent write elsewhere in the file), while a non-unique
+  match — "genuine overlap," meaning the anchor no longer matches exactly
+  once — raises `VersionConflictError(path, content, version)` instead. The
+  conditional put is guarded on the version just read, not the caller's
+  `expected_version`; a `PreconditionFailedError` re-reads and repeats the
+  same check, up to 3 attempts total, after which `VersionConflictError`
+  carries the last-read content and version. On success, metadata is
+  carried over from the object read on the attempt that commits, with
+  `source` unioned into `sources` and `last_updated` stamped from the
+  clock; `old_string == ""` or `source == ""` raises `ValueError` before
+  storage is consulted. `append_line`, `list_prefix`, `delete_file`, and
+  `get_memory_index` are *(planned)*. See
+  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
+  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md), and
+  [ADR 0009](docs/adr/0009-replace-fact-semantics.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.
