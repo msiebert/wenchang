@@ -6,7 +6,7 @@ protocol is the only way the rest of wenchang touches storage; concrete
 backends (in-memory fake, GCS) live in sibling modules.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -34,8 +34,17 @@ class StoredObject:
     version: VersionToken
 
 
+@dataclass(frozen=True)
+class ListedObject:
+    """One object's key, metadata, and version, as returned by a listing."""
+
+    key: str
+    metadata: Mapping[str, str]
+    version: VersionToken
+
+
 class Storage(Protocol):
-    """Minimal get/put storage boundary; backends implement this structurally."""
+    """Get/put/list storage boundary; backends implement this structurally."""
 
     def get(self, key: str) -> StoredObject | None:
         """Return the object at exactly `key`, or None if none exists.
@@ -72,5 +81,17 @@ class Storage(Protocol):
         On success, has the same guarantees as `put`: atomic, a new token
         distinct from every earlier token for `key`, and the caller's mapping
         copied. May raise BackendUnavailableError.
+        """
+        ...
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        """Objects whose key starts with `prefix`, ascending by key.
+
+        `prefix` is a plain string match, not a path or glob. If
+        `start_after` is given, only keys strictly greater than it (by
+        Python string comparison, equal to GCS UTF-8 byte order) are
+        included. Returns at most `limit` (>= 1) objects. Never reads
+        object bodies. Metadata mappings are copies. May raise
+        BackendUnavailableError.
         """
         ...

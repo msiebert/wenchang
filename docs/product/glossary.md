@@ -50,6 +50,13 @@ Terms as used throughout wenchang and its spec.
 - **Memory path** — a file's address, `{scope}/{entity_id}/{area}/{name}.md`,
   relative to the storage root; exactly four non-empty segments, checked
   only syntactically.
+- **Prefix** — a memory path's leading 1-3 segments followed by `/` (e.g.
+  `scope/`, `scope/entity_id/`), naming a scope, entity, or area for
+  `list_prefix` to recurse under; segment-aligned, so it never cuts a
+  segment in half.
+- **Cursor** — an opaque token returned by `list_prefix` alongside a page of
+  results, passed back to resume listing after the last entry seen; callers
+  never parse it, the same as a version token.
 - **Storage root** — the base a memory path is relative to; one storage
   instance (for GCS, one bucket).
 - **Recoverable error** — an error category whose instance carries its own

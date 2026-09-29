@@ -106,7 +106,7 @@ class _StubBucket:
         return self._blob_for_put
 
 
-def _make_storage(bucket: _StubBucket) -> Storage:
+def _make_storage(bucket: "_StubBucket | _StubBucketForList") -> Storage:
     """Build a GcsStorage over a stub bucket, typed as `Storage` so pyright
     treats every call site consistently with the protocol.
     """
@@ -457,6 +457,208 @@ def test_put_if_version_unmapped_exception_from_upload_propagates_unchanged() ->
 
     with pytest.raises(Forbidden):
         storage.put_if_version("k", b"payload", {}, None)
+
+
+class _StubListBlob:
+    """Minimal stand-in for a google.cloud.storage.Blob as returned by list_blobs.
+
+    Records whether any download method is called, so tests can assert
+    list_page() never reads object bodies (AIE-1035).
+    """
+
+    def __init__(
+        self,
+        name: str,
+        generation: int,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        self.name = name
+        self.generation = generation
+        self.metadata: dict[str, str] | None = dict(metadata) if metadata is not None else None
+        self.download_called = False
+
+    def download_as_bytes(self, *, if_generation_match: int | None = None) -> bytes:
+        self.download_called = True
+        raise AssertionError("list_page must never download object bodies")
+
+
+class _StubBucketForList:
+    """Minimal stand-in for google.cloud.storage.Bucket, for list_blobs only."""
+
+    def __init__(
+        self,
+        blobs: list[_StubListBlob] | None = None,
+        list_blobs_raises: BaseException | None = None,
+        raises_mid_iteration: BaseException | None = None,
+    ) -> None:
+        self._blobs = list(blobs or [])
+        self._list_blobs_raises = list_blobs_raises
+        self._raises_mid_iteration = raises_mid_iteration
+        self.list_blobs_calls: list[dict[str, Any]] = []
+
+    def list_blobs(
+        self,
+        *,
+        prefix: str,
+        max_results: int,
+        start_offset: str | None = None,
+    ) -> Any:
+        call: dict[str, Any] = {"prefix": prefix, "max_results": max_results}
+        if start_offset is not None:
+            call["start_offset"] = start_offset
+        self.list_blobs_calls.append(call)
+        if self._list_blobs_raises is not None:
+            raise self._list_blobs_raises
+
+        def _iterator() -> Any:
+            for blob in self._blobs:
+                if self._raises_mid_iteration is not None and blob is self._blobs[-1]:
+                    raise self._raises_mid_iteration
+                yield blob
+
+        return _iterator()
+
+
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_list_blobs_timeout_exceptions_map_to_backend_unavailable_timeout(
+    exc: Exception,
+) -> None:
+    """Each timeout-class exception raised from list_blobs() itself maps to
+    BackendUnavailableError with reason TIMEOUT (AIE-1035).
+    """
+    bucket = _StubBucketForList(list_blobs_raises=exc)
+    storage = _make_storage(bucket)
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.list_page("prefix/", None, 10)
+    assert excinfo.value.reason is TransientReason.TIMEOUT
+
+
+@pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_list_blobs_unavailable_exceptions_map_to_backend_unavailable_unavailable(
+    exc: Exception,
+) -> None:
+    """Each unavailable-class exception raised from list_blobs() itself maps
+    to BackendUnavailableError with reason UNAVAILABLE (AIE-1035).
+    """
+    bucket = _StubBucketForList(list_blobs_raises=exc)
+    storage = _make_storage(bucket)
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.list_page("prefix/", None, 10)
+    assert excinfo.value.reason is TransientReason.UNAVAILABLE
+
+
+def test_list_blobs_unmapped_exception_propagates_unchanged() -> None:
+    """An exception not in the mapping (Forbidden) raised from list_blobs()
+    propagates unchanged, not wrapped (AIE-1035).
+    """
+    bucket = _StubBucketForList(list_blobs_raises=Forbidden("forbidden"))
+    storage = _make_storage(bucket)
+    with pytest.raises(Forbidden):
+        storage.list_page("prefix/", None, 10)
+
+
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_list_blobs_mid_iteration_timeout_exceptions_map_to_backend_unavailable_timeout(
+    exc: Exception,
+) -> None:
+    """Each timeout-class exception raised while iterating the list_blobs()
+    result maps to BackendUnavailableError with reason TIMEOUT (AIE-1035).
+    """
+    blobs = [_StubListBlob("prefix/a", 1), _StubListBlob("prefix/b", 2)]
+    bucket = _StubBucketForList(blobs=blobs, raises_mid_iteration=exc)
+    storage = _make_storage(bucket)
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.list_page("prefix/", None, 10)
+    assert excinfo.value.reason is TransientReason.TIMEOUT
+
+
+@pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_list_blobs_mid_iteration_unavailable_exceptions_map_to_backend_unavailable_unavailable(
+    exc: Exception,
+) -> None:
+    """Each unavailable-class exception raised while iterating the
+    list_blobs() result maps to BackendUnavailableError with reason
+    UNAVAILABLE (AIE-1035).
+    """
+    blobs = [_StubListBlob("prefix/a", 1), _StubListBlob("prefix/b", 2)]
+    bucket = _StubBucketForList(blobs=blobs, raises_mid_iteration=exc)
+    storage = _make_storage(bucket)
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.list_page("prefix/", None, 10)
+    assert excinfo.value.reason is TransientReason.UNAVAILABLE
+
+
+def test_list_blobs_mid_iteration_unmapped_exception_propagates_unchanged() -> None:
+    """An unmapped exception (Forbidden) raised while iterating the
+    list_blobs() result propagates unchanged, not wrapped (AIE-1035).
+    """
+    blobs = [_StubListBlob("prefix/a", 1), _StubListBlob("prefix/b", 2)]
+    bucket = _StubBucketForList(blobs=blobs, raises_mid_iteration=Forbidden("forbidden"))
+    storage = _make_storage(bucket)
+    with pytest.raises(Forbidden):
+        storage.list_page("prefix/", None, 10)
+
+
+def test_list_page_omits_start_offset_when_start_after_is_none() -> None:
+    """list_page(start_after=None) calls list_blobs without a start_offset
+    argument, with max_results == limit + 1 (AIE-1035).
+    """
+    bucket = _StubBucketForList(blobs=[])
+    storage = _make_storage(bucket)
+
+    storage.list_page("prefix/", None, 5)
+
+    assert bucket.list_blobs_calls == [{"prefix": "prefix/", "max_results": 6}]
+
+
+def test_list_page_passes_start_offset_when_start_after_given() -> None:
+    """list_page(start_after="k") calls list_blobs with start_offset="k" and
+    max_results == limit + 1 (AIE-1035).
+    """
+    bucket = _StubBucketForList(blobs=[])
+    storage = _make_storage(bucket)
+
+    storage.list_page("prefix/", "prefix/k", 5)
+
+    assert bucket.list_blobs_calls == [
+        {"prefix": "prefix/", "max_results": 6, "start_offset": "prefix/k"}
+    ]
+
+
+def test_list_page_drops_blob_equal_to_start_after_and_truncates_to_limit() -> None:
+    """A returned blob whose name equals start_after (inclusive start_offset
+    semantics) is dropped, and the remaining results are truncated to limit
+    even though max_results was limit + 1 (AIE-1035).
+    """
+    blobs = [
+        _StubListBlob("prefix/a", 1),
+        _StubListBlob("prefix/b", 2),
+        _StubListBlob("prefix/c", 3),
+        _StubListBlob("prefix/d", 4),
+    ]
+    bucket = _StubBucketForList(blobs=blobs)
+    storage = _make_storage(bucket)
+
+    result = storage.list_page("prefix/", "prefix/a", 2)
+
+    assert [obj.key for obj in result] == ["prefix/b", "prefix/c"]
+
+
+def test_list_page_never_calls_download() -> None:
+    """list_page() never calls download_as_bytes on any returned blob
+    (AIE-1035).
+    """
+    blobs = [_StubListBlob("prefix/a", 1, metadata={"lang": "en"})]
+    bucket = _StubBucketForList(blobs=blobs)
+    storage = _make_storage(bucket)
+
+    result = storage.list_page("prefix/", None, 10)
+
+    assert len(result) == 1
+    assert result[0].key == "prefix/a"
+    assert dict(result[0].metadata) == {"lang": "en"}
+    assert result[0].version == "1"
+    assert blobs[0].download_called is False
 
 
 def test_no_module_outside_storage_gcs_imports_google_cloud() -> None:

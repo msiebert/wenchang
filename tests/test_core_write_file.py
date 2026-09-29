@@ -5,7 +5,7 @@ Covers AIE-1033, US1 through US3, US5, and US6, excluding the byte-size
 limit (T4, tested separately).
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -20,7 +20,7 @@ from wenchang.errors import (
     VersionConflictError,
 )
 from wenchang.file_format import FileMetadata, MetadataFormatError, metadata_to_map
-from wenchang.storage import PreconditionFailedError, Storage, StoredObject
+from wenchang.storage import ListedObject, PreconditionFailedError, Storage, StoredObject
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.version_token import VersionToken
 
@@ -102,6 +102,9 @@ class _StubStorage:
         self.put_if_version_calls.append((key, data, metadata, expected))
         if self._put_if_version_raises is not None:
             raise self._put_if_version_raises
+        raise NotImplementedError("not exercised by these tests")
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         raise NotImplementedError("not exercised by these tests")
 
 

@@ -14,9 +14,9 @@ Today the repository holds the project skeleton (tooling, tests, docs) plus
 six implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); and `core`, whose
-implemented operations so far are `read_file`, `write_file`, and
-`replace_fact`. The module map below is the intended shape; each remaining
-module is marked **(planned)** until implemented.
+implemented operations so far are `read_file`, `write_file`, `replace_fact`,
+and `list_prefix`. The module map below is the intended shape; each
+remaining module is marked **(planned)** until implemented.
 
 ## Module map
 
@@ -49,32 +49,49 @@ module is marked **(planned)** until implemented.
   relative to the storage root; the check never inspects storage or
   interprets the segments (scope validity, authorization) — see [ADR
   0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
+  `is_valid_prefix(prefix)` checks 1-3 valid segments (the same segment
+  rule as `is_valid_path`), each followed by `/`; the empty prefix is
+  invalid. Neither function ever raises or inspects storage.
 - **storage** — an internal protocol mirroring GCS object semantics (custom
   metadata, a generation-backed version token): `Storage` (`get`, `put`,
-  `put_if_version`) and `StoredObject` (bytes, metadata map, `VersionToken`),
-  with two implementations behind it, held identical by one shared
-  conformance suite. `InMemoryStorage` is the unit-test fake. `GcsStorage` is
-  the only module that imports `google.cloud`; it maps client timeouts and
-  server/connection unavailability to `BackendUnavailableError`, and pins
-  each `get` to the generation `get_blob` fetched so content and metadata
-  always come from the same write, retrying on a generation race. `put` is
-  unconditional in both implementations. `put_if_version(key, data, metadata,
-  expected)` is the conditional put: `expected=None` commits only if no
-  object exists at `key` (GCS `ifGenerationMatch=0`); a token commits only if
-  it equals the object's current version; any other case raises the
-  storage-internal `PreconditionFailedError(key)` and writes nothing. Tokens
-  are compared by string equality in `InMemoryStorage`; `GcsStorage` accepts
-  only the canonical decimal form of a positive integer as a token (so `"0"`
-  and other non-canonical strings fail the precondition locally, with no
-  client call, rather than being read as "must not exist"). See
+  `put_if_version`, `list_page`) and `StoredObject` (bytes, metadata map,
+  `VersionToken`), with two implementations behind it, held identical by one
+  shared conformance suite. `InMemoryStorage` is the unit-test fake.
+  `GcsStorage` is the only module that imports `google.cloud`; it maps
+  client timeouts and server/connection unavailability to
+  `BackendUnavailableError`, and pins each `get` to the generation
+  `get_blob` fetched so content and metadata always come from the same
+  write, retrying on a generation race. `put` is unconditional in both
+  implementations. `put_if_version(key, data, metadata, expected)` is the
+  conditional put: `expected=None` commits only if no object exists at
+  `key` (GCS `ifGenerationMatch=0`); a token commits only if it equals the
+  object's current version; any other case raises the storage-internal
+  `PreconditionFailedError(key)` and writes nothing. Tokens are compared by
+  string equality in `InMemoryStorage`; `GcsStorage` accepts only the
+  canonical decimal form of a positive integer as a token (so `"0"` and
+  other non-canonical strings fail the precondition locally, with no client
+  call, rather than being read as "must not exist"). `list_page(prefix,
+  start_after, limit)` returns `ListedObject(key, metadata, version)` for
+  keys starting with `prefix` (plain string match), ascending by key, at
+  most `limit`, strictly after `start_after` when given (exclusive), never
+  reading object bodies; metadata mappings are copies. `InMemoryStorage`
+  sorts and slices in memory; `GcsStorage` uses `list_blobs(prefix=...,
+  start_offset=start_after, max_results=limit + 1)`, dropping a key equal to
+  `start_after` (GCS's `start_offset` is inclusive) before truncating to
+  `limit`; call and iteration errors go through the same
+  `_map_backend_error` as the rest of `GcsStorage`. See
   [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md),
-  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md), and
-  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md).
-- **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...)`,
+  [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
+  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md), and
+  [ADR 0010](docs/adr/0010-list-prefix-pagination.md).
+- **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
+  list_page_size=100)`,
   holding the core API as methods on one object (so later operations can
   share configuration such as a size limit or index cap); `max_file_bytes`
-  must be positive, and `clock` (default current UTC) is injectable for
-  tests and for stamping `last-updated`. `read_file(path) -> MemoryFile` is
+  must be positive, `clock` (default current UTC) is injectable for tests
+  and for stamping `last-updated`, and `list_page_size` (default
+  `DEFAULT_LIST_PAGE_SIZE = 100`) must be positive, bounding
+  `list_prefix`'s page size. `read_file(path) -> MemoryFile` is
   implemented: it validates the path, fetches the object, and returns
   content, metadata, path, and version token. `write_file(path, content,
   metadata, expected_version) -> MemoryFile` is implemented: it validates
@@ -105,11 +122,30 @@ module is marked **(planned)** until implemented.
   carried over from the object read on the attempt that commits, with
   `source` unioned into `sources` and `last_updated` stamped from the
   clock; `old_string == ""` or `source == ""` raises `ValueError` before
-  storage is consulted. `append_line`, `list_prefix`, `delete_file`, and
+  storage is consulted. `list_prefix(prefix, cursor=None) -> ListPage` is
+  implemented: it returns one page of well-formed memory files under a
+  segment-aligned `prefix` as `FileEntry(path, metadata, version)`, in
+  ascending path order, without reading any file's content. An invalid
+  `prefix` raises `NotFoundError(prefix, INVALID_PATH)` without consulting
+  storage. It fetches `list_page_size + 1` keys from `Storage.list_page`
+  (decoding `cursor` to a `start_after` key first, if given) so it can tell
+  whether a key remains after the page; `ListPage.next_cursor` is `None`
+  iff none does. A key under the prefix that isn't a well-formed memory
+  path is skipped, so a page can hold fewer than `list_page_size` entries
+  while `next_cursor` is still non-`None`; corrupt metadata on a
+  well-formed key raises `MetadataFormatError`, and
+  `BackendUnavailableError` propagates, exactly as in `read_file`. A
+  `ListCursor` is an opaque, URL-safe-base64 encoding of the last key
+  examined, validated on decode against the `prefix` it's passed with; a
+  malformed cursor or one issued for a different prefix raises `ValueError`.
+  Listing is not a snapshot: a file written or deleted between two pages of
+  the same listing is reflected at whatever page reads it (or not at all,
+  if deleted before its page). `append_line`, `delete_file`, and
   `get_memory_index` are *(planned)*. See
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
-  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md), and
-  [ADR 0009](docs/adr/0009-replace-fact-semantics.md).
+  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
+  [ADR 0009](docs/adr/0009-replace-fact-semantics.md), and
+  [ADR 0010](docs/adr/0010-list-prefix-pagination.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.
@@ -188,6 +224,14 @@ from the diagram since it isn't wired into the request path shown there.
   layer as an exact path-prefix check, not by instruction.
 - **Metadata-only navigation.** `description` and `aliases` are the entire
   search surface; there is no content search over file bodies.
+- **Listing never reads content and is not a snapshot.** `list_prefix` and
+  the `Storage.list_page` primitive beneath it return keys, metadata, and
+  version tokens only, never object bodies; a listing spans multiple pages
+  without pinning storage to one point in time, so a file's absence from a
+  page means only that it wasn't present when that page was read.
+  Prefixes are segment-aligned (1-3 of the path's four segments, each
+  followed by `/`); listing recurses through every deeper segment beneath
+  the prefix given.
 - **`append_line` carries no version guard** — appends at different offsets
   commute, but a retried append can duplicate a line (acceptable, per the
   error taxonomy).

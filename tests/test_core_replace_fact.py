@@ -3,7 +3,7 @@ match-count rejection, metadata stamping, and stale-version re-apply with
 the bounded retry loop.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
 import pytest
@@ -19,7 +19,7 @@ from wenchang.errors import (
     VersionConflictError,
 )
 from wenchang.file_format import FileMetadata, MetadataFormatError, metadata_to_map
-from wenchang.storage import Storage, StoredObject
+from wenchang.storage import ListedObject, Storage, StoredObject
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.version_token import VersionToken
 
@@ -107,6 +107,9 @@ class _StubStorage:
         self.put_if_version_calls.append((key, data, metadata, expected))
         if self._put_if_version_raises is not None:
             raise self._put_if_version_raises
+        raise NotImplementedError("not exercised by these tests")
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         raise NotImplementedError("not exercised by these tests")
 
 
@@ -675,6 +678,9 @@ class _RacingPutStorage:
             self.race_versions.append(raced_version)
         return self._inner.put_if_version(key, data, metadata, expected)
 
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        return self._inner.list_page(prefix, start_after, limit)
+
 
 def test_replace_fact_reapplies_after_a_race_that_preserves_the_anchor() -> None:
     """A write landing between get() and put_if_version() causes exactly
@@ -817,6 +823,9 @@ class _DeleteBeforePutStorage:
         if self.put_if_version_calls == 1:
             self._inner.delete(key)
         return self._inner.put_if_version(key, data, metadata, expected)
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        return self._inner.list_page(prefix, start_after, limit)
 
 
 def test_replace_fact_raises_file_absent_when_file_deleted_mid_retry() -> None:
