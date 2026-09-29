@@ -15,7 +15,7 @@ from wenchang.errors import (
     ReplaceFactMatchError,
     VersionConflictError,
 )
-from wenchang.file_format import FileMetadata, metadata_from_map, metadata_to_map
+from wenchang.file_format import FileMetadata, metadata_from_map, metadata_to_map, parse_fact
 from wenchang.paths import is_valid_path, is_valid_prefix
 from wenchang.storage import PreconditionFailedError, Storage
 from wenchang.version_token import VersionToken
@@ -255,6 +255,76 @@ class MemoryStore:
             return MemoryFile(path=path, content=new_content, metadata=stamped, version=new_version)
 
         raise VersionConflictError(path, content, version)
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        """Append `line` to the current content, if it is at `expected_version`.
+
+        Raises NotFoundError with reason INVALID_PATH if `path` is not
+        well-formed, without calling storage. Raises ValueError if `line`
+        does not parse as a single fact line, or if `source` is empty,
+        without calling storage. Raises NotFoundError with reason
+        FILE_ABSENT if no object exists at `path`. Raises
+        VersionConflictError if `expected_version` does not match the
+        current version, carrying the current content and version; there is
+        no automatic re-apply. Raises OversizeWriteError if the resulting
+        content exceeds max_file_bytes. On success, stamps
+        `metadata.sources` with `source` added and `last_updated` with the
+        store's clock, leaving other metadata unchanged. If the conditional
+        write fails its precondition, re-reads and returns success if the
+        stored content and metadata already equal exactly what was written
+        (a backend-level retry of its own landed write); otherwise raises
+        VersionConflictError, or NotFoundError with reason FILE_ABSENT if
+        the file is now gone. Propagates MetadataFormatError,
+        UnicodeDecodeError, and BackendUnavailableError unchanged.
+        """
+        if not is_valid_path(path):
+            raise NotFoundError(path, NotFoundReason.INVALID_PATH)
+
+        if parse_fact(line) is None or source == "":
+            raise ValueError("line must be a single fact line and source must be non-empty")
+
+        obj = self._storage.get(path)
+        if obj is None:
+            raise NotFoundError(path, NotFoundReason.FILE_ABSENT)
+
+        content = obj.data.decode("utf-8")
+        if obj.version != expected_version:
+            raise VersionConflictError(path, content, obj.version)
+        metadata = metadata_from_map(obj.metadata)
+
+        sep = "\n" if content and not content.endswith("\n") else ""
+        new_content = content + sep + line + "\n"
+        data = new_content.encode("utf-8")
+        if len(data) > self._max_file_bytes:
+            raise OversizeWriteError(path, len(data), self._max_file_bytes)
+
+        stamped = dataclasses.replace(
+            metadata,
+            sources=metadata.sources | {source},
+            last_updated=self._clock(),
+        )
+        meta_map = metadata_to_map(stamped)
+
+        try:
+            new_version = self._storage.put_if_version(path, data, meta_map, expected_version)
+        except PreconditionFailedError:
+            cur = self._storage.get(path)
+            if cur is None:
+                raise NotFoundError(path, NotFoundReason.FILE_ABSENT) from None
+            if cur.data == data and cur.metadata == meta_map:
+                return MemoryFile(
+                    path=path, content=new_content, metadata=stamped, version=cur.version
+                )
+            raise VersionConflictError(path, cur.data.decode("utf-8"), cur.version) from None
+
+        return MemoryFile(path=path, content=new_content, metadata=stamped, version=new_version)
 
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
         """List files under `prefix`, one page at a time.
