@@ -15,8 +15,9 @@ six implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); and `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-`list_prefix`, and `append_line`. The module map below is the intended
-shape; each remaining module is marked **(planned)** until implemented.
+`list_prefix`, `append_line`, and `delete_file`. The module map below is the
+intended shape; each remaining module is marked **(planned)** until
+implemented.
 
 ## Module map
 
@@ -54,7 +55,8 @@ shape; each remaining module is marked **(planned)** until implemented.
   invalid. Neither function ever raises or inspects storage.
 - **storage** — an internal protocol mirroring GCS object semantics (custom
   metadata, a generation-backed version token): `Storage` (`get`, `put`,
-  `put_if_version`, `list_page`) and `StoredObject` (bytes, metadata map,
+  `put_if_version`, `delete_if_version`, `list_page`) and `StoredObject`
+  (bytes, metadata map,
   `VersionToken`), with two implementations behind it, held identical by one
   shared conformance suite. `InMemoryStorage` is the unit-test fake.
   `GcsStorage` is the only module that imports `google.cloud`; it maps
@@ -70,7 +72,17 @@ shape; each remaining module is marked **(planned)** until implemented.
   string equality in `InMemoryStorage`; `GcsStorage` accepts only the
   canonical decimal form of a positive integer as a token (so `"0"` and
   other non-canonical strings fail the precondition locally, with no client
-  call, rather than being read as "must not exist"). `list_page(prefix,
+  call, rather than being read as "must not exist"). `delete_if_version(key,
+  expected)` is the only delete either implementation offers — there is no
+  unconditional delete. It removes the object at `key` only if it is at
+  `expected`; if the object is absent or at a different version, it raises
+  `PreconditionFailedError(key)` and deletes nothing, the same signal
+  `put_if_version` uses for its own precondition failure. `GcsStorage`
+  rejects a non-canonical token locally as for `put_if_version`, then calls
+  `blob.delete(if_generation_match=...)`; both a GCS `PreconditionFailed`
+  (wrong generation) and a `NotFound` (already absent) map to
+  `PreconditionFailedError`, and any other backend exception goes through
+  `_map_backend_error` like the rest of `GcsStorage`. `list_page(prefix,
   start_after, limit)` returns `ListedObject(key, metadata, version)` for
   keys starting with `prefix` (plain string match), ascending by key, at
   most `limit`, strictly after `start_after` when given (exclusive), never
@@ -82,8 +94,9 @@ shape; each remaining module is marked **(planned)** until implemented.
   `_map_backend_error` as the rest of `GcsStorage`. See
   [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md),
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
-  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md), and
-  [ADR 0010](docs/adr/0010-list-prefix-pagination.md).
+  [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
+  [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
+  [ADR 0012](docs/adr/0012-delete-file.md).
 - **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
   list_page_size=100)`,
   holding the core API as methods on one object (so later operations can
@@ -160,13 +173,31 @@ shape; each remaining module is marked **(planned)** until implemented.
   object is now gone. A missing file raises `NotFoundError(FILE_ABSENT)`
   and is never created. Metadata is stamped the same way as `replace_fact`:
   `source` unioned into `sources`, `last_updated` from the clock, other
-  fields unchanged. `delete_file` and `get_memory_index` are *(planned)*.
+  fields unchanged. `delete_file(path, expected_version) -> None` is
+  implemented: it removes the file at `path` only if it is still at
+  `expected_version`. It reads the current object, checks the version — a
+  mismatch raises `VersionConflictError(path, current_content,
+  current_version)` immediately, the file left in place — then issues one
+  `delete_if_version`. A `PreconditionFailedError` re-reads to tell a
+  conflict from an absence: if the file is now gone it raises
+  `NotFoundError(FILE_ABSENT)`, otherwise `VersionConflictError` carrying
+  the content and version found on re-read. A missing file (before the
+  delete is even attempted) also raises `NotFoundError(FILE_ABSENT)`.
+  Unlike every other mutating call, `delete_file` takes no `source` and
+  returns `None` — there is no version or content left to hand back for a
+  file that no longer exists. It does not parse metadata, so a file with
+  corrupt metadata is still deletable. Deleting leaves no tombstone: a
+  version token from before a delete is never equal to the token of a file
+  later recreated at the same path, since both GCS generations and the
+  in-memory fake's counter are monotonic. `get_memory_index` is
+  *(planned)*.
   See
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
   [ADR 0009](docs/adr/0009-replace-fact-semantics.md),
-  [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
-  [ADR 0011](docs/adr/0011-append-line-version-guard.md).
+  [ADR 0010](docs/adr/0010-list-prefix-pagination.md),
+  [ADR 0011](docs/adr/0011-append-line-version-guard.md), and
+  [ADR 0012](docs/adr/0012-delete-file.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.

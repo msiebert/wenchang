@@ -459,6 +459,151 @@ def test_put_if_version_unmapped_exception_from_upload_propagates_unchanged() ->
         storage.put_if_version("k", b"payload", {}, None)
 
 
+class _StubBlobForDeleteIfVersion(_StubBlob):
+    """Stub blob whose delete() records if_generation_match."""
+
+    def __init__(
+        self,
+        generation: int,
+        delete_raises: BaseException | None = None,
+    ) -> None:
+        super().__init__(generation=generation)
+        self._delete_raises = delete_raises
+        self.delete_if_generation_match: int | None = None
+        self.delete_calls = 0
+
+    def delete(self, *, if_generation_match: int | None = None) -> None:
+        self.delete_calls += 1
+        self.delete_if_generation_match = if_generation_match
+        if self._delete_raises is not None:
+            raise self._delete_raises
+
+
+class _StubBucketForDeleteIfVersion(_StubBucket):
+    """Stub Bucket for delete_if_version: `blob()` always returns the same
+    stub blob, recording the key it was requested for.
+    """
+
+    def __init__(self, blob_for_delete: _StubBlobForDeleteIfVersion) -> None:
+        super().__init__(blob_for_put=blob_for_delete)
+
+
+def test_delete_if_version_deletes_with_matching_generation() -> None:
+    """delete_if_version(key, VersionToken("42")) calls bucket.blob(key)
+    then blob.delete(if_generation_match=42) (AIE-1037, US4.1/US4.6).
+    """
+    blob = _StubBlobForDeleteIfVersion(generation=42)
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    storage.delete_if_version("k", VersionToken("42"))
+
+    assert bucket.blob_calls == ["k"]
+    assert blob.delete_if_generation_match == 42
+    assert blob.delete_calls == 1
+
+
+@pytest.mark.parametrize(
+    "bogus_token", ["", "abc", "0", "-1", "007", "4.2", " 42", "42\n", "42\r\n"]
+)
+def test_delete_if_version_with_non_canonical_token_raises_without_client_call(
+    bogus_token: str,
+) -> None:
+    """A non-canonical expected token (not matching ^[1-9][0-9]*$ as a whole
+    string) raises PreconditionFailedError(key) without calling bucket.blob
+    or blob.delete (AIE-1037, US4.6).
+    """
+    blob = _StubBlobForDeleteIfVersion(generation=1)
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(PreconditionFailedError) as excinfo:
+        storage.delete_if_version("k", VersionToken(bogus_token))
+
+    assert excinfo.value.key == "k"
+    assert bucket.blob_calls == []
+    assert blob.delete_calls == 0
+
+
+def test_delete_if_version_precondition_failed_raises_precondition_failed_error() -> None:
+    """PreconditionFailed raised from blob.delete() maps to
+    PreconditionFailedError(key) (AIE-1037, US4.2/US4.3).
+    """
+    blob = _StubBlobForDeleteIfVersion(
+        generation=1, delete_raises=PreconditionFailed("generation mismatch")
+    )
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(PreconditionFailedError) as excinfo:
+        storage.delete_if_version("k", VersionToken("1"))
+
+    assert excinfo.value.key == "k"
+
+
+def test_delete_if_version_not_found_raises_precondition_failed_error() -> None:
+    """NotFound raised from blob.delete() (the object is absent) maps to
+    PreconditionFailedError(key) (AIE-1037, US4.3).
+    """
+    blob = _StubBlobForDeleteIfVersion(generation=1, delete_raises=NotFound("gone"))
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(PreconditionFailedError) as excinfo:
+        storage.delete_if_version("k", VersionToken("1"))
+
+    assert excinfo.value.key == "k"
+
+
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_delete_if_version_timeout_exceptions_map_to_backend_unavailable_timeout(
+    exc: Exception,
+) -> None:
+    """Each timeout-class exception raised from blob.delete() during
+    delete_if_version() maps to BackendUnavailableError with reason TIMEOUT
+    (AIE-1037, US4.6).
+    """
+    blob = _StubBlobForDeleteIfVersion(generation=1, delete_raises=exc)
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.delete_if_version("k", VersionToken("1"))
+
+    assert excinfo.value.reason is TransientReason.TIMEOUT
+
+
+@pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
+def test_delete_if_version_unavailable_exceptions_map_to_backend_unavailable_unavailable(
+    exc: Exception,
+) -> None:
+    """Each unavailable-class exception raised from blob.delete() during
+    delete_if_version() maps to BackendUnavailableError with reason
+    UNAVAILABLE (AIE-1037, US4.6).
+    """
+    blob = _StubBlobForDeleteIfVersion(generation=1, delete_raises=exc)
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.delete_if_version("k", VersionToken("1"))
+
+    assert excinfo.value.reason is TransientReason.UNAVAILABLE
+
+
+def test_delete_if_version_unmapped_exception_propagates_unchanged() -> None:
+    """An exception not in the mapping (Forbidden) raised from blob.delete()
+    during delete_if_version() propagates unchanged, not wrapped (AIE-1037,
+    US4.6).
+    """
+    blob = _StubBlobForDeleteIfVersion(generation=1, delete_raises=Forbidden("forbidden"))
+    bucket = _StubBucketForDeleteIfVersion(blob)
+    storage = _make_storage(bucket)
+
+    with pytest.raises(Forbidden):
+        storage.delete_if_version("k", VersionToken("1"))
+
+
 class _StubListBlob:
     """Minimal stand-in for a google.cloud.storage.Blob as returned by list_blobs.
 

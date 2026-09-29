@@ -84,6 +84,14 @@ class Storage(Protocol):
         """
         ...
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        """Delete the object at `key` only if it is at `expected`.
+
+        Raises PreconditionFailedError if the object is absent or at a
+        different version.
+        """
+        ...
+
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         """Objects whose key starts with `prefix`, ascending by key.
 

@@ -85,6 +85,9 @@ class _StubStorage:
             raise self._list_page_raises
         return self._list_page_result
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        raise NotImplementedError("not exercised by these tests")
+
 
 class _NeverCalledStorage:
     """Storage stub whose list_page fails the test if invoked at all."""
@@ -106,6 +109,9 @@ class _NeverCalledStorage:
 
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         raise AssertionError("must not consult storage for an invalid prefix")
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        raise AssertionError("must not call storage.delete_if_version")
 
 
 class _DeletableStorage(InMemoryStorage):

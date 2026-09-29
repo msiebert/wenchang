@@ -112,6 +112,9 @@ class _StubStorage:
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         raise NotImplementedError("not exercised by these tests")
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        raise NotImplementedError("not exercised by these tests")
+
 
 # --- US1: successful single-match replacement -------------------------------
 
@@ -681,6 +684,9 @@ class _RacingPutStorage:
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         return self._inner.list_page(prefix, start_after, limit)
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
+
 
 def test_replace_fact_reapplies_after_a_race_that_preserves_the_anchor() -> None:
     """A write landing between get() and put_if_version() causes exactly
@@ -826,6 +832,9 @@ class _DeleteBeforePutStorage:
 
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         return self._inner.list_page(prefix, start_after, limit)
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
 
 
 def test_replace_fact_raises_file_absent_when_file_deleted_mid_retry() -> None:

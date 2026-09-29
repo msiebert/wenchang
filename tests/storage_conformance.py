@@ -385,6 +385,78 @@ class StorageConformance:
         page = storage.list_page("u/", None, 10)
         assert [obj.key for obj in page] == sorted(["u/a", "u/café", "u/z"])
 
+    def test_delete_if_version_with_current_token_deletes_object(self, storage: Storage) -> None:
+        """Given an object at token T, delete_if_version(key, T) returns None
+        and a subsequent get(key) is None (AIE-1037, US4.1).
+        """
+        token = storage.put("k", b"data", {"a": "1"})
+        result = storage.delete_if_version("k", token)
+        assert result is None
+        assert storage.get("k") is None
+
+    def test_delete_if_version_with_stale_token_raises_and_leaves_object_unchanged(
+        self, storage: Storage
+    ) -> None:
+        """Given an object at token T2 (written after T1), delete_if_version
+        using the stale T1 raises PreconditionFailedError and leaves the
+        object's data, metadata, and version unchanged (AIE-1037, US4.2).
+        """
+        t1 = storage.put("k", b"v1", {"which": "v1"})
+        t2 = storage.put("k", b"v2", {"which": "v2"})
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.delete_if_version("k", t1)
+        assert excinfo.value.key == "k"
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"v2"
+        assert dict(result.metadata) == {"which": "v2"}
+        assert result.version == t2
+
+    def test_delete_if_version_on_missing_key_raises(self, storage: Storage) -> None:
+        """Given no object at a key, delete_if_version(key, T) raises
+        PreconditionFailedError (AIE-1037, US4.3).
+        """
+        other_token = storage.put("other-key", b"data", {})
+        with pytest.raises(PreconditionFailedError) as excinfo:
+            storage.delete_if_version("k", other_token)
+        assert excinfo.value.key == "k"
+        assert storage.get("k") is None
+
+    def test_put_if_version_none_succeeds_after_delete(self, storage: Storage) -> None:
+        """Given a key that was deleted, put_if_version(key, ..., None)
+        (create-if-absent) succeeds afterwards (AIE-1037, US4.4).
+        """
+        token = storage.put("k", b"original", {"a": "1"})
+        storage.delete_if_version("k", token)
+
+        new_token = storage.put_if_version("k", b"recreated", {"a": "2"}, None)
+
+        result = storage.get("k")
+        assert result is not None
+        assert result.data == b"recreated"
+        assert dict(result.metadata) == {"a": "2"}
+        assert result.version == new_token
+
+    def test_delete_if_version_leaves_other_keys_visible_in_get_and_list_page(
+        self, storage: Storage
+    ) -> None:
+        """Given two keys, deleting one leaves get() and list_page() still
+        reporting the other, and list_page() no longer lists the deleted key
+        (AIE-1037, US4.5).
+        """
+        token_a = storage.put("del/a", b"data-a", {"who": "a"})
+        storage.put("del/b", b"data-b", {"who": "b"})
+
+        storage.delete_if_version("del/a", token_a)
+
+        assert storage.get("del/a") is None
+        remaining = storage.get("del/b")
+        assert remaining is not None
+        assert remaining.data == b"data-b"
+
+        page = storage.list_page("del/", None, 10)
+        assert [obj.key for obj in page] == ["del/b"]
+
     def test_list_page_version_reflects_the_latest_put(self, storage: Storage) -> None:
         """When a key has been put more than once, the version in its
         ListedObject equals the token from the most recent put, matching
