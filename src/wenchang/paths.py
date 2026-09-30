@@ -14,10 +14,15 @@ import unicodedata
 _MD_SUFFIX = ".md"
 
 
-def _is_valid_segment(segment: str) -> bool:
+def is_valid_segment(segment: str) -> bool:
+    """Return True iff segment is one valid path segment.
+
+    Non-empty, not "." or "..", and no "/", backslash, or Unicode control
+    character. Never raises for any str input.
+    """
     if segment == "" or segment in (".", ".."):
         return False
-    if "\\" in segment:
+    if "/" in segment or "\\" in segment:
         return False
     return all(unicodedata.category(char) != "Cc" for char in segment)
 
@@ -30,7 +35,7 @@ def is_valid_path(path: str) -> bool:
     segments = path.split("/")
     if len(segments) != 4:
         return False
-    if not all(_is_valid_segment(segment) for segment in segments):
+    if not all(is_valid_segment(segment) for segment in segments):
         return False
     name = segments[-1]
     return name.endswith(_MD_SUFFIX) and len(name) > len(_MD_SUFFIX)
@@ -46,4 +51,4 @@ def is_valid_prefix(prefix: str) -> bool:
     segments = prefix[:-1].split("/")
     if not 1 <= len(segments) <= 3:
         return False
-    return all(_is_valid_segment(segment) for segment in segments)
+    return all(is_valid_segment(segment) for segment in segments)
