@@ -50,7 +50,10 @@ Terms as used throughout wenchang and its spec.
   find an existing file before creating a duplicate.
 - **System area (`system/`)** — a read-only-to-the-agent area within any
   scope, holding content a human deliberately curated; enforced at the
-  tool layer, refreshed only by wholesale prefix rewrite.
+  tool layer by `scope.check_not_system`, which rejects any write whose area
+  segment is exactly `system`, for every caller regardless of role.
+  Refreshed only by wholesale prefix rewrite through `core`, which does not
+  apply the check.
 - **Seed areas** — the starting set of area names an adopter configures per
   scope; a starting shape the agent is free to extend.
 - **Systems of record** — data that already has a canonical home in the
