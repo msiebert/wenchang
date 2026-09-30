@@ -193,7 +193,7 @@ def test_delete_file_then_write_file_with_none_recreates_it() -> None:
 
     store.delete_file(VALID_PATH, before.version)
 
-    recreated = store.write_file(VALID_PATH, "- [stated] new\n", _metadata(), None)
+    recreated = store.write_file(VALID_PATH, "- [stated] new\n", _metadata(), None, source="chat")
 
     assert recreated.content == "- [stated] new\n"
     reread = store.read_file(VALID_PATH)
