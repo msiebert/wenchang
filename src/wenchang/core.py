@@ -326,6 +326,39 @@ class MemoryStore:
 
         return MemoryFile(path=path, content=new_content, metadata=stamped, version=new_version)
 
+    def delete_file(self, path: str, expected_version: VersionToken) -> None:
+        """Delete the file at `path`, if it is at `expected_version`.
+
+        Raises NotFoundError with reason INVALID_PATH if `path` is not
+        well-formed, without calling storage. Raises NotFoundError with
+        reason FILE_ABSENT if no object exists at `path`. Raises
+        VersionConflictError if `expected_version` does not match the
+        current version, carrying the current content and version. Does
+        not parse metadata, so a file with corrupt metadata is still
+        deletable. If the conditional delete fails its precondition,
+        re-reads and raises NotFoundError with reason FILE_ABSENT if the
+        file is now gone, or VersionConflictError carrying the content and
+        version found on re-read otherwise. Propagates
+        BackendUnavailableError unchanged.
+        """
+        if not is_valid_path(path):
+            raise NotFoundError(path, NotFoundReason.INVALID_PATH)
+
+        obj = self._storage.get(path)
+        if obj is None:
+            raise NotFoundError(path, NotFoundReason.FILE_ABSENT)
+
+        if obj.version != expected_version:
+            raise VersionConflictError(path, obj.data.decode("utf-8"), obj.version)
+
+        try:
+            self._storage.delete_if_version(path, expected_version)
+        except PreconditionFailedError:
+            cur = self._storage.get(path)
+            if cur is None:
+                raise NotFoundError(path, NotFoundReason.FILE_ABSENT) from None
+            raise VersionConflictError(path, cur.data.decode("utf-8"), cur.version) from None
+
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
         """List files under `prefix`, one page at a time.
 

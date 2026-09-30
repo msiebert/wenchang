@@ -107,6 +107,9 @@ class _StubStorage:
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         raise NotImplementedError("not exercised by these tests")
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        raise NotImplementedError("not exercised by these tests")
+
 
 def _fail_on_any_call(_name: str) -> None:
     pytest.fail("storage should not have been consulted")
@@ -135,6 +138,10 @@ class _NeverCalledStorage:
 
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         _fail_on_any_call("list_page")
+        raise AssertionError("unreachable")
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        _fail_on_any_call("delete_if_version")
         raise AssertionError("unreachable")
 
 
@@ -384,6 +391,9 @@ class _RacingPutStorage:
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         return self._inner.list_page(prefix, start_after, limit)
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
+
 
 def test_append_line_race_before_put_raises_conflict_and_does_not_retry_write() -> None:
     """A write landing between append_line's read and its conditional
@@ -437,6 +447,9 @@ class _OwnWriteLandsThenPreconditionFailsStorage:
 
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         return self._inner.list_page(prefix, start_after, limit)
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
 
 
 def test_append_line_own_write_lands_then_precondition_fails_returns_success() -> None:
@@ -501,6 +514,9 @@ class _DeleteThenPreconditionFailsStorage:
 
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         return self._inner.list_page(prefix, start_after, limit)
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
 
 
 def test_append_line_deleted_mid_retry_raises_file_absent() -> None:

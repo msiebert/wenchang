@@ -135,6 +135,20 @@ class GcsStorage:
             raise mapped from exc
         return VersionToken(str(blob.generation))  # pyright: ignore[reportUnknownMemberType]
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        if not _GENERATION_TOKEN_RE.fullmatch(expected):
+            raise PreconditionFailedError(key)
+        blob = self._bucket.blob(key)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            blob.delete(if_generation_match=int(expected))  # pyright: ignore[reportUnknownMemberType]
+        except (PreconditionFailed, NotFound) as exc:
+            raise PreconditionFailedError(key) from exc
+        except Exception as exc:
+            mapped = _map_backend_error(exc)
+            if mapped is None:
+                raise
+            raise mapped from exc
+
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         try:
             if start_after is None:

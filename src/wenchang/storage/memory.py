@@ -45,6 +45,12 @@ class InMemoryStorage:
             raise PreconditionFailedError(key)
         return self.put(key, data, metadata)
 
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        current = self._objects.get(key)
+        if current is None or current.version != expected:
+            raise PreconditionFailedError(key)
+        del self._objects[key]
+
     def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
         keys = sorted(k for k in self._objects if k.startswith(prefix))
         if start_after is not None:

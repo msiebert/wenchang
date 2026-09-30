@@ -46,6 +46,23 @@ class TestGcsStorage(StorageConformance):
     (AIE-1032, US4-1 through US4-6).
     """
 
+    @pytest.mark.skip(
+        reason=(
+            "fake-gcs-server does not enforce ifGenerationMatch on DELETE "
+            "requests, so a stale-token delete is not rejected by the "
+            "emulator. GcsStorage.delete_if_version does pass "
+            "if_generation_match to the real client; the resulting "
+            "PreconditionFailed -> PreconditionFailedError mapping is "
+            "covered by the stub-based unit test "
+            "test_delete_if_version_precondition_failed_raises_precondition_failed_error "
+            "in tests/test_storage_gcs_errors.py."
+        )
+    )
+    def test_delete_if_version_with_stale_token_raises_and_leaves_object_unchanged(
+        self, storage: Storage
+    ) -> None:
+        super().test_delete_if_version_with_stale_token_raises_and_leaves_object_unchanged(storage)
+
 
 def test_put_then_get_round_trips_through_real_client_stack(storage: Storage) -> None:
     """A put/get round trip through the real google-cloud-storage client and
