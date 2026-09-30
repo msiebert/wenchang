@@ -1,7 +1,7 @@
 """Error taxonomy: three categories of failure, each with fixed next-action guidance."""
 
 from enum import StrEnum
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from wenchang.version_token import VersionToken
 
@@ -145,33 +145,55 @@ class RestrictionReason(StrEnum):
 
     SYSTEM_READ_ONLY = "system_read_only"
     ROLE_REQUIRED = "role_required"
+    NOT_GRANTED = "not_granted"
 
 
 class RestrictedScopeError(PermanentError):
-    """A path falls within a scope the caller cannot write to."""
+    """A path falls within a scope the caller cannot write to.
+
+    `required_roles` is the set of roles permitted to write the scope. It is
+    required and non-empty for ROLE_REQUIRED and must be None otherwise.
+    """
 
     def __init__(
         self,
         path: str,
         scope: str,
         reason: RestrictionReason,
-        required_role: str | None = None,
+        required_roles: frozenset[str] | None = None,
     ) -> None:
-        if reason is RestrictionReason.ROLE_REQUIRED and required_role is None:
-            raise ValueError("required_role is required when reason is ROLE_REQUIRED")
+        if required_roles is not None:
+            # type() rather than isinstance, which consults a spoofable __class__.
+            if not issubclass(type(required_roles), frozenset):  # pyright: ignore[reportUnnecessaryIsInstance]
+                raise TypeError("required_roles must be a frozenset or None")
+            members = frozenset(cast(frozenset[object], required_roles))
+            if not all(isinstance(role, str) for role in members):
+                raise TypeError("required_roles must contain only str")
+            # Exact strs, so overridden str-subclass methods cannot mislead sorting.
+            required_roles = frozenset(str.__str__(cast(str, role)) for role in members)
+        if reason is RestrictionReason.ROLE_REQUIRED and not required_roles:
+            raise ValueError("required_roles must be non-empty when reason is ROLE_REQUIRED")
+        if reason is not RestrictionReason.ROLE_REQUIRED and required_roles is not None:
+            raise ValueError("required_roles is only allowed when reason is ROLE_REQUIRED")
         self.path = path
         self.scope = scope
         self.reason = reason
-        self.required_role = required_role
+        self.required_roles = required_roles
         if reason is RestrictionReason.SYSTEM_READ_ONLY:
             detail = (
                 f"{path} is in scope {scope}; the system/ area of scope {scope} is "
                 "read-only (curated content)."
             )
+        elif reason is RestrictionReason.NOT_GRANTED:
+            detail = (
+                f"{path} is in scope {scope}; the caller's identity does not include "
+                f"this entity in scope {scope}."
+            )
         else:
+            roles = ", ".join(sorted(required_roles or ()))
             detail = (
                 f"{path} is in scope {scope}; scope {scope} is role-gated and the "
-                f"caller lacks the {required_role} role."
+                f"caller lacks a permitted role ({roles})."
             )
         super().__init__(detail)
 

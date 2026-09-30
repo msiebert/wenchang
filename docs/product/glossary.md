@@ -18,7 +18,28 @@ Terms as used throughout wenchang and its spec.
   by the identity resolver as part of a scope grant, checked against
   write-restricted scopes before any mutating call proceeds. An opaque,
   non-empty, adopter-defined string; every granted scope carries exactly
-  one.
+  one. Roles compare by exact, case-sensitive equality with no hierarchy
+  (`Admin` is not `admin`, and `owner` does not imply `admin`), so a scope
+  policy lists every permitted role explicitly.
+- **Write-restricted scope** — a scope listed in the adopter's scope policy,
+  which only callers holding one of its permitted roles may write (e.g.
+  organization writes limited to admin or owner). The only scope property
+  the library understands; any scope name may be restricted, and none is
+  special-cased. A write by a caller without a permitted role is rejected
+  with a permanent `RestrictedScopeError(ROLE_REQUIRED)` listing the
+  permitted roles. Reads and listing are never restricted.
+- **Scope policy** — `scope.ScopePolicy`, the adopter's startup
+  configuration mapping each write-restricted scope to its set of permitted
+  roles. A scope absent from the policy is unrestricted, so any granted
+  role may write it. Keys must match the resolver's scope names exactly; a
+  key that matches no scope restricts nothing. Immutable and validated at
+  construction.
+- **Not granted** — the permanent rejection
+  (`RestrictedScopeError(NOT_GRANTED)`) of a write whose path lies outside
+  the caller's identity: its scope has no grant, or its entity ID differs
+  from the caller's entity ID in that scope. Checked before the role, so a
+  permitted role never opens another entity's prefix. One generic message
+  covers both cases and never reveals the caller's own entity ID or role.
 - **Identity resolver** — the adopter-injected dependency that turns
   caller credentials (opaque to the library) into an identity, or reports a
   resolution failure. It must not raise, and identical credentials must
@@ -51,7 +72,9 @@ Terms as used throughout wenchang and its spec.
 - **System area (`system/`)** — a read-only-to-the-agent area within any
   scope, holding content a human deliberately curated; enforced at the
   tool layer by `scope.check_not_system`, which rejects any write whose area
-  segment is exactly `system`, for every caller regardless of role.
+  segment is exactly `system`, for every caller regardless of role. The
+  tool layer applies it through `scope.check_write`, before the grant and
+  role checks.
   Refreshed only by wholesale prefix rewrite through `core`, which does not
   apply the check.
 - **Seed areas** — the starting set of area names an adopter configures per

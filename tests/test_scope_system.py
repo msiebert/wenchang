@@ -124,7 +124,7 @@ def test_system_area_constant() -> None:
 
 def test_check_not_system_rejects_primary_path() -> None:
     """A write under user/u_42/system/ raises a permanent SYSTEM_READ_ONLY
-    RestrictedScopeError naming scope "user" and no role. (AIE-1040, US1.1)"""
+    RestrictedScopeError naming scope "user" and no role. (AIE-1040, AIE-1042, US1.1)"""
     with pytest.raises(RestrictedScopeError) as exc_info:
         check_not_system(US1_PRIMARY_PATH)
     err = exc_info.value
@@ -132,7 +132,7 @@ def test_check_not_system_rejects_primary_path() -> None:
     assert err.scope == "user"
     assert err.reason is RestrictionReason.SYSTEM_READ_ONLY
     assert err.category is ErrorCategory.PERMANENT
-    assert getattr(err, "required_role", None) is None
+    assert err.required_roles is None
     assert getattr(err, "required_roles", None) is None
     assert is_system_path(US1_PRIMARY_PATH) is True
 
@@ -241,6 +241,13 @@ def test_is_system_path_false_for_malformed(path: str) -> None:
     """is_system_path returns False and never raises for malformed input.
     (AIE-1040, US3.2)"""
     assert is_system_path(path) is False
+
+
+def test_is_system_path_false_for_non_str() -> None:
+    """is_system_path returns False, without raising, for a non-str.
+    (AIE-1040, AIE-1042, review finding 1)"""
+    assert is_system_path(None) is False  # pyright: ignore[reportArgumentType]
+    assert is_system_path(5) is False  # pyright: ignore[reportArgumentType]
 
 
 def test_emoji_path_allowed() -> None:
