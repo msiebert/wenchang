@@ -117,19 +117,20 @@ class _StubStorage:
 def test_write_file_creates_file_and_read_file_agrees() -> None:
     """Writing to an absent path with expected_version=None returns a
     MemoryFile with the given path/content and a token that read_file also
-    sees (AIE-1033, US1-1).
+    sees. On create, sources is the union of caller metadata sources and the
+    required source= argument (AIE-1033, US1-1; AIE-1109).
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
     meta = _metadata()
 
-    result = store.write_file(VALID_PATH, "hello world", meta, None)
+    result = store.write_file(VALID_PATH, "hello world", meta, None, source="chat")
 
     assert result.path == VALID_PATH
     assert result.content == "hello world"
     assert result.metadata.description == meta.description
     assert result.metadata.aliases == meta.aliases
-    assert result.metadata.sources == meta.sources
+    assert result.metadata.sources == meta.sources | {"chat"}
 
     reread = store.read_file(VALID_PATH)
     assert reread.content == "hello world"
@@ -148,7 +149,7 @@ def test_write_file_with_none_expected_conflicts_when_file_exists() -> None:
     before = store.read_file(VALID_PATH)
 
     with pytest.raises(VersionConflictError) as excinfo:
-        store.write_file(VALID_PATH, "new body", _metadata(), None)
+        store.write_file(VALID_PATH, "new body", _metadata(), None, source="chat")
 
     assert excinfo.value.content == "existing body"
     assert excinfo.value.version == before.version
@@ -168,9 +169,13 @@ def test_write_file_updates_with_matching_expected_version() -> None:
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    first = store.write_file(VALID_PATH, "v1 body", _metadata(description="v1"), None)
+    first = store.write_file(
+        VALID_PATH, "v1 body", _metadata(description="v1"), None, source="chat"
+    )
 
-    second = store.write_file(VALID_PATH, "v2 body", _metadata(description="v2"), first.version)
+    second = store.write_file(
+        VALID_PATH, "v2 body", _metadata(description="v2"), first.version, source="chat"
+    )
 
     assert second.version != first.version
     reread = store.read_file(VALID_PATH)
@@ -186,11 +191,11 @@ def test_write_file_with_stale_expected_version_conflicts() -> None:
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    first = store.write_file(VALID_PATH, "v1 body", _metadata(), None)
-    second = store.write_file(VALID_PATH, "v2 body", _metadata(), first.version)
+    first = store.write_file(VALID_PATH, "v1 body", _metadata(), None, source="chat")
+    second = store.write_file(VALID_PATH, "v2 body", _metadata(), first.version, source="chat")
 
     with pytest.raises(VersionConflictError) as excinfo:
-        store.write_file(VALID_PATH, "v3 body", _metadata(), first.version)
+        store.write_file(VALID_PATH, "v3 body", _metadata(), first.version, source="chat")
 
     assert excinfo.value.path == VALID_PATH
     assert excinfo.value.content == "v2 body"
@@ -207,13 +212,15 @@ def test_write_file_retry_with_conflict_version_succeeds() -> None:
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    store.write_file(VALID_PATH, "v1 body", _metadata(), None)
+    store.write_file(VALID_PATH, "v1 body", _metadata(), None, source="chat")
 
     with pytest.raises(VersionConflictError) as excinfo:
-        store.write_file(VALID_PATH, "v2 body", _metadata(), None)
+        store.write_file(VALID_PATH, "v2 body", _metadata(), None, source="chat")
     conflict_version = excinfo.value.version
 
-    result = store.write_file(VALID_PATH, "v2 body retried", _metadata(), conflict_version)
+    result = store.write_file(
+        VALID_PATH, "v2 body retried", _metadata(), conflict_version, source="chat"
+    )
 
     assert result.content == "v2 body retried"
     reread = store.read_file(VALID_PATH)
@@ -230,7 +237,7 @@ def test_write_file_with_expected_version_and_no_file_raises_file_absent() -> No
     store = _new_store(storage)
 
     with pytest.raises(NotFoundError) as excinfo:
-        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"))
+        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"), source="chat")
 
     assert excinfo.value.reason is NotFoundReason.FILE_ABSENT
     assert excinfo.value.path == VALID_PATH
@@ -247,11 +254,13 @@ def test_write_file_with_unmatched_expected_version_conflicts_with_current_state
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    store.write_file(VALID_PATH, "current body", _metadata(description="current"), None)
+    store.write_file(
+        VALID_PATH, "current body", _metadata(description="current"), None, source="chat"
+    )
     current = store.read_file(VALID_PATH)
 
     with pytest.raises(VersionConflictError) as excinfo:
-        store.write_file(VALID_PATH, "new body", _metadata(), VersionToken("abc"))
+        store.write_file(VALID_PATH, "new body", _metadata(), VersionToken("abc"), source="chat")
 
     assert excinfo.value.content == "current body"
     assert excinfo.value.version == current.version
@@ -264,12 +273,14 @@ def test_write_file_retrying_same_successful_call_conflicts_with_own_write() -> 
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    initial = store.write_file(VALID_PATH, "seed", _metadata(), None)
+    initial = store.write_file(VALID_PATH, "seed", _metadata(), None, source="chat")
 
-    first = store.write_file(VALID_PATH, "written once", _metadata(), initial.version)
+    first = store.write_file(
+        VALID_PATH, "written once", _metadata(), initial.version, source="chat"
+    )
 
     with pytest.raises(VersionConflictError) as excinfo:
-        store.write_file(VALID_PATH, "written once", _metadata(), initial.version)
+        store.write_file(VALID_PATH, "written once", _metadata(), initial.version, source="chat")
 
     assert excinfo.value.content == first.content
 
@@ -279,22 +290,23 @@ def test_write_file_retrying_same_successful_call_conflicts_with_own_write() -> 
 
 def test_write_file_sequential_writes_never_mix_content_and_metadata() -> None:
     """After two successive writes, read_file returns the second write's
-    content paired with the second write's metadata, never a mix
-    (AIE-1033, US3-1).
+    content paired with the second write's metadata, never a mix, except for
+    sources, which is the union of everything written so far plus both
+    source= arguments (AIE-1033, US3-1; AIE-1109).
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
     first_meta = _metadata(description="first", aliases=("f",), sources=frozenset({"fs"}))
-    first = store.write_file(VALID_PATH, "content one", first_meta, None)
+    first = store.write_file(VALID_PATH, "content one", first_meta, None, source="chat")
     second_meta = _metadata(description="second", aliases=("s",), sources=frozenset({"ss"}))
-    store.write_file(VALID_PATH, "content two", second_meta, first.version)
+    store.write_file(VALID_PATH, "content two", second_meta, first.version, source="chat")
 
     result = store.read_file(VALID_PATH)
 
     assert result.content == "content two"
     assert result.metadata.description == "second"
     assert result.metadata.aliases == ("s",)
-    assert result.metadata.sources == frozenset({"ss"})
+    assert result.metadata.sources == frozenset({"fs", "ss", "chat"})
 
 
 def test_write_file_invalid_path_leaves_prior_read_behavior_unchanged() -> None:
@@ -305,7 +317,7 @@ def test_write_file_invalid_path_leaves_prior_read_behavior_unchanged() -> None:
     store = _new_store(storage)
 
     with pytest.raises(NotFoundError):
-        store.write_file("not/a/valid", "body", _metadata(), None)
+        store.write_file("not/a/valid", "body", _metadata(), None, source="chat")
 
     with pytest.raises(NotFoundError) as excinfo:
         store.read_file("not/a/valid")
@@ -318,11 +330,13 @@ def test_write_file_conflict_leaves_prior_state_including_token_unchanged() -> N
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    store.write_file(VALID_PATH, "stable body", _metadata(), None)
+    store.write_file(VALID_PATH, "stable body", _metadata(), None, source="chat")
     before = store.read_file(VALID_PATH)
 
     with pytest.raises(VersionConflictError):
-        store.write_file(VALID_PATH, "unwanted", _metadata(), VersionToken("nonexistent"))
+        store.write_file(
+            VALID_PATH, "unwanted", _metadata(), VersionToken("nonexistent"), source="chat"
+        )
 
     after = store.read_file(VALID_PATH)
     assert after.content == before.content
@@ -335,12 +349,12 @@ def test_write_file_naive_clock_leaves_prior_state_unchanged() -> None:
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
-    store.write_file(VALID_PATH, "stable body", _metadata(), None)
+    store.write_file(VALID_PATH, "stable body", _metadata(), None, source="chat")
     before = store.read_file(VALID_PATH)
 
     naive_store = _new_store(storage, clock=lambda: datetime(2025, 1, 1))
     with pytest.raises(ValueError):
-        naive_store.write_file(VALID_PATH, "unwanted", _metadata(), before.version)
+        naive_store.write_file(VALID_PATH, "unwanted", _metadata(), before.version, source="chat")
 
     after = store.read_file(VALID_PATH)
     assert after.content == before.content
@@ -355,7 +369,7 @@ def test_write_file_file_absent_leaves_prior_state_absent() -> None:
     store = _new_store(storage)
 
     with pytest.raises(NotFoundError):
-        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"))
+        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"), source="chat")
 
     with pytest.raises(NotFoundError) as excinfo:
         store.read_file(VALID_PATH)
@@ -381,7 +395,7 @@ def test_write_file_round_trips_content_exactly(body: str) -> None:
     storage = InMemoryStorage()
     store = _new_store(storage)
 
-    store.write_file(VALID_PATH, body, _metadata(), None)
+    store.write_file(VALID_PATH, body, _metadata(), None, source="chat")
 
     result = store.read_file(VALID_PATH)
     assert result.content == body
@@ -389,8 +403,9 @@ def test_write_file_round_trips_content_exactly(body: str) -> None:
 
 def test_write_file_round_trips_metadata_with_special_characters() -> None:
     """Metadata whose aliases/sources contain commas, quotes, brackets, and
-    unicode round-trips exactly through write_file and read_file
-    (AIE-1033, US3-3).
+    unicode round-trips exactly through write_file and read_file, with
+    sources as the union of caller metadata and source= (AIE-1033, US3-3;
+    AIE-1109).
     """
     storage = InMemoryStorage()
     store = _new_store(storage)
@@ -400,12 +415,12 @@ def test_write_file_round_trips_metadata_with_special_characters() -> None:
         sources=frozenset({"src, one", 'src"two', "[src3]", "日本"}),
     )
 
-    store.write_file(VALID_PATH, "body", meta, None)
+    store.write_file(VALID_PATH, "body", meta, None, source="chat")
 
     result = store.read_file(VALID_PATH)
     assert result.metadata.description == meta.description
     assert result.metadata.aliases == meta.aliases
-    assert result.metadata.sources == meta.sources
+    assert result.metadata.sources == meta.sources | {"chat"}
 
 
 # --- US5: last-updated stamping ---------------------------------------------
@@ -413,8 +428,9 @@ def test_write_file_round_trips_metadata_with_special_characters() -> None:
 
 def test_write_file_stamps_last_updated_from_clock_overriding_caller_value() -> None:
     """write_file overrides the caller's last_updated with the injected
-    clock's value, while leaving description, aliases, and sources exactly
-    as supplied (AIE-1033, US5-1).
+    clock's value, while leaving description and aliases exactly as
+    supplied; sources becomes the union with source= (AIE-1033, US5-1;
+    AIE-1109).
     """
     storage = InMemoryStorage()
     store = _new_store(storage, clock=_fixed_clock)
@@ -425,12 +441,12 @@ def test_write_file_stamps_last_updated_from_clock_overriding_caller_value() -> 
         last_updated=datetime(2020, 1, 1, tzinfo=UTC),
     )
 
-    result = store.write_file(VALID_PATH, "body", caller_meta, None)
+    result = store.write_file(VALID_PATH, "body", caller_meta, None, source="chat")
 
     assert result.metadata.last_updated == FIXED_CLOCK_TIME
     assert result.metadata.description == "d"
     assert result.metadata.aliases == ("x", "y")
-    assert result.metadata.sources == frozenset({"s"})
+    assert result.metadata.sources == frozenset({"s", "chat"})
 
     reread = store.read_file(VALID_PATH)
     assert reread.metadata.last_updated == FIXED_CLOCK_TIME
@@ -445,7 +461,7 @@ def test_write_file_default_clock_stamps_tz_aware_utc_now() -> None:
     store = _new_store(storage, clock=None)
 
     before = datetime.now(UTC)
-    result = store.write_file(VALID_PATH, "body", _metadata(), None)
+    result = store.write_file(VALID_PATH, "body", _metadata(), None, source="chat")
     after = datetime.now(UTC)
 
     assert result.metadata.last_updated.tzinfo is not None
@@ -461,7 +477,7 @@ def test_write_file_naive_clock_raises_value_error_and_writes_nothing() -> None:
     store = _new_store(storage, clock=lambda: datetime(2025, 1, 1))
 
     with pytest.raises(ValueError):
-        store.write_file(VALID_PATH, "body", _metadata(), None)
+        store.write_file(VALID_PATH, "body", _metadata(), None, source="chat")
 
     with pytest.raises(NotFoundError) as excinfo:
         store.read_file(VALID_PATH)
@@ -488,7 +504,7 @@ def test_write_file_raises_not_found_invalid_path_without_calling_storage(path: 
     store = _new_store(stub)
 
     with pytest.raises(NotFoundError) as excinfo:
-        store.write_file(path, "body", _metadata(), None)
+        store.write_file(path, "body", _metadata(), None, source="chat")
 
     assert excinfo.value.reason is NotFoundReason.INVALID_PATH
     assert excinfo.value.path == path
@@ -505,7 +521,7 @@ def test_write_file_propagates_backend_unavailable_error_from_put_unchanged() ->
     store = _new_store(stub)
 
     with pytest.raises(BackendUnavailableError) as excinfo:
-        store.write_file(VALID_PATH, "body", _metadata(), None)
+        store.write_file(VALID_PATH, "body", _metadata(), None, source="chat")
 
     assert excinfo.value is error
 
@@ -522,7 +538,7 @@ def test_write_file_propagates_backend_unavailable_error_from_get_on_conflict_un
     store = _new_store(stub)
 
     with pytest.raises(BackendUnavailableError) as excinfo:
-        store.write_file(VALID_PATH, "body", _metadata(), None)
+        store.write_file(VALID_PATH, "body", _metadata(), None, source="chat")
 
     assert excinfo.value is get_error
 
@@ -539,7 +555,7 @@ def test_write_file_conflict_with_absent_follow_up_get_raises_file_absent() -> N
     store = _new_store(stub)
 
     with pytest.raises(NotFoundError) as excinfo:
-        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"))
+        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"), source="chat")
 
     assert excinfo.value.reason is NotFoundReason.FILE_ABSENT
 
@@ -558,7 +574,7 @@ def test_write_file_conflict_with_corrupt_metadata_on_follow_up_get_propagates()
     store = _new_store(stub)
 
     with pytest.raises(MetadataFormatError) as excinfo:
-        store.write_file(VALID_PATH, "body", _metadata(), None)
+        store.write_file(VALID_PATH, "body", _metadata(), None, source="chat")
 
     assert excinfo.value.key == "description"
 
@@ -577,7 +593,7 @@ def test_write_file_conflict_with_non_utf8_bytes_on_follow_up_get_propagates() -
     store = _new_store(stub)
 
     with pytest.raises(UnicodeDecodeError):
-        store.write_file(VALID_PATH, "body", _metadata(), None)
+        store.write_file(VALID_PATH, "body", _metadata(), None, source="chat")
 
 
 # --- T4: byte-size ceiling ---------------------------------------------------
@@ -607,7 +623,7 @@ def test_write_file_at_default_byte_ceiling_succeeds() -> None:
     store = _new_store(storage)
     content = "a" * 16384
 
-    result = store.write_file(VALID_PATH, content, _metadata(), None)
+    result = store.write_file(VALID_PATH, content, _metadata(), None, source="chat")
 
     assert result.content == content
     assert len(content.encode("utf-8")) == 16384
@@ -624,7 +640,7 @@ def test_write_file_over_default_byte_ceiling_raises_oversize_and_writes_nothing
     content = "a" * 16385
 
     with pytest.raises(OversizeWriteError) as excinfo:
-        store.write_file(VALID_PATH, content, _metadata(), None)
+        store.write_file(VALID_PATH, content, _metadata(), None, source="chat")
 
     assert excinfo.value.path == VALID_PATH
     assert excinfo.value.size == 16385
@@ -641,7 +657,7 @@ def test_write_file_over_default_byte_ceiling_leaves_path_absent() -> None:
     store = _new_store(storage)
 
     with pytest.raises(OversizeWriteError):
-        store.write_file(VALID_PATH, "a" * 16385, _metadata(), None)
+        store.write_file(VALID_PATH, "a" * 16385, _metadata(), None, source="chat")
 
     with pytest.raises(NotFoundError) as excinfo:
         store.read_file(VALID_PATH)
@@ -662,7 +678,7 @@ def test_write_file_byte_size_counts_utf8_bytes_not_characters() -> None:
     assert len(content.encode("utf-8")) == 16386
 
     with pytest.raises(OversizeWriteError) as excinfo:
-        store.write_file(VALID_PATH, content, _metadata(), None)
+        store.write_file(VALID_PATH, content, _metadata(), None, source="chat")
 
     assert excinfo.value.size == 16386
 
@@ -676,7 +692,7 @@ def test_write_file_custom_max_file_bytes_rejects_one_byte_over() -> None:
     store = _new_store_with_limit(stub, max_file_bytes=100)
 
     with pytest.raises(OversizeWriteError) as excinfo:
-        store.write_file(VALID_PATH, "a" * 101, _metadata(), None)
+        store.write_file(VALID_PATH, "a" * 101, _metadata(), None, source="chat")
 
     assert excinfo.value.limit == 100
     assert excinfo.value.size == 101
@@ -689,7 +705,7 @@ def test_write_file_custom_max_file_bytes_accepts_exact_limit() -> None:
     storage = InMemoryStorage()
     store = _new_store_with_limit(storage, max_file_bytes=100)
 
-    result = store.write_file(VALID_PATH, "a" * 100, _metadata(), None)
+    result = store.write_file(VALID_PATH, "a" * 100, _metadata(), None, source="chat")
 
     assert result.content == "a" * 100
 
@@ -714,11 +730,11 @@ def test_write_file_oversize_with_stale_expected_version_raises_oversize_not_con
 
     storage = InMemoryStorage()
     store = _new_store(storage)
-    first = store.write_file(VALID_PATH, "v1 body", _metadata(), None)
-    store.write_file(VALID_PATH, "v2 body", _metadata(), first.version)
+    first = store.write_file(VALID_PATH, "v1 body", _metadata(), None, source="chat")
+    store.write_file(VALID_PATH, "v2 body", _metadata(), first.version, source="chat")
 
     with pytest.raises(OversizeWriteError):
-        store.write_file(VALID_PATH, "a" * 16385, _metadata(), first.version)
+        store.write_file(VALID_PATH, "a" * 16385, _metadata(), first.version, source="chat")
 
 
 def test_write_file_oversize_leaves_existing_file_and_token_unchanged() -> None:
@@ -728,11 +744,336 @@ def test_write_file_oversize_leaves_existing_file_and_token_unchanged() -> None:
 
     storage = InMemoryStorage()
     store = _new_store(storage)
-    written = store.write_file(VALID_PATH, "stable body", _metadata(), None)
+    written = store.write_file(VALID_PATH, "stable body", _metadata(), None, source="chat")
 
     with pytest.raises(OversizeWriteError):
-        store.write_file(VALID_PATH, "a" * 16385, _metadata(), written.version)
+        store.write_file(VALID_PATH, "a" * 16385, _metadata(), written.version, source="chat")
 
     after = store.read_file(VALID_PATH)
     assert after.content == "stable body"
     assert after.version == written.version
+
+
+# --- AIE-1109: required source; sources accumulate as a union --------------
+
+
+def test_write_file_create_stamps_source_into_empty_sources() -> None:
+    """Creating with metadata.sources=frozenset() and source="chat" stores
+    and returns sources == {"chat"} (AIE-1109, US1.1).
+    """
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+    meta = _metadata(sources=frozenset())
+
+    result = store.write_file(VALID_PATH, "body", meta, None, source="chat")
+
+    assert result.metadata.sources == frozenset({"chat"})
+    reread = store.read_file(VALID_PATH)
+    assert reread.metadata.sources == frozenset({"chat"})
+
+
+def test_write_file_create_unions_caller_sources_with_source() -> None:
+    """Creating with metadata.sources={"cli"} and source="chat" stores
+    sources == {"cli", "chat"} (AIE-1109, US1.2).
+    """
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+    meta = _metadata(sources=frozenset({"cli"}))
+
+    result = store.write_file(VALID_PATH, "body", meta, None, source="chat")
+
+    assert result.metadata.sources == frozenset({"cli", "chat"})
+
+
+def test_write_file_create_source_already_in_metadata_sources_not_duplicated() -> None:
+    """Creating with metadata.sources={"chat"} and source="chat" stores
+    sources == {"chat"}, with no duplication (AIE-1109, US1.3).
+    """
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+    meta = _metadata(sources=frozenset({"chat"}))
+
+    result = store.write_file(VALID_PATH, "body", meta, None, source="chat")
+
+    assert result.metadata.sources == frozenset({"chat"})
+
+
+def test_write_file_replace_carries_forward_stored_source_caller_did_not_supply() -> None:
+    """Replacing a file whose stored sources={"cli"} with metadata.sources=
+    frozenset() and source="chat" stores and returns sources ==
+    {"cli", "chat"}: the caller did not have to carry "cli" forward
+    (AIE-1109, US2.1).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, "old body", _metadata(sources=frozenset({"cli"})))
+    store = _new_store(storage)
+    before = store.read_file(VALID_PATH)
+
+    result = store.write_file(
+        VALID_PATH, "new body", _metadata(sources=frozenset()), before.version, source="chat"
+    )
+
+    assert result.metadata.sources == frozenset({"cli", "chat"})
+    reread = store.read_file(VALID_PATH)
+    assert reread.metadata.sources == frozenset({"cli", "chat"})
+
+
+def test_write_file_replace_unions_stored_caller_and_source() -> None:
+    """Replacing a file whose stored sources={"cli"} with metadata.sources=
+    {"api"} and source="chat" stores sources == {"cli", "api", "chat"}
+    (AIE-1109, US2.2).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, "old body", _metadata(sources=frozenset({"cli"})))
+    store = _new_store(storage)
+    before = store.read_file(VALID_PATH)
+
+    result = store.write_file(
+        VALID_PATH,
+        "new body",
+        _metadata(sources=frozenset({"api"})),
+        before.version,
+        source="chat",
+    )
+
+    assert result.metadata.sources == frozenset({"cli", "api", "chat"})
+
+
+def test_write_file_replace_cannot_remove_a_stored_source() -> None:
+    """Replacing a file whose stored sources={"cli", "api"} with
+    metadata.sources={"cli"} (omitting "api") and source="cli" leaves
+    sources == {"cli", "api"}: a caller cannot remove a source (AIE-1109,
+    US2.3).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, "old body", _metadata(sources=frozenset({"cli", "api"})))
+    store = _new_store(storage)
+    before = store.read_file(VALID_PATH)
+
+    result = store.write_file(
+        VALID_PATH,
+        "new body",
+        _metadata(sources=frozenset({"cli"})),
+        before.version,
+        source="cli",
+    )
+
+    assert result.metadata.sources == frozenset({"cli", "api"})
+
+
+def test_write_file_replace_description_aliases_content_are_callers_last_updated_is_clock() -> None:
+    """A replace takes description, aliases, and content from the caller
+    exactly, stamps last_updated with the store clock's value, and the
+    returned MemoryFile equals what read_file returns afterwards
+    (AIE-1109, US2.4).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, "old body", _metadata(sources=frozenset({"cli"})))
+    store = _new_store(storage, clock=_fixed_clock)
+    before = store.read_file(VALID_PATH)
+    meta = _metadata(
+        description="new desc",
+        aliases=("z",),
+        sources=frozenset(),
+        last_updated=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+
+    result = store.write_file(VALID_PATH, "new body", meta, before.version, source="chat")
+
+    assert result.content == "new body"
+    assert result.metadata.description == "new desc"
+    assert result.metadata.aliases == ("z",)
+    assert result.metadata.last_updated == FIXED_CLOCK_TIME
+
+    reread = store.read_file(VALID_PATH)
+    assert reread == result
+
+
+def test_write_file_empty_source_on_create_raises_value_error_without_storage() -> None:
+    """source == "" on a create raises ValueError without consulting
+    storage (AIE-1109, US3.1).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(ValueError):
+        store.write_file(VALID_PATH, "body", _metadata(), None, source="")
+
+    assert stub.get_calls == []
+    assert stub.put_if_version_calls == []
+
+
+def test_write_file_empty_source_on_replace_raises_value_error_without_storage() -> None:
+    """source == "" on a replace (non-None expected_version) raises
+    ValueError without consulting storage (AIE-1109, US3.1).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(ValueError):
+        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"), source="")
+
+    assert stub.get_calls == []
+    assert stub.put_if_version_calls == []
+
+
+def test_write_file_missing_source_raises_type_error() -> None:
+    """Omitting source raises TypeError: it is required (AIE-1109, US3.2)."""
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+
+    with pytest.raises(TypeError):
+        store.write_file(VALID_PATH, "body", _metadata(), None)  # pyright: ignore[reportCallIssue]
+
+
+def test_write_file_positional_source_raises_type_error() -> None:
+    """Passing source positionally raises TypeError: it is keyword-only
+    (AIE-1109, US3.2).
+    """
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+
+    with pytest.raises(TypeError):
+        store.write_file(VALID_PATH, "body", _metadata(), None, "chat")  # pyright: ignore[reportCallIssue]
+
+
+def test_write_file_malformed_path_checked_before_empty_source() -> None:
+    """A malformed path raises NotFoundError(INVALID_PATH) even when
+    source == "" is also invalid: the path check runs first, and storage
+    is never consulted (AIE-1109, US3.3).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(NotFoundError) as excinfo:
+        store.write_file("not/a/valid", "body", _metadata(), None, source="")
+
+    assert excinfo.value.reason is NotFoundReason.INVALID_PATH
+    assert stub.get_calls == []
+    assert stub.put_if_version_calls == []
+
+
+def test_write_file_replace_with_stale_version_raises_conflict_with_current_version() -> None:
+    """Given a file at V2, replacing with V1 raises VersionConflictError
+    carrying the path, current content, and V2 (AIE-1109, US3.4).
+    """
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+    v1 = store.write_file(VALID_PATH, "v1 body", _metadata(), None, source="chat")
+    v2 = store.write_file(VALID_PATH, "v2 body", _metadata(), v1.version, source="chat")
+
+    with pytest.raises(VersionConflictError) as excinfo:
+        store.write_file(VALID_PATH, "v3 body", _metadata(), v1.version, source="chat")
+
+    assert excinfo.value.path == VALID_PATH
+    assert excinfo.value.content == "v2 body"
+    assert excinfo.value.version == v2.version
+
+    after = store.read_file(VALID_PATH)
+    assert after.content == "v2 body"
+    assert after.version == v2.version
+
+
+def test_write_file_replace_with_no_object_raises_file_absent_and_creates_nothing() -> None:
+    """A replace (non-None expected_version) against an absent path raises
+    NotFoundError(FILE_ABSENT) and creates nothing (AIE-1109, US3.5).
+    """
+    storage = InMemoryStorage()
+    store = _new_store(storage)
+
+    with pytest.raises(NotFoundError) as excinfo:
+        store.write_file(VALID_PATH, "body", _metadata(), VersionToken("1"), source="chat")
+
+    assert excinfo.value.reason is NotFoundReason.FILE_ABSENT
+
+    with pytest.raises(NotFoundError) as reread_excinfo:
+        store.read_file(VALID_PATH)
+    assert reread_excinfo.value.reason is NotFoundReason.FILE_ABSENT
+
+
+class _RacingPutStorage:
+    """Wraps InMemoryStorage, injecting a concurrent put before
+    put_if_version, to model a second writer landing between write_file's
+    read and its conditional write (AIE-1109, US3.6).
+    """
+
+    def __init__(
+        self,
+        inner: InMemoryStorage,
+        race_content: str,
+        race_metadata: Mapping[str, str],
+    ) -> None:
+        self._inner = inner
+        self._race_content = race_content
+        self._race_metadata = race_metadata
+        self.put_if_version_calls = 0
+        self.race_version: VersionToken | None = None
+
+    def get(self, key: str) -> StoredObject | None:
+        return self._inner.get(key)
+
+    def put(self, key: str, data: bytes, metadata: Mapping[str, str]) -> VersionToken:
+        return self._inner.put(key, data, metadata)
+
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        self.put_if_version_calls += 1
+        if self.put_if_version_calls == 1:
+            self.race_version = self._inner.put(
+                key, self._race_content.encode("utf-8"), self._race_metadata
+            )
+        return self._inner.put_if_version(key, data, metadata, expected)
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        return self._inner.list_page(prefix, start_after, limit)
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
+
+
+def test_write_file_race_before_put_raises_conflict_with_post_race_content() -> None:
+    """A write landing between write_file's read and its conditional write
+    causes VersionConflictError carrying the content and version current
+    after that write; the other writer's content is untouched (AIE-1109,
+    US3.6).
+    """
+    storage = InMemoryStorage()
+    meta = _metadata(sources=frozenset({"cli"}))
+    _seed(storage, VALID_PATH, "old body", meta)
+    wrapped = _RacingPutStorage(storage, "raced body", metadata_to_map(meta))
+    store = _new_store(wrapped)
+    before = store.read_file(VALID_PATH)
+
+    with pytest.raises(VersionConflictError) as excinfo:
+        store.write_file(VALID_PATH, "mine body", _metadata(), before.version, source="chat")
+
+    assert excinfo.value.content == "raced body"
+    assert excinfo.value.version == wrapped.race_version
+    assert wrapped.put_if_version_calls == 1
+
+    after = store.read_file(VALID_PATH)
+    assert after.content == "raced body"
+    assert after.version == wrapped.race_version
+
+
+def test_write_file_replace_with_corrupt_stored_metadata_at_matching_version_propagates() -> None:
+    """A replace whose read finds the current version matching
+    expected_version, but with corrupt stored metadata, propagates
+    MetadataFormatError and leaves the file unchanged (AIE-1109, US3.7).
+    """
+    bad_map = dict(metadata_to_map(_metadata()))
+    del bad_map["description"]
+    v1 = VersionToken("1")
+    stub = _StubStorage(get_result=StoredObject(data=b"old body", metadata=bad_map, version=v1))
+    store = _new_store(stub)
+
+    with pytest.raises(MetadataFormatError) as excinfo:
+        store.write_file(VALID_PATH, "new body", _metadata(), v1, source="chat")
+
+    assert excinfo.value.key == "description"
+    assert stub.put_if_version_calls == []

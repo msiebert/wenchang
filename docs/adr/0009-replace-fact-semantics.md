@@ -106,3 +106,7 @@ version guard — rather than solved with e.g. an idempotency key, which
 `system/` read-only enforcement (AIE-1040) and role-gated scope enforcement
 (AIE-1042) remain out of scope; `system/` paths are writable by
 `replace_fact` until those land, as they already are for `write_file`.
+
+**Update (AIE-1109):** `write_file`'s own required-`source` parity, deferred
+above, is now delivered — see
+[ADR 0013](docs/adr/0013-write-file-source.md).

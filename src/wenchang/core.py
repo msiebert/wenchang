@@ -95,7 +95,8 @@ class ListPage:
 class MemoryStore:
     """Core memory operations over a Storage backend.
 
-    Exposes read_file, write_file, replace_fact, and list_prefix.
+    Exposes read_file, write_file, replace_fact, append_line, delete_file,
+    and list_prefix.
     """
 
     def __init__(
@@ -141,31 +142,52 @@ class MemoryStore:
         content: str,
         metadata: FileMetadata,
         expected_version: VersionToken | None,
+        *,
+        source: str,
     ) -> MemoryFile:
         """Write the memory file at `path`, creating or replacing it.
 
         Raises NotFoundError with reason INVALID_PATH if `path` is not
-        well-formed, without calling storage. Raises OversizeWriteError if
-        the UTF-8 encoding of `content` exceeds `max_file_bytes`, without
-        calling storage. Stamps `metadata.last_updated` with the store's
-        clock, raising ValueError (from FileMetadata's own validation) if
-        the clock returns a naive datetime, without calling storage.
-        `expected_version=None` requires the file to not already exist; a
-        non-None value requires it to match the current version exactly.
-        On a version mismatch raises VersionConflictError carrying the
-        current content and version, or NotFoundError with reason
-        FILE_ABSENT if the file does not exist. Propagates
+        well-formed, without calling storage. Raises ValueError if `source`
+        is empty, without calling storage. Raises OversizeWriteError if the
+        UTF-8 encoding of `content` exceeds `max_file_bytes`, without
+        calling storage. `expected_version=None` requires the file to not
+        already exist, and stores `metadata.sources | {source}`. A non-None
+        value requires it to match the current version exactly, and stores
+        the union of the currently stored sources, `metadata.sources`, and
+        `source`: a caller never has to carry forward sources it doesn't
+        know about, and can't remove a source others recorded. Stamps
+        `metadata.last_updated` with the store's clock, raising ValueError
+        (from FileMetadata's own validation) if the clock returns a naive
+        datetime. On a version mismatch raises VersionConflictError
+        carrying the current content and version, or NotFoundError with
+        reason FILE_ABSENT if the file does not exist. Propagates
         MetadataFormatError, UnicodeDecodeError, and BackendUnavailableError
         unchanged.
         """
         if not is_valid_path(path):
             raise NotFoundError(path, NotFoundReason.INVALID_PATH)
 
+        if source == "":
+            raise ValueError("source must be non-empty")
+
         data = content.encode("utf-8")
         if len(data) > self._max_file_bytes:
             raise OversizeWriteError(path, len(data), self._max_file_bytes)
 
-        stamped = dataclasses.replace(metadata, last_updated=self._clock())
+        if expected_version is None:
+            sources = metadata.sources | {source}
+        else:
+            obj = self._storage.get(path)
+            if obj is None:
+                raise NotFoundError(path, NotFoundReason.FILE_ABSENT)
+            if obj.version != expected_version:
+                metadata_from_map(obj.metadata)
+                raise VersionConflictError(path, obj.data.decode("utf-8"), obj.version)
+            stored = metadata_from_map(obj.metadata)
+            sources = stored.sources | metadata.sources | {source}
+
+        stamped = dataclasses.replace(metadata, sources=sources, last_updated=self._clock())
 
         try:
             version = self._storage.put_if_version(

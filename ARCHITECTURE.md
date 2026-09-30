@@ -108,14 +108,24 @@ implemented.
   implemented: it validates the path, fetches the object, and returns
   content, metadata, path, and version token. `write_file(path, content,
   metadata, expected_version) -> MemoryFile` is implemented: it validates
-  the path, rejects content whose UTF-8 encoding exceeds `max_file_bytes`
-  with `OversizeWriteError` (checked before storage is consulted), stamps
-  `metadata.last_updated` from the clock (overriding the caller's value),
-  and issues one conditional put. On a precondition failure it fetches the
-  current object and raises `VersionConflictError(path, current_content,
-  current_version)`, or `NotFoundError(FILE_ABSENT)` if the file is now
-  absent; a corrupt object found on that fetch raises `MetadataFormatError`
-  or `UnicodeDecodeError` exactly as `read_file` does. `replace_fact(path,
+  the path, rejects an empty `source` with `ValueError` (checked after the path
+  check and before the size check, without consulting storage), and rejects
+  content whose UTF-8 encoding exceeds `max_file_bytes` with
+  `OversizeWriteError` (checked before storage is consulted). On create
+  (`expected_version=None`) it stores `metadata.sources | {source}`. On
+  replace it first reads the current object — a missing file raises
+  `NotFoundError(FILE_ABSENT)`, a version mismatch seen at that read raises
+  `VersionConflictError(path, current_content, current_version)`, and
+  corrupt stored metadata propagates `MetadataFormatError` rather than being
+  silently overwritten — and stores the union of the stored `sources`,
+  `metadata.sources`, and `source`: a caller never has to carry forward
+  sources it doesn't know about, and can't remove one another write
+  recorded. It then stamps `metadata.last_updated` from the clock
+  (overriding the caller's value) and issues one conditional put. On a
+  precondition failure at that put it fetches the current object again and
+  raises `VersionConflictError(path, current_content, current_version)`, or
+  `NotFoundError(FILE_ABSENT)` if the file is now absent; there is no
+  automatic re-apply. `replace_fact(path,
   old_string, new_string, expected_version, *, source) -> MemoryFile` is
   implemented: it changes one span of a file's content without the caller
   resending the rest. `old_string` must match a unique anchor — every start
@@ -196,8 +206,9 @@ implemented.
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
   [ADR 0009](docs/adr/0009-replace-fact-semantics.md),
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md),
-  [ADR 0011](docs/adr/0011-append-line-version-guard.md), and
-  [ADR 0012](docs/adr/0012-delete-file.md).
+  [ADR 0011](docs/adr/0011-append-line-version-guard.md),
+  [ADR 0012](docs/adr/0012-delete-file.md), and
+  [ADR 0013](docs/adr/0013-write-file-source.md).
 - **scope / identity** *(planned)* — the injected identity resolver
   interface (credentials → scope-to-entity-ID map + role per scope), path
   construction, and write-restriction / `system/`-read-only enforcement.
