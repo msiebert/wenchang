@@ -69,6 +69,9 @@ Terms as used throughout wenchang and its spec.
 - **Memory path** — a file's address, `{scope}/{entity_id}/{area}/{name}.md`,
   relative to the storage root; exactly four non-empty segments, checked
   only syntactically.
+- **Name** — a file's stem: the last segment of its memory path without the
+  final `.md`. `.md` is always appended when a path is built, so a name may
+  itself end in `.md` (`notes.md` is stored as `notes.md.md`).
 - **Prefix** — a memory path's leading 1-3 segments followed by `/` (e.g.
   `scope/`, `scope/entity_id/`), naming a scope, entity, or area for
   `list_prefix` to recurse under; segment-aligned, so it never cuts a
