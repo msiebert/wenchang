@@ -728,6 +728,11 @@ dependencies = [
     { name = "google-cloud-storage" },
 ]
 
+[package.optional-dependencies]
+testing = [
+    { name = "pytest" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pyright" },
@@ -737,7 +742,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "google-cloud-storage", specifier = ">=2.18" }]
+requires-dist = [
+    { name = "google-cloud-storage", specifier = ">=2.18" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.3" },
+]
+provides-extras = ["testing"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -57,6 +57,19 @@ Terms as used throughout wenchang and its spec.
   `ResolverFailureError`, and memory is unavailable for the session.
 - **Sandbox resolver** — the reference identity resolver, returning one
   adopter-supplied identity for any credentials; for sandboxes and tests.
+- **Conformance suite** — an executable test suite the library ships for an
+  interface the adopter implements; passing it defines a correct
+  implementation. For the identity resolver it is
+  `wenchang.testing.ResolverConformance`, a pytest mixin the adopter
+  subclasses, installed with the `wenchang[testing]` extra.
+- **Known roles** — the conformance-suite fixture listing every role the
+  adopter's resolver may return. The suite requires every granted role, and
+  every role the scope policy permits, to be in it, so write-restriction
+  checks are decidable and a role typo is caught. A known role the policy
+  never mentions (e.g. `member`) is legitimate.
+- **Expected scopes** — the conformance-suite fixture naming exactly the
+  scopes the adopter's valid test credentials must grant, so a resolver
+  that silently drops a scope fails.
 - **Version token / generation** — an opaque handle representing a file's
   current state, used for optimistic concurrency (compare-and-swap on
   write). Currently backed by a GCS object generation number; callers never
