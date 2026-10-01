@@ -11,12 +11,13 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-seven implemented modules: the cross-cutting `errors` and `version_token`; the
+eight implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-`list_prefix`, `append_line`, and `delete_file`; and `identity`, the
-injected identity resolver boundary, not yet called by any other module.
+`list_prefix`, `append_line`, and `delete_file`; `identity`, the
+injected identity resolver boundary; and `scope`, the `system/` read-only
+check. Neither `identity` nor `scope` is called by any other module yet.
 The module map below is the
 intended shape; each remaining module is marked **(planned)** until
 implemented.
@@ -290,13 +291,28 @@ implemented.
   adopter-supplied `identity` for any credentials and satisfies
   `IdentityResolver[C]` for every `C`. See
   [ADR 0014](docs/adr/0014-identity-resolver.md).
-- **scope** *(planned)* — write-restriction and `system/`-read-only
-  enforcement (AIE-1042, AIE-1040). Path construction itself lives in
-  `paths` (`build_path`, `build_prefix`, `parse_path`); this module supplies
-  the identity lookup, e.g. `build_path(scope, identity.entity_id(scope),
-  area, name)`, and reads the area via `parse_path`. It consumes `Identity`
-  and is called by the tool layer, not `MemoryStore`, so the seeding job can
-  still write `system/` through `core`.
+- **scope** — write restrictions enforced at the tool layer. It imports
+  only `errors` and `paths`, never `core` or `storage`, and `core` never
+  imports it: the tool layer calls it before calling `core`, and
+  `MemoryStore` applies none of its checks, so the seeding job can still
+  rewrite `system/` through `core`. `SYSTEM_AREA` is the `Final` constant
+  `"system"`. `is_system_path(path) -> bool` is True iff
+  `is_valid_path(path)` and the path's area segment (from `parse_path`)
+  equals `SYSTEM_AREA` exactly; it never raises for any `str` and returns
+  False for a malformed path. `check_not_system(path) -> None` raises
+  `NotFoundError(path, INVALID_PATH)` for a malformed path first, the same
+  error `core` gives, and then `RestrictedScopeError(path, scope,
+  SYSTEM_READ_ONLY)` naming the path's first segment as the scope if the
+  area equals `SYSTEM_AREA`; otherwise it returns `None`. The match is exact
+  string equality with no case folding, Unicode normalization, or prefix
+  match, and only the area position counts, so a scope, entity ID, or name
+  called `system` is unrestricted. It takes `path` as its only parameter,
+  with no identity, role, or bypass argument, so no caller can be exempted.
+  The tool layer calls it directly or through the role-gated composite
+  check. That check (AIE-1042) is *(planned)* within this module: it will
+  consume `Identity` and compose `build_path(scope,
+  identity.entity_id(scope), area, name)` with `parse_path`. See
+  [ADR 0016](docs/adr/0016-system-read-only-enforcement.md).
 - **transport** *(planned)* — an abstract client interface mirroring the
   core API, with an in-process implementation now and a remote (gRPC)
   implementation later. In-process and remote implementations must be
@@ -318,9 +334,9 @@ flowchart TB
     subgraph Transport
         transport[transport: abstract client\nin-process now, remote later]
     end
+    scope[scope: system/ read-only check,\nwrite-restriction]
     subgraph Core
         core[core: API functions\noptimistic concurrency]
-        scope[scope: write-restriction,\nsystem/ enforcement]
         identity[identity: resolver protocol,\nIdentity, SandboxResolver]
     end
     subgraph Storage
@@ -330,9 +346,9 @@ flowchart TB
     end
 
     prompts -.guides.-> tools
+    tools --> scope
     tools --> transport
     transport --> core
-    core --> scope
     core --> storageiface
     storageiface --> gcs
     storageiface --> fake
@@ -342,10 +358,13 @@ flowchart TB
 above) and are omitted from the diagram to keep it readable. `file_format`
 is dependency-free and used by `core` and `storage`; it is also omitted
 from the diagram since it isn't wired into the request path shown there.
-`paths` is likewise dependency-free and omitted; `core` and `identity` use
-it for validation, and the planned `scope` module will use its builders.
+`paths` is likewise dependency-free and omitted; `core`, `identity`, and
+`scope` use it for validation, and `scope` reads the area via `parse_path`.
 `identity` sits beside `core` with no arrow: the tool and transport layers
-will call `resolve_identity`, and nothing calls it yet.
+will call `resolve_identity`, and nothing calls it yet. `scope` sits outside
+the Core subgraph with only the `tools --> scope` edge: the tool layer
+checks a write before handing it to `core`, and `core` does not depend on
+`scope`. Nothing calls `scope` yet.
 
 ## Key invariants
 
@@ -379,7 +398,13 @@ will call `resolve_identity`, and nothing calls it yet.
   whatever the caller supplied, so the field stays reliable for index
   ordering without every caller having to remember to refresh it.
 - **The `system/` area is read-only to the agent**, enforced at the tool
-  layer as an exact path-prefix check, not by instruction.
+  layer, not by instruction, as exact equality of the area segment with
+  `system`, in `scope.check_not_system`; core deliberately does not apply it
+  so seeding can rewrite `system/` (see
+  [ADR 0016](docs/adr/0016-system-read-only-enforcement.md)).
+- **`scope` and `core` stay independent.** `scope` never imports `core` or
+  `storage`, and `core` never imports `scope`, so a restriction check can't
+  be wired into `MemoryStore` without breaking the boundary.
 - **Metadata-only navigation.** `description` and `aliases` are the entire
   search surface; there is no content search over file bodies.
 - **Listing never reads content and is not a snapshot.** `list_prefix` and
