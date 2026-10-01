@@ -3,7 +3,7 @@
 Covers AIE-1030.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -55,8 +55,9 @@ PERMANENT_ERROR_FACTORIES = (
         "organization/policy.md",
         "organization",
         RestrictionReason.ROLE_REQUIRED,
-        required_role="admin",
+        required_roles=frozenset({"admin"}),
     ),
+    lambda: RestrictedScopeError("team/t-1/notes/a.md", "team", RestrictionReason.NOT_GRANTED),
     lambda: ResolverFailureError(),
 )
 
@@ -284,20 +285,28 @@ def test_recoverable_error_message_avoids_fail_wording(
 
 
 @pytest.mark.unit
-def test_restriction_reason_has_exactly_two_members() -> None:
-    """RestrictionReason has exactly SYSTEM_READ_ONLY and ROLE_REQUIRED (AIE-1030)."""
+def test_restriction_reason_has_exactly_three_members() -> None:
+    """RestrictionReason has exactly SYSTEM_READ_ONLY, ROLE_REQUIRED, and NOT_GRANTED
+    (AIE-1030, AIE-1042, US5.4).
+    """
     assert {member.value for member in RestrictionReason} == {
         "system_read_only",
         "role_required",
+        "not_granted",
     }
-    assert len(RestrictionReason) == 2
+    assert len(RestrictionReason) == 3
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "make_error",
     PERMANENT_ERROR_FACTORIES,
-    ids=["restricted_scope_system", "restricted_scope_role", "resolver_failure"],
+    ids=[
+        "restricted_scope_system",
+        "restricted_scope_role",
+        "restricted_scope_not_granted",
+        "resolver_failure",
+    ],
 )
 def test_permanent_kinds_are_permanent_not_other_categories(
     make_error: Callable[[], WenchangError],
@@ -315,7 +324,12 @@ def test_permanent_kinds_are_permanent_not_other_categories(
 @pytest.mark.parametrize(
     "make_error",
     PERMANENT_ERROR_FACTORIES,
-    ids=["restricted_scope_system", "restricted_scope_role", "resolver_failure"],
+    ids=[
+        "restricted_scope_system",
+        "restricted_scope_role",
+        "restricted_scope_not_granted",
+        "resolver_failure",
+    ],
 )
 def test_permanent_error_message_says_do_not_retry_and_ends_with_guidance(
     make_error: Callable[[], WenchangError],
@@ -333,26 +347,28 @@ def test_permanent_error_message_says_do_not_retry_and_ends_with_guidance(
 
 @pytest.mark.unit
 def test_restricted_scope_error_exposes_attributes_unchanged() -> None:
-    """RestrictedScopeError exposes path, scope, reason, and required_role unchanged (AIE-1030)."""
+    """RestrictedScopeError exposes path, scope, reason, and required_roles unchanged
+    (AIE-1030, AIE-1042).
+    """
     err = RestrictedScopeError(
         "organization/policy.md",
         "organization",
         RestrictionReason.ROLE_REQUIRED,
-        required_role="admin",
+        required_roles=frozenset({"admin"}),
     )
     assert err.path == "organization/policy.md"
     assert err.scope == "organization"
     assert err.reason == RestrictionReason.ROLE_REQUIRED
-    assert err.required_role == "admin"
+    assert err.required_roles == frozenset({"admin"})
 
 
 @pytest.mark.unit
-def test_restricted_scope_error_required_role_defaults_to_none() -> None:
-    """RestrictedScopeError.required_role defaults to None (AIE-1030)."""
+def test_restricted_scope_error_required_roles_defaults_to_none() -> None:
+    """RestrictedScopeError.required_roles defaults to None (AIE-1030, AIE-1042, US5.3)."""
     err = RestrictedScopeError(
         "system/config.md", "system/config.md", RestrictionReason.SYSTEM_READ_ONLY
     )
-    assert err.required_role is None
+    assert err.required_roles is None
 
 
 @pytest.mark.unit
@@ -369,12 +385,12 @@ def test_restricted_scope_error_system_read_only_names_scope_and_reason() -> Non
 
 @pytest.mark.unit
 def test_restricted_scope_error_role_required_names_scope_and_role() -> None:
-    """A ROLE_REQUIRED restriction names the scope and the required role (AIE-1030)."""
+    """A ROLE_REQUIRED restriction names the scope and the required role (AIE-1030, AIE-1042)."""
     err = RestrictedScopeError(
         "organization/policy.md",
         "organization",
         RestrictionReason.ROLE_REQUIRED,
-        required_role="admin",
+        required_roles=frozenset({"admin"}),
     )
     message = err.message.lower()
     assert "organization" in message
@@ -388,6 +404,228 @@ def test_restricted_scope_error_role_required_without_required_role_rejected() -
         RestrictedScopeError(
             "organization/policy.md", "organization", RestrictionReason.ROLE_REQUIRED
         )
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_role_required_lists_roles_sorted() -> None:
+    """ROLE_REQUIRED keeps the given role set and lists it sorted in the message
+    (AIE-1042, US5.1).
+    """
+    roles = frozenset({"owner", "admin"})
+    err = RestrictedScopeError(
+        "org/o-9/notes/a.md", "org", RestrictionReason.ROLE_REQUIRED, required_roles=roles
+    )
+    assert err.required_roles == roles
+    assert err.path == "org/o-9/notes/a.md"
+    assert err.scope == "org"
+    assert err.reason == RestrictionReason.ROLE_REQUIRED
+    assert "org/o-9/notes/a.md" in err.message
+    assert "org" in err.message
+    assert "admin, owner" in err.message
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_role_required_lists_five_roles_sorted() -> None:
+    """ROLE_REQUIRED lists a five-role set in sorted order in the message
+    (AIE-1042, review finding 2).
+    """
+    err = RestrictedScopeError(
+        "org/o-9/notes/a.md",
+        "org",
+        RestrictionReason.ROLE_REQUIRED,
+        required_roles=frozenset({"e", "c", "a", "d", "b"}),
+    )
+    assert "a, b, c, d, e" in err.message
+
+
+class _SpoofedFrozenSet:
+    """Claims to be a frozenset via __class__ but is not one."""
+
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return frozenset
+
+    def __iter__(self) -> Iterator[str]:
+        yield "zz"
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_rejects_spoofed_frozenset_roles() -> None:
+    """A required_roles object that only spoofs frozenset via __class__ raises
+    TypeError (AIE-1042, review finding 5).
+    """
+    with pytest.raises(TypeError, match="required_roles"):
+        RestrictedScopeError(
+            "org/o-9/notes/a.md",
+            "org",
+            RestrictionReason.ROLE_REQUIRED,
+            required_roles=_SpoofedFrozenSet(),  # pyright: ignore[reportArgumentType]
+        )
+
+
+class _HostileLtRole(str):
+    """A str whose < is always False."""
+
+    def __lt__(self, other: object) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return False
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_normalizes_hostile_lt_roles() -> None:
+    """Roles that are str subclasses with a hostile __lt__ are stored as exact
+    str and still listed sorted (AIE-1042, review finding 5).
+    """
+    err = RestrictedScopeError(
+        "org/o-9/notes/a.md",
+        "org",
+        RestrictionReason.ROLE_REQUIRED,
+        required_roles=frozenset({_HostileLtRole("b"), _HostileLtRole("a")}),
+    )
+    assert err.required_roles is not None
+    assert all(type(role) is str for role in err.required_roles)
+    assert "a, b" in err.message
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_rejects_non_str_role() -> None:
+    """A frozenset required_roles holding a non-str raises TypeError naming
+    required_roles, not a bare sorted() error (AIE-1042, review finding 5).
+    """
+    with pytest.raises(TypeError, match=r"^required_roles"):
+        RestrictedScopeError(
+            "org/o-9/notes/a.md",
+            "org",
+            RestrictionReason.ROLE_REQUIRED,
+            required_roles=frozenset({1, "a"}),  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "required_roles",
+    [None, frozenset[str]()],
+    ids=["none", "empty"],
+)
+def test_restricted_scope_error_role_required_rejects_missing_or_empty_roles(
+    required_roles: frozenset[str] | None,
+) -> None:
+    """ROLE_REQUIRED with required_roles None or empty raises ValueError (AIE-1042, US5.2)."""
+    with pytest.raises(ValueError, match="required_roles must be non-empty"):
+        RestrictedScopeError(
+            "org/o-9/notes/a.md",
+            "org",
+            RestrictionReason.ROLE_REQUIRED,
+            required_roles=required_roles,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reason", list(RestrictionReason), ids=lambda r: r.value)
+@pytest.mark.parametrize(
+    "required_roles",
+    ["admin", {"admin"}, ["admin"], set[str]()],
+    ids=["str", "set", "list", "empty_set"],
+)
+def test_restricted_scope_error_rejects_non_frozenset_roles(
+    reason: RestrictionReason, required_roles: object
+) -> None:
+    """A non-None, non-frozenset required_roles raises TypeError for any reason, before
+    the ValueError checks (AIE-1042, US5.2).
+    """
+    with pytest.raises(TypeError, match="required_roles must be a frozenset or None"):
+        RestrictedScopeError(
+            "org/o-9/notes/a.md",
+            "org",
+            reason,
+            required_roles=required_roles,  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_rejects_leftover_positional_role_string() -> None:
+    """A leftover positional role string raises TypeError, not a per-character role set
+    (AIE-1042, US5.2).
+    """
+    with pytest.raises(TypeError, match="required_roles must be a frozenset or None"):
+        RestrictedScopeError(
+            "org/o-9/notes/a.md",
+            "org",
+            RestrictionReason.ROLE_REQUIRED,
+            "admin",  # pyright: ignore[reportArgumentType]
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reason_value",
+    ["system_read_only", "not_granted"],
+)
+@pytest.mark.parametrize(
+    "required_roles",
+    [frozenset({"admin"}), frozenset[str]()],
+    ids=["non_empty", "empty"],
+)
+def test_restricted_scope_error_other_reasons_reject_required_roles(
+    reason_value: str, required_roles: frozenset[str]
+) -> None:
+    """SYSTEM_READ_ONLY and NOT_GRANTED with required_roles not None raise ValueError
+    (AIE-1042, US5.3).
+    """
+    reason = RestrictionReason(reason_value)
+    with pytest.raises(ValueError, match="required_roles is only allowed"):
+        RestrictedScopeError("org/o-9/system/a.md", "org", reason, required_roles=required_roles)
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_not_granted_defaults_required_roles_to_none() -> None:
+    """NOT_GRANTED with required_roles omitted defaults it to None (AIE-1042, US5.3)."""
+    err = RestrictedScopeError("team/t-1/notes/a.md", "team", RestrictionReason.NOT_GRANTED)
+    assert err.path == "team/t-1/notes/a.md"
+    assert err.scope == "team"
+    assert err.reason == RestrictionReason.NOT_GRANTED
+    assert err.required_roles is None
+
+
+@pytest.mark.unit
+def test_restriction_reason_not_granted_value() -> None:
+    """RestrictionReason.NOT_GRANTED has value "not_granted" (AIE-1042, US5.4)."""
+    assert RestrictionReason.NOT_GRANTED.value == "not_granted"
+    assert RestrictionReason("not_granted") is RestrictionReason.NOT_GRANTED
+
+
+@pytest.mark.unit
+def test_restricted_scope_error_not_granted_names_path_and_scope() -> None:
+    """A NOT_GRANTED message names the path and scope and does not mention roles
+    (AIE-1042, US5.3).
+    """
+    err = RestrictedScopeError("org/o-8/notes/a.md", "org", RestrictionReason.NOT_GRANTED)
+    assert "org/o-8/notes/a.md" in err.message
+    assert "scope org" in err.message
+    assert "role" not in err.message.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("reason_value", "required_roles"),
+    [
+        ("system_read_only", None),
+        ("role_required", frozenset({"admin", "owner"})),
+        ("not_granted", None),
+    ],
+    ids=["system_read_only", "role_required", "not_granted"],
+)
+def test_restricted_scope_error_every_reason_is_permanent_and_says_do_not_retry(
+    reason_value: str, required_roles: frozenset[str] | None
+) -> None:
+    """Every restriction reason gives a permanent error whose message ends with the
+    permanent guidance and says not to retry (AIE-1042, US5.5).
+    """
+    reason = RestrictionReason(reason_value)
+    err = RestrictedScopeError("org/o-9/notes/a.md", "org", reason, required_roles=required_roles)
+    assert isinstance(err, PermanentError)
+    assert err.category == ErrorCategory.PERMANENT
+    assert err.message.endswith(PermanentError.guidance)
+    assert "do not retry" in err.message.lower()
 
 
 @pytest.mark.unit

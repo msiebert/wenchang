@@ -16,8 +16,9 @@ dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
 `list_prefix`, `append_line`, and `delete_file`; `identity`, the
-injected identity resolver boundary; and `scope`, the `system/` read-only
-check. Neither `identity` nor `scope` is called by any other module yet.
+injected identity resolver boundary; and `scope`, the tool-layer write
+checks (`system/` read-only and role-gated write restriction). `scope` takes
+an `Identity` value, but no module calls `identity` or `scope` yet.
 The module map below is the
 intended shape; each remaining module is marked **(planned)** until
 implemented.
@@ -30,9 +31,28 @@ implemented.
   category's next-action guidance text. Concrete kinds: recoverable
   `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
   `NotFoundError`; permanent `RestrictedScopeError`, `ResolverFailureError`;
-  transient `BackendUnavailableError`. See
-  [Cross-cutting: error taxonomy](#cross-cutting-error-taxonomy) and
-  [ADR 0005](docs/adr/0005-error-taxonomy-as-exceptions.md).
+  transient `BackendUnavailableError`.
+  `RestrictedScopeError(path, scope, reason, required_roles: frozenset[str]
+  | None = None)` exposes all four as attributes. `required_roles` is the
+  set of roles permitted to write the scope. It is checked in this order: a
+  non-`None` value whose real type (`issubclass(type(x), frozenset)`, not
+  the spoofable `__class__`) is not a `frozenset` raises `TypeError`, so a
+  leftover positional `"admin"` is never rendered as a set of characters; a
+  non-`str` member raises `TypeError`; the value is then copied to a plain
+  `frozenset` of exact `str`s (`str.__str__`), which is what is stored and
+  sorted into the message; `ROLE_REQUIRED` with `None` or an empty set
+  raises `ValueError`; any other reason with a non-`None` value raises
+  `ValueError`. `RestrictionReason` has
+  exactly three members: `SYSTEM_READ_ONLY` (the message says the `system/`
+  area of the scope is read-only curated content), `ROLE_REQUIRED` (the
+  message says the scope is role-gated and lists `required_roles` sorted,
+  e.g. `admin, owner`), and `NOT_GRANTED` (the message says the caller's
+  identity does not include this entity in the scope). Every message names
+  the path and scope. Neither `ROLE_REQUIRED` nor `NOT_GRANTED` echoes the
+  caller's own entity ID or role. See
+  [Cross-cutting: error taxonomy](#cross-cutting-error-taxonomy),
+  [ADR 0005](docs/adr/0005-error-taxonomy-as-exceptions.md), and
+  [ADR 0017](docs/adr/0017-write-restriction-enforcement.md).
 - **version_token** — `VersionToken`, an opaque `NewType` over `str` used
   wherever a caller needs to prove which version of a file it read.
 - **file_format** — parsing and serializing a memory file's body and
@@ -292,14 +312,23 @@ implemented.
   `IdentityResolver[C]` for every `C`. See
   [ADR 0014](docs/adr/0014-identity-resolver.md).
 - **scope** — write restrictions enforced at the tool layer. It imports
-  only `errors` and `paths`, never `core` or `storage`, and `core` never
-  imports it: the tool layer calls it before calling `core`, and
-  `MemoryStore` applies none of its checks, so the seeding job can still
-  rewrite `system/` through `core`. `SYSTEM_AREA` is the `Final` constant
+  only `errors`, `identity`, and `paths`, never `core` or `storage`, and
+  `core` never imports it: the tool layer calls it before calling `core`,
+  and `MemoryStore` applies none of its checks, so the seeding job and admin
+  tooling can still write `system/` and restricted scopes through `core`.
+  Every check is a pure function over an already-resolved `Identity`; none
+  consults storage or a resolver. Only writes are checked: reads and
+  listing are never checked, including reads of scopes or entities the
+  caller is not granted. `check_not_system`, `check_write_allowed`, and
+  `check_write` each reject a non-`str` path with `TypeError` and normalize
+  a `str` subclass to an exact `str` (`str.__str__`) at entry, before any
+  parsing, so a subclass with a lying `split` or `__ne__` cannot mislead
+  the checks. Error `path` attributes carry that exact `str`.
+  `SYSTEM_AREA` is the `Final` constant
   `"system"`. `is_system_path(path) -> bool` is True iff
   `is_valid_path(path)` and the path's area segment (from `parse_path`)
-  equals `SYSTEM_AREA` exactly; it never raises for any `str` and returns
-  False for a malformed path. `check_not_system(path) -> None` raises
+  equals `SYSTEM_AREA` exactly; it never raises, returning False for a
+  non-`str` or a malformed path. `check_not_system(path) -> None` raises
   `NotFoundError(path, INVALID_PATH)` for a malformed path first, the same
   error `core` gives, and then `RestrictedScopeError(path, scope,
   SYSTEM_READ_ONLY)` naming the path's first segment as the scope if the
@@ -308,11 +337,51 @@ implemented.
   match, and only the area position counts, so a scope, entity ID, or name
   called `system` is unrestricted. It takes `path` as its only parameter,
   with no identity, role, or bypass argument, so no caller can be exempted.
-  The tool layer calls it directly or through the role-gated composite
-  check. That check (AIE-1042) is *(planned)* within this module: it will
-  consume `Identity` and compose `build_path(scope,
-  identity.entity_id(scope), area, name)` with `parse_path`. See
-  [ADR 0016](docs/adr/0016-system-read-only-enforcement.md).
+  `ScopePolicy(write_roles: Mapping[str, frozenset[str]])` is the adopter's
+  scope configuration, mapping each write-restricted scope to the roles
+  permitted to write it. A scope absent from `write_roles` is unrestricted:
+  any granted role may write it. Keys match the resolver's grant keys and
+  the path's scope by exact string equality, so a key that matches no
+  resolver scope (misspelled, differently cased) restricts nothing, and no
+  scope name, `system` included, is special-cased. Construction checks, in
+  order, raising on the first failure: a non-`Mapping` raises `TypeError`;
+  then for each entry in iteration order, all of one entry's checks before
+  the next's, a non-`str` scope name raises `TypeError`, a scope failing
+  `is_valid_segment` raises `ValueError`, a role set whose real type
+  (`issubclass(type(x), frozenset)`) is not a `frozenset` (a `set`, `list`,
+  or `str` included) raises `TypeError`; the role set is then copied into a
+  real `frozenset` before the remaining checks, so a subclass with a lying
+  `__len__` or `__iter__` cannot store an empty set; an empty role set
+  raises `ValueError`, a non-`str` role raises `TypeError`,
+  an empty role `""` raises `ValueError`, and a scope that collides with an
+  earlier one after `str` normalization raises `ValueError`. Scope names and
+  roles are normalized to exact `str` via `str.__str__`, as in `identity`.
+  The caller's mapping is read exactly once and stored as a read-only
+  `MappingProxyType`, so neither later mutation of the source nor item
+  assignment changes the policy. It is equal and hashable by content
+  regardless of insertion order, and defines `__reduce__` so `pickle` and
+  `copy.deepcopy` rebuild through the constructor; `ScopePolicy({})` is
+  valid and restricts nothing. `is_write_restricted(scope)` and
+  `permitted_roles(scope)` (the set, or `None` if unrestricted) are its
+  lookups.
+  `check_write_allowed(path, identity, policy) -> None` checks grant and
+  role only: a malformed path raises `NotFoundError(path, INVALID_PATH)`; a
+  path whose scope has no grant in `identity`, or whose entity ID differs
+  from that grant's entity ID, raises `RestrictedScopeError(path, scope,
+  NOT_GRANTED)`, whether or not the scope is restricted; a restricted scope
+  whose permitted set lacks the grant's role raises
+  `RestrictedScopeError(path, scope, ROLE_REQUIRED,
+  required_roles=<the policy's set>)`. Roles compare by exact,
+  case-sensitive string equality, with no hierarchy. It deliberately skips
+  the `system/` check, so it is for testing each check alone and for admin
+  tooling; tool code must not call it. `check_write(path, identity, policy)
+  -> None` is the tool-layer entry point, called before every mutating call:
+  it normalizes the path once and hands the same exact `str` to
+  `check_not_system`, then `check_write_allowed`, so both sub-checks see
+  identical input and the first
+  failure wins in the order invalid path, `system/`, not granted, role. See
+  [ADR 0016](docs/adr/0016-system-read-only-enforcement.md) and
+  [ADR 0017](docs/adr/0017-write-restriction-enforcement.md).
 - **transport** *(planned)* — an abstract client interface mirroring the
   core API, with an in-process implementation now and a remote (gRPC)
   implementation later. In-process and remote implementations must be
@@ -361,7 +430,9 @@ from the diagram since it isn't wired into the request path shown there.
 `paths` is likewise dependency-free and omitted; `core`, `identity`, and
 `scope` use it for validation, and `scope` reads the area via `parse_path`.
 `identity` sits beside `core` with no arrow: the tool and transport layers
-will call `resolve_identity`, and nothing calls it yet. `scope` sits outside
+will call `resolve_identity`, and nothing calls it yet. `scope` imports the
+`Identity` type to read grants but never calls a resolver, so the diagram
+shows no edge between them. `scope` sits outside
 the Core subgraph with only the `tools --> scope` edge: the tool layer
 checks a write before handing it to `core`, and `core` does not depend on
 `scope`. Nothing calls `scope` yet.
@@ -402,6 +473,15 @@ checks a write before handing it to `core`, and `core` does not depend on
   `system`, in `scope.check_not_system`; core deliberately does not apply it
   so seeding can rewrite `system/` (see
   [ADR 0016](docs/adr/0016-system-read-only-enforcement.md)).
+- **A write is checked against the caller's own grant.** The path's scope
+  must be granted and its entity ID must equal the grant's entity ID; the
+  role check against `ScopePolicy` runs only after that, so a permitted
+  role in one scope never opens another entity's prefix. Violations are
+  permanent `RestrictedScopeError(NOT_GRANTED)` or `(ROLE_REQUIRED)`.
+  Reads and listing are never checked (see
+  [ADR 0017](docs/adr/0017-write-restriction-enforcement.md)).
+- **Write-check order is fixed.** `scope.check_write` raises the first
+  applicable error in the order invalid path, `system/`, not granted, role.
 - **`scope` and `core` stay independent.** `scope` never imports `core` or
   `storage`, and `core` never imports `scope`, so a restriction check can't
   be wired into `MemoryStore` without breaking the boundary.
@@ -451,7 +531,11 @@ cause. Defined in `wenchang.errors` (see [ADR
   `NotFoundError` distinguishes an invalid path from a valid path with no
   file yet). The agent corrects and retries in the same turn.
 - **Permanent** (`PermanentError`) — stop, do not retry
-  (`RestrictedScopeError` for a `system/` write or a role-gated scope;
+  (`RestrictedScopeError` for a `system/` write (`SYSTEM_READ_ONLY`), a
+  role-gated scope the caller's role is not permitted to write
+  (`ROLE_REQUIRED`, carrying the permitted `required_roles`), or a path
+  outside the caller's granted scope or entity (`NOT_GRANTED`, whose one
+  generic message never echoes the caller's own entity ID or role);
   `ResolverFailureError` for identity resolution failure).
 - **Transient** (`TransientError`) — retry is appropriate
   (`BackendUnavailableError`, distinguishing timeout from unavailability); a
