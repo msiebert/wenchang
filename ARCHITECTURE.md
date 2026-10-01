@@ -11,11 +11,13 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-six implemented modules: the cross-cutting `errors` and `version_token`; the
+seven implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
-fake and a GCS implementation behind one protocol); and `core`, whose
+fake and a GCS implementation behind one protocol); `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-`list_prefix`, `append_line`, and `delete_file`. The module map below is the
+`list_prefix`, `append_line`, and `delete_file`; and `identity`, the
+injected identity resolver boundary, not yet called by any other module.
+The module map below is the
 intended shape; each remaining module is marked **(planned)** until
 implemented.
 
@@ -52,7 +54,13 @@ implemented.
   0007](docs/adr/0007-core-api-shape-and-storage-layer.md).
   `is_valid_prefix(prefix)` checks 1-3 valid segments (the same segment
   rule as `is_valid_path`), each followed by `/`; the empty prefix is
-  invalid. Neither function ever raises or inspects storage.
+  invalid. `is_valid_segment(segment)` is the public segment rule both
+  use: non-empty, not `.` or `..`, and no `/`, backslash, or Unicode `Cc`
+  character. It is also the rule `identity` validates scope names and
+  entity IDs with, so an `Identity` can never yield a malformed path; the
+  `/` rejection matters only for such unsplit strings, since the path and
+  prefix checks split on `/` first. None of the three functions ever raises
+  or inspects storage.
 - **storage** — an internal protocol mirroring GCS object semantics (custom
   metadata, a generation-backed version token): `Storage` (`get`, `put`,
   `put_if_version`, `delete_if_version`, `list_page`) and `StoredObject`
@@ -209,9 +217,57 @@ implemented.
   [ADR 0011](docs/adr/0011-append-line-version-guard.md),
   [ADR 0012](docs/adr/0012-delete-file.md), and
   [ADR 0013](docs/adr/0013-write-file-source.md).
-- **scope / identity** *(planned)* — the injected identity resolver
-  interface (credentials → scope-to-entity-ID map + role per scope), path
-  construction, and write-restriction / `system/`-read-only enforcement.
+- **identity** — the injected-dependency boundary through which the
+  library learns who the caller is; it has no notion of users,
+  organizations, or roles of its own, and imports only `errors` and
+  `paths`. Every `str`-typed value (scope keys, `entity_id`, `role`,
+  `detail`) is normalized to an exact `str` via `str.__str__` before
+  validation and storage, so a `str` subclass cannot defeat the segment
+  rule. `ScopeGrant(entity_id, role)` is a frozen value: a non-`str`
+  field raises `TypeError`, an `entity_id` failing `is_valid_segment` or an
+  empty `role` raises `ValueError`. `Identity(grants)` holds one
+  `ScopeGrant` per scope name; a non-`Mapping` raises `TypeError`, otherwise
+  it snapshots the caller's mapping exactly once, type-checks and validates
+  every key (`is_valid_segment`) and value (`issubclass(type(grant),
+  ScopeGrant)`, so a spoofed `__class__` is rejected) of that snapshot,
+  raises `ValueError` for keys that collide after normalization, and stores
+  it as a read-only `MappingProxyType`, so neither the caller's mapping nor
+  item assignment can change it. It exposes `scope_map` (a fresh scope →
+  entity-ID dict each call), `entity_id(scope)`, and `role(scope)` (both
+  raise `KeyError` for an ungranted scope); `"s" in identity.grants` and
+  `grants.get` are the non-raising lookups. It is equal and hashable by
+  content regardless of insertion order, and defines `__reduce__` to
+  rebuild through `type(self)`'s constructor so `pickle` and
+  `copy.deepcopy` work and preserve subclasses; `dataclasses.asdict` is
+  unsupported. An empty `Identity` is valid. `ResolutionFailure(detail)`
+  (a non-`str` `detail` raises `TypeError`, an empty one `ValueError`;
+  shown to the agent, must never carry credentials) is how a resolver
+  reports failure.
+  `IdentityResolver[C]` is a runtime-checkable `Protocol`, generic and
+  inferred contravariant in the credentials type, with one method
+  `resolve(credentials: C) -> Identity | ResolutionFailure` that must not
+  raise. `resolve_identity(resolver, credentials) -> Identity` is the
+  library's only call into a resolver. It type-tests the result with
+  `issubclass(type(result), ...)`, never the resolver-controlled
+  `__class__`: a returned `Identity` is returned as the same object; a
+  `ResolutionFailure(d)` raises `ResolverFailureError(d)`, built inside a
+  guard that falls back to a message naming the resolver class if reading
+  or formatting `d` raises; type names in messages are read through a
+  guarded helper that reports `<unnamed>` if `__name__` raises;
+  a raised `Exception` (including any `WenchangError`) raises a new
+  `ResolverFailureError` naming only the resolver class and exception type,
+  raised `from None`; any other return raises `ResolverFailureError` naming
+  the resolver class and returned type; a `BaseException` that is not an
+  `Exception` propagates unchanged. Credentials are never inspected,
+  stored, or included in an error. `SandboxResolver(identity)` returns the
+  adopter-supplied `identity` for any credentials and satisfies
+  `IdentityResolver[C]` for every `C`. See
+  [ADR 0014](docs/adr/0014-identity-resolver.md).
+- **scope** *(planned)* — path construction from an `Identity` (AIE-1041),
+  and write-restriction and `system/`-read-only enforcement (AIE-1042,
+  AIE-1040). It consumes `Identity` and is called by the tool layer, not
+  `MemoryStore`, so the seeding job can still write `system/` through
+  `core`.
 - **transport** *(planned)* — an abstract client interface mirroring the
   core API, with an in-process implementation now and a remote (gRPC)
   implementation later. In-process and remote implementations must be
@@ -235,7 +291,8 @@ flowchart TB
     end
     subgraph Core
         core[core: API functions\noptimistic concurrency]
-        scope[scope / identity:\nresolver, path construction,\nwrite-restriction, system/ enforcement]
+        scope[scope: path construction,\nwrite-restriction, system/ enforcement]
+        identity[identity: resolver protocol,\nIdentity, SandboxResolver]
     end
     subgraph Storage
         storageiface[storage interface]
@@ -256,6 +313,8 @@ flowchart TB
 above) and are omitted from the diagram to keep it readable. `file_format`
 is dependency-free and used by `core` and `storage`; it is also omitted
 from the diagram since it isn't wired into the request path shown there.
+`identity` sits beside `core` with no arrow: the tool and transport layers
+will call `resolve_identity`, and nothing calls it yet.
 
 ## Key invariants
 
@@ -314,6 +373,14 @@ from the diagram since it isn't wired into the request path shown there.
   place.** The `Storage` protocol and every caller above it speak
   `VersionToken` only; `GcsStorage` is the sole module that turns a token
   into (or out of) an integer generation.
+- **Identity is validated at construction; credentials stay with the
+  resolver.** Identity fields are validated as path segments at
+  construction; the library never handles credentials, only the resolver
+  does; resolver failure is permanent and never chained. `resolve_identity`
+  passes credentials through opaquely, and every failure it surfaces is a
+  `ResolverFailureError` raised `from None`, so no exception message that
+  might carry a credential reaches a rendered traceback (see
+  [ADR 0014](docs/adr/0014-identity-resolver.md)).
 
 ## Cross-cutting: error taxonomy
 

@@ -15,8 +15,27 @@ Terms as used throughout wenchang and its spec.
 - **Entity ID** — the identifier naming a scope's instance (e.g. a specific
   user ID or project ID), supplied by the identity resolver.
 - **Role** — the caller's permission level within a given scope, returned
-  by the identity resolver, checked against write-restricted scopes before
-  any mutating call proceeds.
+  by the identity resolver as part of a scope grant, checked against
+  write-restricted scopes before any mutating call proceeds. An opaque,
+  non-empty, adopter-defined string; every granted scope carries exactly
+  one.
+- **Identity resolver** — the adopter-injected dependency that turns
+  caller credentials (opaque to the library) into an identity, or reports a
+  resolution failure. It must not raise, and identical credentials must
+  give an equal result within a session. The library calls it only through
+  `resolve_identity`.
+- **Identity** — what a resolver returns: the caller's scope grant in each
+  scope it can reach, keyed by scope name. Immutable and validated at
+  construction; an identity with no grants is valid and reaches no scope.
+- **Scope grant** — the caller's entity ID and role within one scope. The
+  entity ID, like the scope name it is keyed by, must be a valid path
+  segment.
+- **Resolution failure** — a resolver's report that credentials could not be
+  resolved, carrying a non-empty detail shown to the agent that must never
+  contain credentials. Always permanent: the library converts it into
+  `ResolverFailureError`, and memory is unavailable for the session.
+- **Sandbox resolver** — the reference identity resolver, returning one
+  adopter-supplied identity for any credentials; for sandboxes and tests.
 - **Version token / generation** — an opaque handle representing a file's
   current state, used for optimistic concurrency (compare-and-swap on
   write). Currently backed by a GCS object generation number; callers never
