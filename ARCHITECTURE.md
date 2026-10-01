@@ -61,6 +61,33 @@ implemented.
   `/` rejection matters only for such unsplit strings, since the path and
   prefix checks split on `/` first. None of the three functions ever raises
   or inspects storage.
+  Construction and parsing sit on the same rules. `PathParts(scope,
+  entity_id, area, name)` is a frozen value whose `name` excludes the final
+  `.md`; it does no validation on construction. `build_path(scope,
+  entity_id, area, name)` checks `scope`, `entity_id`, and `area` with
+  `is_valid_segment` and accepts `name` iff it is non-empty and
+  `is_valid_segment(name + ".md")`, then returns
+  `{scope}/{entity_id}/{area}/{name}.md`, always appending `.md` (so `"b.md"`
+  yields `b.md.md`, and `"."` / `".."` yield the flat filenames `..md` /
+  `...md`). It raises `ValueError(f"invalid {arg}: {value!r}")` naming the
+  first bad argument in parameter order. `build_prefix(scope, entity_id=None,
+  area=None)` returns `scope/`, `scope/entity_id/`, or
+  `scope/entity_id/area/`; only `None` means omitted, and `""` is an invalid
+  segment. An `area` without an `entity_id` raises `ValueError("area
+  requires entity_id")`, checked before any segment validation; otherwise
+  the first bad supplied argument raises as in `build_path`. Every accepted
+  result satisfies `is_valid_prefix`. `parse_path(path) -> PathParts` raises
+  `ValueError(f"invalid path: {path!r}")` iff `not is_valid_path(path)` and
+  strips only the final `.md`. It is the exact inverse of `build_path`:
+  `parse_path(build_path(s, e, a, n)) == PathParts(s, e, a, n)` for every
+  accepted argument set, and `build_path(**asdict(parse_path(p))) == p` for
+  every valid path. Built paths are relative to the storage root and never
+  contain `{root}`. `paths` imports nothing from `wenchang`. The builders
+  raise `ValueError`, not `NotFoundError`, because they are for values
+  library code controls; a caller passing agent-supplied values must
+  validate them first or convert the `ValueError` into
+  `NotFoundError(INVALID_PATH)`. See
+  [ADR 0015](docs/adr/0015-path-construction.md).
 - **storage** — an internal protocol mirroring GCS object semantics (custom
   metadata, a generation-backed version token): `Storage` (`get`, `put`,
   `put_if_version`, `delete_if_version`, `list_page`) and `StoredObject`
@@ -263,11 +290,13 @@ implemented.
   adopter-supplied `identity` for any credentials and satisfies
   `IdentityResolver[C]` for every `C`. See
   [ADR 0014](docs/adr/0014-identity-resolver.md).
-- **scope** *(planned)* — path construction from an `Identity` (AIE-1041),
-  and write-restriction and `system/`-read-only enforcement (AIE-1042,
-  AIE-1040). It consumes `Identity` and is called by the tool layer, not
-  `MemoryStore`, so the seeding job can still write `system/` through
-  `core`.
+- **scope** *(planned)* — write-restriction and `system/`-read-only
+  enforcement (AIE-1042, AIE-1040). Path construction itself lives in
+  `paths` (`build_path`, `build_prefix`, `parse_path`); this module supplies
+  the identity lookup, e.g. `build_path(scope, identity.entity_id(scope),
+  area, name)`, and reads the area via `parse_path`. It consumes `Identity`
+  and is called by the tool layer, not `MemoryStore`, so the seeding job can
+  still write `system/` through `core`.
 - **transport** *(planned)* — an abstract client interface mirroring the
   core API, with an in-process implementation now and a remote (gRPC)
   implementation later. In-process and remote implementations must be
@@ -291,7 +320,7 @@ flowchart TB
     end
     subgraph Core
         core[core: API functions\noptimistic concurrency]
-        scope[scope: path construction,\nwrite-restriction, system/ enforcement]
+        scope[scope: write-restriction,\nsystem/ enforcement]
         identity[identity: resolver protocol,\nIdentity, SandboxResolver]
     end
     subgraph Storage
@@ -313,6 +342,8 @@ flowchart TB
 above) and are omitted from the diagram to keep it readable. `file_format`
 is dependency-free and used by `core` and `storage`; it is also omitted
 from the diagram since it isn't wired into the request path shown there.
+`paths` is likewise dependency-free and omitted; `core` and `identity` use
+it for validation, and the planned `scope` module will use its builders.
 `identity` sits beside `core` with no arrow: the tool and transport layers
 will call `resolve_identity`, and nothing calls it yet.
 
