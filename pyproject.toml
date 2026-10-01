@@ -9,6 +9,9 @@ dependencies = [
     "google-cloud-storage>=2.18",
 ]
 
+[project.optional-dependencies]
+testing = ["pytest>=8.3"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

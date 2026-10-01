@@ -18,7 +18,10 @@ implemented operations so far are `read_file`, `write_file`, `replace_fact`,
 `list_prefix`, `append_line`, and `delete_file`; `identity`, the
 injected identity resolver boundary; and `scope`, the tool-layer write
 checks (`system/` read-only and role-gated write restriction). `scope` takes
-an `Identity` value, but no module calls `identity` or `scope` yet.
+an `Identity` value, but no module calls `identity` or `scope` yet. A ninth,
+`testing`, is adopter-facing rather than part of the runtime: the
+executable resolver conformance suite an adopter runs against their own
+identity resolver, installed with the optional `wenchang[testing]` extra.
 The module map below is the
 intended shape; each remaining module is marked **(planned)** until
 implemented.
@@ -382,6 +385,66 @@ implemented.
   failure wins in the order invalid path, `system/`, not granted, role. See
   [ADR 0016](docs/adr/0016-system-read-only-enforcement.md) and
   [ADR 0017](docs/adr/0017-write-restriction-enforcement.md).
+- **testing** — adopter-facing conformance suites, not part of the runtime
+  request path. `wenchang.testing.ResolverConformance[C]` is a pytest mixin,
+  generic in the credentials type, of twelve test methods; passing all of
+  them defines a conforming `IdentityResolver[C]`. Its name does not start
+  with `Test`, so pytest never collects the mixin itself; an adopter
+  subclasses it as `class TestMyResolver(ResolverConformance[MyCreds])` and
+  supplies six required fixtures: `resolver` (`IdentityResolver[C]`),
+  `valid_credentials` (`C`), `invalid_credentials` (`C`), `policy`
+  (`ScopePolicy`), `expected_scopes` (`frozenset[str]`, exactly the scopes
+  `valid_credentials` must grant), and `known_roles` (`frozenset[str]`,
+  every role the resolver may return). A missing fixture is a pytest
+  collection error. `expected_scopes` and `known_roles` are checked to be
+  `frozenset`s of exact `str` before use. The methods, by Notion §10.1 clause:
+  valid credentials resolve to an `Identity` —
+  `test_valid_credentials_resolve_to_identity`,
+  `test_valid_credentials_resolve_through_library_entry_point`; never
+  raises on bad credentials, and the library converts the failure to a
+  permanent error — `test_invalid_credentials_return_resolution_failure`,
+  `test_invalid_credentials_raise_permanent_resolver_failure_error`;
+  consistent within a session (three resolves of the same credentials
+  object, compared by value; invalid-credential `detail` may differ) —
+  `test_valid_resolution_is_consistent`,
+  `test_invalid_resolution_is_consistent`; roles are decidable (every
+  granted role and every role the policy permits is in `known_roles`) —
+  `test_roles_are_known_to_scope_configuration`. By the issue's enforcement
+  clauses, run end-to-end on the adopter's identity and policy: path
+  construction — `test_granted_scopes_build_valid_paths`; `system/`
+  read-only — `test_system_area_is_read_only_in_every_scope`; write
+  restriction, own entity — `test_own_entity_writes_follow_policy` (returns
+  `None` or raises `ROLE_REQUIRED` with the policy's role set, as the policy
+  predicts), foreign entity — `test_foreign_entity_writes_are_not_granted`,
+  ungranted scope — `test_ungranted_scope_writes_are_not_granted`. Contract
+  checks call `resolver.resolve` directly, so a raising resolver fails
+  rather than being masked by `resolve_identity`; `resolve_identity` is
+  called only to check the conversion. The suite judges the values the
+  library reads, not the resolver's own objects: every resolved `Identity`
+  (and the `resolve_identity` result) is canonicalized to a base `Identity`
+  of base `ScopeGrant`s rebuilt from the stored grants' `entity_id` and
+  `role`, and any `Exception` while rebuilding fails with key phrase
+  `invalid Identity`. Every later comparison and read uses that canonical
+  value, so an `Identity` or `ScopeGrant` subclass with a lying `__eq__` or
+  overridden `role()` / `entity_id()` cannot pass. Result types are tested
+  by real type (`issubclass(type(result), ...)`), so a spoofed `__class__`
+  fails as the wrong type. Resolver and exception type names are read
+  through a guarded helper that reports `<unnamed>` if `__name__` raises.
+  `expected_scopes` and `known_roles` are copied to plain `frozenset`s of
+  exact `str`, and a bad member's type is named. Every violation is reported with
+  `pytest.fail`, never `assert`, with a message naming the resolver class
+  and containing a fixed key phrase (e.g. `must not raise`, `wrong
+  reason`); a caught exception stays attached as the failure's implicit
+  context so pytest shows it. This deliberately contrasts with the
+  library's own `from None` rule in `resolve_identity`: here the adopter is
+  debugging their own resolver with their own test credentials. A resolver
+  that accepts every credential (such as `SandboxResolver`) has its
+  `invalid_credentials` fixture call `pytest.skip`, which skips exactly the
+  three methods taking it. The module applies no pytest marks. It imports
+  `errors`, `identity`, `paths`, and `scope`, plus `pytest`; nothing in the
+  library imports it. It requires the `wenchang[testing]` extra
+  (`testing = ["pytest>=8.3"]` under `[project.optional-dependencies]`). See
+  [ADR 0018](docs/adr/0018-resolver-conformance-suite.md).
 - **transport** *(planned)* — an abstract client interface mirroring the
   core API, with an in-process implementation now and a remote (gRPC)
   implementation later. In-process and remote implementations must be
@@ -435,7 +498,10 @@ will call `resolve_identity`, and nothing calls it yet. `scope` imports the
 shows no edge between them. `scope` sits outside
 the Core subgraph with only the `tools --> scope` edge: the tool layer
 checks a write before handing it to `core`, and `core` does not depend on
-`scope`. Nothing calls `scope` yet.
+`scope`. Nothing calls `scope` yet. `testing` is omitted from the diagram:
+it is not part of the runtime layers, is imported only by adopters' test
+code, and depends on `identity`, `paths`, `scope`, and `errors` with no
+module depending on it.
 
 ## Key invariants
 
@@ -517,6 +583,9 @@ checks a write before handing it to `core`, and `core` does not depend on
   `ResolverFailureError` raised `from None`, so no exception message that
   might carry a credential reaches a rendered traceback (see
   [ADR 0014](docs/adr/0014-identity-resolver.md)).
+- **pytest stays optional.** Nothing outside `wenchang.testing` imports
+  pytest or `wenchang.testing`; the library imports with pytest absent (see
+  [ADR 0018](docs/adr/0018-resolver-conformance-suite.md)).
 
 ## Cross-cutting: error taxonomy
 
