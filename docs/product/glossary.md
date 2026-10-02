@@ -63,7 +63,26 @@ Terms as used throughout wenchang and its spec.
   interface the adopter implements; passing it defines a correct
   implementation. For the identity resolver it is
   `wenchang.testing.ResolverConformance`, a pytest mixin the adopter
-  subclasses, installed with the `wenchang[testing]` extra.
+  subclasses, installed with the `wenchang[testing]` extra; for the
+  transport client it is the transport conformance suite.
+- **Transport conformance suite** — the conformance suite for transport
+  clients, `wenchang.testing.TransportConformance`. It runs the same cases
+  against any transport client (in-process or remote) and fails one that is
+  distinguishable from the in-process client in results or errors,
+  covering round-trip fidelity, atomicity, token opacity, conflicts,
+  replace-fact matching, append guarding, enforcement, index behavior, and
+  error parity, including core's exact wording for argument errors. On
+  enforcement it requires a transport to *accept* a `system/` write: scope
+  rules are enforced by the tools, not the transport. It never
+  compares version tokens, only hands them back. The adopter supplies a
+  fresh client per test plus the settings its store was configured with;
+  every scope in the supplied scope map must be writable through that
+  client, and its writes must stamp strictly increasing last-updated times.
+- **Conformance sentinel** — a small file the transport conformance suite
+  writes under the first mapped scope's own entity, in area
+  `conformance-sentinel`, at the start of every test that touches the
+  store. Finding it already present means the client fixture was shared
+  between tests, which fails the test as not isolated.
 - **Known roles** — the conformance-suite fixture listing every role the
   adopter's resolver may return. The suite requires every granted role, and
   every role the scope policy permits, to be in it, so write-restriction
