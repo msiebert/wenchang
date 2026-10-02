@@ -22,12 +22,12 @@ implements all seven core operations (`read_file`, `write_file`,
 write restriction); and `transport`, the `TransportClient` protocol the
 tool layer will call, plus `InProcessClient`, its in-process
 implementation. `scope` takes an `Identity` value, but no module calls
-`identity` or `scope` yet, and nothing calls `TransportClient` yet: the
-tool layer and any remote transport are still planned. A tenth, `testing`,
-is adopter-facing rather than
-part of the runtime: the
-executable resolver conformance suite an adopter runs against their own
-identity resolver, installed with the optional `wenchang[testing]` extra.
+`identity` or `scope` yet, and no runtime module calls `TransportClient`
+yet: the tool layer and any remote transport are still planned. A tenth,
+`testing`, is adopter-facing rather than part of the runtime: the
+executable conformance suites an adopter runs against their own identity
+resolver and their own transport client, installed with the optional
+`wenchang[testing]` extra.
 The module map below is the
 intended shape; each remaining module is marked **(planned)** until
 implemented.
@@ -559,6 +559,105 @@ implemented.
   library imports it. It requires the `wenchang[testing]` extra
   (`testing = ["pytest>=8.3"]` under `[project.optional-dependencies]`). See
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md).
+  `wenchang.testing.TransportConformance` (in
+  `wenchang.testing.transport_conformance`) is the same shape for a
+  `TransportClient`: a non-generic pytest mixin, not `Test`-prefixed,
+  subclassed as `class TestMyClient(TransportConformance)` with seven
+  required fixtures: `client` (a fresh `TransportClient` over an empty
+  store, per test; checked by reading each of the seven method names, each
+  of which must exist, be readable, and be callable, with a failure naming
+  the method, and then by `isinstance(client, TransportClient)` run inside
+  a guard, so a client whose `__class__` raises fails rather than errors),
+  `source` (a non-empty exact `str` passed as `source=`), `scope_map` (a
+  `Mapping`, by real type, of at least two distinct scopes to entity IDs,
+  every key and value an exact `str` passing `is_valid_segment`; an
+  `items()` that raises or repeats a key fails), and the values the
+  client's store was configured with: `max_file_bytes` (an exact `int` of
+  at least `MIN_FILE_BYTES = 64`), `index_max_bytes` and `list_page_size` (exact positive `int`s;
+  `bool` rejected), and `scope_priority` (an exact `tuple` of distinct
+  exact-`str` valid segments, even though `MemoryStore` accepts any
+  `Sequence`). Fixtures are validated in that fixed order, so the first bad
+  one is reported, with key phrase `fixture <name>`;
+  `test_client_satisfies_protocol` takes all seven and validates them all,
+  so every fixture is required from the first run even though only later
+  cases use the last three. The fixture contract also requires that every
+  mapped scope be writable through `client` under the credentials it was
+  constructed with, and that a client's writes stamp strictly increasing
+  `last_updated` within one test (the repo's reference run uses a ticking
+  clock). Cases call the client sequentially; concurrency is modeled as
+  sequential interleavings on one client, so no thread safety is required.
+  Five baseline methods ship: `test_client_satisfies_protocol` (all seven
+  fixtures, including the client's method and protocol checks),
+  `test_write_then_read_round_trips` (content and all four metadata fields;
+  `source` must be unioned into `sources`),
+  `test_returned_token_is_accepted` (a token from a read is accepted back
+  by `write_file`, and one from a write by `append_line`),
+  `test_read_absent_is_not_found`, and `test_oversize_write_is_rejected`
+  (`OversizeWriteError` with `size` and `limit`, then the path still reads
+  as absent). The exhaustive §10.2 cases are planned as further methods on
+  the same mixin, built from public module-level helpers:
+  `require_fresh`, `sentinel_path`, `without_sentinel`,
+  `sentinel_entry_bytes`, `probe_path`, `expect_error`, `canonical_file`,
+  `canonical_entry`, `canonical_page`, `canonical_index`, and the
+  `check_*` fixture checks. Every failure goes through `pytest.fail`; every
+  message except a fixture check's has the form `name: label: phrase`,
+  where `name` is the client class (read through the guarded `<unnamed>`
+  helper) and `label` names the call or result under check (e.g.
+  `read_file(<path>)`, `write result for <path>`), so a failure says which
+  call fired. Every client call a case makes runs under `expect_error` or a
+  private `_call` wrapper that turns any `Exception` into `unexpected
+  error`, so no raw exception escapes a case. Isolation: every stateful
+  case first calls `require_fresh`, which fails with `not isolated`
+  (naming the type the read returned) if a sentinel file already exists
+  and otherwise writes it; the sentinel is at
+  `build_path(first, scope_map[first], "conformance-sentinel", "sentinel")`
+  where `first` is the first scope in sorted order, i.e. under the caller's
+  own entity in a writable scope, in an area no case uses for data. So a
+  `client` fixture shared across tests fails on the second stateful case in
+  any order. Because entity- and scope-level listings and the index do see
+  the sentinel, later cases filter it with `without_sentinel` (entries,
+  and for a `MemoryIndex` also its `CappedPrefix`, rebuilding the index
+  under `_call` so a malformed index fails rather than raising
+  `ValueError`) and budget it with
+  `sentinel_entry_bytes`, which lists the sentinel through the client and
+  returns `index_entry_bytes` of the returned `FileEntry`. Version tokens
+  are never compared, not even for equality, ordered, sliced, or passed to
+  anything but the client's own methods and `type()`: a remote may return
+  different but equivalent token strings, so a token is checked only by
+  shape (`type(v) is str and v`) and by handing it back. An `ast` scan in
+  the repo's tests pins this rule against the module, including method
+  calls on a token and f-string interpolation of one. `last_updated` is
+  compared only between two results the same client returned in one test
+  (the write result and the read result), never with the test's clock.
+  The canonical readers check every nested field of a client-returned
+  `MemoryFile`, `FileEntry`, `ListPage`, or `MemoryIndex` by exact type
+  (`FileMetadata`, `tuple` of `str` aliases, `frozenset` of `str` sources,
+  aware `datetime`, `CappedPrefix` members with exact `str` prefix and
+  `int` omitted, `str | None` cursor), failing with `wrong result type` or
+  `bad field <name>`. Every attribute read is guarded, so a field that
+  raises on read fails `bad field <name>: unreadable` rather than escaping
+  as an error. `last_updated` is converted to UTC inside the same guard as
+  its offset check (any failure is `bad field last_updated: offset
+  unreadable`), so later comparison and formatting never run client
+  `tzinfo` code, and equal instants at different offsets compare equal.
+  The readers return plain tuples that omit the version; this is the
+  cross-transport parity check for
+  those types that ADR 0019 deferred to the suite. `expect_error(name,
+  label, call, expected, category, /, *, message=None, **payload)` is the
+  one error-parity helper: the raised type must be exactly `expected` (a
+  subclass or a spoofed `__class__` fails), `category` is required for a
+  `WenchangError` subclass and must be `None` otherwise (`harness
+  misuse`), `message` if given must equal `str(exc)`, and each payload
+  attribute is compared by exact type and then value, so a plain `str`
+  never stands in for a `StrEnum` reason. For §10.2's enforcement bullets
+  (`system/` writes and role-restricted writes) the human decided option
+  (a) on 2026-10-02, recorded in ADR 0021: the transport suite asserts such
+  writes are accepted at the transport, and enforcement is tested only by
+  the tool-layer and resolver suites. It imports
+  `core`, `errors`, `file_format`, `paths`, and `transport` from
+  `wenchang`, plus `pytest`, applies no pytest marks, and cites no Linear
+  IDs. See
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md).
 - **transport** — the transport-agnostic client contract the tool layer
   calls, so a transport is added by writing another implementation without
   touching tool definitions. `TransportClient` is a runtime-checkable,
@@ -592,7 +691,10 @@ implemented.
   credentials. The tool layer resolves identity and calls
   `scope.check_write` before any mutating client call; a remote client
   binds whatever it authenticates with at construction (per session or
-  connection), never per call. It imports from `wenchang` only `core`
+  connection), never per call. The transport accepts every well-formed
+  write, including one under `system/`; scope enforcement happens only in
+  the tool layer, and a remote server must not enforce scope at the
+  transport. It imports from `wenchang` only `core`
   (including `MemoryStore`), `file_format`, and `version_token`, and `core`
   never imports it. `InProcessClient(store)` is the in-process
   implementation, calling the wrapped `MemoryStore` directly with no
@@ -608,11 +710,15 @@ implemented.
   through a guarded helper that reports `<unnamed>` if `__name__` raises;
   the `store` property returns the
   wrapped store. `MemoryStore` itself also satisfies `TransportClient`
-  structurally, so a host may pass either. Nothing calls the protocol yet:
-  the tool layer, any remote transport, and the transport conformance
-  suite are planned. See
-  [ADR 0019](docs/adr/0019-transport-client-interface.md) and
-  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md).
+  structurally, so a host may pass either. No runtime module calls the
+  protocol yet: the tool layer and any remote transport are planned. The
+  transport conformance suite (`testing.TransportConformance`) exists with
+  its baseline cases and is run against `InProcessClient` in the repo's
+  tests; its exhaustive §10.2 cases (index behavior, concurrency, full
+  error parity) are planned. See
+  [ADR 0019](docs/adr/0019-transport-client-interface.md),
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md), and
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md).
 - **tools** *(planned)* — the agent-facing tool layer: thin wrappers over
   the transport client, carrying no policy, each described by a docstring.
 - **prompts** *(planned)* — instruction text for filing, deduplication,
@@ -670,8 +776,9 @@ the Core subgraph with only the `tools --> scope` edge: the tool layer
 checks a write before handing it to `core`, and `core` does not depend on
 `scope`. Nothing calls `scope` yet. `testing` is omitted from the diagram:
 it is not part of the runtime layers, is imported only by adopters' test
-code, and depends on `identity`, `paths`, `scope`, and `errors` with no
-module depending on it.
+code, and depends on `identity`, `paths`, `scope`, and `errors` (resolver
+suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
+(transport suite), with no module depending on it.
 
 ## Key invariants
 
@@ -767,8 +874,19 @@ module depending on it.
   client raises exactly the exceptions `MemoryStore` raises, taxonomy and
   non-taxonomy alike, with equal attributes and message; only failures of
   the transport itself map to `BackendUnavailableError`. The transport adds
-  no identity, policy, or error vocabulary of its own (see
-  [ADR 0019](docs/adr/0019-transport-client-interface.md)).
+  no identity, policy, or error vocabulary of its own: it accepts every
+  well-formed write, including one under `system/`, and scope enforcement
+  happens only in the tool layer (see
+  [ADR 0019](docs/adr/0019-transport-client-interface.md) and
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md)).
+- **Conformance never compares tokens.** The transport conformance suite
+  treats version tokens as callers must: it never compares (even for
+  equality), orders, parses, slices, or does arithmetic on one, and checks
+  a token only by its shape and by handing it back to the client that
+  issued it, pinned by an `ast` scan of the suite module. Likewise it
+  compares `last_updated` only between two results from the same client,
+  never against the test's clock (see
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md)).
 - **pytest stays optional.** Nothing outside `wenchang.testing` imports
   pytest or `wenchang.testing`; the library imports with pytest absent (see
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md)).

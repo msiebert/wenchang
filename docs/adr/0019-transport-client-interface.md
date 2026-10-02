@@ -195,3 +195,13 @@ unvalidated and rely on conformance testing. Validation runs only in
 contents, including a `str`-subclass `path`, are not validated at all. A
 legitimate adopter subclass of `FileEntry` or `CappedPrefix` cannot be
 placed in a `MemoryIndex`.
+
+**Update (2026-10-02):** decision 6's "a server can enforce scope on its
+side" is amended by the human's answer to the open question in
+[ADR 0021](0021-transport-conformance-harness.md) (option (a)): a remote
+server must not enforce scope at the transport layer. The transport is
+identity-agnostic in both directions, accepting every well-formed write,
+including one under `system/`, and the tool layer, where identity is
+known, is the only enforcement point. Credentials bound at construction
+still authenticate the connection; they do not authorize paths. The rest
+of decision 6 is unchanged.
