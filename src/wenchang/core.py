@@ -6,7 +6,7 @@ import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NewType, cast
+from typing import Final, NewType, cast
 
 from wenchang.errors import (
     NotFoundError,
@@ -15,13 +15,24 @@ from wenchang.errors import (
     ReplaceFactMatchError,
     VersionConflictError,
 )
-from wenchang.file_format import FileMetadata, metadata_from_map, metadata_to_map, parse_fact
+from wenchang.file_format import (
+    LAST_UPDATED_KEY,
+    FileMetadata,
+    MetadataFormatError,
+    metadata_from_map,
+    metadata_to_map,
+    parse_fact,
+)
 from wenchang.paths import is_valid_path, is_valid_prefix
 from wenchang.storage import PreconditionFailedError, Storage
 from wenchang.version_token import VersionToken
 
 DEFAULT_MAX_FILE_BYTES: int = 16 * 1024
 DEFAULT_LIST_PAGE_SIZE: int = 100
+DEFAULT_INDEX_MAX_BYTES: int = 64 * 1024
+
+# Equals scope.SYSTEM_AREA; core must not import scope.
+INDEX_SYSTEM_AREA: Final = "system"
 
 _MAX_REPLACE_ATTEMPTS = 3
 
@@ -90,6 +101,28 @@ class FileEntry:
     path: str
     metadata: FileMetadata
     version: VersionToken
+
+
+def _utf8_len(s: str) -> int:
+    return len(s.encode("utf-8", errors="surrogatepass"))
+
+
+def index_entry_bytes(entry: FileEntry) -> int:
+    """UTF-8 size of an index entry: path, every metadata key and value, and version.
+
+    Raises MetadataFormatError if last-updated cannot be rendered in UTC.
+    """
+    try:
+        rendered = metadata_to_map(entry.metadata)
+    except OverflowError as exc:
+        raise MetadataFormatError(
+            LAST_UPDATED_KEY, "last-updated cannot be rendered in UTC"
+        ) from exc
+    return (
+        _utf8_len(entry.path)
+        + sum(_utf8_len(k) + _utf8_len(v) for k, v in rendered.items())
+        + _utf8_len(entry.version)
+    )
 
 
 @dataclass(frozen=True)
