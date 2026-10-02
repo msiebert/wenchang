@@ -1,7 +1,8 @@
 """Tests for the identity value types, the resolver protocol, resolve_identity,
 and SandboxResolver.
 
-Covers AIE-1043, US1, US2.1-4, US2.7-9, US3, and US4 (FR-001 to FR-006, SC-001).
+Covers AIE-1043, US1, US2.1-4, US2.7-9, US3, and US4 (FR-001 to FR-006, SC-001),
+and AIE-1137 (resolver failure errors carry no exception context).
 """
 
 import copy

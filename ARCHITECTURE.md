@@ -308,9 +308,9 @@ implemented.
   a raised `Exception` (including any `WenchangError`) raises a new
   `ResolverFailureError` naming only the resolver class and exception type,
   raised `from None`; every `ResolverFailureError` is raised `from None`
-  after its try/except has exited, so no resolver exception is its
-  `__cause__` or `__context__`; any other return raises `ResolverFailureError` naming
-  the resolver class and returned type; a `BaseException` that is not an
+  outside any handler, so no resolver exception is its `__cause__` or
+  `__context__`; any other return raises `ResolverFailureError` naming the
+  resolver class and returned type; a `BaseException` that is not an
   `Exception` propagates unchanged. Credentials are never inspected,
   stored, or included in an error. `SandboxResolver(identity)` returns the
   adopter-supplied `identity` for any credentials and satisfies
