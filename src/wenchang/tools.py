@@ -6,23 +6,31 @@ Its public methods are the tools; their docstrings are the descriptions a
 host shows the agent. Tools take a scope, area, and name and build the
 path under the caller's own entity in that scope. Mutating tools check the
 write against the identity and policy, then call the client.
+render_result and render_error produce the JSON-safe form a host shows the
+agent.
 """
 
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from enum import Enum
 from types import MappingProxyType
 from typing import Final, NoReturn, cast
 
-from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex
-from wenchang.errors import InvalidArgumentError
-from wenchang.file_format import FileMetadata, MetadataFormatError
+from wenchang.core import CappedPrefix, FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
+from wenchang.errors import InvalidArgumentError, WenchangError
+from wenchang.file_format import (
+    LAST_UPDATED_KEY,
+    FileMetadata,
+    MetadataFormatError,
+    metadata_to_map,
+)
 from wenchang.identity import Identity, IdentityResolver, resolve_identity
-from wenchang.paths import build_path, build_prefix, is_valid_segment
+from wenchang.paths import build_path, build_prefix, is_valid_segment, parse_path
 from wenchang.scope import ScopePolicy, check_write
 from wenchang.transport import TransportClient
 from wenchang.version_token import VersionToken
 
-__all__ = ["TOOL_NAMES", "MemoryTools", "bind_tools"]
+__all__ = ["TOOL_NAMES", "MemoryTools", "bind_tools", "render_error", "render_result"]
 
 TOOL_NAMES: Final[tuple[str, ...]] = (
     "get_memory_index",
@@ -32,6 +40,20 @@ TOOL_NAMES: Final[tuple[str, ...]] = (
     "append_line",
     "replace_fact",
     "delete_file",
+)
+
+# The only exception attributes render_error copies; never vars(exc).
+_ERROR_FIELDS: Final[tuple[str, ...]] = (
+    "path",
+    "content",
+    "version",
+    "size",
+    "limit",
+    "match_count",
+    "reason",
+    "scope",
+    "required_roles",
+    "argument",
 )
 
 # Core overrides last_updated on every write.
@@ -303,6 +325,14 @@ def _type_name(t: type) -> str:
         return "<unnamed>"
 
 
+def _message(exc: BaseException) -> str:
+    # An exception's __str__ may raise or return a str subclass.
+    try:
+        return str.__str__(str(exc))
+    except Exception:
+        return "<unreadable>"
+
+
 def _exact(argument: str, value: object) -> str:
     """Return value as an exact str; InvalidArgumentError(argument) if its real type is not str."""
     if not issubclass(type(value), str):
@@ -346,3 +376,96 @@ def bind_tools[C](
 ) -> MemoryTools:
     """Resolve the caller's identity and return the session's tools."""
     return MemoryTools(client, resolve_identity(resolver, credentials), policy, source=source)
+
+
+def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str, object]:
+    """Render a tool's return value as a JSON-safe dict for the agent."""
+    if value is None:
+        return {"ok": True}
+    kind = type(cast(object, value))
+    if issubclass(kind, MemoryFile):
+        file = cast(MemoryFile, value)
+        return _file_fields(file, content=file.content)
+    if issubclass(kind, ListPage):
+        page = cast(ListPage, value)
+        cursor = page.next_cursor
+        return {
+            "entries": [_file_fields(entry) for entry in page.entries],
+            "next_cursor": None if cursor is None else str.__str__(cursor),
+        }
+    if issubclass(kind, MemoryIndex):
+        index = cast(MemoryIndex, value)
+        return {
+            "entries": [_file_fields(entry) for entry in index.entries],
+            "capped": [_capped_fields(cap) for cap in index.capped],
+        }
+    raise TypeError(f"cannot render a {_type_name(kind)}")
+
+
+def render_error(exc: Exception) -> dict[str, object]:
+    """Render any tool failure as a JSON-safe dict, including its repair material."""
+    kind = type(exc)
+    name = _type_name(kind)
+    if issubclass(kind, MetadataFormatError | UnicodeDecodeError):
+        return {"error": name, "category": "internal", "message": _message(exc)}
+    if not issubclass(kind, WenchangError):
+        # Off-contract exceptions may carry internals the agent must not see.
+        return {"error": name, "category": "internal", "message": "internal error"}
+    error = cast(WenchangError, exc)
+    out: dict[str, object] = {
+        "error": name,
+        "category": str.__str__(error.category.value),
+        "message": _message(error),
+    }
+    for key in _ERROR_FIELDS:
+        try:
+            field = cast(object, getattr(error, key, None))
+        except Exception:
+            continue
+        if field is not None:
+            out[key] = _json_value(field)
+    return out
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return cast(object, value.value)
+    if isinstance(value, frozenset):
+        return sorted(cast(frozenset[str], value))
+    if isinstance(value, str):
+        return str.__str__(value)
+    return value
+
+
+def _file_fields(entry: FileEntry | MemoryFile, content: str | None = None) -> dict[str, object]:
+    scope: str | None
+    area: str | None
+    name: str | None
+    try:
+        parts = parse_path(entry.path)
+    except ValueError:
+        scope = area = name = None
+    else:
+        scope, area, name = parts.scope, parts.area, parts.name
+    metadata = entry.metadata
+    fields: dict[str, object] = {"path": entry.path, "scope": scope, "area": area, "name": name}
+    if content is not None:
+        fields["content"] = content
+    return fields | {
+        "version": str.__str__(entry.version),
+        "description": metadata.description,
+        "aliases": list(metadata.aliases),
+        "sources": sorted(metadata.sources),
+        "last_updated": metadata_to_map(metadata)[LAST_UPDATED_KEY],
+    }
+
+
+def _capped_fields(cap: CappedPrefix) -> dict[str, object]:
+    # A prefix is scope/, scope/entity/, or scope/entity/area/.
+    segments = cap.prefix.rstrip("/").split("/")
+    return {
+        "prefix": cap.prefix,
+        "scope": segments[0],
+        "area": segments[2] if len(segments) >= 3 else None,
+        "omitted": cap.omitted,
+    }
