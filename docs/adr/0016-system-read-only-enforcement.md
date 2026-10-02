@@ -105,3 +105,9 @@ being moved into `core`, but they cannot detect a tool that forgets it;
 AIE-1044's tests must cover that.
 
 Reads and listings of `system/` are unaffected.
+
+**Update (2026-10-02):** the tool layer now exists
+([ADR 0022](0022-tool-layer.md)). Every mutating tool calls `check_write`,
+and therefore `check_not_system`, on the path it built before calling the
+transport client. Its tests cover this obligation for all four mutating
+tools, including that a `system/` write never reaches the client.

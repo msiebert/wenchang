@@ -120,6 +120,21 @@ class ReplaceFactMatchError(RecoverableError):
         super().__init__(detail)
 
 
+class InvalidArgumentError(RecoverableError):
+    """An agent-supplied argument was rejected; correct it and retry."""
+
+    def __init__(self, argument: str, detail: str) -> None:
+        # type() rather than isinstance, which consults a spoofable __class__.
+        if not issubclass(type(cast(object, argument)), str):
+            raise TypeError("argument must be a str")
+        # Exact str, so an overridden __str__/__format__ cannot alter the message.
+        argument = str.__str__(argument)
+        if not argument:
+            raise ValueError("argument must be non-empty")
+        self.argument = argument
+        super().__init__(f"Argument {argument} is invalid: {detail}")
+
+
 class NotFoundReason(StrEnum):
     """Why a memory location could not be resolved to an existing file."""
 

@@ -175,3 +175,15 @@ restricts nothing, so adopters must use the resolver's exact scope names.
 An identity with no grants can write nothing, and a restricted scope is
 always decidable: an ungranted scope is `NOT_GRANTED` and never falls
 through to the role check.
+
+**Update (2026-10-02):** the tool layer now exists
+([ADR 0022](0022-tool-layer.md)). Every mutating tool calls `check_write`
+on the path it built before calling the transport client, and the client
+receives that same path object (decision 11). Its tests cover this
+obligation, including the role check. Read scoping, left open by decision
+8, is decided there as own entity only: tools take `(scope, area, name)`
+and build the path from the caller's grant, so reads and listing reach only
+the caller's own entity in each granted scope. Because no tool accepts an
+entity ID, `NOT_GRANTED` is unreachable through the tools; an ungranted
+scope is the recoverable `InvalidArgumentError`. `scope` itself is
+unchanged and still never checks reads.

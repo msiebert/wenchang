@@ -40,6 +40,8 @@ Terms as used throughout wenchang and its spec.
   from the caller's entity ID in that scope. Checked before the role, so a
   permitted role never opens another entity's prefix. One generic message
   covers both cases and never reveals the caller's own entity ID or role.
+  Unreachable through the tools, which build every path from the caller's
+  own grant.
 - **Identity resolver** — the adopter-injected dependency that turns
   caller credentials (opaque to the library) into an identity, or reports a
   resolution failure. It must not raise, and identical credentials must
@@ -124,6 +126,26 @@ Terms as used throughout wenchang and its spec.
   call and result through unchanged; the simplest adoption path and the
   reference implementation. A `MemoryStore` can also be used as a
   transport client directly.
+- **Tool layer** — the agent-facing verbs (`get_memory_index`,
+  `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`,
+  `delete_file`), implemented as `tools.MemoryTools` over a transport
+  client. Tools carry no judgment; each one's docstring is the description
+  the agent sees. Mutating tools check the write (`system/` read-only,
+  write restriction) before the transport sees it. Framework-agnostic: a
+  host adapter mounts the tools and renders results and errors with
+  `render_result` / `render_error`.
+- **Session binding** — resolving the caller's identity once, at session
+  start, with `tools.bind_tools`, which returns that session's
+  `MemoryTools`. It is the only place credentials pass through the tool
+  layer, and they are not retained. The identity and the calling surface's
+  `source` name are then fixed for the session.
+- **Scope-relative address** — how the agent names a file to the tools:
+  `(scope, area, name)`, with `name` excluding `.md`. The tool fills in the
+  caller's own entity ID for that scope, so the agent never types an entity
+  ID and reaches only its own entity in each granted scope. A memory path
+  `scope/<entity>/area/name.md` from the index or a listing maps to
+  `read_file(scope, area, name)`. A scope the session isn't granted is a
+  recoverable error listing the available scopes.
 - **Description** — a file's one-line human-readable summary; part of the
   metadata-only search surface.
 - **Aliases** — a file's list of alternate names, nicknames, acronyms, and
@@ -169,7 +191,9 @@ Terms as used throughout wenchang and its spec.
   instance (for GCS, one bucket).
 - **Recoverable error** — an error category whose instance carries its own
   repair material (e.g. current content and version); the caller corrects
-  and retries in the same turn without asking the user.
+  and retries in the same turn without asking the user. Includes
+  `InvalidArgumentError`, the tool layer's rejection of an agent-supplied
+  argument, which names the argument to correct.
 - **Permanent error** — an error category signaling the call cannot succeed
   as given; the caller must stop and not retry.
 - **Transient error** — an error category signaling a temporary condition
