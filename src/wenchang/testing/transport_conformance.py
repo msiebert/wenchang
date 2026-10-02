@@ -121,9 +121,13 @@ def _fail(name: str, label: str, text: str, /) -> NoReturn:
 
 def check_client(name: str, client: object) -> TransportClient:
     """Return client if it satisfies TransportClient, else fail ("fixture client")."""
-    if not isinstance(client, TransportClient):
+    try:
+        satisfies = isinstance(client, TransportClient)
+    except Exception as exc:
+        pytest.fail(f"{name}: fixture client could not be checked: raised {_name(type(exc))}")
+    if not satisfies:
         pytest.fail(f"{name}: fixture client must be a TransportClient, got {_name(type(client))}")
-    return client
+    return cast(TransportClient, client)
 
 
 def check_source(name: str, source: object) -> str:
@@ -151,6 +155,8 @@ def check_scope_map(name: str, scope_map: object) -> dict[str, str]:
     for key, value in items:
         if type(key) is not str:
             pytest.fail(f"{prefix} key must be a str, got {_name(type(key))}")
+        if key in result:
+            pytest.fail(f"{prefix} has duplicate key {_short(key)}")
         if type(value) is not str:
             pytest.fail(f"{prefix} value for {key!r} must be a str, got {_name(type(value))}")
         if not is_valid_segment(key):
@@ -158,6 +164,8 @@ def check_scope_map(name: str, scope_map: object) -> dict[str, str]:
         if not is_valid_segment(value):
             pytest.fail(f"{prefix} value {_short(value)} is not a valid path segment")
         result[key] = value
+    if len(result) < 2:
+        pytest.fail(f"{prefix} must map at least two scopes, got {len(result)}")
     return result
 
 
@@ -235,10 +243,9 @@ def without_sentinel(
         canonical_index(name, label, raw)
         index = cast(MemoryIndex, raw)
         suffix = f"/{SENTINEL_AREA}/"
-        return MemoryIndex(
-            entries=_drop_sentinel(name, label, index.entries),
-            capped=tuple(c for c in index.capped if not c.prefix.endswith(suffix)),
-        )
+        entries = _drop_sentinel(name, label, index.entries)
+        capped = tuple(c for c in index.capped if not c.prefix.endswith(suffix))
+        return _call(name, label, lambda: MemoryIndex(entries=entries, capped=capped))
     entries = _call(name, label, lambda: tuple(cast(Iterable[object], raw)))
     return _drop_sentinel(name, label, entries)
 
@@ -280,7 +287,7 @@ def require_fresh(name: str, client: TransportClient, scope_map: Mapping[str, st
     read_label = f"read_file({path})"
     write_label = f"write_file({path})"
     try:
-        client.read_file(path)
+        result = cast(object, client.read_file(path))
     except Exception as exc:
         expect_error(
             name,
@@ -295,7 +302,8 @@ def require_fresh(name: str, client: TransportClient, scope_map: Mapping[str, st
         _fail(
             name,
             read_label,
-            "client is not isolated: the sentinel exists before this test wrote it",
+            "client is not isolated: the sentinel exists before this test wrote it "
+            f"(read returned {_name(type(result))})",
         )
     metadata = FileMetadata(
         "conformance sentinel", (), frozenset(), datetime(2000, 1, 1, tzinfo=UTC)
@@ -390,6 +398,14 @@ def expect_error[E: Exception](
 # --- Canonical readers -------------------------------------------------------
 
 
+def _get(name: str, label: str, value: object, attr: str, /) -> object:
+    """getattr(value, attr); any Exception fails "bad field <attr>: unreadable"."""
+    try:
+        return cast(object, getattr(value, attr))
+    except Exception:
+        _fail(name, label, f"bad field {attr}: unreadable")
+
+
 def _exact(name: str, label: str, field: str, value: object, t: type, /) -> None:
     if type(value) is not t:
         _fail(name, label, f"bad field {field}: expected {_name(t)}, got {_name(type(value))}")
@@ -404,30 +420,31 @@ def _canonical_metadata(
     name: str, label: str, value: object, /
 ) -> tuple[str, tuple[str, ...], tuple[str, ...], datetime]:
     _exact(name, label, "metadata", value, FileMetadata)
-    metadata = cast(FileMetadata, value)
-    description = cast(object, metadata.description)
+    description = _get(name, label, value, "description")
     _exact(name, label, "description", description, str)
-    aliases = cast(object, metadata.aliases)
+    aliases = _get(name, label, value, "aliases")
     _exact(name, label, "aliases", aliases, tuple)
     for i, alias in enumerate(cast(tuple[object, ...], aliases)):
         _exact(name, label, f"aliases[{i}]", alias, str)
-    sources = cast(object, metadata.sources)
+    sources = _get(name, label, value, "sources")
     _exact(name, label, "sources", sources, frozenset)
     for source in cast(frozenset[object], sources):
         _exact(name, label, "sources member", source, str)
-    last_updated = cast(object, metadata.last_updated)
+    last_updated = _get(name, label, value, "last_updated")
     _exact(name, label, "last_updated", last_updated, datetime)
+    # Normalized to UTC so later comparison and formatting never call client tzinfo code.
     try:
         offset = cast(datetime, last_updated).utcoffset()
+        if offset is None:
+            _fail(name, label, "bad field last_updated: naive")
+        utc = cast(datetime, last_updated).astimezone(UTC)
     except Exception:
         _fail(name, label, "bad field last_updated: offset unreadable")
-    if offset is None:
-        _fail(name, label, "bad field last_updated: naive")
     return (
         cast(str, description),
         cast(tuple[str, ...], aliases),
         tuple(sorted(cast(frozenset[str], sources))),
-        cast(datetime, last_updated),
+        utc,
     )
 
 
@@ -437,13 +454,14 @@ def canonical_file(name: str, label: str, value: object, /) -> CanonicalFile:
     The version is checked for shape only and is not part of the result.
     """
     _outer(name, label, value, MemoryFile)
-    file = cast(MemoryFile, value)
-    path = cast(object, file.path)
+    path = _get(name, label, value, "path")
     _exact(name, label, "path", path, str)
-    content = cast(object, file.content)
+    content = _get(name, label, value, "content")
     _exact(name, label, "content", content, str)
-    description, aliases, sources, last_updated = _canonical_metadata(name, label, file.metadata)
-    if not (type(file.version) is str and file.version):
+    metadata = _get(name, label, value, "metadata")
+    description, aliases, sources, last_updated = _canonical_metadata(name, label, metadata)
+    v = _get(name, label, value, "version")
+    if not (type(v) is str and v):
         _fail(name, label, "bad field version: not a non-empty str")
     return (cast(str, path), cast(str, content), description, aliases, sources, last_updated)
 
@@ -454,13 +472,14 @@ def canonical_entry(name: str, label: str, value: object, /) -> CanonicalEntry:
     The version is checked for shape only and is not part of the result.
     """
     _outer(name, label, value, FileEntry)
-    entry = cast(FileEntry, value)
-    path = cast(object, entry.path)
+    path = _get(name, label, value, "path")
     _exact(name, label, "path", path, str)
     if not is_valid_path(cast(str, path)):
         _fail(name, label, f"bad field path: {_short(path)} is not a valid path")
-    description, aliases, sources, last_updated = _canonical_metadata(name, label, entry.metadata)
-    if not (type(entry.version) is str and entry.version):
+    metadata = _get(name, label, value, "metadata")
+    description, aliases, sources, last_updated = _canonical_metadata(name, label, metadata)
+    v = _get(name, label, value, "version")
+    if not (type(v) is str and v):
         _fail(name, label, "bad field version: not a non-empty str")
     return (cast(str, path), description, aliases, sources, last_updated)
 
@@ -477,9 +496,8 @@ def _canonical_entries(name: str, label: str, value: object, /) -> tuple[Canonic
 def canonical_page(name: str, label: str, value: object, /) -> CanonicalPage:
     """Check a ListPage by exact type; return (canonical entries, next_cursor is None)."""
     _outer(name, label, value, ListPage)
-    page = cast(ListPage, value)
-    entries = _canonical_entries(name, label, page.entries)
-    cursor = cast(object, page.next_cursor)
+    entries = _canonical_entries(name, label, _get(name, label, value, "entries"))
+    cursor = _get(name, label, value, "next_cursor")
     if cursor is not None:
         _exact(name, label, "next_cursor", cursor, str)
     return (entries, cursor is None)
@@ -488,16 +506,15 @@ def canonical_page(name: str, label: str, value: object, /) -> CanonicalPage:
 def canonical_index(name: str, label: str, value: object, /) -> CanonicalIndex:
     """Check a MemoryIndex by exact type; return (canonical entries, ((prefix, omitted), ...))."""
     _outer(name, label, value, MemoryIndex)
-    index = cast(MemoryIndex, value)
-    entries = _canonical_entries(name, label, index.entries)
-    capped = cast(object, index.capped)
+    entries = _canonical_entries(name, label, _get(name, label, value, "entries"))
+    capped = _get(name, label, value, "capped")
     _exact(name, label, "capped", capped, tuple)
     result: list[tuple[str, int]] = []
     for i, cap in enumerate(cast(tuple[object, ...], capped)):
         _exact(name, label, f"capped[{i}]", cap, CappedPrefix)
-        prefix = cast(object, cast(CappedPrefix, cap).prefix)
+        prefix = _get(name, label, cap, "prefix")
         _exact(name, label, f"capped[{i}].prefix", prefix, str)
-        omitted = cast(object, cast(CappedPrefix, cap).omitted)
+        omitted = _get(name, label, cap, "omitted")
         _exact(name, label, f"capped[{i}].omitted", omitted, int)
         result.append((cast(str, prefix), cast(int, omitted)))
     return (entries, tuple(result))
