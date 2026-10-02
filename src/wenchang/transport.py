@@ -1,10 +1,9 @@
 """Transport-agnostic client contract mirroring the core API.
 
-The tool layer calls a `TransportClient`; a concrete implementation is
-injected at startup. The in-process implementation calls `MemoryStore`
-directly; a remote implementation (for example gRPC) calls a service that
-wraps one. Both must be behaviorally indistinguishable, which the transport
-conformance suite in `wenchang.testing` checks.
+The tool layer calls a `TransportClient`. A concrete implementation is
+injected at startup and may run in-process over `MemoryStore` or remotely
+(for example over gRPC); implementations must be behaviorally
+indistinguishable.
 """
 
 from collections.abc import Mapping
@@ -21,7 +20,7 @@ __all__ = ["TransportClient"]
 class TransportClient(Protocol):
     """The seven memory operations over any transport.
 
-    Each of the six operations that `MemoryStore` already implements mirrors
+    Each of the six operations that `MemoryStore` implements mirrors
     the `MemoryStore` method of the same name: the same parameters, the same
     return type, and, for well-typed arguments, exactly the same exception
     types with equal attributes and message. That covers the
@@ -35,7 +34,8 @@ class TransportClient(Protocol):
     came from an in-process call or a remote one. A failure of the
     transport itself (a timeout, a refused connection, a crashed server)
     surfaces as `BackendUnavailableError` with the matching
-    `TransientReason`. `get_memory_index` follows
+    `TransientReason`, never as a transport library's own exception type.
+    `get_memory_index` follows
     `MemoryStore.get_memory_index` the same way.
     """
 

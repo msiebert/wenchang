@@ -90,8 +90,10 @@ imports `typing.Protocol`, `typing.runtime_checkable`,
 8. **`CappedPrefix` and `MemoryIndex` validate types at construction**, as
    `identity` does (ADR 0014 §9), because a remote client builds them from
    deserialized data. Real-type checks (`issubclass(type(x), ...)`) for
-   scalars and members, exact `tuple` for the two container fields (a
-   `tuple` subclass can lie through `__iter__`, `__eq__`, or `__hash__`),
+   the two scalars, which are then normalized; exact types for the two
+   container fields and their members (a `tuple`, `FileEntry`, or
+   `CappedPrefix` subclass can lie through `__iter__`, `__getattribute__`,
+   `__eq__`, or `__hash__`, defeating the duplicate checks or equality),
    `bool` rejected for `omitted`, `str` subclass prefix normalized with
    `str.__str__`, `int` subclass `omitted` normalized with `int.__index__`
    before the `<= 0` check, duplicate `capped` prefixes and duplicate
@@ -148,8 +150,8 @@ class MemoryIndex:
 
     def __post_init__(self) -> None:
         # TypeError if type(self.entries) is not tuple, or type(self.capped) is not tuple
-        # TypeError for any entries member with not issubclass(type(e), FileEntry)
-        # TypeError for any capped member with not issubclass(type(c), CappedPrefix)
+        # TypeError for any entries member with type(e) is not FileEntry
+        # TypeError for any capped member with type(c) is not CappedPrefix
         # ValueError(f"duplicate entry path: {p!r}") if two entries share a path
         # ValueError(f"duplicate capped prefix: {p!r}") if two capped members share a prefix
         ...

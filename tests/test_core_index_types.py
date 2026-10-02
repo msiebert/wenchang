@@ -4,6 +4,7 @@ Covers AIE-1048, US3.1 through US3.6.
 """
 
 import dataclasses
+import itertools
 from datetime import UTC, datetime
 
 import pytest
@@ -32,11 +33,14 @@ def _entry(path: str = "user/u-1/notes/a.md", version: str = "1") -> FileEntry:
 
 
 class _StrSub(str):
-    pass
+    """str subclass whose __str__ claims to be a valid prefix."""
+
+    def __str__(self) -> str:
+        return PREFIX
 
 
 class _LyingInt(int):
-    """int subclass whose comparisons claim it is always positive."""
+    """int subclass whose comparisons and conversions claim it is 5."""
 
     def __le__(self, other: int, /) -> bool:
         return False
@@ -51,7 +55,53 @@ class _LyingInt(int):
         return True
 
     def __index__(self) -> int:
-        return int.__int__(self)
+        return 5
+
+    def __int__(self) -> int:
+        return 5
+
+
+class _SpoofsFileEntry:
+    """Passes isinstance(x, FileEntry) via __class__ without being a FileEntry."""
+
+    @property
+    def __class__(self) -> type[FileEntry]:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return FileEntry
+
+
+class _SpoofsCappedPrefix:
+    """Passes isinstance(x, CappedPrefix) via __class__ without being a CappedPrefix."""
+
+    @property
+    def __class__(self) -> type[CappedPrefix]:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return CappedPrefix
+
+
+class _SpoofsStr:
+    """Passes isinstance(x, str) via __class__ without being a str."""
+
+    @property
+    def __class__(self) -> type[str]:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return str
+
+
+class _FileEntrySub(FileEntry):
+    pass
+
+
+class _CappedPrefixSub(CappedPrefix):
+    pass
+
+
+class _ShiftingPathEntry(FileEntry):
+    """FileEntry subclass reporting a fresh distinct path on every access."""
+
+    _reads = itertools.count()
+
+    def __getattribute__(self, name: str) -> object:
+        if name == "path":
+            return f"user/u-1/notes/shift-{next(_ShiftingPathEntry._reads)}.md"
+        return super().__getattribute__(name)
 
 
 class _EntryTuple(tuple[FileEntry, ...]):
@@ -142,9 +192,34 @@ def test_capped_prefix_normalizes_int_subclass() -> None:
 
 
 def test_capped_prefix_rejects_lying_non_positive_int_subclass() -> None:
-    """AIE-1048, US3.3: an int subclass with a lying __le__ and value -3 raises ValueError."""
+    """AIE-1048, US3.3: an int subclass with lying comparisons and value -3 raises ValueError."""
     with pytest.raises(ValueError):
         CappedPrefix(PREFIX, _LyingInt(-3))
+
+
+def test_capped_prefix_int_normalization_ignores_overridden_conversions() -> None:
+    """AIE-1048, US3.3: omitted normalizes by real value, not an overridden __int__/__index__."""
+    lying = _LyingInt(-3)
+    assert int(lying) == 5
+    assert lying.__index__() == 5
+    with pytest.raises(ValueError):
+        CappedPrefix(PREFIX, lying)
+
+
+def test_capped_prefix_str_normalization_ignores_overridden_str() -> None:
+    """AIE-1048, US3.3: prefix normalizes by real value, not an overridden __str__."""
+    bad = _StrSub("bad")
+    assert str(bad) == PREFIX
+    with pytest.raises(ValueError):
+        CappedPrefix(bad, 1)
+
+
+def test_capped_prefix_rejects_isinstance_spoofing_prefix() -> None:
+    """AIE-1048, US3.3: a prefix whose __class__ claims str but is not one raises TypeError."""
+    spoof: object = _SpoofsStr()
+    assert isinstance(spoof, str)
+    with pytest.raises(TypeError):
+        CappedPrefix(spoof, 1)  # pyright: ignore[reportArgumentType]
 
 
 # US3.4
@@ -208,18 +283,66 @@ def test_memory_index_rejects_tuple_subclass_capped() -> None:
         MemoryIndex(capped=_CappedTuple((CappedPrefix(PREFIX, 1),)))
 
 
-@pytest.mark.parametrize("member", [CappedPrefix(PREFIX, 1), object(), "user/u-1/notes/a.md"])
+@pytest.mark.parametrize(
+    "member",
+    [CappedPrefix(PREFIX, 1), object(), "user/u-1/notes/a.md"],
+    ids=["capped-prefix", "object", "str"],
+)
 def test_memory_index_rejects_non_file_entry_member(member: object) -> None:
     """AIE-1048, US3.5: an entries member that is not a FileEntry raises TypeError."""
     with pytest.raises(TypeError):
         MemoryIndex(entries=(_entry(), member))  # pyright: ignore[reportArgumentType]
 
 
-@pytest.mark.parametrize("member", [_entry(), object(), PREFIX])
+@pytest.mark.parametrize(
+    "member", [_entry(), object(), PREFIX], ids=["file-entry", "object", "str"]
+)
 def test_memory_index_rejects_non_capped_prefix_member(member: object) -> None:
     """AIE-1048, US3.5: a capped member that is not a CappedPrefix raises TypeError."""
     with pytest.raises(TypeError):
         MemoryIndex(capped=(CappedPrefix(OTHER_PREFIX, 1), member))  # pyright: ignore[reportArgumentType]
+
+
+def test_memory_index_rejects_isinstance_spoofing_entry() -> None:
+    """AIE-1048, US3.5: an entries member whose __class__ claims FileEntry raises TypeError."""
+    spoof: object = _SpoofsFileEntry()
+    assert isinstance(spoof, FileEntry)
+    with pytest.raises(TypeError):
+        MemoryIndex(entries=(spoof,))  # pyright: ignore[reportArgumentType]
+
+
+def test_memory_index_rejects_isinstance_spoofing_capped() -> None:
+    """AIE-1048, US3.5: a capped member whose __class__ claims CappedPrefix raises TypeError."""
+    spoof: object = _SpoofsCappedPrefix()
+    assert isinstance(spoof, CappedPrefix)
+    with pytest.raises(TypeError):
+        MemoryIndex(capped=(spoof,))  # pyright: ignore[reportArgumentType]
+
+
+def test_memory_index_rejects_file_entry_subclass_member() -> None:
+    """AIE-1048, US3.5: an entries member that is a FileEntry subclass raises TypeError."""
+    member = _FileEntrySub(path=PREFIX + "a.md", metadata=_metadata(), version=VersionToken("1"))
+    with pytest.raises(TypeError):
+        MemoryIndex(entries=(member,))
+
+
+def test_memory_index_rejects_capped_prefix_subclass_member() -> None:
+    """AIE-1048, US3.5: a capped member that is a CappedPrefix subclass raises TypeError."""
+    with pytest.raises(TypeError):
+        MemoryIndex(capped=(_CappedPrefixSub(PREFIX, 1),))
+
+
+def test_memory_index_rejects_subclass_defeating_duplicate_detection() -> None:
+    """AIE-1048, US3.5: FileEntry subclasses whose path shifts on each read raise TypeError."""
+    first = _ShiftingPathEntry(
+        path=PREFIX + "a.md", metadata=_metadata(), version=VersionToken("1")
+    )
+    second = _ShiftingPathEntry(
+        path=PREFIX + "a.md", metadata=_metadata(), version=VersionToken("2")
+    )
+    assert first.path != first.path
+    with pytest.raises(TypeError):
+        MemoryIndex(entries=(first, second))
 
 
 def test_memory_index_rejects_duplicate_entry_paths() -> None:

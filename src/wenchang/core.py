@@ -61,6 +61,14 @@ def _count_occurrences(content: str, old_string: str) -> int:
         index = found + 1
 
 
+def _type_name(t: type) -> str:
+    # A metaclass may make __name__ raise or return a str subclass.
+    try:
+        return str.__str__(t.__name__)
+    except Exception:
+        return "<unnamed>"
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -108,9 +116,9 @@ class CappedPrefix:
         prefix = cast(object, self.prefix)
         omitted = cast(object, self.omitted)
         if not issubclass(type(prefix), str):
-            raise TypeError(f"prefix must be a str, not {type(prefix).__name__}")
+            raise TypeError(f"prefix must be a str, not {_type_name(type(prefix))}")
         if issubclass(type(omitted), bool) or not issubclass(type(omitted), int):
-            raise TypeError(f"omitted must be an int, not {type(omitted).__name__}")
+            raise TypeError(f"omitted must be an int, not {_type_name(type(omitted))}")
         # Exact str and int, so overridden subclass methods cannot mislead validation.
         exact_prefix = str.__str__(cast(str, prefix))
         exact_omitted = int.__index__(cast(int, omitted))
@@ -137,15 +145,20 @@ class MemoryIndex:
     capped: tuple[CappedPrefix, ...] = ()
 
     def __post_init__(self) -> None:
-        # Exact tuples: a tuple subclass can lie through __iter__, __eq__, or __hash__.
+        # Exact types: a subclass can lie through __iter__, __eq__, __hash__, or
+        # __getattribute__, defeating duplicate detection and equality.
         if type(self.entries) is not tuple or type(self.capped) is not tuple:
             raise TypeError("entries and capped must be exact tuples")
         for entry in cast(tuple[object, ...], self.entries):
-            if not issubclass(type(entry), FileEntry):
-                raise TypeError(f"entries member must be a FileEntry, not {type(entry).__name__}")
+            if type(entry) is not FileEntry:
+                raise TypeError(
+                    f"entries member must be a FileEntry, not {_type_name(type(entry))}"
+                )
         for cap in cast(tuple[object, ...], self.capped):
-            if not issubclass(type(cap), CappedPrefix):
-                raise TypeError(f"capped member must be a CappedPrefix, not {type(cap).__name__}")
+            if type(cap) is not CappedPrefix:
+                raise TypeError(
+                    f"capped member must be a CappedPrefix, not {_type_name(type(cap))}"
+                )
         paths: set[str] = set()
         for entry in self.entries:
             if entry.path in paths:

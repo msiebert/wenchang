@@ -220,7 +220,7 @@ def test_transport_client_cannot_be_instantiated() -> None:
 
 def test_transport_module_imports_are_restricted() -> None:
     """transport.py imports only core, file_format, and version_token from wenchang,
-    with no __future__ import and no TYPE_CHECKING guard (AIE-1048, US4.1).
+    all at module level, with no __future__ import and no TYPE_CHECKING guard (AIE-1048, US4.1).
     """
     tree = ast.parse(TRANSPORT_MODULE.read_text(), filename=str(TRANSPORT_MODULE))
     modules = _imported_modules(tree)
@@ -238,11 +238,18 @@ def test_transport_module_imports_are_restricted() -> None:
         for child in ast.walk(node)
         if isinstance(child, ast.Import | ast.ImportFrom)
     ]
+    top_level = {id(node) for node in tree.body}
+    nested = [
+        f"line {node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import | ast.ImportFrom) and id(node) not in top_level
+    ]
 
     assert disallowed_wenchang == []
     assert forbidden == []
     assert "__future__" not in modules
     assert guarded == []
+    assert nested == [], "every import must be a top-level module statement"
 
 
 def test_core_does_not_import_transport() -> None:
@@ -263,10 +270,9 @@ def test_library_cites_no_linear_ids() -> None:
     files = sorted(PACKAGE_DIR.rglob("*.py"))
     assert files, f"no modules found under {PACKAGE_DIR}"
 
-    matches = {
-        str(path.relative_to(REPO_ROOT)): LINEAR_ID.findall(path.read_text())
-        for path in files
-        if LINEAR_ID.search(path.read_text())
+    found = {
+        str(path.relative_to(REPO_ROOT)): LINEAR_ID.findall(path.read_text()) for path in files
     }
+    matches = {name: ids for name, ids in found.items() if ids}
 
     assert matches == {}

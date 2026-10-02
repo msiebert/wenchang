@@ -154,13 +154,19 @@ annotation.
    `MemoryIndex()` is the empty index.
 5. **Given** `entries` or `capped` whose exact type is not `tuple` (a
    `list`, or a `tuple` subclass), **Then** `TypeError`. **Given** an
-   `entries` member whose real type is not `FileEntry`, or a `capped`
-   member whose real type is not `CappedPrefix`, **Then** `TypeError`.
-   **Given** two `capped` members with the same `prefix`, or two `entries`
-   members with the same `path`, **Then** `ValueError`. Member *contents*
-   are not validated beyond that: `FileEntry` validates nothing itself, and
-   the correctness of remote-built `MemoryFile`, `FileEntry`, and
-   `ListPage` values is an AIE-1045 parity case.
+   `entries` member whose exact type is not `FileEntry` (`type(e) is
+   FileEntry`; a `FileEntry` subclass or a `__class__` spoof is rejected),
+   or a `capped` member whose exact type is not `CappedPrefix`, **Then**
+   `TypeError`. Exact types are required because the duplicate checks read
+   `path` and `prefix` through the member, and a subclass with a lying
+   `__getattribute__` or `__eq__` could defeat them or break US3.6
+   equality. **Given** two `capped` members with the same `prefix`, or two
+   `entries` members with the same `path`, **Then** `ValueError`. Member
+   *contents* are not validated beyond that: `FileEntry` validates nothing
+   itself (its `path` may even be a `str` subclass), and the correctness of
+   remote-built `MemoryFile`, `FileEntry`, and `ListPage` values is an
+   AIE-1045 parity case. A `CappedPrefix` built around validation with
+   `object.__new__` is likewise not re-validated.
 6. **Given** two `MemoryIndex` values with equal fields, **Then** they are
    equal and hash equal; values differing in any field compare unequal.
 
@@ -221,11 +227,11 @@ annotation.
 - **FR-003**: `wenchang.core` MUST export `CappedPrefix(prefix: str,
   omitted: int)` and `MemoryIndex(entries: tuple[FileEntry, ...] = (),
   capped: tuple[CappedPrefix, ...] = ())`, both frozen dataclasses, with the
-  validation in US3.2, US3.3, and US3.5. Member and scalar type checks use
-  the real type (`issubclass(type(x), ...)`), never `isinstance`; the two
-  container fields require exact `tuple` (`type(x) is tuple`); `str` and
-  `int` scalars are normalized to exact types; and `TypeError` precedes
-  `ValueError`.
+  validation in US3.2, US3.3, and US3.5. Scalar type checks use the real
+  type (`issubclass(type(x), ...)`), never `isinstance`, and `str` and
+  `int` scalars are then normalized to exact types; the two container
+  fields require exact `tuple` and their members exact `FileEntry` /
+  `CappedPrefix` (`type(x) is ...`); and `TypeError` precedes `ValueError`.
 - **FR-004**: The protocol class docstring MUST state the error-parity
   contract exactly as in US1.5, naming the non-taxonomy exception types.
   The module MUST cite no Linear IDs.

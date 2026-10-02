@@ -24,7 +24,7 @@ and `MemoryStore.get_memory_index`), AIE-1044 (tools), AIE-1047/1045
 | 6 | a class missing any one method | `isinstance` | `False` (parametrized) |
 | 7 | `TransportClient()` | instantiate | `TypeError` |
 | 8 | `CappedPrefix("user/u-1/notes/", 12)` | build | frozen; `omitted <= 0` or an invalid prefix → `ValueError`; non-`str` prefix or non-`int`/`bool` omitted → `TypeError` first; `str`/`int` subclasses stored as exact types |
-| 9 | `MemoryIndex()` | build | frozen; `entries == ()` and `capped == ()`; non-exact-`tuple` fields or wrong member types → `TypeError`; duplicate capped prefix or entry path → `ValueError`; equal values hash equal |
+| 9 | `MemoryIndex()` | build | frozen; `entries == ()` and `capped == ()`; non-exact-`tuple` fields or non-exact-type members (subclasses included) → `TypeError`; duplicate capped prefix or entry path → `ValueError`; equal values hash equal |
 | 10 | `transport.py`, `core.py` | `ast` scan | transport imports only `core`, `file_format`, `version_token` from `wenchang`, at module level, no `__future__`; core does not import transport; no `AIE-\d+` under `src/` |
 
 ## Key design decisions

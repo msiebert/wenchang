@@ -11,15 +11,18 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-eight implemented modules: the cross-cutting `errors` and `version_token`; the
+nine implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-`list_prefix`, `append_line`, and `delete_file`; `identity`, the
-injected identity resolver boundary; and `scope`, the tool-layer write
-checks (`system/` read-only and role-gated write restriction). `scope` takes
-an `Identity` value, but no module calls `identity` or `scope` yet. A ninth,
-`testing`, is adopter-facing rather than part of the runtime: the
+`list_prefix`, `append_line`, and `delete_file`, plus the index value types
+`MemoryIndex` and `CappedPrefix`; `identity`, the injected identity resolver
+boundary; `scope`, the tool-layer write checks (`system/` read-only and
+role-gated write restriction); and `transport`, the `TransportClient`
+protocol the tool layer will call. `scope` takes an `Identity` value, but
+no module calls `identity` or `scope` yet, and nothing implements or calls
+`TransportClient` yet. A tenth, `testing`, is adopter-facing rather than
+part of the runtime: the
 executable resolver conformance suite an adopter runs against their own
 identity resolver, installed with the optional `wenchang[testing]` extra.
 The module map below is the
@@ -258,16 +261,49 @@ implemented.
   corrupt metadata is still deletable. Deleting leaves no tombstone: a
   version token from before a delete is never equal to the token of a file
   later recreated at the same path, since both GCS generations and the
-  in-memory fake's counter are monotonic. `get_memory_index` is
-  *(planned)*.
+  in-memory fake's counter are monotonic. `get_memory_index(scope_map) ->
+  MemoryIndex` is *(planned)*, but its two value types exist.
+  `CappedPrefix(prefix, omitted)` is a frozen value naming a prefix the
+  index could not return in full and how many files under it were left
+  out. `MemoryIndex(entries=(), capped=())` is a frozen value holding
+  `entries: tuple[FileEntry, ...]` and `capped: tuple[CappedPrefix, ...]`;
+  `MemoryIndex()` is the empty index. `entries` is taken as already in load
+  order — `system/` areas across all scopes first, then the remaining
+  scopes in the configured priority order (or as one tier if none is
+  configured), within each tier by `last-updated`, most recent first — and
+  is never re-sorted or order-checked; an empty `capped` means the index is
+  complete. Both validate at construction, because a remote transport
+  client builds them from deserialized data, with every `TypeError` check
+  before any `ValueError` check. `CappedPrefix`: a `prefix` whose real type
+  (`issubclass(type(x), str)`) is not `str`, or an `omitted` that is a
+  `bool` or not an `int`, raises `TypeError` (so `CappedPrefix("", True)`
+  is a `TypeError`); `prefix` is then stored as an exact `str`
+  (`str.__str__`) and `omitted` as an exact `int` (`int.__index__`), and
+  the value checks run on those normalized values, so a subclass with a
+  lying `__le__` cannot store a non-positive count; a prefix failing
+  `is_valid_prefix` or `omitted <= 0` raises `ValueError`. `MemoryIndex`
+  requires exact types throughout: a field whose type is not exactly
+  `tuple` (a `list` or a `tuple` subclass) raises `TypeError`, as does any
+  member whose type is not exactly `FileEntry` or `CappedPrefix`
+  respectively (`type(x) is ...`), so subclasses are rejected rather than
+  normalized, since a subclass could lie through `__iter__`,
+  `__getattribute__`, `__eq__`, or `__hash__` and defeat the duplicate
+  checks or equality; two entries sharing a `path` or two capped members
+  sharing a `prefix` then raise `ValueError`. Only the two `CappedPrefix`
+  scalars use real-type checks plus normalization. Member contents are not
+  validated beyond that (a `FileEntry`'s fields, including a `str`-subclass
+  `path`, are taken as given). Type names in these messages are read
+  through a guarded helper that reports `<unnamed>` if `__name__` raises
+  or is not a `str`. Equality and hashing are the dataclass defaults.
   See
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
   [ADR 0009](docs/adr/0009-replace-fact-semantics.md),
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md),
   [ADR 0011](docs/adr/0011-append-line-version-guard.md),
-  [ADR 0012](docs/adr/0012-delete-file.md), and
-  [ADR 0013](docs/adr/0013-write-file-source.md).
+  [ADR 0012](docs/adr/0012-delete-file.md),
+  [ADR 0013](docs/adr/0013-write-file-source.md), and
+  [ADR 0019](docs/adr/0019-transport-client-interface.md).
 - **identity** — the injected-dependency boundary through which the
   library learns who the caller is; it has no notion of users,
   organizations, or roles of its own, and imports only `errors` and
@@ -445,10 +481,45 @@ implemented.
   library imports it. It requires the `wenchang[testing]` extra
   (`testing = ["pytest>=8.3"]` under `[project.optional-dependencies]`). See
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md).
-- **transport** *(planned)* — an abstract client interface mirroring the
-  core API, with an in-process implementation now and a remote (gRPC)
-  implementation later. In-process and remote implementations must be
-  behaviorally indistinguishable, verified by a shared conformance suite.
+- **transport** — the transport-agnostic client contract the tool layer
+  calls, so a transport is added by writing another implementation without
+  touching tool definitions. `TransportClient` is a runtime-checkable,
+  synchronous `Protocol` of exactly seven methods: `read_file`,
+  `write_file`, `append_line`, `replace_fact`, `list_prefix`,
+  `delete_file`, and `get_memory_index(scope_map: Mapping[str, str]) ->
+  MemoryIndex`. The six operations `MemoryStore` already implements mirror
+  it exactly — parameter names, kinds, defaults, annotations, and return
+  type, including keyword-only `source` and `list_prefix`'s `cursor:
+  ListCursor | None = None` — pinned by a test comparing
+  `inspect.signature(..., eval_str=True)` of each pair, so the tool layer is
+  written once and an in-process client can be a pure pass-through. The
+  module therefore has no `from __future__ import annotations` and imports
+  its annotation types at module level, never under `TYPE_CHECKING`.
+  `runtime_checkable` checks method presence only; signatures are held by
+  that test and pyright, behavior by the conformance suite. The class
+  docstring states the error-parity contract: for well-typed arguments,
+  each mirrored method raises exactly the exception types the matching
+  `MemoryStore` method raises, with equal attributes and message — the
+  `wenchang.errors` taxonomy (same category and payload) and the
+  non-taxonomy types core raises, including `ValueError` (empty `source` or
+  `old_string`, non-fact `line`, malformed or foreign `cursor`),
+  `MetadataFormatError`, and `UnicodeDecodeError`. A client never reshapes
+  an error into its own vocabulary or lets a transport library's exception
+  escape; a failure of the transport itself (timeout, refused connection,
+  crashed server) surfaces as `BackendUnavailableError` with the matching
+  `TransientReason`. Wrongly typed arguments are outside the contract.
+  `get_memory_index` follows `MemoryStore.get_memory_index` the same way.
+  The protocol is identity-agnostic: `scope_map` is the plain
+  `Identity.scope_map` shape, and no method carries identity or
+  credentials. The tool layer resolves identity and calls
+  `scope.check_write` before any mutating client call; a remote client
+  binds whatever it authenticates with at construction (per session or
+  connection), never per call. It imports from `wenchang` only `core`,
+  `file_format`, and `version_token`, and `core` never imports it. Nothing
+  implements or calls it yet: the in-process client and
+  `MemoryStore.get_memory_index` are planned, the tool layer is planned,
+  and the transport conformance suite is planned. See
+  [ADR 0019](docs/adr/0019-transport-client-interface.md).
 - **tools** *(planned)* — the agent-facing tool layer: thin wrappers over
   the transport client, carrying no policy, each described by a docstring.
 - **prompts** *(planned)* — instruction text for filing, deduplication,
@@ -488,12 +559,14 @@ flowchart TB
 
 `errors` and `version_token` are cross-cutting (imported by every layer
 above) and are omitted from the diagram to keep it readable. `file_format`
-is dependency-free and used by `core` and `storage`; it is also omitted
+is dependency-free and used by `core`, `storage`, and `transport` (for the
+`FileMetadata` annotation); it is also omitted
 from the diagram since it isn't wired into the request path shown there.
 `paths` is likewise dependency-free and omitted; `core`, `identity`, and
 `scope` use it for validation, and `scope` reads the area via `parse_path`.
-`identity` sits beside `core` with no arrow: the tool and transport layers
-will call `resolve_identity`, and nothing calls it yet. `scope` imports the
+`identity` sits beside `core` with no arrow: the tool layer will call
+`resolve_identity`, and nothing calls it yet; `transport` never sees an
+identity. `scope` imports the
 `Identity` type to read grants but never calls a resolver, so the diagram
 shows no edge between them. `scope` sits outside
 the Core subgraph with only the `tools --> scope` edge: the tool layer
@@ -583,6 +656,14 @@ module depending on it.
   `ResolverFailureError` raised `from None`, so no exception message that
   might carry a credential reaches a rendered traceback (see
   [ADR 0014](docs/adr/0014-identity-resolver.md)).
+- **The transport mirrors core exactly.** Each of `TransportClient`'s six
+  operations shared with `MemoryStore` has an identical signature (held by
+  an `inspect.signature` equality test), and for well-typed arguments every
+  client raises exactly the exceptions `MemoryStore` raises, taxonomy and
+  non-taxonomy alike, with equal attributes and message; only failures of
+  the transport itself map to `BackendUnavailableError`. The transport adds
+  no identity, policy, or error vocabulary of its own (see
+  [ADR 0019](docs/adr/0019-transport-client-interface.md)).
 - **pytest stays optional.** Nothing outside `wenchang.testing` imports
   pytest or `wenchang.testing`; the library imports with pytest absent (see
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md)).
