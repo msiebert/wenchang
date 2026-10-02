@@ -567,7 +567,8 @@ implemented.
   Each tool runs its checks in a fixed order, raising the first failure:
   `scope`, `area`, `name` type check (normalized to exact `str` via
   `str.__str__`) and UTF-8 encodability check; the grant check (`scope in
-  identity.grants`); path building; for mutating tools only,
+  identity.grants`); path building; the `area` and `name` rules (below);
+  for mutating tools only,
   `scope.check_write(path, identity, policy)`; the remaining arguments;
   then the client call, which receives the same path object `check_write`
   validated. `read_file`, `list_prefix`, and `get_memory_index` never call
@@ -575,6 +576,15 @@ implemented.
   `NOT_GRANTED` and `INVALID_PATH` are unreachable through the tools; it
   still runs on every mutation as the single home of the `system/` and role
   rules.
+  The tools narrow what core `paths` accepts, so a lookalike of `system`
+  (`System`, a Cyrillic `ѕystem`, an inserted zero-width character) can't
+  be addressed: every `area` (including `list_prefix`'s, when given) must
+  match `^[a-z0-9][a-z0-9_-]*$`, and `name`, which stays Unicode, must not
+  contain a `Cf` character, `\u2028`, `\u2029`, or a Unicode noncharacter.
+  A violation raises `InvalidArgumentError("area")` or `("name")` directly,
+  with a detail naming the rule and no `__cause__`, before `check_write`
+  and the client. Core paths, storage, and the transport are unaffected
+  (see [ADR 0022](docs/adr/0022-tool-layer.md) decision 14).
   Every rejection of an agent-supplied argument is the recoverable
   `InvalidArgumentError`, never `TypeError`: a wrong real type (detail
   `"{argument} must be a string, not {type_name}"`, `str` subclasses

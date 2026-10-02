@@ -10,6 +10,8 @@ render_result and render_error produce the JSON-safe form a host shows the
 agent.
 """
 
+import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import Enum
@@ -62,6 +64,8 @@ _LINE_BOUNDARIES: Final[tuple[str, ...]] = (
     "\u2028",
     "\u2029",
 )
+
+_AREA_SLUG: Final = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 # Marks a field render_error omits because it has no JSON-safe form.
 _DROP: Final = object()
@@ -142,7 +146,7 @@ class MemoryTools:
         `scope` is one of the scopes available in this session, `area` is the
         folder inside it, and `name` is the file name without `.md`. Any area
         may be read, including `system/`. Keep the returned version: pass it
-        as `expected_version` when you change the file.
+        as `expected_version` when you change the file. Areas are lowercase ASCII slugs.
         """
         path = self._path(scope, area, name)
         return self._client.read_file(path)
@@ -156,7 +160,7 @@ class MemoryTools:
         given, narrows the listing to one folder. Each page returns entries
         with metadata and version, and a `next_cursor`. When `next_cursor` is
         not null, pass it back as `cursor` with the same `scope` and `area` to
-        get the next page.
+        get the next page. Areas are lowercase ASCII slugs.
         """
         prefix = self._prefix(scope, area)
         if cursor is None:
@@ -186,7 +190,7 @@ class MemoryTools:
         and `aliases` replace the stored values; they are not merged with
         what was there. A per-file byte ceiling applies: an oversize write is
         rejected with the current size and the limit, so shorten the content
-        and retry. The `system/` area is read-only.
+        and retry. The `system/` area is read-only. Areas are lowercase ASCII slugs.
 
         A version conflict is routine: someone else changed the file since
         you read it. The error carries the current content and version;
@@ -222,7 +226,7 @@ class MemoryTools:
         `[stated]`, `[observed]`, `[inferred]`, or `[system]`, for example
         `- [stated] Prefers tea`. Pass the version you read as
         `expected_version`. The per-file byte ceiling applies to the result.
-        The `system/` area is read-only.
+        The `system/` area is read-only. Areas are lowercase ASCII slugs.
 
         A version conflict is routine: someone else changed the file since
         you read it. The error carries the current content and version;
@@ -259,6 +263,7 @@ class MemoryTools:
         version so you can quote a longer, unique span. `new_string` replaces
         it. Pass the version you read as `expected_version`. The per-file
         byte ceiling applies to the result. The `system/` area is read-only.
+        Areas are lowercase ASCII slugs.
 
         A version conflict is routine: someone else changed the file since
         you read it. The error carries the current content and version;
@@ -282,7 +287,7 @@ class MemoryTools:
         `scope` is one of the scopes available in this session, `area` is the
         folder inside it, and `name` is the file name without `.md`. Pass the
         version you read as `expected_version`. The `system/` area is
-        read-only.
+        read-only. Areas are lowercase ASCII slugs.
 
         A version conflict is routine: someone else changed the file since
         you read it. The error carries the current content and version;
@@ -314,10 +319,13 @@ class MemoryTools:
         _encodable("name", name)
         entity_id = self._entity(scope)
         try:
-            return build_path(scope, entity_id, area, name)
+            path = build_path(scope, entity_id, area, name)
         except ValueError as exc:
             argument = "area" if not is_valid_segment(area) else "name"
             raise InvalidArgumentError(argument, str(exc)) from exc
+        _check_area_slug(area)
+        _check_name_chars(name)
+        return path
 
     def _prefix(self, scope: str, area: str | None) -> str:
         scope = _exact("scope", scope)
@@ -328,10 +336,13 @@ class MemoryTools:
             _encodable("area", area)
         entity_id = self._entity(scope)
         try:
-            return build_prefix(scope, entity_id, area)
+            prefix = build_prefix(scope, entity_id, area)
         except ValueError as exc:
             # scope and entity_id are valid by construction, so only area can fail.
             raise InvalidArgumentError("area", str(exc)) from exc
+        if area is not None:
+            _check_area_slug(area)
+        return prefix
 
 
 def _type_name(t: type) -> str:
@@ -365,6 +376,30 @@ def _encodable(argument: str, value: str) -> None:
         value.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise InvalidArgumentError(argument, f"{argument} is not valid UTF-8 text") from exc
+
+
+def _check_area_slug(area: str) -> None:
+    if _AREA_SLUG.fullmatch(area) is None:
+        raise InvalidArgumentError(
+            "area",
+            f"area {area!r} must be a lowercase slug: a-z0-9 first, then a-z0-9, '-' or '_'",
+        )
+
+
+def _check_name_chars(name: str) -> None:
+    for char in name:
+        if _is_forbidden_name_char(char):
+            raise InvalidArgumentError(
+                "name",
+                f"name must not contain invisible, separator, or noncharacter U+{ord(char):04X}",
+            )
+
+
+def _is_forbidden_name_char(char: str) -> bool:
+    code = ord(char)
+    if 0xFDD0 <= code <= 0xFDEF or code & 0xFFFE == 0xFFFE:
+        return True
+    return unicodedata.category(char) in ("Cf", "Zl", "Zp")
 
 
 def _aliases(aliases: object) -> tuple[str, ...]:
