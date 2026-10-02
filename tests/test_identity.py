@@ -7,7 +7,8 @@ Covers AIE-1043, US1, US2.1-4, US2.7-9, US3, and US4 (FR-001 to FR-006, SC-001).
 import copy
 import dataclasses
 import pickle
-from collections.abc import ItemsView, Iterator, Mapping
+import traceback
+from collections.abc import Callable, ItemsView, Iterator, Mapping
 
 import pytest
 
@@ -876,3 +877,59 @@ def test_return_with_raising_type_name_reports_unnamed() -> None:
         "Resolver _WrongTypeResolver returned <unnamed>, not Identity or ResolutionFailure."
     )
     assert SECRET not in str(err)
+
+
+TRACEBACK_MARKER = "SECRET-TOKEN"
+
+
+class _DetailRaisingFailure(ResolutionFailure):
+    """A ResolutionFailure whose detail property raises with a secret message."""
+
+    @property
+    def detail(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+        raise RuntimeError(TRACEBACK_MARKER)
+
+
+def _detail_raising_failure() -> ResolutionFailure:
+    # Bypasses __init__, which would try to assign the read-only detail property.
+    return object.__new__(_DetailRaisingFailure)
+
+
+_FAILURE_PATHS: dict[str, Callable[[], IdentityResolver[object]]] = {
+    "raises": lambda: _RaisingResolver(RuntimeError(TRACEBACK_MARKER)),
+    "returns_failure": lambda: _FixedResolver(ResolutionFailure("token expired")),
+    "failure_detail_raises": lambda: _FixedResolver(_detail_raising_failure()),
+    "wrong_type": lambda: _WrongTypeResolver(42),
+}
+
+
+@pytest.mark.parametrize("path", list(_FAILURE_PATHS), ids=list(_FAILURE_PATHS))
+def test_resolver_failure_error_carries_no_cause_or_context(path: str) -> None:
+    """Every resolve_identity failure path raises a ResolverFailureError with no
+    __cause__, no __context__, and a suppressed context (AIE-1137).
+    """
+    resolver = _FAILURE_PATHS[path]()
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        resolve_identity(resolver, "creds")
+
+    err = excinfo.value
+    assert err.__cause__ is None
+    assert err.__context__ is None
+    assert err.__suppress_context__ is True
+
+
+@pytest.mark.parametrize(
+    "path", ["raises", "failure_detail_raises"], ids=["raises", "failure_detail_raises"]
+)
+def test_resolver_failure_traceback_omits_original_exception_message(path: str) -> None:
+    """The formatted traceback of the ResolverFailureError never includes the
+    resolver's exception message (AIE-1137).
+    """
+    resolver = _FAILURE_PATHS[path]()
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        resolve_identity(resolver, "creds")
+
+    formatted = "".join(traceback.format_exception(excinfo.value))
+    assert TRACEBACK_MARKER not in formatted

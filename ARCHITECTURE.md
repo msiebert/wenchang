@@ -307,7 +307,9 @@ implemented.
   guarded helper that reports `<unnamed>` if `__name__` raises;
   a raised `Exception` (including any `WenchangError`) raises a new
   `ResolverFailureError` naming only the resolver class and exception type,
-  raised `from None`; any other return raises `ResolverFailureError` naming
+  raised `from None`; every `ResolverFailureError` is raised `from None`
+  after its try/except has exited, so no resolver exception is its
+  `__cause__` or `__context__`; any other return raises `ResolverFailureError` naming
   the resolver class and returned type; a `BaseException` that is not an
   `Exception` propagates unchanged. Credentials are never inspected,
   stored, or included in an error. `SandboxResolver(identity)` returns the
@@ -580,8 +582,9 @@ module depending on it.
   construction; the library never handles credentials, only the resolver
   does; resolver failure is permanent and never chained. `resolve_identity`
   passes credentials through opaquely, and every failure it surfaces is a
-  `ResolverFailureError` raised `from None`, so no exception message that
-  might carry a credential reaches a rendered traceback (see
+  `ResolverFailureError` raised `from None` outside any handler for the
+  resolver's exception, so no exception message that might carry a credential is reachable from it,
+  whether through a rendered traceback or the exception chain (see
   [ADR 0014](docs/adr/0014-identity-resolver.md)).
 - **pytest stays optional.** Nothing outside `wenchang.testing` imports
   pytest or `wenchang.testing`; the library imports with pytest absent (see
