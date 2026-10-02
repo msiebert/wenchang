@@ -432,10 +432,7 @@ def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str
                 _file_fields(cast(FileEntry, entry))
                 for entry in _iterate_or_empty(lambda: index.entries)
             ],
-            "capped": [
-                _capped_fields(cast(CappedPrefix, cap))
-                for cap in _iterate_or_empty(lambda: index.capped)
-            ],
+            "capped": _capped_rows(_iterate_or_empty(lambda: index.capped)),
         }
     raise TypeError(f"cannot render a {_type_name(kind)}")
 
@@ -582,12 +579,15 @@ def _iterate_or_empty(read: Callable[[], object]) -> list[object]:
 
 
 def _timestamp_or_drop(read: Callable[[], object]) -> object:
-    """Return read() as UTC ISO-8601 with a "Z" suffix, or _DROP if it is not a datetime."""
+    """Return read() as UTC ISO-8601 with a "Z" suffix, or _DROP if it is not an aware datetime."""
     try:
         value = read()
         if not issubclass(type(value), datetime):
             return _DROP
-        return _timestamp(cast(datetime, value))
+        moment = cast(datetime, value)
+        if moment.utcoffset() is None:
+            return _DROP
+        return _timestamp(moment)
     except Exception:
         return _DROP
 
@@ -597,12 +597,33 @@ def _timestamp(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _capped_fields(cap: CappedPrefix) -> dict[str, object]:
-    # A prefix is scope/, scope/entity/, or scope/entity/area/.
-    segments = cap.prefix.rstrip("/").split("/")
-    return {
-        "prefix": cap.prefix,
-        "scope": segments[0],
-        "area": segments[2] if len(segments) >= 3 else None,
-        "omitted": cap.omitted,
-    }
+def _capped_rows(caps: list[object]) -> list[dict[str, object]]:
+    """Render each capped row, skipping any that cannot render."""
+    rows: list[dict[str, object]] = []
+    for cap in caps:
+        row = _capped_fields(cap)
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def _capped_fields(cap: object) -> dict[str, object] | None:
+    """Render one capped row, or None if its prefix or omitted count is wrongly typed."""
+    try:
+        prefix = _str_or_drop(lambda: cast(CappedPrefix, cap).prefix)
+        if prefix is _DROP:
+            return None
+        omitted = cast(object, cast(CappedPrefix, cap).omitted)
+        kind = type(omitted)
+        if not issubclass(kind, int) or issubclass(kind, bool):
+            return None
+        # A prefix is scope/, scope/entity/, or scope/entity/area/.
+        segments = cast(str, prefix).rstrip("/").split("/")
+        return {
+            "prefix": prefix,
+            "scope": segments[0],
+            "area": segments[2] if len(segments) >= 3 else None,
+            "omitted": int.__int__(cast(int, omitted)),
+        }
+    except Exception:
+        return None

@@ -786,3 +786,45 @@ def test_render_memory_index_with_none_field(field: str) -> None:
 
     assert out == {"entries": [], "capped": []}
     _round_trips(out)
+
+
+def _int_prefix_cap() -> CappedPrefix:
+    cap = CappedPrefix("org/o-9/", 1)
+    # Bypasses __post_init__, which rejects a non-str prefix.
+    object.__setattr__(cap, "prefix", 5)
+    return cap
+
+
+@pytest.mark.parametrize(
+    "make_bad",
+    [lambda: None, _int_prefix_cap],
+    ids=["none-member", "int-prefix"],
+)
+def test_render_memory_index_skips_bad_capped_rows(make_bad: Callable[[], object]) -> None:
+    """AIE-1044, US7.5a: a capped member that is None or has a non-str prefix is
+    skipped without raising; valid rows still render.
+    """
+    index = MemoryIndex()
+    # Bypasses __post_init__ validation, as a hostile caller could.
+    object.__setattr__(index, "capped", (make_bad(), CappedPrefix("user/u-1/notes/", 2)))
+
+    out = render_result(index)
+
+    assert out["capped"] == [
+        {"prefix": "user/u-1/notes/", "scope": "user", "area": "notes", "omitted": 2}
+    ]
+    _round_trips(out)
+
+
+def test_render_memory_file_drops_naive_last_updated() -> None:
+    """AIE-1044, US7.5a: a naive last_updated renders without raising and omits
+    last_updated.
+    """
+    metadata = _metadata_with(last_updated=datetime(2026, 1, 1))
+    file = MemoryFile(_PATH, "body", metadata, _VERSION)
+
+    out = render_result(file)
+
+    assert "last_updated" not in out
+    assert out["description"] == "d"
+    _round_trips(out)
