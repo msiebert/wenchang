@@ -14,8 +14,8 @@ unchanged.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| US1 | area `notes`, `system`, `a-b`, `2026-q4` / area `System`, `ѕystem`, `sys​tem`, `-a`, `a.b`, `café`, fullwidth | any area-taking tool, `list_prefix` included | accepted (`system` still hits `SYSTEM_READ_ONLY`) / `InvalidArgumentError("area")`, detail names the regex, no `__cause__`, no `check_write`, no client call; `""`/`..`/`a/b` keep the `build_path` cause |
-| US2 | name `café`, `日本語`, `Notes` / name with `Cf`, U+2028/9, noncharacter | file tool | accepted / `InvalidArgumentError("name")`, no cause, no client call |
+| US1 | area `notes`, `system`, `a-b`, `2026-q4` / area `System`, `ѕystem`, `sys` + U+200B + `tem`, `-a`, `a.b`, `café`, fullwidth | any area-taking tool, `list_prefix` included | accepted (`system` still hits `SYSTEM_READ_ONLY`) / `InvalidArgumentError("area")`, detail states the slug rule in prose and echoes the value, no `__cause__`, no `check_write`, no client call; `""`/`..`/`a/b` keep the `build_path` cause |
+| US2 | name `café`, `日本語`, `Notes` / name with `Cf`, U+2028/9, noncharacter | file tool | accepted / `InvalidArgumentError("name")` naming the code point, no cause, no client call |
 | US3 | combined bad arguments | call | scope → path building → area → name → `check_write` → other args → client |
 | US4 | docs | read | ADR 0022 decision 14 and open point removed; ARCHITECTURE.md, glossary, tool docstrings state the rule |
 

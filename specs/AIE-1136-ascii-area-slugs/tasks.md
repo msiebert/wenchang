@@ -6,7 +6,8 @@
 
 test-writer adds failing tests to `tests/test_tools.py` for spec US1.1–1.3,
 US2.1–2.2, US3.1–3.4, and US4.4 (docstring phrase); implementer adds
-`_AREA_SLUG`, `_check_area`, `_check_name` and calls them from `_path` /
+`_AREA_SLUG`, `_check_area_slug`, `_check_name_chars`
+(`_is_forbidden_name_char`) and calls them from `_path` /
 `_prefix` per plan.md. `make check` green.
 
 ## T2 — Docs

@@ -28,7 +28,9 @@ address through `wenchang.tools` narrows.
   `\u2028` / `\u2029`, or a Unicode noncharacter (U+FDD0–U+FDEF, and any
   code point whose low 16 bits are `FFFE` or `FFFF`).
 - A violation raises `InvalidArgumentError("area" | "name", detail)` with no
-  `__cause__` and no client call. The detail names the rule.
+  `__cause__` and no client call. The area detail states the slug rule in
+  prose and echoes the value; the name detail names the offending code
+  point.
 - The check runs after the scope-grant check and path building, and before
   `check_write`. It lives in `_path` / `_prefix`, so it applies to every
   tool that takes `area` / `name`, reads and `list_prefix(scope, area)`
@@ -51,7 +53,7 @@ Option **"ASCII slug areas"**. Rejected alternatives:
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 1.1 | area in `notes`, `system`, `a`, `0`, `a-b`, `a_b`, `2026-q4`, `x9_y-z` | any area-taking tool | accepted; `system` still reaches `check_write` and raises `RestrictedScopeError(SYSTEM_READ_ONLY)` for mutations |
-| 1.2 | area in `System`, `SYSTEM`, `ѕystem` (Cyrillic), `sys​tem`, `system­`, `-a`, `_a`, `a b`, `a.b`, `café`, `ｓystem` (fullwidth) | any area-taking tool (incl. `list_prefix(scope, area)`) | `InvalidArgumentError(argument="area")`, detail contains `^[a-z0-9][a-z0-9_-]*$`; `__cause__ is None`; no client call; no `check_write` |
+| 1.2 | area in `System`, `SYSTEM`, `ѕystem` (Cyrillic), `sys` + U+200B + `tem`, `system` + U+00AD, `-a`, `_a`, `a b`, `a.b`, `café`, `ｓystem` (fullwidth) | any area-taking tool (incl. `list_prefix(scope, area)`) | `InvalidArgumentError(argument="area")`, detail `area '<value>' must be a lowercase slug: a-z0-9 first, then a-z0-9, '-' or '_'` (value via `repr`); `__cause__ is None`; no client call; no `check_write` |
 | 1.3 | area `""`, `".."`, `"a/b"` | any area-taking tool | unchanged from AIE-1044: `InvalidArgumentError("area")` chained from the `build_path` / `build_prefix` `ValueError` |
 
 ### US2 — name rejects invisibles
@@ -59,14 +61,14 @@ Option **"ASCII slug areas"**. Rejected alternatives:
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 2.1 | name in `a`, `Notes`, `café`, `日本語`, `a b`, `a.b`, `ѕ` | file tool | accepted |
-| 2.2 | name containing U+200B, U+200D, U+FEFF, U+00AD, U+202E, U+2060 (`Cf`), U+2028, U+2029, U+FDD0, U+FFFE, U+1FFFF | file tool | `InvalidArgumentError(argument="name")`, detail names the rule; `__cause__ is None`; no client call; no `check_write` |
+| 2.2 | name containing U+200B, U+200D, U+FEFF, U+00AD, U+202E, U+2060 (`Cf`), U+2028, U+2029, U+FDD0, U+FFFE, U+1FFFF | file tool | `InvalidArgumentError(argument="name")`, detail `name must not contain invisible, separator, or noncharacter U+XXXX` naming the first offending code point; `__cause__ is None`; no client call; no `check_write` |
 
 ### US3 — ordering
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 3.1 | ungranted scope and bad area | call | scope error wins (`argument="scope"`) |
-| 3.2 | bad area and bad name | file tool | `argument="area"` |
+| 3.2 | non-slug area and a name that passes core `paths` but breaks the name rule (e.g. contains U+200B) | file tool | `argument="area"` (area checked before name). A core-invalid name (e.g. `x/y`) is reported by `build_path` first, per the documented order |
 | 3.3 | bad area / name on a mutating tool | call | `check_write` spy not called; client not called |
 | 3.4 | valid slug area, invalid other argument (e.g. non-fact `line`) | mutating tool | `check_write` runs first, then that argument's error (unchanged order) |
 

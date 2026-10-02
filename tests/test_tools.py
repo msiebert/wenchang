@@ -806,9 +806,14 @@ BAD_AREA_SLUGS = {
     "leading-underscore": "_leading",
     "cjk": "\u6709",
     "space": "a b",
+    "all-caps": "SYSTEM",
+    "soft-hyphen": "a\u00adb",
+    "short-dot": "a.b",
+    "accented": "caf\u00e9",
+    "fullwidth": "\uff53ystem",
 }
 
-GOOD_AREA_SLUGS = ("notes", "notes-2", "a_b", "9lives")
+GOOD_AREA_SLUGS = ("notes", "notes-2", "a_b", "9lives", "a", "0", "2026-q4", "x9_y-z")
 
 BAD_NAME_CHARS = {
     "zwsp": "\u200b",
@@ -819,6 +824,10 @@ BAD_NAME_CHARS = {
     "line-separator": "\u2028",
     "paragraph-separator": "\u2029",
     "noncharacter": "\ufffe",
+    "soft-hyphen": "\u00ad",
+    "noncharacter-fdd0": "\ufdd0",
+    "noncharacter-ffff": "\uffff",
+    "noncharacter-plane-1": "\U0001ffff",
 }
 
 GOOD_NAMES = ("\u00dcbersicht", "\u65e5\u672c\u8a9e", "my notes")
@@ -857,11 +866,13 @@ def test_name_with_invisible_or_separator_char_is_invalid_argument(
     harness: _Harness, tool: str, char: str
 ) -> None:
     """A name containing a format character, line or paragraph separator, or
-    noncharacter raises InvalidArgumentError("name") with no __cause__ and no
-    client or check_write call (AIE-1136).
+    noncharacter raises InvalidArgumentError("name") naming the code point,
+    with no __cause__ and no client or check_write call (AIE-1136).
     """
     err = _invalid(harness, tool, "name", name=f"my{char}notes")
 
+    assert "name must not contain" in err.detail
+    assert f"U+{ord(char):04X}" in err.detail
     assert err.__cause__ is None
     assert harness.log == []
 
@@ -896,6 +907,17 @@ def test_area_slug_check_precedes_check_write(harness: _Harness, tool: str) -> N
     runs (AIE-1136).
     """
     err = _invalid(harness, tool, "area", scope="org", area="System")
+
+    assert "a-z0-9" in err.detail
+    assert harness.log == []
+
+
+@pytest.mark.parametrize("tool", NAME_TOOLS)
+def test_area_slug_check_precedes_name_check(harness: _Harness, tool: str) -> None:
+    """A non-slug area and a core-valid name with a zero-width space report
+    the area (AIE-1136, US3.2).
+    """
+    err = _invalid(harness, tool, "area", area="System", name="my\u200bnotes")
 
     assert "a-z0-9" in err.detail
     assert harness.log == []
