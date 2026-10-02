@@ -83,12 +83,15 @@ class _StoreClient:
         return MemoryIndex()
 
 
+_ORG_ROLES = frozenset({"owner", "admin", "editor", "viewer", "auditor"})
+
+
 def _identity() -> Identity:
     return Identity({"user": ScopeGrant("u-1", "owner"), "org": ScopeGrant("o-9", "member")})
 
 
 def _policy() -> ScopePolicy:
-    return ScopePolicy({"org": frozenset({"admin", "owner"})})
+    return ScopePolicy({"org": _ORG_ROLES})
 
 
 def _client() -> _StoreClient:
@@ -157,6 +160,7 @@ def test_end_to_end_lifecycle() -> None:
 
     whole_scope = tools.list_prefix("user")
     assert [entry.path for entry in whole_scope.entries] == [path]
+    _json_safe(render_result(whole_scope))
 
     index = tools.get_memory_index()
     assert client.scope_maps == [{"user": "u-1", "org": "o-9"}]
@@ -189,10 +193,10 @@ def test_end_to_end_rejections() -> None:
         tools.write_file("org", "notes", "a", "- [stated] x\n", "Org notes", [], None)
     assert role_info.value.reason is RestrictionReason.ROLE_REQUIRED
     assert role_info.value.path == "org/o-9/notes/a.md"
-    assert role_info.value.required_roles == frozenset({"admin", "owner"})
+    assert role_info.value.required_roles == _ORG_ROLES
     rendered_role = render_error(role_info.value)
     _json_safe(rendered_role)
-    assert rendered_role["required_roles"] == ["admin", "owner"]
+    assert rendered_role["required_roles"] == ["admin", "auditor", "editor", "owner", "viewer"]
 
     with pytest.raises(InvalidArgumentError) as scope_info:
         tools.read_file("team", "notes", "a")

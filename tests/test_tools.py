@@ -787,9 +787,11 @@ def test_segment_checks_precede_grant_check(harness: _Harness, tool: str) -> Non
     assert harness.log == []
 
 
-@pytest.mark.parametrize("tool", MUTATING_TOOLS)
+@pytest.mark.parametrize("tool", SCOPE_TOOLS)
 def test_grant_check_precedes_path_building(harness: _Harness, tool: str) -> None:
-    """An ungranted scope is reported before an invalid area (AIE-1044, US3.0)."""
+    """An ungranted scope is reported before an invalid area, for every
+    scope-taking tool (AIE-1044, US2.5, US3.0).
+    """
     _invalid(harness, tool, "scope", scope="team", area="a/b")
 
     assert harness.log == []
@@ -958,14 +960,24 @@ def test_str_subclass_description_is_normalized(harness: _Harness) -> None:
 
 @pytest.mark.parametrize(
     "aliases",
-    ["ab", b"ab", 5, iter(["a"]), frozenset({"a"}), ["a", 5], ("a", None)],
-    ids=["str", "bytes", "int", "iterator", "set", "int-member", "none-member"],
+    ["ab", b"ab", bytearray(b"ab"), 5, iter(["a"]), frozenset({"a"}), ["a", 5], ("a", None)],
+    ids=["str", "bytes", "bytearray", "int", "iterator", "set", "int-member", "none-member"],
 )
 def test_malformed_aliases_are_invalid_argument(harness: _Harness, aliases: object) -> None:
     """A bare str/bytes, a non-Sequence, or a non-str member raises
     InvalidArgumentError("aliases"), never TypeError (AIE-1044, US3.9, US3.10).
     """
     _invalid(harness, "write_file", "aliases", aliases=aliases)
+
+
+def test_non_str_alias_member_detail(harness: _Harness) -> None:
+    """A non-str aliases member gets the wrong-type detail naming aliases
+    (AIE-1044, US3.9, US3.10).
+    """
+    err = _invalid(harness, "write_file", "aliases", aliases=["a", 5])
+
+    assert err.detail == _wrong_type_detail("aliases", "int")
+    assert err.__cause__ is None
 
 
 def test_str_subclass_alias_members_are_normalized(harness: _Harness) -> None:

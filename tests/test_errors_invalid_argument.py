@@ -1,4 +1,4 @@
-"""Tests for InvalidArgumentError, the recoverable agent-argument error."""
+"""Tests for InvalidArgumentError, the recoverable agent-argument error (AIE-1044, US4.4)."""
 
 import pytest
 

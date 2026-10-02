@@ -98,6 +98,16 @@ def test_render_memory_file() -> None:
     }
     assert type(out["version"]) is str
     assert out["last_updated"] == metadata_to_map(_METADATA)[LAST_UPDATED_KEY]
+
+
+def test_render_memory_file_with_empty_content() -> None:
+    """AIE-1044, US7.1: an empty body renders as content "", not omitted or None."""
+    file = MemoryFile(path=_PATH, content="", metadata=_METADATA, version=_VERSION)
+
+    out = render_result(file)
+
+    assert out["content"] == ""
+    assert json.loads(json.dumps(out)) == out
     _round_trips(out)
 
 
@@ -265,7 +275,7 @@ def test_render_restricted_scope_role_required() -> None:
         "org/o-9/notes/a.md",
         "org",
         RestrictionReason.ROLE_REQUIRED,
-        required_roles=frozenset({"owner", "admin"}),
+        required_roles=frozenset({"owner", "admin", "editor", "viewer", "auditor"}),
     )
 
     out = _assert_error(
@@ -274,7 +284,7 @@ def test_render_restricted_scope_role_required() -> None:
             "path": "org/o-9/notes/a.md",
             "reason": "role_required",
             "scope": "org",
-            "required_roles": ["admin", "owner"],
+            "required_roles": ["admin", "auditor", "editor", "owner", "viewer"],
         },
     )
 
