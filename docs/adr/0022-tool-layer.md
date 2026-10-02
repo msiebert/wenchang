@@ -181,11 +181,11 @@ imports it.
    subclass overriding that method can't redirect reads or writes to
    another entity. For the same reason, `get_memory_index` builds its scope
    map from the grants (`{s: g.entity_id for s, g in grants.items()}`) and
-   never reads the overridable `scope_map` property. An ungranted scope raises `InvalidArgumentError("scope",
-   "scope '<scope>' is not available in this session; available scopes:
-   <sorted, comma-separated>")` before any path is built. It is
-   recoverable because the error itself lists the scopes the agent can
-   use. A `build_path` / `build_prefix` `ValueError` becomes
+   never reads the overridable `scope_map` property. An ungranted scope
+   raises `InvalidArgumentError("scope", "scope '<scope>' is not available
+   in this session; available scopes: <sorted, comma-separated>")` before
+   any path is built. It is recoverable because the error itself lists the
+   scopes the agent can use. A `build_path` / `build_prefix` `ValueError` becomes
    `InvalidArgumentError` naming `area` if `area` fails `is_valid_segment`,
    and `name` otherwise; scope and entity ID are already valid because
    `Identity` and `ScopeGrant` validate them. `build_path` appends `.md`
@@ -237,12 +237,15 @@ imports it.
       str(exc)}`. Any other exception outside the taxonomy renders the
       fixed message `"internal error"`, so an off-contract exception
       doesn't leak internals to the agent. So does a `WenchangError`
-      subclass whose `category` is missing, raises, or is not an `Enum`
-      member. A payload value renders only if it is an exact `str`, an
-      `int` that is not a `bool`, an `Enum` member (as its value), or a
-      `frozenset` of `str` (sorted); otherwise that field is dropped.
-      `render_result` likewise drops `aliases` or `sources` members that
-      are not JSON-safe strings instead of raising. This relies on ADR 0019
+      subclass whose `category` is missing, raises, or is not an
+      `ErrorCategory` member. A payload value renders only if it is an
+      exact `str`, an `int` that is not a `bool`, an `Enum` member (as its
+      value), or a `frozenset` of `str` (sorted); otherwise that field is
+      dropped. `render_result` never raises for any value of a supported
+      type, and its output is always JSON-serializable: it drops
+      `aliases` or `sources` members that are not JSON-safe strings, and
+      drops a `path`, `content`, `version`, `description`, or
+      `next_cursor` that is not an exact `str`. This relies on ADR 0019
       decision 7: a conforming client surfaces every transport failure as
       `BackendUnavailableError`, so nothing the agent must act on arrives
       as an off-contract exception. A host needs one `except Exception` and
@@ -276,10 +279,13 @@ imports it.
     encodability. A lone surrogate passes `is_valid_segment`, and core's
     `UnicodeEncodeError` (a `ValueError`) would otherwise reach the client
     as an uncategorized error. A `description` containing any line boundary
-    `str.splitlines` recognizes (`\x85`, ` `, `\x0b`, and the rest,
-    not only `\n` and `\r`, which is all `FileMetadata` checks) is
-    rejected, so a description is one line under every rule a reader might
-    apply. A host schema may pass through whatever the model emitted, and a
+    `str.splitlines` recognizes is rejected, so a description is one line
+    under every rule a reader might apply. Two layers share this: the tool
+    itself rejects `\x0b`, `\x0c`, `\x1c`, `\x1d`, `\x1e`, `\x85`,
+    `\u2028`, and `\u2029` before building the metadata (no `__cause__`);
+    `\n` and `\r` are rejected by `FileMetadata`, whose `ValueError`
+    surfaces as `InvalidArgumentError("description")` chained from it.
+    A host schema may pass through whatever the model emitted, and a
     `TypeError` has no category, so the agent couldn't repair it.
     - **Rejected: treating `TypeError` as the host schema's concern**,
       which leaves the agent stuck when the host is loose.

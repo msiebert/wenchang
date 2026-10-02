@@ -157,13 +157,16 @@ dependencies.
     "internal", "message": str(exc)}`; any other non-`WenchangError`
     renders the fixed message `"internal error"`, so an off-contract
     exception does not leak internals to the agent. A `WenchangError`
-    subclass whose `category` is missing, raises, or is not an `Enum`
-    member falls back to that same internal rendering, and a payload value
-    that is not JSON-safe is dropped: `_json_value` accepts only an exact
-    `str`, an `int` that is not a `bool`, an `Enum` member (its value),
-    and a `frozenset` of `str` (sorted). `render_result` likewise drops
-    `aliases`/`sources` members that are not JSON-safe strings rather than
-    raising. This relies on ADR
+    subclass whose `category` is missing, raises, or is not an
+    `ErrorCategory` member falls back to that same internal rendering, and
+    a payload value that is not JSON-safe is dropped: `_json_value`
+    accepts only an exact `str`, an `int` that is not a `bool`, an `Enum`
+    member (its value), and a `frozenset` of `str` (sorted).
+    `render_result` never raises for any value of a supported type, and
+    its output is always JSON-serializable: it drops `aliases`/`sources`
+    members that are not JSON-safe strings, and drops a `path`,
+    `content`, `version`, `description`, or `next_cursor` that is not an
+    exact `str`. This relies on ADR
     0019's transport-failure mapping: a conforming client surfaces every
     transport failure as `BackendUnavailableError`, so nothing the agent
     needs to act on arrives as an off-contract exception. A host needs one
@@ -412,6 +415,7 @@ def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str
     #                "area": seg[2] if 3 segments else None, "omitted": n} ...]}
     # None       -> {"ok": True}
     # other      -> TypeError (dispatch on issubclass(type(value), ...))
+    # path / content / version / description / next_cursor not exact str -> key dropped
 
 
 def render_error(exc: Exception) -> dict[str, object]:
@@ -421,7 +425,7 @@ def render_error(exc: Exception) -> dict[str, object]:
     #     return {"error": name, "category": "internal", "message": _message(exc)}
     # other non-WenchangError:
     #     return {"error": name, "category": "internal", "message": "internal error"}
-    # category missing / raising / not an Enum member -> the "internal error" dict above
+    # category missing / raising / not an ErrorCategory member -> the "internal error" dict above
     # out = {"error": name, "category": exc.category.value, "message": _message(exc)}
     # for key in _ERROR_FIELDS: value = getattr(exc, key, None) (guarded); skip None
     #   _json_value: exact str; int but not bool; Enum member -> .value;

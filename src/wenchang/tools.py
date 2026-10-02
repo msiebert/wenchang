@@ -412,11 +412,14 @@ def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str
         return _file_fields(file, content=file.content)
     if issubclass(kind, ListPage):
         page = cast(ListPage, value)
-        cursor = page.next_cursor
-        return {
-            "entries": [_file_fields(entry) for entry in page.entries],
-            "next_cursor": None if cursor is None else str.__str__(cursor),
-        }
+        out: dict[str, object] = {"entries": [_file_fields(entry) for entry in page.entries]}
+        if page.next_cursor is None:
+            out["next_cursor"] = None
+        else:
+            cursor = _str_or_drop(lambda: page.next_cursor)
+            if cursor is not _DROP:
+                out["next_cursor"] = cursor
+        return out
     if issubclass(kind, MemoryIndex):
         index = cast(MemoryIndex, value)
         return {
@@ -490,28 +493,53 @@ def _json_value(value: object) -> object:
     return _DROP
 
 
-def _file_fields(entry: FileEntry | MemoryFile, content: str | None = None) -> dict[str, object]:
-    scope: str | None
-    area: str | None
-    name: str | None
-    try:
-        parts = parse_path(entry.path)
-    except ValueError:
-        scope = area = name = None
-    else:
-        scope, area, name = parts.scope, parts.area, parts.name
-    metadata = entry.metadata
-    fields: dict[str, object] = {"path": entry.path, "scope": scope, "area": area, "name": name}
+def _file_fields(entry: FileEntry | MemoryFile, content: object = None) -> dict[str, object]:
+    # Fields whose real type is not str are omitted rather than fail to render.
+    fields: dict[str, object] = {}
+    path = _str_or_drop(lambda: entry.path)
+    if path is not _DROP:
+        fields["path"] = path
+        try:
+            parts = parse_path(cast(str, path))
+            parsed: dict[str, object] = {
+                "scope": parts.scope,
+                "area": parts.area,
+                "name": parts.name,
+            }
+        except ValueError:
+            fields |= {"scope": None, "area": None, "name": None}
+        except Exception:
+            pass
+        else:
+            fields |= parsed
     if content is not None:
-        fields["content"] = content
+        content_value = _str_or_drop(lambda: content)
+        if content_value is not _DROP:
+            fields["content"] = content_value
+    metadata = entry.metadata
+    version = _str_or_drop(lambda: entry.version)
+    if version is not _DROP:
+        fields["version"] = version
+    description = _str_or_drop(lambda: metadata.description)
+    if description is not _DROP:
+        fields["description"] = description
     # Metadata may hold non-str members; drop them rather than fail to render.
     return fields | {
-        "version": str.__str__(entry.version),
-        "description": metadata.description,
         "aliases": _str_members(metadata.aliases),
         "sources": sorted(_str_members(metadata.sources)),
         "last_updated": _timestamp(metadata.last_updated),
     }
+
+
+def _str_or_drop(read: Callable[[], object]) -> object:
+    """Return read() as an exact str, or _DROP if it raises or its real type is not str."""
+    try:
+        value = read()
+    except Exception:
+        return _DROP
+    if not issubclass(type(value), str):
+        return _DROP
+    return str.__str__(cast(str, value))
 
 
 def _str_members(values: Iterable[object]) -> list[str]:

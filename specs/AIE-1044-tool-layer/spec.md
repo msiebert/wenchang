@@ -6,8 +6,8 @@
 
 **Created**: 2026-10-01
 
-**Status**: Draft — human decisions recorded 2026-10-02 (see "Human
-decisions (2026-10-02)" below); ready for the spec checkpoint.
+**Status**: Implemented — code-reviewed 2026-10-02 (human decisions
+recorded 2026-10-02; see "Human decisions (2026-10-02)" below).
 
 **Input**: Linear AIE-1044 ("Define the tool-facing layer exposing memory
 operations as callable tools, built on top of the transport client and the
@@ -450,8 +450,10 @@ adds `content`. If `parse_path` raises `ValueError` on an entry's path
 (malformed path from a remote client), `scope`, `area`, and `name` are
 `None` and rendering continues. An `aliases` or `sources` member that is
 not a JSON-safe string is dropped from the rendered list rather than
-raising; `render_result` never raises for a supported value type, even
-with hostile metadata members. Host contract: every tool failure is renderable —
+raising, and a `path`, `content`, `version`, `description`, or
+`next_cursor` that is not an exact `str` is dropped from the output.
+`render_result` never raises for any value of a supported type, and its
+output is always JSON-serializable. Host contract: every tool failure is renderable —
 `render_error` accepts any `Exception` and never raises, so a host
 adapter wraps each tool call in `except Exception as exc: return
 render_error(exc)`.
@@ -487,7 +489,12 @@ render_error(exc)`.
    that is not a JSON-safe string (e.g. an `int`, or an object with a
    raising `__str__`), **Then** that member is dropped from the rendered
    list, the remaining members render as usual, and no exception is
-   raised.
+   raised. **Given** a `MemoryFile`, entry, or `ListPage` (built
+   directly, bypassing core) whose `path`, `content`, `version`,
+   `description`, or `next_cursor` is not an exact `str` (e.g. an `int`;
+   `next_cursor=None` still renders as `None`), **Then** that
+   field is absent from the output, the other fields render as usual, no
+   exception is raised, and `json.dumps(out)` succeeds.
 6. **Given** any `WenchangError` `exc` (`render_error(exc: Exception)`),
    **When** `render_error(exc)`,
    **Then** the result has `error == type(exc).__name__`, `category ==
@@ -528,7 +535,8 @@ render_error(exc)`.
     message guard matters for `WenchangError`, `MetadataFormatError`, and
     `UnicodeDecodeError`, whose `str(exc)` is rendered); both are exact
     `str`. **Given** a `WenchangError` subclass whose `category` is
-    missing, raises on access, or is not an `Enum` member, **Then**
+    missing, raises on access, or is not an `ErrorCategory` member,
+    **Then**
     `render_error` falls back to the off-contract rendering `{"error":
     <type name>, "category": "internal", "message": "internal error"}`.
     **Given** a `WenchangError` whose payload attribute holds a value that
@@ -614,12 +622,16 @@ render_error(exc)`.
   entity ID from the agent.
 - **FR-009**: `render_result` and `render_error` MUST behave as in US7 and
   produce JSON-safe output. `render_result` raises `TypeError` for an
-  unsupported value type and otherwise never raises (a malformed entry
-  path renders `scope`/`area`/`name` as `None`, and non-JSON-safe
-  `aliases`/`sources` members are dropped, US7.5a; capped rows carry
-  `scope` and `area`, US7.3). `render_error` accepts any `Exception` and
+  unsupported value type and never raises for any value of a supported
+  type; its output is always JSON-serializable. A malformed entry path
+  renders `scope`/`area`/`name` as `None`; non-JSON-safe
+  `aliases`/`sources` members are dropped; and `path`, `content`,
+  `version`, `description`, or `next_cursor` that is not an exact `str`
+  is dropped from the output (US7.5a). Capped rows carry `scope` and
+  `area` (US7.3). `render_error` accepts any `Exception` and
   never raises (guarded type name and message; a `WenchangError` subclass
-  with a missing or non-`Enum` `category` falls back to the internal
+  whose `category` is missing, raises, or is not an `ErrorCategory` member
+  falls back to the internal
   rendering; non-JSON-safe payload fields are dropped, US7.12); exceptions
   outside the taxonomy and the two data-integrity types render the fixed
   message `"internal error"` (US7.11).

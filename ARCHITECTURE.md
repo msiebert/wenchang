@@ -582,7 +582,9 @@ implemented.
   `description`, each `aliases` member, `content`, `line`, `new_string`),
   malformed `aliases` (a bare `str`/`bytes`, a value whose real type is not
   a `Sequence`, or a non-`str` member), a `description` containing any
-  `str.splitlines` line boundary, a `line` that `parse_fact` rejects, an
+  `str.splitlines` line boundary (the tool rejects `\x0b`, `\x0c`,
+  `\x1c`–`\x1e`, `\x85`, ` `, and ` ` itself; `\n` and `\r` are
+  left to `FileMetadata`, whose `ValueError` is converted), a `line` that `parse_fact` rejects, an
   empty `old_string`, and an ungranted scope, raised directly with detail
   `"scope {scope!r} is not available in this session; available scopes:
   {sorted, comma-separated}"` so the error itself tells the agent which
@@ -602,12 +604,15 @@ implemented.
   as `path`, `scope`, `area`, `name` (from `parse_path`, or all `None` for
   a malformed path), `version` (`str`), `description`, `aliases` (list),
   `sources` (sorted list), and `last_updated` (the `metadata_to_map`
-  string), plus `content` for a `MemoryFile`; an `aliases` or `sources`
-  member that is not a JSON-safe string is dropped; a `ListPage` as `entries` and
-  `next_cursor`; a `MemoryIndex` as `entries` and `capped` rows of
+  string), plus `content` for a `MemoryFile`; a `ListPage` as `entries`
+  and `next_cursor`; a `MemoryIndex` as `entries` and `capped` rows of
   `prefix`, `scope`, `area` (`None` for a scope- or entity-level prefix),
   and `omitted`; `None` as `{"ok": True}`; any other value raises
-  `TypeError`. `render_error` accepts any `Exception` and never raises. A
+  `TypeError`. `render_result` never raises for any value of a supported
+  type and its output is always JSON-serializable: an `aliases` or
+  `sources` member that is not a JSON-safe string is dropped, and a
+  `path`, `content`, `version`, `description`, or `next_cursor` that is
+  not an exact `str` is dropped from the output. `render_error` accepts any `Exception` and never raises. A
   `WenchangError` renders `error` (type name), `category`, `message`, and
   each non-`None` attribute from a fixed list (`path`, `content`,
   `version`, `size`, `limit`, `match_count`, `reason`, `scope`,
@@ -617,7 +622,8 @@ implemented.
   `str`, an `int` that is not a `bool`, an `Enum` member (as its value),
   or a `frozenset` of `str` (sorted); any other value drops that field. A
   `WenchangError` subclass whose `category` is missing, raises, or is not
-  an `Enum` member renders as an off-contract exception. Anything else renders with category
+  an `ErrorCategory` member renders as an off-contract exception.
+  Anything else renders with category
   `"internal"`: `MetadataFormatError` and `UnicodeDecodeError` with
   `str(exc)` as the message, any other exception with the fixed message
   `"internal error"`, so an off-contract exception does not leak internals.

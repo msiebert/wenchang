@@ -581,8 +581,8 @@ def test_list_prefix_with_area_and_cursor_passes_both_positionally(harness: _Har
 
 
 def test_get_memory_index_passes_scope_map(harness: _Harness) -> None:
-    """get_memory_index passes identity.scope_map and returns the client's
-    object, without check_write (AIE-1044, US2.3).
+    """get_memory_index passes the scope map built from identity.grants and
+    returns the client's object, without check_write (AIE-1044, US2.3).
     """
     preset = MemoryIndex()
     harness.client.returns["get_memory_index"] = preset

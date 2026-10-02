@@ -38,54 +38,55 @@ No existing test changed.
 `t` = `tests/test_tools.py`, `d` = `tests/test_tools_descriptions.py`,
 `r` = `tests/test_tools_render.py`, `e` = `tests/test_tools_end_to_end.py`,
 `ia` = `tests/test_errors_invalid_argument.py`. Every test docstring cites
-AIE-1044 and its scenario ID. Line numbers are as of commit `08dfb4f`.
-Rows marked *pending* depend on scenarios the adversarial code review
-changed; their tests land with the code-review fix, and this table is
-refreshed then.
+AIE-1044 and its scenario ID. Line numbers are as of commit `263076e`.
+
+`make check` at `263076e`: lint and typecheck clean; 1968 passed,
+6 skipped (the pre-existing resolver-conformance skips), 39 deselected
+(integration).
 
 | Acceptance criterion | Test(s) |
 | -------------------- | ------- |
-| US1.1 four read-only properties | `t::test_constructor_exposes_read_only_properties` (L379) |
-| US1.2 empty / non-`str` `source` → `ValueError` / `TypeError`; subclass stored as `str` | `t::test_empty_source_raises_value_error` (L395), `::test_non_str_source_raises_type_error` (L402), `::test_str_subclass_source_is_stored_as_exact_str` (L408) |
-| US1.3 non-client, non-`Identity`, non-`ScopePolicy` (incl. spoofed `__class__`) → `TypeError` | `t::test_non_client_raises_type_error` (L416), `::test_non_identity_raises_type_error` (L427), `::test_non_policy_raises_type_error` (L440) |
-| US1.4 `bind_tools` returns `MemoryTools` with the resolved identity | `t::test_bind_tools_resolves_identity` (L448) |
-| US1.5 resolution failure → permanent `ResolverFailureError`, no client call | `t::test_bind_tools_resolution_failure_is_permanent_and_never_calls_client` (L463) |
-| US1.6 raising resolver → no secret in message | `t::test_bind_tools_raising_resolver_does_not_leak_message` (L477) |
-| US1.7 credentials not retained (weakref + `gc.collect()`) | `t::test_bind_tools_does_not_retain_credentials` (L490) |
-| US2.1 `read_file` builds own path, returns client object, no `check_write`; `system/` readable | `t::test_read_file_builds_own_path_and_returns_client_result` (L508), `::test_read_file_may_read_system_area` (L524) |
-| US2.2 `list_prefix` builds entity / area prefix, positional args | `t::test_list_prefix_scope_only_passes_entity_prefix_positionally` (L533), `::test_list_prefix_with_area_and_cursor_passes_both_positionally` (L546) |
-| US2.3 `get_memory_index()` passes a map built from `grants`, takes no parameters | `t::test_get_memory_index_passes_scope_map` (L562), `::test_get_memory_index_takes_no_parameters` (L577); overridden-`scope_map` scenario *pending* |
-| US2.4 client errors from `read_file` propagate as the same object | `t::test_read_file_errors_propagate_unchanged` (L594) |
-| US2.5 / US3.3 / US4.6 ungranted scope → `InvalidArgumentError("scope")` with exact detail, no `__cause__`, no `check_write` or client call | `t::test_ungranted_scope_is_invalid_argument` (L607, all six scope-taking tools) |
-| US2.6 / US3.5 / US4.6 invalid `area` / `name` → named argument, chained from builder `ValueError` | `t::test_invalid_area_is_invalid_argument` (L621), `::test_invalid_name_is_invalid_argument` (L634) |
-| US2.7 `name="a.md"` → `.../a.md.md` | `t::test_name_ending_in_md_gets_md_appended` (L645) |
-| US2.8 / US3.10 wrong-type segment or cursor → `InvalidArgumentError`; guarded type name | `t::test_wrong_type_segment_is_invalid_argument` (L667), `::test_none_area_is_invalid_argument_for_file_tools` (L682), `::test_wrong_type_cursor_is_invalid_argument` (L689), `::test_unreadable_type_name_reports_unnamed` (L698) |
-| US2.8 lying `str`-subclass segments normalized; exact-`str` path | `t::test_lying_str_segments_are_normalized` (L708) |
-| US2.8 / US3.11 lone-surrogate segment → `InvalidArgumentError` chained from `UnicodeEncodeError` | `t::test_unencodable_segment_is_invalid_argument` (L731) |
-| US2.9 `Identity.entity_id()` override cannot redirect | `t::test_identity_entity_id_override_cannot_redirect` (L744, `read_file` and `write_file`) |
-| US3.0 check order: segments → grant → path → `check_write` → arguments → client; same path object | `t::test_mutating_tool_checks_then_forwards_same_path_object` (L765), `::test_segment_checks_precede_grant_check` (L780), `::test_grant_check_precedes_path_building` (L791), `::test_path_building_precedes_check_write` (L801), `::test_check_write_precedes_argument_validation` (L819) |
-| US3.1 exact forwarded call with `source=`; placeholder metadata | `t::test_mutating_tool_forwards_exact_call` (L830), `::test_write_file_metadata_uses_placeholder_and_tuple_aliases` (L845) |
-| US3.2 `system/` → `RestrictedScopeError(SYSTEM_READ_ONLY)`, no client call | `t::test_system_area_is_read_only` (L858) |
-| US3.4 `member` → `ROLE_REQUIRED` with roles; `owner` forwarded | `t::test_member_cannot_write_role_gated_scope` (L871), `::test_owner_can_write_role_gated_scope` (L885) |
-| US3.6 client taxonomy errors propagate as the same object | `t::test_client_errors_propagate_from_mutating_tools` (L906) |
-| US3.7 `expected_version=None` forwarded; list aliases → tuple | `t::test_write_file_none_version_creates` (L918), `::test_write_file_metadata_uses_placeholder_and_tuple_aliases` (L845) |
-| US3.8 `description`: line boundaries, unencodable, `system/` precedence, subclass | `t::test_description_with_newline_is_invalid_argument` (L926, `\n` and `\r`), `::test_unencodable_description_is_invalid_argument` (L935), `::test_bad_description_in_system_area_is_restricted` (L944), `::test_str_subclass_description_is_normalized` (L952); other `str.splitlines` boundaries *pending* |
-| US3.9 malformed `aliases`; member detail; subclass members normalized | `t::test_malformed_aliases_are_invalid_argument` (L966), `::test_non_str_alias_member_detail` (L973), `::test_str_subclass_alias_members_are_normalized` (L983); unencodable member and real-type `Sequence` check *pending* |
-| US3.10 one wrong-type rule, exact detail, no `TypeError`; subclasses forwarded as `str` | `t::test_wrong_type_argument_is_invalid_argument` (L1009), `::test_wrong_type_content_detail_sentence` (L1021), `::test_str_subclass_arguments_are_forwarded_as_exact_str` (L1041), `::test_str_subclass_cursor_is_forwarded_as_exact_str` (L1055) |
-| US3.11 unencodable `content` / `line` / `new_string` | `t::test_unencodable_text_is_invalid_argument` (L1072) |
-| US4.1 client `list_prefix` `ValueError` → `cursor` only when a cursor was passed | `t::test_list_prefix_value_error_becomes_cursor_argument` (L1085); no-cursor propagation *pending* |
-| US4.2 tool pre-validates `line` (`parse_fact`) and `old_string` (non-empty); client `ValueError` propagates | *pending* (replaces `t::test_client_value_error_becomes_named_argument`, L1106) |
-| US4.3 `MetadataFormatError` / `UnicodeDecodeError` pass through every tool | `t::test_data_integrity_errors_pass_through` (L1129) |
+| US1.1 four read-only properties | `t::test_constructor_exposes_read_only_properties` (L400) |
+| US1.2 empty / non-`str` `source` → `ValueError` / `TypeError`; subclass stored as `str` | `t::test_empty_source_raises_value_error` (L416), `::test_non_str_source_raises_type_error` (L423), `::test_str_subclass_source_is_stored_as_exact_str` (L429) |
+| US1.3 non-client, non-`Identity`, non-`ScopePolicy` (incl. spoofed `__class__`) → `TypeError` | `t::test_non_client_raises_type_error` (L437), `::test_non_identity_raises_type_error` (L448), `::test_non_policy_raises_type_error` (L461) |
+| US1.4 `bind_tools` returns `MemoryTools` with the resolved identity | `t::test_bind_tools_resolves_identity` (L469) |
+| US1.5 resolution failure → permanent `ResolverFailureError`, no client call | `t::test_bind_tools_resolution_failure_is_permanent_and_never_calls_client` (L484) |
+| US1.6 raising resolver → no secret in message | `t::test_bind_tools_raising_resolver_does_not_leak_message` (L498) |
+| US1.7 credentials not retained (weakref + `gc.collect()`) | `t::test_bind_tools_does_not_retain_credentials` (L511) |
+| US2.1 `read_file` builds own path, returns client object, no `check_write`; `system/` readable | `t::test_read_file_builds_own_path_and_returns_client_result` (L529), `::test_read_file_may_read_system_area` (L545) |
+| US2.2 `list_prefix` builds entity / area prefix, positional args | `t::test_list_prefix_scope_only_passes_entity_prefix_positionally` (L554), `::test_list_prefix_with_area_and_cursor_passes_both_positionally` (L567) |
+| US2.3 `get_memory_index()` passes a map built from `grants` (an overridden `scope_map` is ignored), takes no parameters | `t::test_get_memory_index_passes_scope_map` (L583), `::test_get_memory_index_scope_map_comes_from_grants` (L598, `_LyingScopeMapIdentity`), `::test_get_memory_index_takes_no_parameters` (L613) |
+| US2.4 client errors from `read_file` propagate as the same object | `t::test_read_file_errors_propagate_unchanged` (L630) |
+| US2.5 / US3.3 / US4.6 ungranted scope → `InvalidArgumentError("scope")` with exact detail, no `__cause__`, no `check_write` or client call | `t::test_ungranted_scope_is_invalid_argument` (L643, all six scope-taking tools) |
+| US2.6 / US3.5 / US4.6 invalid `area` / `name` → named argument, chained from builder `ValueError` | `t::test_invalid_area_is_invalid_argument` (L657), `::test_invalid_name_is_invalid_argument` (L670) |
+| US2.7 `name="a.md"` → `.../a.md.md` | `t::test_name_ending_in_md_gets_md_appended` (L681) |
+| US2.8 / US3.10 wrong-type segment or cursor → `InvalidArgumentError`; guarded type name | `t::test_wrong_type_segment_is_invalid_argument` (L703), `::test_none_area_is_invalid_argument_for_file_tools` (L718), `::test_wrong_type_cursor_is_invalid_argument` (L725), `::test_unreadable_type_name_reports_unnamed` (L734) |
+| US2.8 lying `str`-subclass segments normalized; exact-`str` path | `t::test_lying_str_segments_are_normalized` (L744) |
+| US2.8 / US3.11 lone-surrogate segment → `InvalidArgumentError` chained from `UnicodeEncodeError` | `t::test_unencodable_segment_is_invalid_argument` (L767) |
+| US2.9 `Identity.entity_id()` / `scope_map` overrides cannot redirect | `t::test_identity_entity_id_override_cannot_redirect` (L780, `read_file` and `write_file`), `::test_get_memory_index_scope_map_comes_from_grants` (L598) |
+| US3.0 check order: segments → grant → path → `check_write` → arguments → client; same path object | `t::test_mutating_tool_checks_then_forwards_same_path_object` (L801), `::test_segment_checks_precede_grant_check` (L816), `::test_grant_check_precedes_path_building` (L827), `::test_path_building_precedes_check_write` (L837), `::test_check_write_precedes_argument_validation` (L855) |
+| US3.1 exact forwarded call with `source=`; placeholder metadata | `t::test_mutating_tool_forwards_exact_call` (L866), `::test_write_file_metadata_uses_placeholder_and_tuple_aliases` (L881) |
+| US3.2 `system/` → `RestrictedScopeError(SYSTEM_READ_ONLY)`, no client call | `t::test_system_area_is_read_only` (L894) |
+| US3.4 `member` → `ROLE_REQUIRED` with roles; `owner` forwarded | `t::test_member_cannot_write_role_gated_scope` (L907), `::test_owner_can_write_role_gated_scope` (L921) |
+| US3.6 client taxonomy errors propagate as the same object | `t::test_client_errors_propagate_from_mutating_tools` (L942) |
+| US3.7 `expected_version=None` forwarded; list aliases → tuple | `t::test_write_file_none_version_creates` (L954), `::test_write_file_metadata_uses_placeholder_and_tuple_aliases` (L881) |
+| US3.8 `description`: every `str.splitlines` boundary, unencodable, `system/` precedence, subclass | `t::test_description_with_newline_is_invalid_argument` (L962, `\n` and `\r`, rejected by `FileMetadata`, `__cause__` is its `ValueError`), `::test_description_with_line_boundary_is_invalid_argument` (L993, ` `, ` `, `\x85`, `\x0b`, `\x0c`, `\x1c`, `\x1d`, `\x1e`, rejected by the tool itself), `::test_unencodable_description_is_invalid_argument` (L971), `::test_bad_description_in_system_area_is_restricted` (L980), `::test_str_subclass_description_is_normalized` (L1002) |
+| US3.9 malformed `aliases`; member detail; unencodable member; real-type `Sequence` check; subclass members normalized | `t::test_malformed_aliases_are_invalid_argument` (L1016), `::test_non_str_alias_member_detail` (L1023), `::test_unencodable_alias_member_is_invalid_argument` (L1033, chained from `UnicodeEncodeError`), `::test_class_spoofing_aliases_is_invalid_argument` (L1042, `_ListSpoof`), `::test_str_subclass_alias_members_are_normalized` (L1049) |
+| US3.10 one wrong-type rule, exact detail, no `TypeError`; subclasses forwarded as `str` | `t::test_wrong_type_argument_is_invalid_argument` (L1075), `::test_wrong_type_content_detail_sentence` (L1087), `::test_str_subclass_arguments_are_forwarded_as_exact_str` (L1107), `::test_str_subclass_cursor_is_forwarded_as_exact_str` (L1121) |
+| US3.11 unencodable `content` / `line` / `new_string` | `t::test_unencodable_text_is_invalid_argument` (L1138) |
+| US4.1 client `list_prefix` `ValueError` → `cursor` only when a cursor was passed | `t::test_list_prefix_value_error_becomes_cursor_argument` (L1151), `::test_list_prefix_unreadable_value_error_becomes_cursor_argument` (L1168), `::test_list_prefix_value_error_without_cursor_propagates` (L1183) |
+| US4.2 tool pre-validates `line` (`parse_fact`) and `old_string` (non-empty); client `ValueError` propagates | `t::test_non_fact_line_is_rejected_before_client_call` (L1216), `::test_empty_old_string_is_rejected_before_client_call` (L1225), `::test_client_value_error_for_valid_argument_propagates` (L1197, `append_line` and `replace_fact`) |
+| US4.3 `MetadataFormatError` / `UnicodeDecodeError` pass through every tool | `t::test_data_integrity_errors_pass_through` (L1240) |
 | US4.4 `InvalidArgumentError` class: category, `argument`, `detail`, `str`, empty / non-`str` / subclass `argument` | `ia::test_invalid_argument_error_is_recoverable` (L27), `::test_invalid_argument_error_is_wenchang_error` (L39), `::test_invalid_argument_error_exposes_argument` (L45), `::test_invalid_argument_error_detail_is_composed_sentence` (L51), `::test_invalid_argument_error_str_is_detail_then_guidance` (L57), `::test_invalid_argument_error_rejects_empty_argument` (L69), `::test_invalid_argument_error_rejects_non_str_argument` (L76), `::test_invalid_argument_error_normalizes_str_subclass_argument` (L82) |
-| US4.5 `ValueError` from every other client call propagates unchanged | `t::test_unconverted_value_error_propagates` (L1145, `read_file`, `delete_file`, `write_file`, `get_memory_index`); `append_line`, `replace_fact`, and cursor-less `list_prefix` *pending* |
+| US4.5 `ValueError` from every other client call propagates unchanged | `t::test_unconverted_value_error_propagates` (L1256, `read_file`, `delete_file`, `write_file`, `get_memory_index`), `::test_client_value_error_for_valid_argument_propagates` (L1197, `append_line`, `replace_fact`), `::test_list_prefix_value_error_without_cursor_propagates` (L1183, cursor-less `list_prefix`) |
 | US5.1 `TOOL_NAMES` fixed tuple | `d::test_tool_names_are_fixed_tuple` (L164) |
 | US5.2 `tools()` bound methods in order; fresh, read-only | `d::test_tools_mapping_holds_bound_methods_in_order` (L170), `::test_tools_mapping_is_fresh_and_read_only` (L184) |
 | US5.3 first docstring line is one sentence | `d::test_docstring_first_line_is_one_sentence` (L198) |
 | US5.4–5.6, US5.8 pinned phrases (routine, byte ceiling, labels, exactly once, not merged, `system/` read-only, `capped`, index-path mapping) | `d::test_docstring_contains_pinned_phrase` (L211), `::test_mutating_docstring_presents_conflict_as_merge_and_retry` (L219), `::test_name_docstring_says_name_excludes_md` (L231), `::test_get_memory_index_docstring_explains_entity_segment` (L242) |
 | US5.7 no `AIE-\d+` in `tools.py` | `d::test_tools_module_cites_no_linear_ids` (L252) |
-| US6.1 restricted, module-level imports | `t::test_tools_module_imports_are_restricted` (L1185) |
-| US6.2 lower layers don't import `tools` | `t::test_lower_layers_do_not_import_tools` (L1209) |
-| US6.3 runtime dependencies unchanged | `t::test_runtime_dependencies_are_unchanged` (L1219) |
+| US6.1 restricted, module-level imports | `t::test_tools_module_imports_are_restricted` (L1296) |
+| US6.2 lower layers don't import `tools` | `t::test_lower_layers_do_not_import_tools` (L1320) |
+| US6.3 runtime dependencies unchanged | `t::test_runtime_dependencies_are_unchanged` (L1330) |
 | US7.1 `MemoryFile` rendering | `r::test_render_memory_file` (L84), `::test_render_memory_file_with_empty_content` (L106) |
 | US7.2 `ListPage` with / without cursor | `r::test_render_list_page_with_cursor` (L117), `::test_render_list_page_without_cursor` (L137) |
 | US7.3 `MemoryIndex` capped rows (area-, entity-, scope-level); empty index | `r::test_render_memory_index_with_capped_prefixes` (L145), `::test_render_empty_memory_index` (L169) |
@@ -232,22 +233,43 @@ Code review:
   `list_prefix` only when a cursor was passed, and lets every other
   `ValueError` propagate (US4.1, US4.2, US4.5, FR-004(a)).
 - **Rendering could still raise.** A `WenchangError` subclass with a
-  missing or non-`Enum` `category`, a non-JSON-safe payload value, or
-  hostile `aliases` / `sources` members could make `render_error` /
-  `render_result` raise or emit non-JSON. The bad `category` now falls back
+  missing or non-`ErrorCategory` `category`, a non-JSON-safe payload
+  value, or hostile `aliases` / `sources` members could make
+  `render_error` / `render_result` raise or emit non-JSON. The bad `category` now falls back
   to the internal rendering, bad fields and members are dropped, and
   `_json_value` accepts only exact `str`, non-`bool` `int`, `Enum`
   members, and `frozenset`s of `str` (US7.5a, US7.12, FR-009).
 - **`aliases` gaps.** Members weren't UTF-8-checked, and the `Sequence`
   check used the spoofable `isinstance`. Both are fixed (US3.9).
 - **`description` line boundaries.** Only `\n` / `\r` were rejected, so
-  `\x85`, ` `, `\x0b`, and the other `str.splitlines` boundaries got
-  through. All are rejected now (US3.8).
+  `\x85`, `\u2028`, `\x0b`, and the other `str.splitlines` boundaries got
+  through. All are rejected now (US3.8): the tool itself rejects `\x0b`,
+  `\x0c`, `\x1c`–`\x1e`, `\x85`, ` `, and ` ` before the client
+  call, while `\n` and `\r` are still rejected by `FileMetadata` and
+  surface as `InvalidArgumentError("description")` chained from its
+  `ValueError`.
 - **Open, recorded in ADR 0022 Consequences:** lookalike `system` areas
   (`System`, Cyrillic `ѕ`, zero-width `Cf` characters) are writable because
   `paths` and `scope` compare exactly. This is a policy question for you.
   Separately, `resolve_identity`'s `from None` leaves the original
   exception, and its credentials frame, reachable as `__context__`.
+
+Gate review:
+
+- **`render_result` hardened.** A `path`, `content`, `version`,
+  `description`, or `next_cursor` that is not an exact `str` is dropped
+  from the output instead of raising, so `render_result` never raises for
+  any value of a supported type and its output is always
+  JSON-serializable (US7.5a new scenario, FR-009, plan decision 11,
+  ARCHITECTURE.md, ADR 0022 decision 11).
+- **US7.12 assertions tightened** in the `render_error` tests.
+- **Doc fixes.** The internal fallback is documented as applying when
+  `category` is not an `ErrorCategory` member (it said `Enum` member,
+  which the code doesn't accept) in spec.md, plan.md, ARCHITECTURE.md,
+  and ADR 0022; spec status set to implemented, code-reviewed
+  2026-10-02; an unwrapped line in ADR 0022 decision 9 rewrapped.
+- **Merge dependency.** ADRs 0020 and 0021 come from the AIE-1046 and
+  AIE-1047 branches; those must land before this PR merges.
 
 ## Look closely at
 
@@ -298,5 +320,3 @@ Code review:
   the credentials frame.
 - After human review, update ADR 0022 decision 12 with approval wording
   for the orchestrator calls.
-- Refresh the *pending* rows in the table above once the code-review fix
-  tests land.

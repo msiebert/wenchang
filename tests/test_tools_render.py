@@ -500,21 +500,42 @@ class _BytesContentError(RecoverableError):
     [
         lambda: _NoCategoryError("no category"),
         lambda: _StrCategoryError("str category"),
-        _UnsortableRolesError,
-        _BytesContentError,
     ],
-    ids=["no-category", "str-category", "unsortable-roles", "bytes-content"],
+    ids=["no-category", "str-category"],
 )
-def test_render_error_never_raises_on_hostile_wenchang_error(
+def test_render_error_without_valid_category_renders_internal(
     make: Callable[[], WenchangError],
 ) -> None:
-    """AIE-1044, US7.12: a WenchangError subclass with a missing or wrongly typed
-    category or payload field renders without raising, JSON-safe, with the
-    error, category, and message keys.
+    """AIE-1044, US7.12: a WenchangError subclass with a missing or non-enum
+    category renders as a fixed internal error without raising.
+    """
+    exc = make()
+
+    out = render_error(exc)
+
+    assert out == {
+        "error": type(exc).__name__,
+        "category": "internal",
+        "message": "internal error",
+    }
+    _round_trips(out)
+
+
+@pytest.mark.parametrize(
+    ("make", "dropped"),
+    [(_UnsortableRolesError, "required_roles"), (_BytesContentError, "content")],
+    ids=["unsortable-roles", "bytes-content"],
+)
+def test_render_error_drops_wrongly_typed_payload_field(
+    make: Callable[[], WenchangError], dropped: str
+) -> None:
+    """AIE-1044, US7.12: a WenchangError with a wrongly typed payload field renders
+    without raising, keeps its category, and omits the bad field.
     """
     out = render_error(make())
 
-    assert {"error", "category", "message"} <= out.keys()
+    assert dropped not in out
+    assert out["category"] == "recoverable"
     assert all(type(out[key]) is str for key in ("error", "category", "message"))
     _round_trips(out)
 
@@ -557,3 +578,102 @@ def test_render_list_page_drops_non_str_metadata_members() -> None:
     assert entries[0]["aliases"] == ["b"]
     assert entries[0]["sources"] == ["s"]
     _round_trips(out)
+
+
+# --- render_result never raises on wrongly typed core fields ------------------
+
+
+def _tuple_description_metadata() -> FileMetadata:
+    return FileMetadata(
+        description=cast(str, ("d1", "d2")),
+        aliases=("x",),
+        sources=frozenset({"s"}),
+        last_updated=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
+def _render_entry(entry: FileEntry) -> dict[str, object]:
+    out = render_result(ListPage((entry,), None))
+    _round_trips(out)
+    entries = cast(list[dict[str, object]], out["entries"])
+    return entries[0]
+
+
+def test_render_file_entry_drops_non_str_version() -> None:
+    """AIE-1044, US7.5a: a FileEntry whose version is an int renders without
+    raising, omits version, and keeps its well-typed fields.
+    """
+    entry = FileEntry(_PATH, _METADATA, cast(VersionToken, 5))
+
+    out = _render_entry(entry)
+
+    assert "version" not in out
+    assert out["path"] == _PATH
+    assert out["description"] == "Notes about a"
+
+
+def test_render_file_entry_drops_non_str_path() -> None:
+    """AIE-1044, US7.5a: a FileEntry whose path is an int renders without
+    raising, omits path, and keeps its well-typed fields.
+    """
+    entry = FileEntry(cast(str, 5), _METADATA, _VERSION)
+
+    out = _render_entry(entry)
+
+    assert "path" not in out
+    assert out["version"] == "v-17"
+    assert out["description"] == "Notes about a"
+
+
+def test_render_list_page_drops_non_str_next_cursor() -> None:
+    """AIE-1044, US7.5a: a ListPage whose next_cursor is an int renders without
+    raising, omits next_cursor, and keeps its entries.
+    """
+    page = ListPage((_entry(_PATH),), cast(ListCursor, 7))
+
+    out = render_result(page)
+
+    assert "next_cursor" not in out
+    assert out["entries"] == [_entry_fields(_PATH, "user", "notes", "a")]
+    _round_trips(out)
+
+
+def test_render_memory_file_drops_bytes_content() -> None:
+    """AIE-1044, US7.5a: a MemoryFile whose content is bytes renders without
+    raising, omits content, and keeps its well-typed fields.
+    """
+    file = MemoryFile(_PATH, cast(str, b"x"), _METADATA, _VERSION)
+
+    out = render_result(file)
+
+    assert "content" not in out
+    assert out["path"] == _PATH
+    assert out["version"] == "v-17"
+    _round_trips(out)
+
+
+def test_render_memory_file_drops_tuple_description() -> None:
+    """AIE-1044, US7.5a: a MemoryFile whose metadata description is a tuple
+    renders without raising, omits description, and keeps its well-typed fields.
+    """
+    file = MemoryFile(_PATH, "body", _tuple_description_metadata(), _VERSION)
+
+    out = render_result(file)
+
+    assert "description" not in out
+    assert out["content"] == "body"
+    assert out["aliases"] == ["x"]
+    _round_trips(out)
+
+
+def test_render_file_entry_drops_tuple_description() -> None:
+    """AIE-1044, US7.5a: a FileEntry whose metadata description is a tuple
+    renders without raising, omits description, and keeps its well-typed fields.
+    """
+    entry = FileEntry(_PATH, _tuple_description_metadata(), _VERSION)
+
+    out = _render_entry(entry)
+
+    assert "description" not in out
+    assert out["path"] == _PATH
+    assert out["sources"] == ["s"]
