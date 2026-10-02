@@ -2036,8 +2036,8 @@ class TransportConformance:
                 result = _write(
                     name,
                     f"write_file({fit})",
-                    lambda v=version, m=fit_meta: client.write_file(
-                        fit, "- [stated] a\n", m, v, source=src
+                    lambda expected_version=version, m=fit_meta: client.write_file(
+                        fit, "- [stated] a\n", m, expected_version, source=src
                     ),
                 )
                 version = result.version

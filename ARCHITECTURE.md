@@ -571,8 +571,9 @@ implemented.
   every key and value an exact `str` passing `is_valid_segment`; an
   `items()` that raises or repeats a key fails), and the values the
   client's store was configured with: `max_file_bytes` (an exact `int` of
-  at least `MIN_FILE_BYTES = 64`), `index_max_bytes` and `list_page_size` (exact positive `int`s;
-  `bool` rejected), and `scope_priority` (an exact `tuple` of distinct
+  at least `MIN_FILE_BYTES = 64`), `index_max_bytes` (an exact `int` of
+  at least `MIN_INDEX_BYTES = 1024`), `list_page_size` (an exact positive
+  `int`; `bool` rejected for all three), and `scope_priority` (an exact `tuple` of distinct
   exact-`str` valid segments, even though `MemoryStore` accepts any
   `Sequence`). Fixtures are validated in that fixed order, so the first bad
   one is reported, with key phrase `fixture <name>`;

@@ -57,3 +57,5 @@ group and a drift test pinning core's exact argument-error messages.
   honest when core's wording changes.
 - US8.3 may skip for adopters with very large caps; the reference does
   not.
+- US8.3 rejects `index_max_bytes` below `MIN_INDEX_BYTES` (1024), so
+  adopters with smaller caps must raise the fixture value.

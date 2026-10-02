@@ -57,16 +57,23 @@ the suite last observed through a read, and the carried `version` is
 used only by handing it back. Every case begins with the fixture checks
 it needs and `require_fresh`.
 
+Fixtures: the AIE-1047 seven, unchanged except that `index_max_bytes`
+must be an exact `int` of at least `MIN_INDEX_BYTES = 1024` (checked in
+`test_client_satisfies_protocol` and US8.3, failing `fixture
+index_max_bytes`). The floor leaves room for the US8.3 probe entries,
+including the exact-fit and +1 budget probes.
+
 ### User Story 1 - Round-trip fidelity (Priority: P1)
 
 1. `test_round_trip_unicode_content_and_metadata`: content
    `"- [stated] café ☕ 日本語 \U0001F600\n"`, description `"déjà vu"`,
-   aliases `("ñ", "日本")`, sources `{seed}` → canonical write and read
+   aliases `("日本", "ñ")`, sources `{seed}` → canonical write and read
    tuples equal and equal to expected (`round trip`).
 2. `test_round_trip_markdown_resembling_fact_syntax`: content with lines
-   that look like fact lines but are not valid (`"- [shouted] x\n- stated
-   y\n[stated] z\n"`) plus a blank line and a code fence → byte-for-byte
-   equal content on read.
+   that look like fact lines but are not valid, a CRLF line ending,
+   trailing spaces, a blank line, and a fenced block (`"- [shouted] x
+   \r\n- stated y\n[stated] z\n\n```\n- [stated] f  \n```\n"`), with an
+   empty description → byte-for-byte equal content and metadata on read.
 3. `test_round_trip_content_without_trailing_newline` and
    `test_round_trip_empty_content`: `"- [stated] a"` and `""` both
    survive unchanged.
@@ -136,9 +143,10 @@ Content `"- [stated] alpha\n- [stated] beta\n- [stated] alpha\n"`.
 3. `test_replace_fact_multiple_matches_rejected`: `old_string="alpha"` →
    `match_count=2`; content unchanged.
 4. `test_replace_fact_stale_token_unique_match_reapplies`: read `r1`;
-   append a line via `r1.version` (so `r1` is stale); `replace_fact(P,
-   "beta", "gamma", r1.version)` → succeeds (re-applied); read shows the
-   appended line and `gamma`.
+   append `"- [stated] d"` via `r1.version` (so `r1` is stale);
+   `replace_fact(P, "beta", "zeta", r1.version)` → succeeds (re-applied);
+   read shows the appended line and `zeta` (same length as `beta`, so the
+   content stays within `MIN_FILE_BYTES`).
 5. `test_replace_fact_stale_token_non_unique_conflicts`: read `r1`;
    via `r1.version` replace `beta` with `alpha` (now three `alpha`s);
    `replace_fact(P, "beta", "x", r1.version)` → conflict payload (zero
@@ -231,11 +239,20 @@ when replaying the cap.
    by `list_prefix` or the index, never from self-built `FileEntry`s.
    Assertions: the returned entry paths equal the replayed longest
    fitting prefix exactly, in order (`wrong order`), so the next entry
-   would overflow; and `capped` equals the replayed omitted entries
-   grouped by area prefix with counts, sorted by prefix (the sentinel's
-   own prefix included if it was capped), compared after
-   `without_sentinel` on both sides to the `INDEX_AREA` expectation
-   (`wrong capped`).
+   would overflow; the returned sizes total at most the budget
+   (`budget exceeded`); and the client's raw `capped`, in the order
+   returned, equals the replayed omitted entries grouped by area prefix
+   with counts, sorted by prefix, including the sentinel's area when the
+   replay predicts it capped (`wrong capped`; unsorted or
+   sentinel-dropped output fails). `index_max_bytes` must be at least
+   `MIN_INDEX_BYTES` (1024), which leaves room for the probe entries.
+   Two budget probes follow: a newest `conformance-probe-fit` entry sized
+   to fill the leftover budget exactly, then resized one byte past it,
+   each rechecked against a fresh replay. The exact fit catches a client
+   whose budget is too small; the +1 catches one whose budget is too
+   large. If the probe entry cannot be sized exactly within the attempt
+   limit, or the leftover budget is below a minimal entry, the probes do
+   not run and the first check stands.
 4. `test_index_of_empty_scope_map_is_empty`: `canonical_index` of
    `get_memory_index({})` equals `((), ())` (no `require_fresh` needed,
    stateless).

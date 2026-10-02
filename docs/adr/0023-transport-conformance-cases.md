@@ -21,8 +21,9 @@ the `TransportConformance` mixin with seven fixtures, five baseline cases,
 `sentinel_entry_bytes`, the `name: label: phrase` message form, the clock
 contract, and the rule that version tokens are never compared, pinned by
 an `ast` scan (`find_version_misuse`) in the repo's tests. AIE-1045 adds
-the exhaustive Section 10.2 cases as further methods on the same mixin,
-without changing the fixture contract or the harness helpers.
+the exhaustive Section 10.2 cases as further methods on the same mixin.
+It keeps the fixture set and the existing harness helpers, but raises
+the `index_max_bytes` minimum (decision 9).
 
 Three things had to be settled first:
 
@@ -48,8 +49,10 @@ Three things had to be settled first:
 
 Add 43 case methods to `TransportConformance`, grouped by Section 10.2
 bullet, plus private case helpers and pinned message constants in
-`wenchang.testing.transport_conformance`. No change to `core`,
-`transport`, or the harness helpers. The repo's method-name test lists
+`wenchang.testing.transport_conformance`. No change to `core` or
+`transport`; the existing harness helpers keep their behavior, and the
+only fixture-contract change is the `index_max_bytes` floor (decision
+9). The repo's method-name test lists
 the full set; the reference run against `InProcessClient` passes all of
 them with no skips; each group has a broken-client self-test in
 `tests/test_transport_conformance_cases_self.py`; and
@@ -106,17 +109,27 @@ them with no skips; each group has a broken-client self-test in
    20 files (the reference fixture, 4096 bytes, does not skip). It then
    asserts that the returned paths equal the replayed included prefix
    exactly (`wrong order`), that their sizes total at most the budget
-   (`budget exceeded`), and that `capped`, after `without_sentinel`,
-   equals the replayed omitted entries grouped by area prefix with counts
-   (`wrong capped`). Sizes come only from client-returned entries, never
-   from self-built `FileEntry`s.
+   (`budget exceeded`), and that the client's raw `capped`, in the order
+   returned, equals the replayed omitted entries grouped by area prefix
+   with counts, sorted by prefix, including the sentinel's area when the
+   replay predicts it capped (`wrong capped`); unsorted or
+   sentinel-dropped output fails. Sizes come only from client-returned
+   entries, never from self-built `FileEntry`s. `index_max_bytes` has a
+   floor of `MIN_INDEX_BYTES = 1024` so the probe entries fit.
+   Two budget probes follow: a newest `conformance-probe-fit` entry sized
+   to fill the leftover budget exactly, then one byte past it, each
+   rechecked against a fresh replay. The exact fit catches a client whose
+   budget is too small; the +1 catches one whose budget is too large. If
+   the entry cannot be sized exactly within `_FIT_ATTEMPTS` writes, or the
+   leftover budget is below a minimal entry, the probes do not run and the
+   first check stands.
    - **Rejected: hardcoded sizes or file counts**, which hold only for one
      fixture value and one entry encoding.
    - **Rejected: asserting only "a prefix within budget"**, which a client
      that drops entries early, or orders tiers wrongly, would pass.
    - **Rejected: stopping as soon as the sentinel alone is capped**, which
-     at some budgets gives a case whose `capped` is empty after
-     `without_sentinel` and so checks nothing about the probe files.
+     at some budgets gives a case whose only capped area is the
+     sentinel's and so checks nothing about the probe files.
 5. **Tokens reach the client only inside `client.<method>(...)` calls in
    the lambda passed to `_call` or `expect_error`.** No helper takes a
    token parameter; helpers such as `_write`, `_read`, `_conflict`, and
@@ -167,6 +180,20 @@ them with no skips; each group has a broken-client self-test in
      wording about values outside the well-typed contract ADR 0019 covers.
    - **Rejected: a custom `Mapping` that yields a duplicate key**, which
      tests a caller bug, not transport parity.
+9. **`index_max_bytes` has a floor of `MIN_INDEX_BYTES = 1024`, and the
+   cap case adds three private helpers.** The floor leaves headroom for
+   the US8.3 probe entries and the exact-fit and +1 budget probes; a
+   smaller value fails `fixture index_max_bytes` in every case that
+   validates fixtures, including `test_client_satisfies_protocol`. This
+   amends ADR 0021 decision 2, which allowed any positive `int`. The
+   helpers are `_check_cap` (asserts one `get_memory_index` result
+   against a replay: order, budget, raw `capped`), `_listed_sizes`
+   (`index_entry_bytes` of listed entries by path, failing if an
+   expected path is missing), and `_utf8_len` (UTF-8 byte length, used
+   to size the fit probe). The existing harness helpers are unchanged.
+   - **Rejected: keeping any positive `int` and skipping the probes at
+     small budgets**, which silently weakens the cap case for adopters
+     with small caps.
 
 ### Adversarial review
 
@@ -196,7 +223,9 @@ new wording as a suite failure until their transport matches.
 
 The cap case adapts to any fixture values, but an adopter whose
 `index_max_bytes` is so large that 20 probe files never overflow it gets
-a skip, not a pass, for that one case.
+a skip, not a pass, for that one case. An adopter whose
+`index_max_bytes` is below 1024 fails fixture validation and must
+configure a larger cap for the suite.
 
 Corrupt-metadata errors and duplicate scopes are not checked by this
 suite. Corrupt stored metadata is exercised only in-process, by core's

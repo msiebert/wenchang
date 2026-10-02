@@ -36,7 +36,7 @@ from wenchang.errors import (
 from wenchang.file_format import FileMetadata
 from wenchang.paths import is_valid_path, parse_path
 from wenchang.storage.memory import InMemoryStorage
-from wenchang.testing.transport_conformance import TransportConformance
+from wenchang.testing.transport_conformance import MIN_INDEX_BYTES, TransportConformance
 from wenchang.transport import InProcessClient
 from wenchang.version_token import VersionToken
 
@@ -1199,6 +1199,17 @@ def test_skipped_case_counts_as_failure() -> None:
     """A fixture under which US8.3 skips is reported as "case skipped" (AIE-1045, FR-002)."""
     with pytest.raises(pytest.fail.Exception, match="case skipped"):
         _run_unskipped(INDEX_BYTE_CAP, _LargeIndexBudget(), index_max_bytes=1 << 20)
+
+
+def test_index_byte_cap_rejects_budget_below_minimum() -> None:
+    """US8.3 fails "fixture index_max_bytes" below MIN_INDEX_BYTES (AIE-1045, US8.3)."""
+    client = _reference()
+    expected = (
+        f"{type(client).__name__}: fixture index_max_bytes must be at least "
+        f"{MIN_INDEX_BYTES}, got {MIN_INDEX_BYTES - 1}"
+    )
+    with pytest.raises(pytest.fail.Exception, match=f"^{re.escape(expected)}"):
+        _run(INDEX_BYTE_CAP, client, index_max_bytes=MIN_INDEX_BYTES - 1)
 
 
 def test_reference_subclass_runs_every_case_unskipped(pytester: pytest.Pytester) -> None:

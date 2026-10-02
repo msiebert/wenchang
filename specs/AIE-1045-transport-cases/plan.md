@@ -189,10 +189,22 @@ non-system tiers by `scope_priority` (listed in order, unlisted as one
 trailing tier), the sentinel in its tier position and oldest, recency
 from write order within tiers. Replay core's loop: include while the
 cumulative size ≤ `index_max_bytes`, stop at the first overflow. Assert
-the returned paths equal the included paths exactly (`wrong order`);
-expected `capped` = omitted entries grouped by area prefix with counts,
-sorted by prefix (the sentinel's prefix included if capped); compare
-after `without_sentinel` on both sides (`wrong capped`).
+the returned paths equal the included paths exactly (`wrong order`) and
+their sizes total at most the budget (`budget exceeded`). Expected
+`capped` comes from the replay over client-returned entries: omitted
+entries grouped by area prefix with counts, sorted by prefix, including
+the sentinel's area when the replay predicts it capped. It is compared
+to the client's raw `capped` in the order returned, so unsorted or
+sentinel-dropped output fails `wrong capped`. `index_max_bytes` is
+floored at `MIN_INDEX_BYTES = 1024` to leave room for the probe entries.
+Then two budget probes: write `conformance-probe-fit` (newest) sized to
+fill the leftover budget exactly, recheck, then resize it to one byte
+past and recheck. The exact fit catches a too-small budget; the +1
+catches a too-large one. Sizing re-measures the listed entry and retries
+up to `_FIT_ATTEMPTS` times, since the version string's length can
+change between writes. If the entry cannot be sized exactly within
+`_FIT_ATTEMPTS`, or the leftover budget is below a minimal entry, the
+probes do not run and the first check stands.
 
 ### `tests/test_testing_package.py`
 
