@@ -174,3 +174,29 @@ chaining, a crashing resolver surfaces only its class and exception type, so
 adopters debug it directly. Session consistency is a resolver contract left
 to the AIE-1039 conformance suite; the library does not cache or verify it.
 `dataclasses.asdict` does not work on `Identity`.
+
+## Update (2026-10-02)
+
+AIE-1137 tightens decision 3. Before, `from None` left `__context__`
+pointing to the resolver's exception. Code that walks `__context__`
+directly, such as a host logger, error reporter, or debugger, could reach
+the original message and any credential in it. Now no
+`ResolverFailureError` that leaves `resolve_identity` carries any exception
+from resolution as `__context__`. Every one has `__cause__` `None` and
+`__suppress_context__` `True`. That covers all four failure paths: resolver
+raised, `ResolutionFailure` returned, `ResolutionFailure.detail` raised,
+and wrong return type.
+
+`resolve_identity` raises outside the `except` block. Each handler only
+builds the `ResolverFailureError` into a local variable. The raise, always
+`from None`, happens after the try/except has exited, when no resolver
+exception is being handled, so Python records none as `__context__`.
+Setting `__context__ = None` before `raise` inside the handler would not
+work, because Python resets `__context__` to the handled exception at
+raise time. The approach excludes only the resolver's exceptions. If the
+caller is itself handling an exception when it calls `resolve_identity`,
+that exception is still attached as `__context__`, as usual.
+- **Rejected: a wrapper that catches, clears `__context__`, and
+  re-raises.** It would also drop the caller's own in-flight exception.
+
+Messages, categories, and the public API are unchanged.

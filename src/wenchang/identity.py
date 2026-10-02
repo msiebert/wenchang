@@ -129,12 +129,17 @@ def _type_name(t: type) -> str:
 def resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
     """Resolve `credentials` with `resolver`, raising ResolverFailureError on failure."""
     name = _type_name(type(resolver))
+    result: object = None
+    raised: ResolverFailureError | None = None
     try:
         # Widened because resolvers may be untyped and return anything.
         result = cast(object, resolver.resolve(credentials))
     except Exception as exc:
         # The exception message may carry credentials, so only its type is reported.
-        raise ResolverFailureError(f"Resolver {name} raised {_type_name(type(exc))}.") from None
+        raised = ResolverFailureError(f"Resolver {name} raised {_type_name(type(exc))}.")
+    # Raised outside the except block so the original exception isn't kept as __context__.
+    if raised is not None:
+        raise raised from None
     # type() rather than isinstance, which consults a resolver-controlled __class__.
     result_type = type(result)
     if issubclass(result_type, Identity):
@@ -147,7 +152,7 @@ def resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identi
         raise error from None
     raise ResolverFailureError(
         f"Resolver {name} returned {_type_name(result_type)}, not Identity or ResolutionFailure."
-    )
+    ) from None
 
 
 class SandboxResolver:
