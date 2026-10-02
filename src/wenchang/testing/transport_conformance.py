@@ -10,7 +10,9 @@ with "Test", and supply these fixtures:
     scope_map        a Mapping of at least two scopes to entity IDs; every
                      scope must be writable through `client`
     max_file_bytes   the store's max_file_bytes (an int, at least 64)
-    index_max_bytes  the store's index_max_bytes (a positive int)
+    index_max_bytes  the store's index_max_bytes (an int, at least 1024),
+                     measured over index entries as the client returns
+                     them, version string included
     scope_priority   the store's scope_priority, as an exact tuple of str
     list_page_size   the store's list_page_size (a positive int)
 
@@ -40,6 +42,7 @@ Passing every test defines a conforming client.
 
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
+from itertools import pairwise
 from typing import Final, NoReturn, cast, overload
 
 import pytest
@@ -76,6 +79,7 @@ INDEX_AREA: Final = "conformance-index"
 SENTINEL_AREA: Final = "conformance-sentinel"
 SENTINEL_STEM: Final = "sentinel"
 MIN_FILE_BYTES: Final = 64
+MIN_INDEX_BYTES: Final = 1024
 _SENTINEL_SOURCE: Final = "conformance-harness"
 _SENTINEL_CONTENT: Final = "- [system] conformance sentinel\n"
 _REPR_LIMIT: Final = 80
@@ -97,6 +101,7 @@ _INVALID_PATHS: Final = ("a/b", "a/b/c/d", "a/../c/d.md")
 _SYSTEM_AREA: Final = "system"
 _CAP_FILES: Final = 20
 _CAP_DESCRIPTION: Final = "x" * 200
+_FIT_ATTEMPTS: Final = 3
 
 _METHODS: Final = (
     "read_file",
@@ -807,6 +812,64 @@ def _area_prefix(path: str, /) -> str:
     return build_prefix(parts.scope, parts.entity_id, parts.area)
 
 
+def _utf8_len(text: str, /) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _listed_sizes(
+    name: str, client: TransportClient, prefix: str, expected: Iterable[str], /
+) -> dict[str, int]:
+    """index_entry_bytes of every entry listed under prefix, by path; fail if any expected
+    path is missing."""
+    label = f"list_prefix({prefix})"
+    listed = _listed_entries(name, client, prefix)
+    raw = [e for e, _ in listed]
+    sizes = dict(zip((c[0] for _, c in listed), _entry_bytes(name, label, raw), strict=True))
+    missing = [p for p in expected if p not in sizes]
+    if missing:
+        _fail(name, label, f"missing entry: {_short(missing)}")
+    return sizes
+
+
+def _check_cap(
+    name: str,
+    client: TransportClient,
+    scopes: Mapping[str, str],
+    budget: int,
+    replay: list[str],
+    included: list[str],
+    /,
+) -> None:
+    """get_memory_index matches the replayed cap: entries, budget, and raw capped."""
+    counts: dict[str, int] = {}
+    for path in replay[len(included) :]:
+        area = _area_prefix(path)
+        counts[area] = counts.get(area, 0) + 1
+    expected_capped = tuple(sorted(counts.items()))
+    index_label = "get_memory_index result"
+    index = cast(
+        object,
+        _call(name, "get_memory_index(scope_map)", lambda: client.get_memory_index(scopes)),
+    )
+    raw_entries, canon_entries, _, capped = _index_parts(name, index_label, index)
+    used = sum(_entry_bytes(name, index_label, cast(tuple[FileEntry, ...], raw_entries)))
+    if used > budget:
+        _fail(name, index_label, f"budget exceeded: entries total {used} > {budget}")
+    got = [c[0] for c in canon_entries]
+    if got != included:
+        _fail(
+            name,
+            index_label,
+            f"wrong order: expected {included}, got {got}; check the clock contract",
+        )
+    if capped != expected_capped:
+        _fail(
+            name,
+            index_label,
+            f"wrong capped: expected {_short(expected_capped)}, got {_short(capped)}",
+        )
+
+
 def _first_page(
     name: str, client: TransportClient, prefix: str, size: int, /
 ) -> tuple[ListPage, CanonicalPage]:
@@ -840,7 +903,7 @@ class TransportConformance:
         check_source(name, source)
         check_scope_map(name, scope_map)
         check_positive_int(name, "max_file_bytes", max_file_bytes, MIN_FILE_BYTES)
-        check_positive_int(name, "index_max_bytes", index_max_bytes)
+        check_positive_int(name, "index_max_bytes", index_max_bytes, MIN_INDEX_BYTES)
         check_scope_priority(name, scope_priority)
         check_positive_int(name, "list_page_size", list_page_size)
 
@@ -1008,21 +1071,22 @@ class TransportConformance:
             src,
             "- [stated] café ☕ 日本語 \U0001f600\n",
             "déjà vu",
-            ("ñ", "日本"),
+            ("日本", "ñ"),
             frozenset({_seed(src)}),
         )
 
     def test_round_trip_markdown_resembling_fact_syntax(
         self, client: TransportClient, source: str, scope_map: Mapping[str, str]
     ) -> None:
-        """Content with near-fact lines, a blank line, and a code fence survives byte-for-byte."""
+        """Near-fact lines, a code fence, CRLF, trailing spaces, and an empty description
+        survive byte-for-byte."""
         name = _name(type(client))
         check_client(name, client)
         src = check_source(name, source)
         scopes = check_scope_map(name, scope_map)
         require_fresh(name, client, scopes)
-        content = "- [shouted] x\n- stated y\n[stated] z\n\n```\n- [stated] fenced\n```\n"
-        _round_trip(name, client, scopes, src, content, "d", ("x", "y"), frozenset({_seed(src)}))
+        content = "- [shouted] x \r\n- stated y\n[stated] z\n\n```\n- [stated] f  \n```\n"
+        _round_trip(name, client, scopes, src, content, "", ("x", "y"), frozenset({_seed(src)}))
 
     def test_round_trip_content_without_trailing_newline(
         self, client: TransportClient, source: str, scope_map: Mapping[str, str]
@@ -1034,7 +1098,7 @@ class TransportConformance:
         scopes = check_scope_map(name, scope_map)
         require_fresh(name, client, scopes)
         _round_trip(
-            name, client, scopes, src, "- [stated] a", "d", ("x", "y"), frozenset({_seed(src)})
+            name, client, scopes, src, "- [stated] a", "d", ("y", "x"), frozenset({_seed(src)})
         )
 
     def test_round_trip_empty_content(
@@ -1533,14 +1597,15 @@ class TransportConformance:
         _write(
             name,
             f"append_line({p})",
-            lambda: client.append_line(p, "- [stated] delta", r1.version, source=src),
+            lambda: client.append_line(p, "- [stated] d", r1.version, source=src),
         )
+        # "zeta" keeps the length of "beta", so content stays within MIN_FILE_BYTES.
         _write(
             name,
             f"replace_fact({p})",
-            lambda: client.replace_fact(p, "beta", "gamma", r1.version, source=src),
+            lambda: client.replace_fact(p, "beta", "zeta", r1.version, source=src),
         )
-        want = "- [stated] alpha\n- [stated] gamma\n- [stated] alpha\n- [stated] delta\n"
+        want = "- [stated] alpha\n- [stated] zeta\n- [stated] alpha\n- [stated] d\n"
         _expect_content(name, client, p, "wrong content", want)
 
     def test_replace_fact_stale_token_non_unique_conflicts(
@@ -1902,7 +1967,11 @@ class TransportConformance:
         )
         got = [c[0] for c in entries]
         if got != expected:
-            _fail(name, index_label, f"wrong order: expected {expected}, got {got}")
+            _fail(
+                name,
+                index_label,
+                f"wrong order: expected {expected}, got {got}; check the clock contract",
+            )
 
     def test_index_byte_cap_degrades_with_capped_prefixes(
         self,
@@ -1917,16 +1986,17 @@ class TransportConformance:
         check_client(name, client)
         src = check_source(name, source)
         scopes = check_scope_map(name, scope_map)
-        budget = check_positive_int(name, "index_max_bytes", index_max_bytes)
+        budget = check_positive_int(name, "index_max_bytes", index_max_bytes, MIN_INDEX_BYTES)
         priority = check_scope_priority(name, scope_priority)
         require_fresh(name, client, scopes)
         second = sorted(scopes)[1]
         sentinel = sentinel_path(scopes)
         sentinel_bytes = sentinel_entry_bytes(name, client, scopes)
         prefix = build_prefix(second, scopes[second], INDEX_AREA)
-        list_label = f"list_prefix({prefix})"
-        metadata = _meta(_CAP_DESCRIPTION, sources=frozenset({_seed(src)}))
+        seed = frozenset({_seed(src)})
+        metadata = _meta(_CAP_DESCRIPTION, sources=seed)
         written: list[str] = []
+        sizes: dict[str, int] = {}
         replay: list[str] = []
         included: list[str] = []
         # Continue until an INDEX_AREA entry, not just the sentinel, is predicted capped.
@@ -1934,14 +2004,7 @@ class TransportConformance:
             path = probe_path(name, _PROBE_LABEL, scopes, second, INDEX_AREA, f"{PROBE_STEM}-{i}")
             _create(name, client, path, metadata, src)
             written.append(path)
-            listed = _listed_entries(name, client, prefix)
-            raw = [e for e, _ in listed]
-            sizes = dict(
-                zip((c[0] for _, c in listed), _entry_bytes(name, list_label, raw), strict=True)
-            )
-            missing = [p for p in written if p not in sizes]
-            if missing:
-                _fail(name, list_label, f"missing entry: {_short(missing)}")
+            sizes = _listed_sizes(name, client, prefix, written)
             sizes[sentinel] = sentinel_bytes
             replay, included = _replay_cap(sentinel, written, sizes, priority, budget)
             if any(p != sentinel for p in replay[len(included) :]):
@@ -1951,35 +2014,46 @@ class TransportConformance:
                 f"{_CAP_FILES} index entries cannot overflow index_max_bytes={budget} "
                 f"past the sentinel"
             )
-        counts: dict[str, int] = {}
-        for path in replay[len(included) :]:
-            area = _area_prefix(path)
-            counts[area] = counts.get(area, 0) + 1
-        sentinel_area = _area_prefix(sentinel)
-        expected_capped = tuple(
-            (area, n) for area, n in sorted(counts.items()) if area != sentinel_area
-        )
-        index_label = "get_memory_index result"
-        index = cast(
-            object,
-            _call(name, "get_memory_index(scope_map)", lambda: client.get_memory_index(scopes)),
-        )
-        raw_entries, canon_entries, _, _ = _index_parts(name, index_label, index)
-        used = sum(_entry_bytes(name, index_label, cast(tuple[FileEntry, ...], raw_entries)))
-        if used > budget:
-            _fail(name, index_label, f"budget exceeded: entries total {used} > {budget}")
-        got = [c[0] for c in canon_entries]
-        if got != included:
-            _fail(name, index_label, f"wrong order: expected {included}, got {got}")
-        _, capped = canonical_index(
-            name, index_label, without_sentinel(name, index_label, cast(MemoryIndex, index))
-        )
-        if capped != expected_capped:
-            _fail(
-                name,
-                index_label,
-                f"wrong capped: expected {_short(expected_capped)}, got {_short(capped)}",
-            )
+        _check_cap(name, client, scopes, budget, replay, included)
+
+        # A newest entry filling the leftover budget exactly, then one byte past it, pins the
+        # budget comparison: an off-by-k client includes or caps the wrong entries.
+        remaining = budget - sum(sizes[p] for p in included)
+        fit = probe_path(name, _PROBE_LABEL, scopes, second, INDEX_AREA, f"{PROBE_STEM}-fit")
+        last = written[-1]
+        base = sizes[last] - len(_CAP_DESCRIPTION) - _utf8_len(last) + _utf8_len(fit)
+        version: VersionToken | None = None
+
+        def fit_to(target: int) -> dict[str, int] | None:
+            """Write fit with an entry of exactly target bytes; None if that is unreachable."""
+            nonlocal base, version
+            # The version string's length can change between writes, so the size is re-measured.
+            for _ in range(_FIT_ATTEMPTS):
+                if target < base:
+                    return None
+                description = "x" * (target - base)
+                fit_meta = _meta(description, sources=seed)
+                result = _write(
+                    name,
+                    f"write_file({fit})",
+                    lambda v=version, m=fit_meta: client.write_file(
+                        fit, "- [stated] a\n", m, v, source=src
+                    ),
+                )
+                version = result.version
+                fit_sizes = _listed_sizes(name, client, prefix, [*written, fit])
+                if fit_sizes[fit] == target:
+                    return fit_sizes
+                base = fit_sizes[fit] - len(description)
+            return None
+
+        for target in (remaining, remaining + 1):
+            fitted = fit_to(target)
+            if fitted is None:
+                return
+            fitted[sentinel] = sentinel_bytes
+            replay, included = _replay_cap(sentinel, [*written, fit], fitted, priority, budget)
+            _check_cap(name, client, scopes, budget, replay, included)
 
     def test_index_of_empty_scope_map_is_empty(self, client: TransportClient) -> None:
         """get_memory_index({}) returns no entries and nothing capped."""
@@ -2028,10 +2102,12 @@ class TransportConformance:
         if canonical_page(name, label, again) != (entries2, last):
             _fail(name, label, "unstable cursor: the same cursor listed a different page")
         paths = [c[0] for c in entries1 + entries2]
+        if len(paths) != len(set(paths)):
+            _fail(name, label, f"wrong order: duplicate entry across pages, got {paths}")
         if sorted(set(paths)) != sorted(written):
             _fail(name, label, f"wrong entries: expected {sorted(written)}, got {paths}")
-        if paths != sorted(paths):
-            _fail(name, label, f"wrong order: expected ascending paths, got {paths}")
+        if any(a >= b for a, b in pairwise(paths)):
+            _fail(name, label, f"wrong order: expected strictly ascending paths, got {paths}")
 
     def test_list_prefix_levels(
         self, client: TransportClient, source: str, scope_map: Mapping[str, str]

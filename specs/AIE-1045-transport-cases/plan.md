@@ -63,8 +63,8 @@ parameter; helpers take a zero-arg callable instead.
    entries** (`index_entry_bytes` over entries from `list_prefix` or the
    index, never self-built `FileEntry`s), never hardcoded, so the cases
    hold for any fixture values; US8.3 asserts the exact longest fitting
-   prefix and exact `capped`, and skips only when 20 probe files cannot
-   overflow the fixture cap.
+   prefix and exact `capped`, and skips only when 20 probe files never
+   make the replay omit an `INDEX_AREA` entry (not merely the sentinel).
 5. **Tokens reach the client only inside `client.<method>(...)` calls in
    the lambda passed to `_call`/`expect_error`**; no helper takes a token
    parameter. `_ABSENT_TOKEN = VersionToken("1")` is a plain constant
@@ -116,8 +116,12 @@ MSG_INVALID_ENTITY: Final = "invalid entity_id: {entity_id!r}"
 def _meta(
     description: str = "d", aliases: tuple[str, ...] = ("x", "y"), *, sources: frozenset[str]
 ) -> FileMetadata: ...
-def _write(name: str, label: str, fn: Callable[[], object], /) -> MemoryFile: ...  # _call + canonical_file
-def _read(name: str, label: str, fn: Callable[[], object], /) -> MemoryFile: ...   # _call + canonical_file
+def _write(
+    name: str, label: str, fn: Callable[[], object], /
+) -> MemoryFile: ...  # _call + canonical_file
+def _read(
+    name: str, label: str, fn: Callable[[], object], /
+) -> MemoryFile: ...  # _call + canonical_file
 def _conflict(
     name: str, label: str, fn: Callable[[], object], path: str, content: str, /
 ) -> VersionConflictError: ...  # expect_error(VersionConflictError, RECOVERABLE, path=, content=)
@@ -174,10 +178,12 @@ unlisted scopes as one tier sorted by recency (newest first). The case
 computes this from the fixtures rather than hardcoding scope names.
 
 US8.3 budget: write files with 200-byte descriptions under `INDEX_AREA`
-in `second_scope` one at a time until the `index_entry_bytes` of their
-entries (from `list_prefix`, all pages) plus `sentinel_entry_bytes`
-exceed `index_max_bytes`, or 20 are written; skip if 20 cannot overflow.
-Build the expected order from the listed entries and the sentinel entry
+in `second_scope` one at a time (at most 20). After each write, size the
+`INDEX_AREA` entries (from `list_prefix`, all pages) with
+`index_entry_bytes` and the sentinel with `sentinel_entry_bytes`, and
+replay the cap; keep writing until the replay predicts that at least one
+`INDEX_AREA` entry, not merely the sentinel, is omitted. Skip only if
+that never happens within 20 files. Build the expected order from the listed entries and the sentinel entry
 (from `list_prefix` of the sentinel area): system tier (empty), then
 non-system tiers by `scope_priority` (listed in order, unlisted as one
 trailing tier), the sentinel in its tier position and oldest, recency

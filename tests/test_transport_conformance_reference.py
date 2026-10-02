@@ -109,9 +109,9 @@ class _Ticking:
 
 
 class TestInProcessClient(TransportConformance):
-    """InProcessClient over a fresh MemoryStore passes every baseline case, none skipped.
+    """InProcessClient over a fresh MemoryStore passes every suite case, none skipped.
 
-    AIE-1047, US1.1, US3.1, US3.2, US3.3, US3.4, US3.5.
+    AIE-1047, US1.1, US3.1-US3.5; AIE-1045, US1-US10, US11.1.
     """
 
     @pytest.fixture

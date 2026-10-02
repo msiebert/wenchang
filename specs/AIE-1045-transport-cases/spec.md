@@ -215,11 +215,13 @@ when replaying the cap.
    write order the recency order).
 3. `test_index_byte_cap_degrades_with_capped_prefixes`: write files with
    200-byte descriptions under `INDEX_AREA` in `second_scope`, one at a
-   time, until the entries for them listed by `list_prefix` (all pages)
-   plus `sentinel_entry_bytes` total more than `index_max_bytes`, or 20
-   files are written; skip with `pytest.skip` only if 20 files cannot
-   overflow (the reference fixture, 4096, does not skip). The case then
-   replays core's rule over the full expected order — the system tier
+   time (at most 20). After each write, list the `INDEX_AREA` entries
+   (`list_prefix`, all pages), size them and the sentinel, and replay
+   core's rule (below); stop as soon as the replay predicts that at least
+   one `INDEX_AREA` entry, not merely the sentinel, is omitted. Skip with
+   `pytest.skip` only if that never happens within 20 files (the
+   reference fixture, 4096, does not skip). The replay runs over the full
+   expected order — the system tier
    (empty here), then non-system tiers by `scope_priority` (listed scopes
    in order, unlisted as one trailing tier) with the sentinel in its
    tier position, recency (newest first, from write order; the sentinel
@@ -275,7 +277,11 @@ when replaying the cap.
 2. `test_absent_file_is_not_found_for_every_mutating_read`:
    `read_file`, `append_line`, `replace_fact`, `delete_file` on an
    absent path → `NotFoundError(path=P, reason=FILE_ABSENT)`.
-3. `test_empty_source_is_value_error`: `source=""` on `write_file` →
+3. `test_empty_source_is_value_error`: the case creates `P` (content
+   `_FACTS`) and reads it, then hands back that read's real token in each
+   call, because core validates arguments before checking existence or
+   version, so the `ValueError` is raised regardless and the file must
+   stay unchanged afterwards (`content changed`). `source=""` on `write_file` →
    `message=MSG_WRITE_ARGS`; on `replace_fact` (valid `old_string`) →
    `message=MSG_REPLACE_ARGS`; on `append_line` (valid fact line) →
    `message=MSG_APPEND_ARGS`; each via `expect_error(ValueError, None,
@@ -309,7 +315,8 @@ when replaying the cap.
    reference client passes the same case: US1 drops a unicode alias; US2
    returns new content with old description after a conflict; US3
    returns a token the client later rejects; US4 returns success on a
-   stale write; US5 reports `match_count=1` for zero matches; US6 lands
+   stale write; US5 reports `match_count=2` for zero matches (a count
+   of 1 is invalid for `ReplaceFactMatchError`); US6 lands
    both concurrent appends; US7 accepts an oversize append; US8 returns
    `capped=()` when it omitted entries; US9 returns `next_cursor=None`
    on a full first page; US10 raises `KeyError` for an absent read.
@@ -371,8 +378,10 @@ when replaying the cap.
 ## Assumptions
 
 - Corrupt-metadata errors are out of the transport suite's reach
-  (recorded in ADR 0023); their parity is the tool layer's and the
-  storage suite's concern.
+  (recorded in ADR 0023); corrupt stored metadata is covered by core's
+  `read_file`/`list_prefix` tests and the storage conformance suite
+  (`tests/storage_conformance.py`), and the tool layer passes
+  `MetadataFormatError` through.
 - US7.3 follows the human's answer (a) to ADR 0021's open question: the
   transport accepts `system/` writes. ADR 0019 already carries the
   "Update (2026-10-02)" amendment to decision 6 and ADR 0021 already

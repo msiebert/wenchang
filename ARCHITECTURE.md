@@ -592,8 +592,60 @@ implemented.
   by `write_file`, and one from a write by `append_line`),
   `test_read_absent_is_not_found`, and `test_oversize_write_is_rejected`
   (`OversizeWriteError` with `size` and `limit`, then the path still reads
-  as absent). The exhaustive §10.2 cases are planned as further methods on
-  the same mixin, built from public module-level helpers:
+  as absent). On top of these, 43 case methods cover all nine §10.2
+  groups, one method per assertion, each self-contained (own writes, own
+  probe paths): round-trip fidelity (unicode, fact-like markdown, no
+  trailing newline, empty content, empty aliases with many sources, a
+  replace whose sources accumulate), atomicity (a stale replace leaves
+  content and metadata together; a delete removes both; an append moves
+  content and `last_updated` together), version token opacity (tokens from
+  every operation and from index entries are accepted when handed back),
+  conflict semantics (stale write and stale delete conflict carrying the
+  current content, and the carried token is accepted; create-on-existing
+  conflicts; a token on an absent path is `FILE_ABSENT`), replace-fact
+  matching (zero and multiple matches carry `match_count` and content; a
+  stale token re-applies a still-unique match and conflicts otherwise),
+  append guarding (two appends at one token: one lands, one conflicts, no
+  duplication; separator rule; no creation on an absent path), enforcement
+  (oversize append and `replace_fact` rejected with the exact UTF-8 size
+  of the would-be content; a `system/` write *accepted* at the transport),
+  index behavior (fan-out over every scope; `system/` first, then
+  `scope_priority` tiers, each by recency; the byte cap; an empty map
+  gives `((), ())`), listing (pagination at `list_page_size` with stable
+  cursors in ascending path order, entity and scope levels, invalid
+  prefix, malformed and foreign cursors), and error parity (invalid path
+  and absent file for every operation, empty `source` per method, full
+  `str(exc)` equal to a locally built core error and ending with the
+  category guidance, `get_memory_index` argument errors). The index cap
+  case replays core's rule over entries the client returned (sized with
+  `index_entry_bytes` and `sentinel_entry_bytes`, never hardcoded),
+  writing up to 20 files under area `INDEX_AREA = "conformance-index"`
+  until the replay omits one of them, and asserts the exact longest
+  fitting prefix and the exact `capped`; it skips only if 20 files never
+  overflow (the reference fixture does not). Argument-error `ValueError`s
+  pin core's exact text through module constants (`MSG_WRITE_ARGS`,
+  `MSG_REPLACE_ARGS`, `MSG_APPEND_ARGS`, one per method where core shares a
+  message across causes, plus `MSG_MALFORMED_CURSOR`,
+  `MSG_FOREIGN_CURSOR`, `MSG_INVALID_SCOPE`, `MSG_INVALID_ENTITY`), and a
+  drift test in the repo's tests provokes every (method, cause) pair on a
+  real `MemoryStore` and requires `str(exc)` to equal the constant.
+  `get_memory_index`'s `TypeError`s (non-`Mapping` map, non-`str` key or
+  value) are checked by type only, since their text names caller-side
+  types a remote may reject at serialization in its own words. Two
+  behaviors are out of the suite: duplicate scopes in `scope_map`
+  (unbuildable with a real `Mapping`, and legitimately collapsed by a
+  remote that serializes to JSON) and corrupt-metadata parity
+  (`MetadataFormatError`, `UnicodeDecodeError`), which a conforming client
+  cannot provoke because it cannot seed corrupt stored data; corrupt
+  stored metadata is covered by core's `read_file`/`list_prefix` tests and
+  the storage conformance suite, and the tool layer passes
+  `MetadataFormatError` through. Calls on absent or malformed paths
+  hand back `_ABSENT_TOKEN = VersionToken("1")`, a plain module constant,
+  since any token there must yield `NotFoundError`; every other token
+  reaches the client only as an argument to a `client.<method>(...)` call
+  written inside the lambda passed to `_call` or `expect_error`, and no
+  helper takes a token parameter, so the token scan needs no exemption.
+  The cases are built from public module-level helpers:
   `require_fresh`, `sentinel_path`, `without_sentinel`,
   `sentinel_entry_bytes`, `probe_path`, `expect_error`, `canonical_file`,
   `canonical_entry`, `canonical_page`, `canonical_index`, and the
@@ -650,12 +702,17 @@ implemented.
   never stands in for a `StrEnum` reason. For §10.2's enforcement bullets
   (`system/` writes and role-restricted writes) the human decided option
   (a) on 2026-10-02, recorded in ADR 0021: the transport suite asserts such
-  writes are accepted at the transport, and enforcement is tested only by
-  the tool-layer and resolver suites. It imports
-  `core`, `errors`, `file_format`, `paths`, and `transport` from
-  `wenchang`, plus `pytest`, applies no pytest marks, and cites no Linear
-  IDs. See
-  [ADR 0021](docs/adr/0021-transport-conformance-harness.md).
+  writes are accepted at the transport
+  (`test_system_area_write_is_accepted_at_transport`), and enforcement is
+  tested only by the tool-layer and resolver suites. The repo checks the
+  suite itself: a method-name test pins the exact set of public cases, the
+  reference run against `InProcessClient` passes with no skips, and each
+  §10.2 group has a broken-client self-test that fails with the expected
+  phrase and label. It imports `core`, `errors`, `file_format`, `paths`,
+  `transport`, and `version_token` from `wenchang`, plus `pytest`, applies
+  no pytest marks, and cites no Linear IDs. See
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md) and
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md).
 - **transport** — the transport-agnostic client contract the tool layer
   calls, so a transport is added by writing another implementation without
   touching tool definitions. `TransportClient` is a runtime-checkable,
@@ -710,13 +767,14 @@ implemented.
   wrapped store. `MemoryStore` itself also satisfies `TransportClient`
   structurally, so a host may pass either. No runtime module calls the
   protocol yet: the tool layer and any remote transport are planned. The
-  transport conformance suite (`testing.TransportConformance`) exists with
-  its baseline cases and is run against `InProcessClient` in the repo's
-  tests; its exhaustive §10.2 cases (index behavior, concurrency, full
-  error parity) are planned. See
+  transport conformance suite (`testing.TransportConformance`) is
+  complete: its baseline cases and the exhaustive cases for all nine
+  §10.2 groups run against `InProcessClient` in the repo's tests with no
+  skips, and define what a future remote client must pass. See
   [ADR 0019](docs/adr/0019-transport-client-interface.md),
-  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md), and
-  [ADR 0021](docs/adr/0021-transport-conformance-harness.md).
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md),
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md), and
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md).
 - **tools** *(planned)* — the agent-facing tool layer: thin wrappers over
   the transport client, carrying no policy, each described by a docstring.
 - **prompts** *(planned)* — instruction text for filing, deduplication,
@@ -873,9 +931,11 @@ suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
   the transport itself map to `BackendUnavailableError`. The transport adds
   no identity, policy, or error vocabulary of its own: it accepts every
   well-formed write, including one under `system/`, and scope enforcement
-  happens only in the tool layer (see
-  [ADR 0019](docs/adr/0019-transport-client-interface.md) and
-  [ADR 0021](docs/adr/0021-transport-conformance-harness.md)).
+  happens only in the tool layer; the transport conformance suite asserts
+  the acceptance (see
+  [ADR 0019](docs/adr/0019-transport-client-interface.md),
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md), and
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md)).
 - **Conformance never compares tokens.** The transport conformance suite
   treats version tokens as callers must: it never compares (even for
   equality), orders, parses, slices, or does arithmetic on one, and checks
