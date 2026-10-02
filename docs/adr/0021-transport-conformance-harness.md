@@ -79,6 +79,8 @@ existing module changes.
    positive `int`s (`bool` rejected); `scope_priority` an exact `tuple` of
    distinct exact-`str` valid segments, even though `MemoryStore` accepts
    any `Sequence`.
+   - **Update (2026-10-02):** `index_max_bytes` now has a floor of
+     `MIN_INDEX_BYTES = 1024`; see [ADR 0023](0023-transport-conformance-cases.md).
    - **Rejected: a single `settings` fixture**, which would couple the
      contract to `MemoryStore`'s constructor.
    - **Rejected: adding fixtures as AIE-1045 needs them**, which changes a

@@ -66,7 +66,12 @@ Terms as used throughout wenchang and its spec.
 - **Transport conformance suite** — the conformance suite for transport
   clients, `wenchang.testing.TransportConformance`. It runs the same cases
   against any transport client (in-process or remote) and fails one that is
-  distinguishable from the in-process client in results or errors. It never
+  distinguishable from the in-process client in results or errors,
+  covering round-trip fidelity, atomicity, token opacity, conflicts,
+  replace-fact matching, append guarding, enforcement, index behavior, and
+  error parity, including core's exact wording for argument errors. On
+  enforcement it requires a transport to *accept* a `system/` write: scope
+  rules are enforced by the tools, not the transport. It never
   compares version tokens, only hands them back. The adopter supplies a
   fresh client per test plus the settings its store was configured with;
   every scope in the supplied scope map must be writable through that

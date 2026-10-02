@@ -38,6 +38,7 @@ from wenchang.storage.memory import InMemoryStorage
 from wenchang.testing import transport_conformance
 from wenchang.testing.transport_conformance import (
     MIN_FILE_BYTES,
+    MIN_INDEX_BYTES,
     PROBE_AREA,
     PROBE_STEM,
     PROBE_STEM_2,
@@ -1612,8 +1613,9 @@ BAD_FIXTURES: list[tuple[str, str, object, str]] = [
     ("max-file-bytes-bool", "max_file_bytes", True, "bool"),
     ("max-file-bytes-float", "max_file_bytes", 256.0, "float"),
     ("max-file-bytes-str", "max_file_bytes", "256", "str"),
-    ("index-max-bytes-zero", "index_max_bytes", 0, "at least 1"),
-    ("index-max-bytes-negative", "index_max_bytes", -1, "at least 1"),
+    ("index-max-bytes-small", "index_max_bytes", MIN_INDEX_BYTES - 1, str(MIN_INDEX_BYTES)),
+    ("index-max-bytes-zero", "index_max_bytes", 0, str(MIN_INDEX_BYTES)),
+    ("index-max-bytes-negative", "index_max_bytes", -1, str(MIN_INDEX_BYTES)),
     ("index-max-bytes-bool", "index_max_bytes", True, "bool"),
     ("index-max-bytes-float", "index_max_bytes", 4096.0, "float"),
     ("scope-priority-str", "scope_priority", "user", "str"),
@@ -2240,11 +2242,19 @@ class TestMissingSource(TransportConformance):
 def test_subclass_missing_fixture_reports_fixture_error(pytester: pytest.Pytester) -> None:
     """A subclass without the source fixture errors every case that takes it.
 
-    (AIE-1047, US1.5)
+    The expected counts come from the suite's case signatures, so they track
+    added cases. (AIE-1047, US1.5; AIE-1045, US11.1)
     """
+    cases = [
+        value
+        for name, value in vars(TransportConformance).items()
+        if name.startswith("test_") and callable(value)
+    ]
+    takes_source = sum("source" in inspect.signature(case).parameters for case in cases)
     pytester.makepyfile(test_missing_source=MISSING_SOURCE_MODULE)
 
     result = pytester.runpytest("-p", "no:cacheprovider")
 
-    result.assert_outcomes(passed=1, errors=4)
+    assert takes_source > 0
+    result.assert_outcomes(passed=len(cases) - takes_source, errors=takes_source)
     result.stdout.fnmatch_lines(["*fixture 'source' not found*"])
