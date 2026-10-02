@@ -3,10 +3,10 @@
 import base64
 import binascii
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import NewType, cast
+from datetime import UTC, datetime, timedelta
+from typing import Final, NewType, cast
 
 from wenchang.errors import (
     NotFoundError,
@@ -15,15 +15,34 @@ from wenchang.errors import (
     ReplaceFactMatchError,
     VersionConflictError,
 )
-from wenchang.file_format import FileMetadata, metadata_from_map, metadata_to_map, parse_fact
-from wenchang.paths import is_valid_path, is_valid_prefix
+from wenchang.file_format import (
+    LAST_UPDATED_KEY,
+    FileMetadata,
+    MetadataFormatError,
+    metadata_from_map,
+    metadata_to_map,
+    parse_fact,
+)
+from wenchang.paths import (
+    build_prefix,
+    is_valid_path,
+    is_valid_prefix,
+    is_valid_segment,
+    parse_path,
+)
 from wenchang.storage import PreconditionFailedError, Storage
 from wenchang.version_token import VersionToken
 
 DEFAULT_MAX_FILE_BYTES: int = 16 * 1024
 DEFAULT_LIST_PAGE_SIZE: int = 100
+DEFAULT_INDEX_MAX_BYTES: int = 64 * 1024
+
+# Equals scope.SYSTEM_AREA; core must not import scope.
+INDEX_SYSTEM_AREA: Final = "system"
 
 _MAX_REPLACE_ATTEMPTS = 3
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 ListCursor = NewType("ListCursor", str)
 
@@ -90,6 +109,28 @@ class FileEntry:
     path: str
     metadata: FileMetadata
     version: VersionToken
+
+
+def _utf8_len(s: str) -> int:
+    return len(s.encode("utf-8", errors="surrogatepass"))
+
+
+def index_entry_bytes(entry: FileEntry) -> int:
+    """UTF-8 size of an index entry: path, every metadata key and value, and version.
+
+    Raises MetadataFormatError if last-updated cannot be rendered in UTC.
+    """
+    try:
+        rendered = metadata_to_map(entry.metadata)
+    except OverflowError as exc:
+        raise MetadataFormatError(
+            LAST_UPDATED_KEY, "last-updated cannot be rendered in UTC"
+        ) from exc
+    return (
+        _utf8_len(entry.path)
+        + sum(_utf8_len(k) + _utf8_len(v) for k, v in rendered.items())
+        + _utf8_len(entry.version)
+    )
 
 
 @dataclass(frozen=True)
@@ -175,7 +216,7 @@ class MemoryStore:
     """Core memory operations over a Storage backend.
 
     Exposes read_file, write_file, replace_fact, append_line, delete_file,
-    and list_prefix.
+    list_prefix, and get_memory_index.
     """
 
     def __init__(
@@ -185,15 +226,54 @@ class MemoryStore:
         max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
         clock: Callable[[], datetime] = _utc_now,
         list_page_size: int = DEFAULT_LIST_PAGE_SIZE,
+        index_max_bytes: int = DEFAULT_INDEX_MAX_BYTES,
+        scope_priority: Sequence[str] = (),
     ) -> None:
+        # Real-type checks: a str is a Sequence of its characters, and a
+        # spoofed __class__ must not pass.
+        priority = cast(object, scope_priority)
+        if issubclass(type(priority), (str, bytes, bytearray)) or not issubclass(
+            type(priority), Sequence
+        ):
+            raise TypeError(
+                f"scope_priority must be a sequence of str, not {_type_name(type(priority))}"
+            )
+        members: list[str] = []
+        for member in cast(Sequence[object], priority):
+            if not issubclass(type(member), str):
+                raise TypeError(f"scope_priority entry must be str, got {_type_name(type(member))}")
+            members.append(str.__str__(cast(str, member)))
+
         if max_file_bytes <= 0:
             raise ValueError("max_file_bytes must be positive")
         if list_page_size <= 0:
             raise ValueError("list_page_size must be positive")
+        if index_max_bytes <= 0:
+            raise ValueError("index_max_bytes must be positive")
+        seen: set[str] = set()
+        for s in members:
+            if not is_valid_segment(s):
+                raise ValueError(f"invalid scope_priority entry: {s!r}")
+            if s in seen:
+                raise ValueError(f"duplicate scope_priority entry: {s!r}")
+            seen.add(s)
+
         self._storage = storage
         self._max_file_bytes = max_file_bytes
         self._clock = clock
         self._list_page_size = list_page_size
+        self._index_max_bytes = index_max_bytes
+        self._scope_priority = tuple(members)
+
+    @property
+    def index_max_bytes(self) -> int:
+        """The byte budget for get_memory_index entries."""
+        return self._index_max_bytes
+
+    @property
+    def scope_priority(self) -> tuple[str, ...]:
+        """Scopes in index priority order; unlisted scopes rank after them."""
+        return self._scope_priority
 
     def read_file(self, path: str) -> MemoryFile:
         """Read the memory file at `path`.
@@ -486,3 +566,89 @@ class MemoryStore:
         )
         next_cursor = _encode_cursor(page[-1].key) if more else None
         return ListPage(entries=entries, next_cursor=next_cursor)
+
+    def get_memory_index(self, scope_map: Mapping[str, str]) -> MemoryIndex:
+        """Merged metadata across every scope in `scope_map`, ordered and byte-capped.
+
+        Order: system/ areas across all scopes first; then scopes in
+        `scope_priority` order, unlisted scopes last as one tier; within a
+        tier by last-updated, most recent first, then by path. Entries are
+        included in that order until the next one would exceed
+        `index_max_bytes`; the rest are reported in `capped` by area prefix.
+        Every entry is sized first, so an unrenderable one raises even past
+        the cap.
+
+        Raises TypeError if `scope_map` is not a Mapping of str to str, and
+        ValueError for an invalid scope or entity_id or a duplicate scope,
+        all without calling storage. Propagates MetadataFormatError and
+        BackendUnavailableError unchanged.
+        """
+        if not issubclass(type(cast(object, scope_map)), Mapping):
+            raise TypeError(
+                f"scope_map must be a Mapping, not {_type_name(type(cast(object, scope_map)))}"
+            )
+        raw = list(cast(Mapping[object, object], scope_map).items())
+        normalized: list[tuple[str, str]] = []
+        for item in cast(list[object], raw):
+            if type(item) is not tuple or len(cast(tuple[object, ...], item)) != 2:
+                raise TypeError("scope_map items must be (str, str) pairs")
+            key, value = cast(tuple[object, object], item)
+            if not issubclass(type(key), str):
+                raise TypeError(f"scope_map key must be str, got {_type_name(type(key))}")
+            if not issubclass(type(value), str):
+                raise TypeError(f"scope_map value must be str, got {_type_name(type(value))}")
+            normalized.append((str.__str__(cast(str, key)), str.__str__(cast(str, value))))
+        pairs = sorted(normalized)
+        seen: set[str] = set()
+        for scope, entity_id in pairs:
+            if not is_valid_segment(scope):
+                raise ValueError(f"invalid scope: {scope!r}")
+            if not is_valid_segment(entity_id):
+                raise ValueError(f"invalid entity_id: {entity_id!r}")
+            if scope in seen:
+                raise ValueError(f"duplicate scope: {scope!r}")
+            seen.add(scope)
+        if not pairs:
+            return MemoryIndex()
+
+        collected: list[FileEntry] = []
+        for scope, entity_id in pairs:
+            prefix = build_prefix(scope, entity_id)
+            cursor: ListCursor | None = None
+            while True:
+                # The base method, so a subclass override cannot alter the index.
+                page = MemoryStore.list_prefix(self, prefix, cursor)
+                collected.extend(page.entries)
+                cursor = page.next_cursor
+                if cursor is None:
+                    break
+
+        priority_index = {s: i for i, s in enumerate(self._scope_priority)}
+        unlisted = len(self._scope_priority)
+
+        def sort_key(entry: FileEntry) -> tuple[int, int, int, str]:
+            parts = parse_path(entry.path)
+            micros = (entry.metadata.last_updated - _EPOCH) // timedelta(microseconds=1)
+            if parts.area == INDEX_SYSTEM_AREA:
+                return (0, 0, -micros, entry.path)
+            return (1, priority_index.get(parts.scope, unlisted), -micros, entry.path)
+
+        ordered = sorted(collected, key=sort_key)
+        # Size every entry up front so an unrenderable one raises regardless of the cap.
+        sized = [(entry, index_entry_bytes(entry)) for entry in ordered]
+
+        included: list[FileEntry] = []
+        total = 0
+        for entry, size in sized:
+            if total + size > self._index_max_bytes:
+                break
+            included.append(entry)
+            total += size
+
+        counts: dict[str, int] = {}
+        for entry in ordered[len(included) :]:
+            parts = parse_path(entry.path)
+            area_prefix = build_prefix(parts.scope, parts.entity_id, parts.area)
+            counts[area_prefix] = counts.get(area_prefix, 0) + 1
+        capped = tuple(CappedPrefix(p, n) for p, n in sorted(counts.items()))
+        return MemoryIndex(entries=tuple(included), capped=capped)

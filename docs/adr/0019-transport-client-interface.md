@@ -161,7 +161,9 @@ review; this section is updated once they are confirmed or changed.
   `BackendUnavailableError`.
 - **The index algorithm is built with the in-process client** (decision 3
   and Context): the semantics written on AIE-1044 are implemented under
-  AIE-1046; AIE-1044 is tools only.
+  AIE-1046; AIE-1044 is tools only. This is realized by
+  [ADR 0020](0020-memory-index-and-in-process-client.md), which implements
+  `MemoryStore.get_memory_index` alongside `InProcessClient`.
 - **A remote client binds credentials once at construction, never per
   call** (decision 6), so the protocol stays identity-free.
 

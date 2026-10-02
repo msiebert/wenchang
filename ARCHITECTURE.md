@@ -13,15 +13,18 @@ no schema and does not search file content.
 Today the repository holds the project skeleton (tooling, tests, docs) plus
 nine implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
-fake and a GCS implementation behind one protocol); `core`, whose
-implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-`list_prefix`, `append_line`, and `delete_file`, plus the index value types
-`MemoryIndex` and `CappedPrefix`; `identity`, the injected identity resolver
-boundary; `scope`, the tool-layer write checks (`system/` read-only and
-role-gated write restriction); and `transport`, the `TransportClient`
-protocol the tool layer will call. `scope` takes an `Identity` value, but
-no module calls `identity` or `scope` yet, and nothing implements or calls
-`TransportClient` yet. A tenth, `testing`, is adopter-facing rather than
+fake and a GCS implementation behind one protocol); `core`, which
+implements all seven core operations (`read_file`, `write_file`,
+`replace_fact`, `list_prefix`, `append_line`, `delete_file`, and
+`get_memory_index`, with its value types `MemoryIndex` and
+`CappedPrefix`); `identity`, the injected identity resolver boundary;
+`scope`, the tool-layer write checks (`system/` read-only and role-gated
+write restriction); and `transport`, the `TransportClient` protocol the
+tool layer will call, plus `InProcessClient`, its in-process
+implementation. `scope` takes an `Identity` value, but no module calls
+`identity` or `scope` yet, and nothing calls `TransportClient` yet: the
+tool layer and any remote transport are still planned. A tenth, `testing`,
+is adopter-facing rather than
 part of the runtime: the
 executable resolver conformance suite an adopter runs against their own
 identity resolver, installed with the optional `wenchang[testing]` extra.
@@ -160,13 +163,28 @@ implemented.
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
   [ADR 0012](docs/adr/0012-delete-file.md).
 - **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
-  list_page_size=100)`,
-  holding the core API as methods on one object (so later operations can
-  share configuration such as a size limit or index cap); `max_file_bytes`
+  list_page_size=100, index_max_bytes=65536, scope_priority=())`,
+  holding the core API as methods on one object so operations share
+  configuration such as the size limit and index cap; `max_file_bytes`
   must be positive, `clock` (default current UTC) is injectable for tests
   and for stamping `last-updated`, and `list_page_size` (default
   `DEFAULT_LIST_PAGE_SIZE = 100`) must be positive, bounding
-  `list_prefix`'s page size. `read_file(path) -> MemoryFile` is
+  `list_prefix`'s page size. `index_max_bytes` (default
+  `DEFAULT_INDEX_MAX_BYTES = 65536`) is the index byte budget and must be
+  positive (any value with `<= 0` false is accepted, as for the other
+  numeric settings). `scope_priority` (default empty) is the adopter's
+  index scope order, exposed with `index_max_bytes` as read-only
+  properties. Constructor validation runs every `TypeError` before any
+  `ValueError`: `scope_priority` whose real type is `str`, `bytes`, or
+  `bytearray` (a bare string is a `Sequence` of its characters), or is not
+  a `Sequence` (`issubclass(type(x), Sequence)`, so a spoofed `__class__`
+  fails), raises `TypeError`, as does any non-`str` member; members are
+  then normalized with `str.__str__` and copied to a tuple, so later
+  mutation of a caller's list has no effect. The positivity checks follow,
+  then, per normalized member in order, `ValueError("invalid
+  scope_priority entry: ...")` if it fails `is_valid_segment` and
+  `ValueError("duplicate scope_priority entry: ...")` if already seen.
+  `read_file(path) -> MemoryFile` is
   implemented: it validates the path, fetches the object, and returns
   content, metadata, path, and version token. `write_file(path, content,
   metadata, expected_version) -> MemoryFile` is implemented: it validates
@@ -262,7 +280,64 @@ implemented.
   version token from before a delete is never equal to the token of a file
   later recreated at the same path, since both GCS generations and the
   in-memory fake's counter are monotonic. `get_memory_index(scope_map) ->
-  MemoryIndex` is *(planned)*, but its two value types exist.
+  MemoryIndex` is implemented: the session bootstrap, returning merged
+  metadata across every scope in a scope-name → entity-ID map, ordered and
+  byte-capped, without reading any file's content. It validates
+  `scope_map` before any storage call, every `TypeError` before any
+  `ValueError`: a value whose real type is not a `Mapping` raises
+  `TypeError`; `items()` is read exactly once into a list; for each item in
+  that order, one that is not exactly a 2-`tuple` (`type(item) is tuple`
+  and length 2) raises `TypeError("scope_map items must be (str, str)
+  pairs")`, then a non-`str` key raises `TypeError("scope_map key must be str,
+  got ...")` and a non-`str` value `TypeError("scope_map value must be
+  str, got ...")`, and both are normalized with `str.__str__`; the
+  normalized pairs are sorted by scope; then for each sorted pair
+  `ValueError(f"invalid scope: {scope!r}")` or `ValueError(f"invalid
+  entity_id: {entity_id!r}")` if it fails `is_valid_segment`, and
+  `ValueError(f"duplicate scope: {scope!r}")` for a scope seen twice (a
+  `Mapping` whose `items()` repeats a key, or two keys equal after
+  normalization), so a lying `Mapping` cannot cause a double fan-out.
+  These are `ValueError`, not `NotFoundError`, because the map is a
+  library-controlled `Identity.scope_map` (ADR 0015). An empty map returns
+  `MemoryIndex()` without touching storage. For each scope in sorted order
+  it drains every page under `build_prefix(scope, entity_id)` through the
+  base method `MemoryStore.list_prefix(self, prefix, cursor)`, looping
+  until `next_cursor is None` and never stopping on an empty page, so
+  malformed keys are skipped and corrupt metadata or
+  `BackendUnavailableError` propagates unwrapped exactly as in
+  `list_prefix`, and a subclass override of `list_prefix` cannot change
+  the index. The merged entries are sorted by: `system/` areas across all
+  scopes first, decided only by `parse_path(path).area ==
+  INDEX_SYSTEM_AREA` (a `core`-local `Final` equal to `"system"`, pinned
+  equal to `scope.SYSTEM_AREA` by a test, since `core` must not import
+  `scope`), and ignoring `scope_priority`; then non-`system/` entries with
+  scopes listed in `scope_priority` as one tier each in list order,
+  followed by every unlisted scope as one trailing tier (so the empty
+  default is one flat tier, and a listed scope absent from the map is
+  ignored); within a tier by `last-updated`, most recent first, keyed on
+  the exact integer microsecond offset from the Unix epoch rather than a
+  float timestamp; then by path ascending, so the order is total. It sizes
+  every ordered entry with `index_entry_bytes` before including any, so an
+  unrenderable entry raises `MetadataFormatError` whether or not it would
+  fall under the cap. It then includes entries in that order while the running total of
+  `index_entry_bytes` stays `<= index_max_bytes` (the cap is inclusive)
+  and stops at the first entry that does not fit, never skipping ahead to
+  a smaller one, so `entries` is an exact prefix of the full order.
+  Everything from that entry on is counted per area prefix
+  (`build_prefix(scope, entity_id, area)`) into `capped`, sorted by prefix
+  string; the `capped` section's own size is not charged to the budget.
+  `index_entry_bytes(entry) -> int` is the public, sole cost rule: the
+  UTF-8 length of `entry.path`, plus every key and value of the canonical
+  rendering `metadata_to_map(entry.metadata)`, plus `entry.version`, all
+  encoded with `errors="surrogatepass"` so a lone surrogate (which
+  `is_valid_segment` accepts) is counted rather than raising. It measures
+  the library's canonical rendering, not the stored bytes (extra stored
+  keys cost nothing; a non-ASCII alias counts its JSON `\uXXXX` escape)
+  and not any tool's rendering. An `OverflowError` from re-rendering an
+  extreme `last-updated` (e.g. `0001-01-01T00:00:00+05:00`, which
+  `metadata_from_map` accepts but cannot be converted to UTC) is raised as
+  `MetadataFormatError("last-updated", ...)`. Like listing, the index is
+  not a snapshot. The two index value types:
   `CappedPrefix(prefix, omitted)` is a frozen value naming a prefix the
   index could not return in full and how many files under it were left
   out. `MemoryIndex(entries=(), capped=())` is a frozen value holding
@@ -302,8 +377,9 @@ implemented.
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md),
   [ADR 0011](docs/adr/0011-append-line-version-guard.md),
   [ADR 0012](docs/adr/0012-delete-file.md),
-  [ADR 0013](docs/adr/0013-write-file-source.md), and
-  [ADR 0019](docs/adr/0019-transport-client-interface.md).
+  [ADR 0013](docs/adr/0013-write-file-source.md),
+  [ADR 0019](docs/adr/0019-transport-client-interface.md), and
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md).
 - **identity** — the injected-dependency boundary through which the
   library learns who the caller is; it has no notion of users,
   organizations, or roles of its own, and imports only `errors` and
@@ -489,9 +565,9 @@ implemented.
   synchronous `Protocol` of exactly seven methods: `read_file`,
   `write_file`, `append_line`, `replace_fact`, `list_prefix`,
   `delete_file`, and `get_memory_index(scope_map: Mapping[str, str]) ->
-  MemoryIndex`. The six operations `MemoryStore` already implements mirror
-  it exactly — parameter names, kinds, defaults, annotations, and return
-  type, including keyword-only `source` and `list_prefix`'s `cursor:
+  MemoryIndex`. All seven `MemoryStore` methods mirror it exactly —
+  parameter names, kinds, defaults, annotations, and return type,
+  including keyword-only `source` and `list_prefix`'s `cursor:
   ListCursor | None = None` — pinned by a test comparing
   `inspect.signature(..., eval_str=True)` of each pair, so the tool layer is
   written once and an in-process client can be a pure pass-through. The
@@ -516,12 +592,27 @@ implemented.
   credentials. The tool layer resolves identity and calls
   `scope.check_write` before any mutating client call; a remote client
   binds whatever it authenticates with at construction (per session or
-  connection), never per call. It imports from `wenchang` only `core`,
-  `file_format`, and `version_token`, and `core` never imports it. Nothing
-  implements or calls it yet: the in-process client and
-  `MemoryStore.get_memory_index` are planned, the tool layer is planned,
-  and the transport conformance suite is planned. See
-  [ADR 0019](docs/adr/0019-transport-client-interface.md).
+  connection), never per call. It imports from `wenchang` only `core`
+  (including `MemoryStore`), `file_format`, and `version_token`, and `core`
+  never imports it. `InProcessClient(store)` is the in-process
+  implementation, calling the wrapped `MemoryStore` directly with no
+  network hop: each of the seven methods has the protocol's exact
+  signature (pinned by the same `inspect.signature` test), forwards its
+  arguments unchanged, returns the store's result object itself (except
+  `delete_file`, which always returns `None`, even if a store subclass
+  returns a value), and lets every exception propagate as raised, adding
+  no `__cause__` or `__context__`. It adds no caching, retry, or validation
+  beyond its constructor, which raises `TypeError` unless the argument's
+  real type is a `MemoryStore` (`issubclass(type(x), MemoryStore)`; a
+  subclass is accepted, a spoofed `__class__` is not), naming the type
+  through a guarded helper that reports `<unnamed>` if `__name__` raises;
+  the `store` property returns the
+  wrapped store. `MemoryStore` itself also satisfies `TransportClient`
+  structurally, so a host may pass either. Nothing calls the protocol yet:
+  the tool layer, any remote transport, and the transport conformance
+  suite are planned. See
+  [ADR 0019](docs/adr/0019-transport-client-interface.md) and
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md).
 - **tools** *(planned)* — the agent-facing tool layer: thin wrappers over
   the transport client, carrying no policy, each described by a docstring.
 - **prompts** *(planned)* — instruction text for filing, deduplication,
@@ -565,10 +656,14 @@ is dependency-free and used by `core`, `storage`, and `transport` (for the
 `FileMetadata` annotation); it is also omitted
 from the diagram since it isn't wired into the request path shown there.
 `paths` is likewise dependency-free and omitted; `core`, `identity`, and
-`scope` use it for validation, and `scope` reads the area via `parse_path`.
+`scope` use it for validation, `scope` reads the area via `parse_path`, and
+`core` builds index prefixes with `build_prefix` and reads index areas
+with `parse_path`.
 `identity` sits beside `core` with no arrow: the tool layer will call
 `resolve_identity`, and nothing calls it yet; `transport` never sees an
-identity. `scope` imports the
+identity. `transport` is implemented in-process (`InProcessClient` over
+`MemoryStore`); the remote half of its box, like `tools` and `prompts`, is
+planned. `scope` imports the
 `Identity` type to read grants but never calls a resolver, so the diagram
 shows no edge between them. `scope` sits outside
 the Core subgraph with only the `tools --> scope` edge: the tool layer
@@ -659,7 +754,14 @@ module depending on it.
   resolver's exception, so no exception message that might carry a credential is reachable from it,
   whether through a rendered traceback or the exception chain (see
   [ADR 0014](docs/adr/0014-identity-resolver.md)).
-- **The transport mirrors core exactly.** Each of `TransportClient`'s six
+- **The index cap is a byte budget over `index_entry_bytes`, inclusive,
+  applied as a prefix of the documented order.** `get_memory_index`
+  includes entries in order while the running total stays within
+  `index_max_bytes` and stops at the first that does not fit, so everything
+  omitted ranks below everything returned, and every omitted file is
+  counted under its area prefix in `capped`; nothing is truncated silently
+  (see [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md)).
+- **The transport mirrors core exactly.** Each of `TransportClient`'s seven
   operations shared with `MemoryStore` has an identical signature (held by
   an `inspect.signature` equality test), and for well-typed arguments every
   client raises exactly the exceptions `MemoryStore` raises, taxonomy and
