@@ -8,8 +8,8 @@ hold them so. This adds `wenchang.testing.TransportConformance`, the
 pytest mixin an adopter subclasses with seven fixtures (`client`,
 `source`, `scope_map`, and the four store settings), plus the shared
 mechanics every case needs: fixture validation, `require_fresh`
-(isolation sentinel under an unmapped entity, called by every stateful
-case), `expect_error` (exact type + category + optional message +
+(isolation sentinel under the first mapped scope's own entity in area
+`conformance-sentinel`, called by every stateful case), `expect_error` (exact type + category + optional message +
 exact-typed payload parity), deep exact-type canonical readers, and a
 path builder. Tokens are never compared, only handed back; `last_updated`
 is round-tripped between two server-stamped results, never against the
