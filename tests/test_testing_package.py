@@ -350,9 +350,11 @@ def _is_exempt_call(node: ast.Call) -> bool:
 
 
 def find_version_misuse(source: str) -> list[int]:
-    """Return the line of each Compare, BinOp, Subscript, or Call using a version operand.
+    """Return the line of each operation using a version operand.
 
-    A Call to `type` or to a method on the name `client` is exempt.
+    Flags a Compare, BinOp, Subscript, f-string field, method call on a version
+    operand, or Call taking one as an argument. A Call to `type` or to a method
+    on the name `client` is exempt as a caller of the token, not its receiver.
     """
     lines: list[int] = []
     for node in ast.walk(ast.parse(source)):
@@ -360,10 +362,12 @@ def find_version_misuse(source: str) -> list[int]:
             operands = [node.left, *node.comparators]
         elif isinstance(node, ast.BinOp):
             operands = [node.left, node.right]
-        elif isinstance(node, ast.Subscript):
+        elif isinstance(node, ast.Subscript | ast.FormattedValue):
             operands = [node.value]
-        elif isinstance(node, ast.Call) and not _is_exempt_call(node):
-            operands = [*node.args, *(keyword.value for keyword in node.keywords)]
+        elif isinstance(node, ast.Call):
+            operands = [node.func.value] if isinstance(node.func, ast.Attribute) else []
+            if not _is_exempt_call(node):
+                operands += [*node.args, *(keyword.value for keyword in node.keywords)]
         else:
             continue
         if any(_is_version_operand(operand) for operand in operands):
@@ -458,6 +462,19 @@ def test_transport_conformance_never_operates_on_version_tokens() -> None:
 )
 def test_version_scan_flags_misuse(source: str) -> None:
     """The token ast rule flags each listed violation (AIE-1047, US5.4, US2.6)."""
+    assert find_version_misuse(source) == [1]
+
+
+@pytest.mark.parametrize(
+    "source",
+    ['r.version.startswith("a")', 'f"{r.version}"', "x = f'v={w.expected_version!r}'"],
+    ids=["method-on-token", "f-string", "f-string-conversion"],
+)
+def test_version_scan_flags_method_calls_and_f_strings(source: str) -> None:
+    """The token ast rule flags a method call on a token and an f-string of one.
+
+    (AIE-1047, US5.4, US2.6)
+    """
     assert find_version_misuse(source) == [1]
 
 

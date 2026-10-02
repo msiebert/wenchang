@@ -121,6 +121,18 @@ def _fail(name: str, label: str, text: str, /) -> NoReturn:
 
 def check_client(name: str, client: object) -> TransportClient:
     """Return client if it satisfies TransportClient, else fail ("fixture client")."""
+    for method in _METHODS:
+        try:
+            attr = cast(object, getattr(client, method))
+        except AttributeError:
+            pytest.fail(f"{name}: fixture client is missing method {method}")
+        except Exception as exc:
+            pytest.fail(
+                f"{name}: fixture client method {method} could not be read: "
+                f"raised {_name(type(exc))}"
+            )
+        if not callable(attr):
+            pytest.fail(f"{name}: fixture client method {method} is not callable")
     try:
         satisfies = isinstance(client, TransportClient)
     except Exception as exc:

@@ -9,8 +9,8 @@ and containing the key phrase.
 
 import inspect
 import re
-from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from itertools import pairwise
 from typing import cast
 
@@ -48,6 +48,8 @@ from wenchang.testing.transport_conformance import (
     canonical_file,
     canonical_index,
     canonical_page,
+    check_client,
+    check_scope_map,
     expect_error,
     probe_path,
     require_fresh,
@@ -59,6 +61,7 @@ from wenchang.transport import InProcessClient
 from wenchang.version_token import VersionToken
 
 pytestmark = pytest.mark.unit
+pytest_plugins = ["pytester"]
 
 _call = transport_conformance._call  # pyright: ignore[reportPrivateUsage]
 
@@ -960,7 +963,7 @@ def test_canonical_page_non_entry_member_fails_naming_type() -> None:
 
     message = _fails(lambda: canonical_page(NAME, LABEL, page), "dict")
 
-    assert "bad field" in message or "wrong result type" in message
+    assert "bad field entries[0]: expected FileEntry" in message
 
 
 def test_canonical_index_returns_entries_and_capped() -> None:
@@ -1002,6 +1005,30 @@ BAD_INDEXES: list[tuple[str, MemoryIndex, str]] = [
         "capped-member-tuple",
         _build(MemoryIndex, {"entries": (), "capped": (("org/", 1),)}),
         "capped",
+    ),
+    (
+        "capped-prefix-int",
+        _build(
+            MemoryIndex,
+            {"entries": (), "capped": (_build(CappedPrefix, {"prefix": 1, "omitted": 1}),)},
+        ),
+        "capped[0].prefix",
+    ),
+    (
+        "capped-omitted-bool",
+        _build(
+            MemoryIndex,
+            {"entries": (), "capped": (_build(CappedPrefix, {"prefix": "org/", "omitted": True}),)},
+        ),
+        "capped[0].omitted",
+    ),
+    (
+        "capped-omitted-str",
+        _build(
+            MemoryIndex,
+            {"entries": (), "capped": (_build(CappedPrefix, {"prefix": "org/", "omitted": "1"}),)},
+        ),
+        "capped[0].omitted",
     ),
 ]
 
@@ -1368,6 +1395,11 @@ BAD_READS: list[tuple[str, Callable[[MemoryFile], object], str]] = [
         "round trip changed last_updated",
     ),
     ("wrong-path", lambda f: _with(f, path=Q), "round trip changed path"),
+    (
+        "changes-description",
+        lambda f: _with_meta(f, description="other"),
+        "round trip changed description",
+    ),
 ]
 
 
@@ -1495,18 +1527,20 @@ def test_oversize_wrong_error_fails(exc: Exception, phrase: str, detail: str) ->
 
 
 @pytest.mark.parametrize(
-    ("client", "label"),
+    ("make_client", "label"),
     [
-        (_ForgetsTokens(on_write=True, on_append=False), f"write_file({P})"),
-        (_ForgetsTokens(on_write=False, on_append=True), f"append_line({Q})"),
+        (lambda: _ForgetsTokens(on_write=True, on_append=False), f"write_file({P})"),
+        (lambda: _ForgetsTokens(on_write=False, on_append=True), f"append_line({Q})"),
     ],
     ids=["write", "append"],
 )
-def test_forgotten_token_fails_token_not_accepted(client: _ForgetsTokens, label: str) -> None:
+def test_forgotten_token_fails_token_not_accepted(
+    make_client: Callable[[], _ForgetsTokens], label: str
+) -> None:
     """A client rejecting its own token fails "token not accepted" (AIE-1047, US4.7, US4.10)."""
     _reference_passes(TOKEN_CASE)
 
-    message = _case_fails(TOKEN_CASE, client, label, "token not accepted")
+    message = _case_fails(TOKEN_CASE, make_client(), label, "token not accepted")
 
     assert "VersionConflictError" in message
 
@@ -1517,6 +1551,7 @@ def test_forgotten_token_fails_token_not_accepted(client: _ForgetsTokens, label:
 @pytest.mark.parametrize(
     ("first", "second"),
     [(a, b) for a in STATEFUL_CASES for b in STATEFUL_CASES if a != b],
+    ids=[f"{a}-then-{b}" for a in STATEFUL_CASES for b in STATEFUL_CASES if a != b],
 )
 def test_shared_client_second_case_not_isolated(first: str, second: str) -> None:
     """A client shared by two different cases fails the second "not isolated".
@@ -1697,3 +1732,519 @@ def test_every_case_takes_only_the_seven_fixtures() -> None:
         assert params[0] == "client"
         assert set(params) <= set(FIXTURE_ORDER)
     assert "max_file_bytes" in _case_params(OVERSIZE)
+
+
+# --- US2.0, FR-003: adversarial values fail, never raise raw -----------------
+
+
+def _without(fields: Mapping[str, object], missing: str) -> dict[str, object]:
+    return {k: v for k, v in fields.items() if k != missing}
+
+
+def _file_without(missing: str) -> MemoryFile:
+    """A MemoryFile with every field except `missing` set, so reading it raises."""
+    fields: dict[str, object] = {
+        "path": P,
+        "content": "- [stated] a\n",
+        "metadata": _raw_meta(),
+        "version": TOKEN,
+    }
+    return _build(MemoryFile, _without(fields, missing))
+
+
+def _meta_without(missing: str) -> FileMetadata:
+    """A FileMetadata with every field except `missing` set, so reading it raises."""
+    return _build(FileMetadata, _without(vars(_raw_meta()), missing))
+
+
+UNREADABLE_FILES: list[tuple[str, MemoryFile, str]] = [
+    ("no-metadata", _file_without("metadata"), "bad field metadata: unreadable"),
+    ("no-version", _file_without("version"), "bad field version"),
+    ("no-aliases", _raw_file(metadata=_meta_without("aliases")), "bad field aliases: unreadable"),
+]
+
+
+@pytest.mark.parametrize(
+    ("value", "phrase"),
+    [(v, p) for _, v, p in UNREADABLE_FILES],
+    ids=[i for i, _, _ in UNREADABLE_FILES],
+)
+def test_canonical_file_unreadable_field_fails(value: MemoryFile, phrase: str) -> None:
+    """A field that raises on read fails "bad field <name>", not AttributeError.
+
+    (AIE-1047, US2.3, US2.0, FR-003)
+    """
+    _fails(lambda: canonical_file(NAME, LABEL, value), phrase)
+
+
+UNREADABLE_READS: list[tuple[str, Callable[[MemoryFile], object], str]] = [
+    (
+        "no-metadata",
+        lambda f: _build(MemoryFile, _without(vars(f), "metadata")),
+        "bad field metadata: unreadable",
+    ),
+    (
+        "no-version",
+        lambda f: _build(MemoryFile, _without(vars(f), "version")),
+        "bad field version",
+    ),
+    (
+        "no-aliases",
+        lambda f: _with(f, metadata=_build(FileMetadata, _without(vars(f.metadata), "aliases"))),
+        "bad field aliases: unreadable",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("transform", "phrase"),
+    [(t, p) for _, t, p in UNREADABLE_READS],
+    ids=[i for i, _, _ in UNREADABLE_READS],
+)
+def test_round_trip_unreadable_read_field_fails(
+    transform: Callable[[MemoryFile], object], phrase: str
+) -> None:
+    """A read result with an unreadable field fails the round trip, not AttributeError.
+
+    (AIE-1047, US2.3, US4.10, FR-003)
+    """
+    _reference_passes(ROUND_TRIP)
+
+    _case_fails(ROUND_TRIP, _ProbeReadReturns(transform), READ_RESULT_P, phrase)
+
+
+class _ClassRaises(_Forwarding):
+    """A working client whose __class__ raises on read."""
+
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise RuntimeError("no class for you")
+
+
+def test_check_client_raising_class_fails_as_fixture_client() -> None:
+    """A client whose __class__ raises fails "fixture client", not RuntimeError.
+
+    (AIE-1047, US1.2, US2.0, FR-003)
+    """
+    with pytest.raises(pytest.fail.Exception, match=f"^{NAME}: fixture client "):
+        check_client(NAME, _ClassRaises())
+
+
+@pytest.mark.parametrize("case", ALL_CASES)
+def test_raising_class_client_fails_every_case(case: str) -> None:
+    """Every case fails "fixture client" for a client whose __class__ raises.
+
+    (AIE-1047, US1.2, US4.10, FR-003)
+    """
+    _reference_passes(case)
+
+    _fixture_fails(case, _ClassRaises(), "client")
+
+
+class _FlakyOffset(tzinfo):
+    """A zero UTC offset on the first utcoffset call; raises on every later call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def utcoffset(self, dt: datetime | None, /) -> timedelta:
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("offset changed its mind")
+        return timedelta(0)
+
+    def dst(self, dt: datetime | None, /) -> None:
+        return None
+
+    def tzname(self, dt: datetime | None, /) -> str:
+        return "flaky"
+
+
+def test_round_trip_flaky_offset_fails_not_raises() -> None:
+    """A last_updated whose offset raises after the first read fails, never raises raw.
+
+    (AIE-1047, US2.3, US4.3, FR-003)
+    """
+    _reference_passes(ROUND_TRIP)
+    client = _ProbeReadReturns(
+        lambda f: _with_meta(f, last_updated=f.metadata.last_updated.replace(tzinfo=_FlakyOffset()))
+    )
+
+    with pytest.raises(pytest.fail.Exception) as exc_info:
+        _run(ROUND_TRIP, client)
+
+    message = str(exc_info.value)
+    assert message.startswith(f"_ProbeReadReturns: {READ_RESULT_P}: "), message
+    assert "bad field last_updated" in message or "round trip" in message, message
+
+
+def test_round_trip_same_instant_other_offset_passes() -> None:
+    """A read last_updated at +05:00 for the same instant passes the round trip.
+
+    (AIE-1047, US2.3, US4.3)
+    """
+    plus_five = timezone(timedelta(hours=5))
+    client = _ProbeReadReturns(
+        lambda f: _with_meta(f, last_updated=f.metadata.last_updated.astimezone(plus_five))
+    )
+
+    _run(ROUND_TRIP, client)
+
+
+class _DuplicateItems(dict[str, str]):
+    """A dict whose items() yields `pairs`, which may repeat a key."""
+
+    def __init__(self, pairs: list[tuple[str, str]]) -> None:
+        super().__init__(pairs)
+        self.pairs = pairs
+
+    def items(self) -> list[tuple[str, str]]:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return self.pairs
+
+
+DUPLICATE_SCOPE_PAIRS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("different-entities", [("user", "u-1"), ("user", "u-2"), ("org", "o-9")]),
+    ("one-distinct-scope", [("user", "u-1"), ("user", "u-1")]),
+]
+
+
+@pytest.mark.parametrize(
+    "pairs", [p for _, p in DUPLICATE_SCOPE_PAIRS], ids=[i for i, _ in DUPLICATE_SCOPE_PAIRS]
+)
+def test_check_scope_map_duplicate_items_key_fails(pairs: list[tuple[str, str]]) -> None:
+    """A scope_map whose items() repeats a key fails "fixture scope_map".
+
+    (AIE-1047, US1.3, US2.0, FR-003)
+    """
+    with pytest.raises(pytest.fail.Exception, match=f"^{NAME}: fixture scope_map "):
+        check_scope_map(NAME, _DuplicateItems(pairs))
+
+
+@pytest.mark.parametrize(
+    "pairs", [p for _, p in DUPLICATE_SCOPE_PAIRS], ids=[i for i, _ in DUPLICATE_SCOPE_PAIRS]
+)
+def test_protocol_case_rejects_duplicate_items_scope_map(pairs: list[tuple[str, str]]) -> None:
+    """test_client_satisfies_protocol fails "fixture scope_map" for a repeated key.
+
+    (AIE-1047, US1.3, US4.8a, US4.10)
+    """
+    _reference_passes(PROTOCOL)
+
+    _fixture_fails(PROTOCOL, _reference(), "scope_map", scope_map=_DuplicateItems(pairs))
+
+
+def test_without_sentinel_duplicate_index_paths_fails() -> None:
+    """An unvalidated MemoryIndex with duplicate entry paths fails, not ValueError.
+
+    (AIE-1047, US1.6, US2.4, US2.8, FR-003)
+    """
+    index = _build(MemoryIndex, {"entries": (P_ENTRY, P_ENTRY), "capped": ()})
+
+    with pytest.raises(pytest.fail.Exception) as exc_info:
+        without_sentinel(NAME, LABEL, index)
+
+    message = str(exc_info.value)
+    assert message.startswith(f"{NAME}: {LABEL}: "), message
+    assert "bad field entries" in message or "unexpected error" in message, message
+
+
+class _ReadReturnsNone(_Forwarding):
+    """read_file returns None for every path instead of raising."""
+
+    def read_file(self, path: str) -> MemoryFile:
+        return None  # pyright: ignore[reportReturnType]
+
+
+def test_require_fresh_non_raising_read_names_returned_type() -> None:
+    """A sentinel read that returns fails "not isolated" naming the returned type.
+
+    (AIE-1047, US2.7, US1.4)
+    """
+    message = _fails(
+        lambda: require_fresh(NAME, _ReadReturnsNone(), SCOPE_MAP),
+        "not isolated",
+        label=f"read_file({SENTINEL})",
+    )
+
+    assert "NoneType" in message
+
+
+# --- Mutation survivors -------------------------------------------------------
+
+MAX_FILE_BYTES = 256
+
+
+class _StoresThenRejectsOversize(_Forwarding):
+    """write_file of a probe path stores small content, then raises OversizeWriteError."""
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        if path in PROBES:
+            super().write_file(path, "- [stated] a\n", metadata, expected_version, source=source)
+            raise OversizeWriteError(path, MAX_FILE_BYTES + 1, MAX_FILE_BYTES)
+        return super().write_file(path, content, metadata, expected_version, source=source)
+
+
+def test_oversize_write_that_stores_fails_on_follow_up_read() -> None:
+    """A correct OversizeWriteError after storing the file fails the follow-up read.
+
+    (AIE-1047, US3.5, US4.6)
+    """
+    _reference_passes(OVERSIZE)
+
+    _case_fails(OVERSIZE, _StoresThenRejectsOversize(), f"read_file({P})", "did not raise")
+
+
+def test_oversize_limit_one_byte_high_fails_did_not_raise() -> None:
+    """A store accepting exactly max_file_bytes + 1 fails "did not raise" (AIE-1047, US3.5)."""
+    _reference_passes(OVERSIZE)
+    store = MemoryStore(InMemoryStorage(), clock=_Ticking(), max_file_bytes=MAX_FILE_BYTES + 1)
+    client = _Forwarding(InProcessClient(store))
+
+    _case_fails(OVERSIZE, client, f"write_file({P})", "did not raise")
+
+
+class _StripsGivenSource(_Forwarding):
+    """write_file and read_file drop `source` from the sources of probe results."""
+
+    def __init__(self, source: str) -> None:
+        super().__init__()
+        self.source = source
+
+    def _strip(self, path: str, result: MemoryFile) -> MemoryFile:
+        if path in PROBES:
+            return _with_meta(result, sources=result.metadata.sources - {self.source})
+        return result
+
+    def read_file(self, path: str) -> MemoryFile:
+        return self._strip(path, super().read_file(path))
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        result = super().write_file(path, content, metadata, expected_version, source=source)
+        return self._strip(path, result)
+
+
+@pytest.mark.parametrize("source", ["conformance", "s0"])
+def test_round_trip_strips_fixture_source_fails(source: str) -> None:
+    """Dropping the fixture's source fails "source not stamped", whatever the seed.
+
+    (AIE-1047, US3.2, US4.4)
+    """
+    _run(ROUND_TRIP, _reference(), source=source)
+
+    message = _case_fails(
+        ROUND_TRIP,
+        _StripsGivenSource(source),
+        f"write result for {P}",
+        "source not stamped",
+        source=source,
+    )
+
+    assert source in message
+
+
+class _ReplaceFactNone(_Forwarding):
+    """replace_fact is None instead of a method."""
+
+    replace_fact = None  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
+
+
+class _ReplaceFactInt(_Forwarding):
+    """replace_fact is a non-callable int instead of a method."""
+
+    replace_fact = 5  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride]
+
+
+@pytest.mark.parametrize("make_client", [_ReplaceFactNone, _ReplaceFactInt], ids=["none", "int"])
+def test_protocol_case_non_callable_method_fails(make_client: Callable[[], _Forwarding]) -> None:
+    """A non-callable replace_fact fails "fixture client" naming the method.
+
+    (AIE-1047, US3.1, US4.8a)
+    """
+    message = _fixture_fails(PROTOCOL, make_client(), "client")
+
+    assert "replace_fact" in message
+
+
+class _ReturnsDict(_Forwarding):
+    """The token rewrite of P or the append to Q returns a dict instead of a MemoryFile."""
+
+    def __init__(self, *, on_rewrite: bool, on_append: bool) -> None:
+        super().__init__()
+        self.on_rewrite = on_rewrite
+        self.on_append = on_append
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        result = super().write_file(path, content, metadata, expected_version, source=source)
+        if self.on_rewrite and path == P and expected_version is not None:
+            return {"path": path}  # pyright: ignore[reportReturnType]
+        return result
+
+    def append_line(
+        self, path: str, line: str, expected_version: VersionToken, *, source: str
+    ) -> MemoryFile:
+        result = super().append_line(path, line, expected_version, source=source)
+        if self.on_append and path == Q:
+            return {"path": path}  # pyright: ignore[reportReturnType]
+        return result
+
+
+@pytest.mark.parametrize(
+    ("make_client", "label"),
+    [
+        (lambda: _ReturnsDict(on_rewrite=True, on_append=False), f"write result for {P}"),
+        (lambda: _ReturnsDict(on_rewrite=False, on_append=True), f"append result for {Q}"),
+    ],
+    ids=["rewrite", "append"],
+)
+def test_token_case_dict_result_fails(make_client: Callable[[], _ReturnsDict], label: str) -> None:
+    """A dict from the token rewrite or append fails "wrong result type".
+
+    (AIE-1047, US3.3, US4.7)
+    """
+    _reference_passes(TOKEN_CASE)
+
+    message = _case_fails(TOKEN_CASE, make_client(), label, "wrong result type")
+
+    assert "dict" in message
+
+
+def test_without_sentinel_capped_list_fails() -> None:
+    """A MemoryIndex whose capped is a list fails "bad field capped" (AIE-1047, US1.6, US2.4)."""
+    index = _build(MemoryIndex, {"entries": (P_ENTRY,), "capped": [CappedPrefix("org/", 1)]})
+
+    _fails(lambda: without_sentinel(NAME, LABEL, index), "bad field capped")
+
+
+def test_without_sentinel_keeps_lookalike_capped_prefix() -> None:
+    """A capped prefix only ending in "conformance-sentinel/" is kept (AIE-1047, US1.6)."""
+    lookalike = CappedPrefix("org/o-9/x-conformance-sentinel/", 2)
+    index = MemoryIndex(entries=(P_ENTRY,), capped=(lookalike, CappedPrefix(SENTINEL_PREFIX, 1)))
+
+    result = without_sentinel(NAME, LABEL, index)
+
+    assert [(c.prefix, c.omitted) for c in result.capped] == [
+        ("org/o-9/x-conformance-sentinel/", 2)
+    ]
+
+
+class _UnreadableCategory(NotFoundError):
+    """A NotFoundError whose category raises on read."""
+
+    @property
+    def category(self) -> ErrorCategory:  # pyright: ignore[reportIncompatibleVariableOverride]
+        raise RuntimeError("no category for you")
+
+
+def test_expect_error_unreadable_category_fails() -> None:
+    """A category raising on read fails "wrong category" with "unreadable" (AIE-1047, US2.1)."""
+    exc = _UnreadableCategory(P, FILE_ABSENT)
+
+    message = _fails(
+        lambda: expect_error(NAME, LABEL, _raising(exc), _UnreadableCategory, RECOVERABLE),
+        "wrong category",
+    )
+
+    assert "unreadable" in message
+
+
+class _ItemsRaises(dict[str, str]):
+    """A dict whose items() raises."""
+
+    def items(self) -> list[tuple[str, str]]:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise RuntimeError("no items for you")
+
+
+def test_protocol_case_rejects_unreadable_scope_map() -> None:
+    """A scope_map whose items() raises fails "fixture scope_map" (AIE-1047, US1.3, US4.8a)."""
+    _reference_passes(PROTOCOL)
+
+    message = _fixture_fails(PROTOCOL, _reference(), "scope_map", scope_map=_ItemsRaises(SCOPE_MAP))
+
+    assert "RuntimeError" in message
+
+
+def test_without_sentinel_raising_iterable_is_unexpected() -> None:
+    """A generator raising mid-iteration fails "unexpected error" (AIE-1047, US1.6, US2.8)."""
+
+    def entries() -> Iterator[FileEntry]:
+        yield P_ENTRY
+        raise RuntimeError("iteration exploded")
+
+    message = _fails(lambda: without_sentinel(NAME, LABEL, entries()), "unexpected error")
+
+    assert "RuntimeError" in message
+
+
+MISSING_SOURCE_MODULE = """
+from collections.abc import Mapping
+
+import pytest
+
+from wenchang.core import MemoryStore
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.testing import TransportConformance
+from wenchang.transport import InProcessClient, TransportClient
+
+
+class TestMissingSource(TransportConformance):
+    @pytest.fixture
+    def client(self) -> TransportClient:
+        return InProcessClient(MemoryStore(InMemoryStorage(), max_file_bytes=256))
+
+    @pytest.fixture
+    def scope_map(self) -> Mapping[str, str]:
+        return {"user": "u-1", "org": "o-9"}
+
+    @pytest.fixture
+    def max_file_bytes(self) -> int:
+        return 256
+
+    @pytest.fixture
+    def index_max_bytes(self) -> int:
+        return 4096
+
+    @pytest.fixture
+    def scope_priority(self) -> tuple[str, ...]:
+        return ("user", "org")
+
+    @pytest.fixture
+    def list_page_size(self) -> int:
+        return 2
+"""
+
+
+def test_subclass_missing_fixture_reports_fixture_error(pytester: pytest.Pytester) -> None:
+    """A subclass without the source fixture errors every case that takes it.
+
+    (AIE-1047, US1.5)
+    """
+    pytester.makepyfile(test_missing_source=MISSING_SOURCE_MODULE)
+
+    result = pytester.runpytest("-p", "no:cacheprovider")
+
+    result.assert_outcomes(passed=1, errors=4)
+    result.stdout.fnmatch_lines(["*fixture 'source' not found*"])
