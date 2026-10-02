@@ -619,7 +619,9 @@ implemented.
   guarded the same way: a `metadata` that is not a `FileMetadata`,
   `aliases` or `sources` that are not iterable, or a `last_updated` that
   is not a `datetime` is dropped (keys omitted), and `entries` or `capped`
-  that are not iterable render as empty lists. `render_error` accepts any
+  that are not iterable render as empty lists. A `capped` row whose
+  `prefix` is not a `str` or whose `omitted` is not an `int` is skipped,
+  and a naive `datetime` `last_updated` is dropped. `render_error` accepts any
   `Exception` and never raises. A
   `WenchangError` renders `error` (type name), `category`, `message`, and
   each non-`None` attribute from a fixed list (`path`, `content`,

@@ -251,7 +251,9 @@ imports it.
       too: a `metadata` that is not a `FileMetadata`, `aliases` or
       `sources` that are not iterable, or a `last_updated` that is not a
       `datetime` is dropped (keys omitted), and `entries` or `capped` that
-      are not iterable render as empty lists. This relies on ADR 0019
+      are not iterable render as empty lists. A `capped` row whose `prefix`
+      is not a `str` or whose `omitted` is not an `int` is skipped, and a
+      naive `datetime` `last_updated` is dropped. This relies on ADR 0019
       decision 7: a conforming client surfaces every transport failure as
       `BackendUnavailableError`, so nothing the agent must act on arrives
       as an off-contract exception. A host needs one `except Exception` and

@@ -38,9 +38,9 @@ No existing test changed.
 `t` = `tests/test_tools.py`, `d` = `tests/test_tools_descriptions.py`,
 `r` = `tests/test_tools_render.py`, `e` = `tests/test_tools_end_to_end.py`,
 `ia` = `tests/test_errors_invalid_argument.py`. Every test docstring cites
-AIE-1044 and its scenario ID. Line numbers are as of commit `263076e`.
+AIE-1044 and its scenario ID. Line numbers are as of commit `f5d1b7e`.
 
-`make check` at `263076e`: lint and typecheck clean; 1968 passed,
+`make check` at `f5d1b7e`: lint and typecheck clean; 1986 passed,
 6 skipped (the pre-existing resolver-conformance skips), 39 deselected
 (integration).
 
@@ -92,13 +92,13 @@ AIE-1044 and its scenario ID. Line numbers are as of commit `263076e`.
 | US7.3 `MemoryIndex` capped rows (area-, entity-, scope-level); empty index | `r::test_render_memory_index_with_capped_prefixes` (L145), `::test_render_empty_memory_index` (L169) |
 | US7.4 `None` → `{"ok": True}` | `r::test_render_none` (L177) |
 | US7.5 unsupported value → `TypeError` | `r::test_render_unsupported_value_raises_type_error` (L190) |
-| US7.5a malformed entry path → `None` segments; non-JSON-safe `aliases` / `sources` members dropped | `r::test_render_malformed_entry_path_renders_none_segments` (L196), `::test_render_memory_file_drops_non_str_metadata_members` (L534), `::test_render_list_page_drops_non_str_metadata_members` (L548) |
+| US7.5a malformed entry path → `None` segments; non-JSON-safe `aliases` / `sources` members dropped; wrongly typed scalar and container fields dropped; bad `capped` rows skipped; naive `last_updated` dropped | `r::test_render_malformed_entry_path_renders_none_segments` (L196), `::test_render_memory_file_drops_non_str_metadata_members` (L555), `::test_render_list_page_drops_non_str_metadata_members` (L569), `::test_render_file_entry_drops_non_str_version` (L602), `::test_render_file_entry_drops_non_str_path` (L615), `::test_render_list_page_drops_non_str_next_cursor` (L628), `::test_render_memory_file_drops_bytes_content` (L641), `::test_render_memory_file_drops_tuple_description` (L655), `::test_render_file_entry_drops_tuple_description` (L669), `::test_render_memory_file_drops_none_aliases` (L701), `::test_render_memory_file_drops_none_sources` (L717), `::test_render_memory_file_with_none_metadata` (L731), `::test_render_memory_file_drops_non_datetime_last_updated` (L748), `::test_render_list_page_with_non_iterable_entries` (L763), `::test_render_memory_index_with_none_field` (L777), `::test_render_memory_index_skips_bad_capped_rows` (L803), `::test_render_memory_file_drops_naive_last_updated` (L819) |
 | US7.6–7.7 repair material for conflict, oversize, match | `r::test_render_version_conflict_error` (L226), `::test_render_oversize_write_error` (L236), `::test_render_replace_fact_match_error` (L246) |
 | US7.8 `NotFoundError`, `BackendUnavailableError` reasons | `r::test_render_not_found_error` (L257), `::test_render_backend_unavailable_error` (L268) |
 | US7.9 `RestrictedScopeError` with / without `required_roles` | `r::test_render_restricted_scope_role_required` (L275), `::test_render_restricted_scope_without_roles` (L304) |
 | US7.10 `InvalidArgumentError`; `ResolverFailureError` minimal | `r::test_render_invalid_argument_error` (L313), `::test_render_resolver_failure_error` (L321) |
 | US7.11 data-integrity → `internal` with `str(exc)`; others → `"internal error"` | `r::test_render_data_integrity_errors` (L340), `::test_render_other_exceptions_use_fixed_message` (L353) |
-| US7.12 hostile `__str__` / `__name__`, bad `category`, non-JSON-safe payload never raise | `r::test_hostile_str_on_wenchang_error_falls_back` (L402), `::test_hostile_str_on_data_integrity_error_falls_back` (L426), `::test_hostile_str_on_other_exception_never_raises` (L434), `::test_hostile_type_name_on_other_exception_falls_back` (L442), `::test_hostile_type_name_on_wenchang_error_falls_back` (L451), `::test_render_error_never_raises_on_hostile_wenchang_error` (L508) |
+| US7.12 hostile `__str__` / `__name__`, bad `category`, non-JSON-safe payload never raise | `r::test_hostile_str_on_wenchang_error_falls_back` (L402), `::test_hostile_str_on_data_integrity_error_falls_back` (L426), `::test_hostile_str_on_other_exception_never_raises` (L434), `::test_hostile_type_name_on_other_exception_falls_back` (L442), `::test_hostile_type_name_on_wenchang_error_falls_back` (L451), `::test_render_error_without_valid_category_renders_internal` (L506), `::test_render_error_drops_wrongly_typed_payload_field` (L529) |
 | FR-001 exports | `d::test_tools_mapping_holds_bound_methods_in_order` (L170) and every `t` / `r` test importing `MemoryTools`, `bind_tools`, `TOOL_NAMES`, `render_result`, `render_error` |
 | FR-002 `check_write` before every mutating call, never on reads | US2.1–2.3, US3.0, US3.2, US3.4 rows |
 | FR-003 forwarding and unchanged results | US2.1–2.4, US3.1, US3.6 rows |
@@ -282,6 +282,11 @@ Gate review:
   this file held raw U+2028/U+2029 characters inside backticks; they are
   now the escaped text `\u2028` / `\u2029`, matching ADR 0022. Overlong
   lines in the ARCHITECTURE.md tools entry rewrapped.
+- **Third round: `capped` rows and naive timestamps.** A `capped` row whose
+  `prefix` is not a `str` or whose `omitted` is not an `int` is now skipped
+  (via `_capped_rows`) instead of raising, and a naive `datetime`
+  `last_updated` is dropped rather than converted as if it were local
+  time (US7.5a, FR-009, ARCHITECTURE.md, ADR 0022 decision 11).
 - **Merge dependency.** ADRs 0020 and 0021 come from the AIE-1046 and
   AIE-1047 branches; those must land before this PR merges.
 

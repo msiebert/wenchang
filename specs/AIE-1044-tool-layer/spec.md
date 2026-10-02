@@ -510,7 +510,12 @@ render_error(exc)`.
    other fields render as usual, and no exception is raised. **Given** a
    `ListPage` whose `entries`, or a `MemoryIndex` whose `entries` or
    `capped`, is not iterable, **Then** that field renders as an empty
-   list and no exception is raised.
+   list and no exception is raised. **Given** a `MemoryIndex` with a
+   `capped` row whose `prefix` is not a `str` or whose `omitted` is not
+   an `int`, **Then** that row is skipped and the other rows render as
+   usual. **Given** a `MemoryFile` or entry whose `last_updated` is a
+   naive `datetime`, **Then** `last_updated` is omitted and no exception
+   is raised.
 6. **Given** any `WenchangError` `exc` (`render_error(exc: Exception)`),
    **When** `render_error(exc)`,
    **Then** the result has `error == type(exc).__name__`, `category ==
@@ -647,7 +652,9 @@ render_error(exc)`.
   `path`; a `metadata` that is not a `FileMetadata`, `aliases`/`sources`
   that are not iterable, or a `last_updated` that is not a `datetime` is
   dropped (keys omitted); and `entries`/`capped` that are not iterable
-  render as empty lists (US7.5a). Capped rows carry `scope` and
+  render as empty lists; a `capped` row whose `prefix` is not a `str` or
+  whose `omitted` is not an `int` is skipped; and a naive `datetime`
+  `last_updated` is dropped (US7.5a). Capped rows carry `scope` and
   `area` (US7.3). `render_error` accepts any `Exception` and
   never raises (guarded type name and message; a `WenchangError` subclass
   whose `category` is missing, raises, or is not an `ErrorCategory` member

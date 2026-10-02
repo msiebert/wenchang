@@ -788,17 +788,25 @@ def test_render_memory_index_with_none_field(field: str) -> None:
     _round_trips(out)
 
 
-def _int_prefix_cap() -> CappedPrefix:
-    cap = CappedPrefix("org/o-9/", 1)
-    # Bypasses __post_init__, which rejects a non-str prefix.
-    object.__setattr__(cap, "prefix", 5)
-    return cap
+def _bad_cap(field: str, value: object) -> Callable[[], CappedPrefix]:
+    def make() -> CappedPrefix:
+        cap = CappedPrefix("org/o-9/", 1)
+        # Bypasses __post_init__, which rejects wrongly typed fields.
+        object.__setattr__(cap, field, value)
+        return cap
+
+    return make
 
 
 @pytest.mark.parametrize(
     "make_bad",
-    [lambda: None, _int_prefix_cap],
-    ids=["none-member", "int-prefix"],
+    [
+        lambda: None,
+        _bad_cap("prefix", 5),
+        _bad_cap("omitted", True),
+        _bad_cap("omitted", "3"),
+    ],
+    ids=["none-member", "int-prefix", "bool-omitted", "str-omitted"],
 )
 def test_render_memory_index_skips_bad_capped_rows(make_bad: Callable[[], object]) -> None:
     """AIE-1044, US7.5a: a capped member that is None or has a non-str prefix is
