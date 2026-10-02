@@ -6,7 +6,7 @@ import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import NewType
+from typing import NewType, cast
 
 from wenchang.errors import (
     NotFoundError,
@@ -61,6 +61,14 @@ def _count_occurrences(content: str, old_string: str) -> int:
         index = found + 1
 
 
+def _type_name(t: type) -> str:
+    # A metaclass may make __name__ raise or return a str subclass.
+    try:
+        return str.__str__(t.__name__)
+    except Exception:
+        return "<unnamed>"
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -90,6 +98,77 @@ class ListPage:
 
     entries: tuple[FileEntry, ...]
     next_cursor: ListCursor | None
+
+
+@dataclass(frozen=True)
+class CappedPrefix:
+    """A prefix the memory index could not return in full.
+
+    `omitted` is how many files under `prefix` were left out. The agent can
+    call `list_prefix(prefix)` to page through them.
+    """
+
+    prefix: str
+    omitted: int
+
+    def __post_init__(self) -> None:
+        # Real-type checks: a remote client builds this from deserialized data.
+        prefix = cast(object, self.prefix)
+        omitted = cast(object, self.omitted)
+        if not issubclass(type(prefix), str):
+            raise TypeError(f"prefix must be a str, not {_type_name(type(prefix))}")
+        if issubclass(type(omitted), bool) or not issubclass(type(omitted), int):
+            raise TypeError(f"omitted must be an int, not {_type_name(type(omitted))}")
+        # Exact str and int, so overridden subclass methods cannot mislead validation.
+        exact_prefix = str.__str__(cast(str, prefix))
+        exact_omitted = int.__index__(cast(int, omitted))
+        object.__setattr__(self, "prefix", exact_prefix)
+        object.__setattr__(self, "omitted", exact_omitted)
+        if not is_valid_prefix(exact_prefix):
+            raise ValueError(f"invalid prefix: {exact_prefix!r}")
+        if exact_omitted <= 0:
+            raise ValueError(f"omitted must be positive, got {exact_omitted}")
+
+
+@dataclass(frozen=True)
+class MemoryIndex:
+    """Merged metadata across every scope in a scope map, in load order.
+
+    `entries` is already ordered: system/ areas across all scopes first;
+    then the remaining scopes in the configured priority order, or as one
+    tier if none is configured; within each tier by last-updated, most
+    recent first. `capped` lists every prefix not fully returned once the
+    byte budget was reached; an empty `capped` means the index is complete.
+    """
+
+    entries: tuple[FileEntry, ...] = ()
+    capped: tuple[CappedPrefix, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Exact types: a subclass can lie through __iter__, __eq__, __hash__, or
+        # __getattribute__, defeating duplicate detection and equality.
+        if type(self.entries) is not tuple or type(self.capped) is not tuple:
+            raise TypeError("entries and capped must be exact tuples")
+        for entry in cast(tuple[object, ...], self.entries):
+            if type(entry) is not FileEntry:
+                raise TypeError(
+                    f"entries member must be a FileEntry, not {_type_name(type(entry))}"
+                )
+        for cap in cast(tuple[object, ...], self.capped):
+            if type(cap) is not CappedPrefix:
+                raise TypeError(
+                    f"capped member must be a CappedPrefix, not {_type_name(type(cap))}"
+                )
+        paths: set[str] = set()
+        for entry in self.entries:
+            if entry.path in paths:
+                raise ValueError(f"duplicate entry path: {entry.path!r}")
+            paths.add(entry.path)
+        prefixes: set[str] = set()
+        for cap in self.capped:
+            if cap.prefix in prefixes:
+                raise ValueError(f"duplicate capped prefix: {cap.prefix!r}")
+            prefixes.add(cap.prefix)
 
 
 class MemoryStore:

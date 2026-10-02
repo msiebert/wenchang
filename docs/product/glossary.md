@@ -76,7 +76,18 @@ Terms as used throughout wenchang and its spec.
   parse, compare, or order it.
 - **Memory index** — the merged, metadata-only view across a set of scopes,
   returned by `get_memory_index` for session bootstrap, subject to a byte
-  cap (default 64 KB) and a documented priority ordering.
+  cap (default 64 KB) and a documented priority ordering. Represented by
+  `core.MemoryIndex`: the entries in load order, plus the capped prefixes;
+  no capped prefixes means the index is complete.
+- **Capped prefix** — a prefix the memory index could not return in full
+  once its byte cap was reached, with a count of the files left out
+  (`core.CappedPrefix`). The agent can list that prefix to page through
+  them.
+- **Transport client** — the object the tool layer calls to reach memory,
+  implementing `transport.TransportClient`: the core API's operations with
+  identical signatures and identical errors, over any transport (in-process
+  or remote). It carries no identity per call; a remote client
+  authenticates once, when it is constructed.
 - **Description** — a file's one-line human-readable summary; part of the
   metadata-only search surface.
 - **Aliases** — a file's list of alternate names, nicknames, acronyms, and
