@@ -1,6 +1,6 @@
 """Packaging tests for the wenchang.testing subpackage.
 
-Covers AIE-1039, US9.1 through US9.7.
+Covers AIE-1039, US9.1 through US9.7, and AIE-1047, US5.1, US5.2, US5.4.
 """
 
 import ast
@@ -14,7 +14,8 @@ from typing import Any, cast
 
 import pytest
 
-from wenchang.testing import ResolverConformance
+import wenchang.testing
+from wenchang.testing import ResolverConformance, TransportConformance
 
 pytestmark = pytest.mark.unit
 
@@ -22,6 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = REPO_ROOT / "src" / "wenchang"
 TESTING_DIR = PACKAGE_DIR / "testing"
 CONFORMANCE_MODULE = TESTING_DIR / "resolver_conformance.py"
+TRANSPORT_CONFORMANCE_MODULE = TESTING_DIR / "transport_conformance.py"
+
+TRANSPORT_CONFORMANCE_WENCHANG_IMPORTS = frozenset(
+    {"core", "errors", "file_format", "paths", "transport", "version_token"}
+)
 
 LINEAR_ID = re.compile(r"AIE-\d+")
 
@@ -283,3 +289,194 @@ def test_conformance_module_applies_no_pytest_marks() -> None:
     tree = ast.parse(CONFORMANCE_MODULE.read_text(), filename=str(CONFORMANCE_MODULE))
 
     assert _pytest_marks(tree) == []
+
+
+def _transport_module_source() -> str:
+    assert TRANSPORT_CONFORMANCE_MODULE.is_file(), f"{TRANSPORT_CONFORMANCE_MODULE} does not exist"
+    return TRANSPORT_CONFORMANCE_MODULE.read_text()
+
+
+def _disallowed_wenchang_imports(tree: ast.AST) -> list[str]:
+    """Return each relative import or wenchang import outside the allowed modules."""
+    allowed = TRANSPORT_CONFORMANCE_WENCHANG_IMPORTS
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                if parts[0] == "wenchang" and (len(parts) != 2 or parts[1] not in allowed):
+                    found.append(f"line {node.lineno}: import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.level > 0:
+                found.append(f"line {node.lineno}: relative import")
+                continue
+            assert node.module is not None
+            parts = node.module.split(".")
+            if parts[0] != "wenchang":
+                continue
+            if len(parts) == 1:
+                bad = [alias.name for alias in node.names if alias.name not in allowed]
+            else:
+                bad = [] if len(parts) == 2 and parts[1] in allowed else [node.module]
+            if bad:
+                found.append(f"line {node.lineno}: from {node.module} import {bad}")
+    return found
+
+
+def _imports_pytest(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import) and any(a.name == "pytest" for a in node.names):
+            return True
+    return False
+
+
+def _is_version_operand(node: ast.expr) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id.endswith("version")
+    if isinstance(node, ast.Attribute):
+        return node.attr.endswith("version")
+    return False
+
+
+def _is_exempt_call(node: ast.Call) -> bool:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == "type"
+    return (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and (func.value.id == "client")
+    )
+
+
+def find_version_misuse(source: str) -> list[int]:
+    """Return the line of each Compare, BinOp, Subscript, or Call using a version operand.
+
+    A Call to `type` or to a method on the name `client` is exempt.
+    """
+    lines: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Compare):
+            operands = [node.left, *node.comparators]
+        elif isinstance(node, ast.BinOp):
+            operands = [node.left, node.right]
+        elif isinstance(node, ast.Subscript):
+            operands = [node.value]
+        elif isinstance(node, ast.Call) and not _is_exempt_call(node):
+            operands = [*node.args, *(keyword.value for keyword in node.keywords)]
+        else:
+            continue
+        if any(_is_version_operand(operand) for operand in operands):
+            lines.append(node.lineno)
+    return sorted(lines)
+
+
+def test_transport_conformance_is_exported_and_not_collected() -> None:
+    """wenchang.testing exports TransportConformance, not Test-prefixed (AIE-1047, US5.1)."""
+    assert isinstance(TransportConformance, type)
+    assert not TransportConformance.__name__.startswith("Test")
+    assert {"ResolverConformance", "TransportConformance"} <= set(wenchang.testing.__all__)
+
+
+def test_transport_conformance_imports_only_allowed_modules() -> None:
+    """transport_conformance.py imports pytest and only the allowed wenchang modules.
+
+    (AIE-1047, US5.2)
+    """
+    tree = ast.parse(_transport_module_source(), filename=str(TRANSPORT_CONFORMANCE_MODULE))
+
+    assert _imports_pytest(tree)
+    assert _disallowed_wenchang_imports(tree) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from wenchang.scope import check_write",
+        "from wenchang.identity import Identity",
+        "from wenchang.storage.memory import InMemoryStorage",
+        "from wenchang.testing import ResolverConformance",
+        "from wenchang import core, scope",
+        "import wenchang",
+        "import wenchang.storage",
+        "from . import core",
+        "from ..paths import build_path",
+    ],
+)
+def test_transport_import_scan_detects_disallowed(source: str) -> None:
+    """The transport import scan flags disallowed wenchang imports (AIE-1047, US5.2)."""
+    assert _disallowed_wenchang_imports(ast.parse(source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import pytest",
+        "from collections.abc import Mapping",
+        "from wenchang.core import MemoryFile",
+        "from wenchang import paths, transport",
+        "import wenchang.errors",
+        "from wenchang.version_token import VersionToken",
+        "from wenchang.file_format import FileMetadata",
+    ],
+)
+def test_transport_import_scan_allows_permitted(source: str) -> None:
+    """The transport import scan allows stdlib, pytest, and allowed modules (AIE-1047, US5.2)."""
+    assert _disallowed_wenchang_imports(ast.parse(source)) == []
+
+
+def test_transport_conformance_applies_no_pytest_marks() -> None:
+    """transport_conformance.py has no pytestmark and no pytest.mark (AIE-1047, US5.2)."""
+    tree = ast.parse(_transport_module_source(), filename=str(TRANSPORT_CONFORMANCE_MODULE))
+
+    assert _pytest_marks(tree) == []
+
+
+def test_transport_conformance_cites_no_linear_ids() -> None:
+    """transport_conformance.py matches no Linear ID pattern (AIE-1047, US5.2)."""
+    assert LINEAR_ID.findall(_transport_module_source()) == []
+
+
+def test_transport_conformance_never_operates_on_version_tokens() -> None:
+    """The token ast rule finds no misuse in transport_conformance.py (AIE-1047, US5.4, US2.6)."""
+    assert find_version_misuse(_transport_module_source()) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "a.version == b.version",
+        "x.version[0]",
+        "int(x.version)",
+        "f(version=r.version)",
+        "sorted(v.version)",
+        "expected_version != None",
+        "token + expected_version",
+        "str(w.version)",
+        "other.write_file(p, c, m, r.version, source=s)",
+    ],
+)
+def test_version_scan_flags_misuse(source: str) -> None:
+    """The token ast rule flags each listed violation (AIE-1047, US5.4, US2.6)."""
+    assert find_version_misuse(source) == [1]
+
+
+def test_version_scan_reports_line_numbers() -> None:
+    """The token ast rule reports the offending line (AIE-1047, US5.4, US2.6)."""
+    assert find_version_misuse("x = 1\ny = r.version + 'a'\nz = 2\n") == [2]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "type(x.version)",
+        "client.write_file(p, c, m, r.version, source=s)",
+        "client.append_line(q, line, w.version, source=s)",
+        "type(value.version) is str and value.version",
+        "version_text = 'v'",
+        "a.path == b.path",
+    ],
+)
+def test_version_scan_allows_exemptions(source: str) -> None:
+    """The token ast rule allows type() and client calls (AIE-1047, US5.4, US2.6)."""
+    assert find_version_misuse(source) == []

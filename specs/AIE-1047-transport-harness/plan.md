@@ -138,8 +138,8 @@ type CanonicalPage = tuple[tuple[CanonicalEntry, ...], bool]
 type CanonicalIndex = tuple[tuple[CanonicalEntry, ...], tuple[tuple[str, int], ...]]
 
 
-def _name(t: type) -> str: ...            # as in resolver_conformance
-def _short(value: object) -> str: ...     # repr truncated to _REPR_LIMIT, guarded
+def _name(t: type) -> str: ...  # as in resolver_conformance
+def _short(value: object) -> str: ...  # repr truncated to _REPR_LIMIT, guarded
 
 
 def check_client(name: str, client: object) -> TransportClient: ...
@@ -149,7 +149,9 @@ def check_positive_int(name: str, fixture: str, value: object) -> int: ...
 def check_scope_priority(name: str, value: object) -> tuple[str, ...]: ...
 
 
-def probe_path(name: str, label: str, scope_map: Mapping[str, str], scope: str, area: str, stem: str, /) -> str:
+def probe_path(
+    name: str, label: str, scope_map: Mapping[str, str], scope: str, area: str, stem: str, /
+) -> str:
     """build_path(scope, scope_map[scope], area, stem); fail ("probe scope") if scope absent."""
 
 
@@ -160,12 +162,18 @@ def sentinel_path(scope_map: Mapping[str, str]) -> str:
 @overload
 def without_sentinel(name: str, label: str, value: MemoryIndex, /) -> MemoryIndex: ...
 @overload
-def without_sentinel(name: str, label: str, value: Iterable[FileEntry], /) -> tuple[FileEntry, ...]: ...
-def without_sentinel(name: str, label: str, value: MemoryIndex | Iterable[FileEntry], /) -> MemoryIndex | tuple[FileEntry, ...]:
+def without_sentinel(
+    name: str, label: str, value: Iterable[FileEntry], /
+) -> tuple[FileEntry, ...]: ...
+def without_sentinel(
+    name: str, label: str, value: MemoryIndex | Iterable[FileEntry], /
+) -> MemoryIndex | tuple[FileEntry, ...]:
     """Drop the sentinel entry (and its CappedPrefix, for an index)."""
 
 
-def sentinel_entry_bytes(name: str, client: TransportClient, scope_map: Mapping[str, str], /) -> int:
+def sentinel_entry_bytes(
+    name: str, client: TransportClient, scope_map: Mapping[str, str], /
+) -> int:
     """index_entry_bytes of the sentinel FileEntry as listed through the client."""
 
 
