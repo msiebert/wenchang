@@ -176,6 +176,8 @@ Algorithm:
    - `TypeError` if `not issubclass(type(scope_map), Mapping)` (real type;
      `collections.abc.Mapping` registers `dict` and `MappingProxyType`).
    - `raw = list(scope_map.items())`, read exactly once.
+   - For each `item` in `raw`: `TypeError("scope_map items must be (str,
+     str) pairs")` unless `type(item) is tuple and len(item) == 2`.
    - For each `(k, v)` in `raw` order: `TypeError(f"scope_map key must be
      str, got {name}")` if `not issubclass(type(k), str)`;
      `TypeError(f"scope_map value must be str, got {name}")` likewise for
@@ -200,10 +202,11 @@ Algorithm:
    and `micros = (e.metadata.last_updated - _EPOCH) // timedelta(
    microseconds=1)` with `_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)`, an
    exact `int` (aware subtraction handles any offset). No floats.
-4. Walk the sorted list with `total = 0`; for each entry `size =
-   index_entry_bytes(e)`; if `total + size <= self._index_max_bytes`,
-   include and add; otherwise stop. Everything from the first miss on is
-   omitted.
+4. Size every ordered entry first: `sized = [(e, index_entry_bytes(e))
+   for e in ordered]`, so a `MetadataFormatError` from an unrenderable
+   entry is raised regardless of the cap. Then walk `sized` with `total =
+   0`; if `total + size <= self._index_max_bytes`, include and add;
+   otherwise stop. Everything from the first miss on is omitted.
 5. Count omitted entries by `build_prefix(parts.scope, parts.entity_id,
    parts.area)`; `capped = tuple(CappedPrefix(p, n) for p, n in
    sorted(counts.items()))`.

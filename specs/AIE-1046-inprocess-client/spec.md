@@ -106,7 +106,10 @@ a fixed clock. `_seed(path, last_updated)` seeds a file with description
 10. **Given** a stored `last-updated` that `metadata_from_map` accepts but
     `metadata_to_map` cannot re-render (`0001-01-01T00:00:00+05:00`
     overflows `astimezone(UTC)`), **Then** `index_entry_bytes` raises
-    `MetadataFormatError("last-updated", ...)`, not `OverflowError`.
+    `MetadataFormatError("last-updated", ...)`, not `OverflowError`, and
+    `get_memory_index` raises it whether or not the cap would reach that
+    entry: every ordered entry is sized before inclusion, so the outcome
+    for corrupt metadata does not depend on `index_max_bytes`.
 11. **Given** a path or description containing a lone surrogate
     (`"\ud800"`, which `is_valid_segment` accepts), **Then**
     `index_entry_bytes` counts it with `encode("utf-8",
@@ -229,8 +232,12 @@ non-ASCII alias counts its `\uXXXX` escape).
    storage). The `Sequence` check on `scope_priority` uses the same
    real-type rule.
 5. **Given** `scope_map`, validation runs in this order, before storage is
-   consulted: (a) `items()` is read exactly once into a list; (b) for each
-   pair in that order, `TypeError("scope_map key must be str, got ...")` /
+   consulted: (a) `items()` is read exactly once into a list; (a′) for each
+   item in that order, `TypeError("scope_map items must be (str, str)
+   pairs")` unless its real type is exactly `tuple` of length 2 (so an
+   `items()` yielding a 3-tuple or the 2-character string `"ab"` raises
+   `TypeError` rather than unpacking); (b) for each pair in that order,
+   `TypeError("scope_map key must be str, got ...")` /
    `TypeError("scope_map value must be str, got ...")` if the real type is
    not `str`, then both are normalized with `str.__str__`; (c) the
    normalized pairs are sorted by scope; (d) for each pair in sorted order,
