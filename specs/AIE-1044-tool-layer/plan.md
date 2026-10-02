@@ -16,7 +16,7 @@ Python ≥ 3.12; pyright strict; ruff 100. `tools` imports `core`
 (`FileEntry`, `ListCursor`, `ListPage`, `MemoryFile`, `MemoryIndex`),
 `errors` (`InvalidArgumentError`, `WenchangError`), `file_format`
 (`FileMetadata`, `LAST_UPDATED_KEY`, `MetadataFormatError`,
-`metadata_to_map`), `identity` (`Identity`, `IdentityResolver`,
+`metadata_to_map`, `parse_fact`), `identity` (`Identity`, `IdentityResolver`,
 `resolve_identity`), `paths` (`build_path`, `build_prefix`,
 `is_valid_segment`, `parse_path`), `scope` (`ScopePolicy`, `check_write`), `transport`
 (`TransportClient`), `version_token` (`VersionToken`). No new
@@ -73,20 +73,28 @@ dependencies.
    plain `ValueError` for a malformed `cursor`, a non-fact `line`, and an
    empty `old_string`, and ADR 0010 deferred agent-facing mapping to the
    tool layer. A `ValueError` has no category, so the agent cannot know to
-   retry; converting it to a recoverable error naming the argument gives
-   repair material. The original is chained as `__cause__` because core's
-   messages carry no secrets. `MetadataFormatError` and
-   `UnicodeDecodeError` are `ValueError` subclasses but data-integrity
-   failures (ADR 0006/0007) and pass through. Rejected: raising
-   `NotFoundError(INVALID_PATH)` for a bad cursor (wrong repair: the path
-   is fine); validating in the tool layer before the call (duplicates
-   core's rules and drifts).
+   retry; a recoverable error naming the argument gives repair material.
+   `line` and `old_string` are pre-validated by the tool
+   (`parse_fact(line) is not None`, `old_string != ""`), which raises
+   `InvalidArgumentError` directly: the rules are one call each and
+   checking them first means a client `ValueError` from those calls is
+   never guessed to be the agent's fault. The cursor cannot be
+   pre-validated without decoding it, so a client `ValueError` from
+   `list_prefix` is converted to `cursor`, chained as `__cause__` (core's
+   messages carry no secrets), but only when a cursor was passed.
+   `MetadataFormatError` and `UnicodeDecodeError` are `ValueError`
+   subclasses but data-integrity failures (ADR 0006/0007) and pass
+   through. Rejected: raising `NotFoundError(INVALID_PATH)` for a bad
+   cursor (wrong repair: the path is fine); converting every client
+   `ValueError` from `append_line`/`replace_fact` (blames the agent for
+   any other `ValueError` those calls raise).
 6. **Conversion is per tool and per argument, never a blanket
-   `except ValueError`.** Only the three documented client sites,
+   `except ValueError`.** Only `list_prefix` with a cursor,
    `build_path`/`build_prefix` (decision 9), and `FileMetadata`'s
    `description` newline check convert; a `ValueError` from anywhere else
-   propagates. Rejected: one wrapper around every client
-   call, which would hide a core bug as an agent error.
+   propagates and renders as `"internal error"`. Rejected: one wrapper
+   around every client call, which would hide a core bug as an agent
+   error.
 7. **`TOOL_NAMES` order is index, read, list, write, append, replace,
    delete**: bootstrap first, then reads, then writes in increasing
    destructiveness, the order a host should list them.
@@ -103,7 +111,10 @@ dependencies.
    identity.grants[scope].entity_id`. The tool reads the grant directly
    and never calls `Identity.entity_id()`, so an `Identity` subclass
    overriding that method cannot redirect reads or writes to another
-   entity (spec US2.9). Notion §6: tool code "uses the returned fields to
+   entity (spec US2.9). For the same reason `get_memory_index` builds its
+   scope map from the grants (`{s: g.entity_id for s, g in
+   grants.items()}`) and never reads the overridable `scope_map`
+   property (spec US2.3). Notion §6: tool code "uses the returned fields to
    build the path prefix". An ungranted scope is
    `InvalidArgumentError("scope", f"scope {scope!r} is not available in
    this session; available scopes: {', '.join(sorted(identity.grants))}")`,
@@ -145,7 +156,14 @@ dependencies.
     `UnicodeDecodeError` render as `{"error": <type name>, "category":
     "internal", "message": str(exc)}`; any other non-`WenchangError`
     renders the fixed message `"internal error"`, so an off-contract
-    exception does not leak internals to the agent. This relies on ADR
+    exception does not leak internals to the agent. A `WenchangError`
+    subclass whose `category` is missing, raises, or is not an `Enum`
+    member falls back to that same internal rendering, and a payload value
+    that is not JSON-safe is dropped: `_json_value` accepts only an exact
+    `str`, an `int` that is not a `bool`, an `Enum` member (its value),
+    and a `frozenset` of `str` (sorted). `render_result` likewise drops
+    `aliases`/`sources` members that are not JSON-safe strings rather than
+    raising. This relies on ADR
     0019's transport-failure mapping: a conforming client surfaces every
     transport failure as `BackendUnavailableError`, so nothing the agent
     needs to act on arrives as an off-contract exception. A host needs one
@@ -163,11 +181,15 @@ dependencies.
     naming it before any client call, never `TypeError`; `str` subclasses
     are normalized with `str.__str__`; the detail is `f"{argument} must be
     a string, not {type_name}"` with `type_name` read through the guarded
-    `_type_name`. `scope`, `area`, `name` (during the segment checks),
-    `description`, `content`, `line`, and `new_string` are also checked
+    `_type_name`. `aliases` must be a `Sequence` by real type
+    (`issubclass(type(aliases), Sequence)`, not `isinstance`), and
+    `description` is rejected if it contains any `str.splitlines` line
+    boundary, not only `\n`/`\r`. `scope`, `area`, `name` (during the
+    segment checks), `description`, each `aliases` member, `content`,
+    `line`, and `new_string` are also checked
     for UTF-8 encodability (a lone surrogate passes `is_valid_segment`), so core's
-    `UnicodeEncodeError` (a `ValueError`) never reaches the per-argument
-    conversions and gets blamed on `line` or `old_string`. A host schema
+    `UnicodeEncodeError` (a `ValueError`) never reaches the client as an
+    uncategorized error. A host schema
     may pass through whatever the model emitted, and a `TypeError` has no
     category, so the agent could not repair it. Rejected: `TypeError` as
     the host schema's concern (leaves the agent stuck when the host is
@@ -217,7 +239,7 @@ from typing import Final, NoReturn, cast
 from wenchang.core import FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import InvalidArgumentError, WenchangError
 from wenchang.file_format import (
-    LAST_UPDATED_KEY, FileMetadata, MetadataFormatError, metadata_to_map,
+    LAST_UPDATED_KEY, FileMetadata, MetadataFormatError, metadata_to_map, parse_fact,
 )
 from wenchang.identity import Identity, IdentityResolver, resolve_identity
 from wenchang.paths import build_path, build_prefix, is_valid_segment, parse_path
@@ -261,7 +283,8 @@ class MemoryTools:
 
     def get_memory_index(self) -> MemoryIndex:
         """Load the metadata index of every memory scope available in this session. ..."""
-        # return self._client.get_memory_index(self._identity.scope_map)
+        # scope_map = {s: g.entity_id for s, g in self._identity.grants.items()}
+        # return self._client.get_memory_index(scope_map)   # never identity.scope_map
 
     def read_file(self, scope: str, area: str, name: str) -> MemoryFile:
         """Read one memory file: its content, metadata, and version. ..."""
@@ -273,7 +296,9 @@ class MemoryTools:
         """List the files in a scope or area, one page at a time, without content. ..."""
         # prefix = self._prefix(scope, area); cursor = None or _exact("cursor", cursor)
         # try: return self._client.list_prefix(prefix, cursor)   # both positional
-        # except ValueError as exc: _reraise_argument("cursor", exc)
+        # except ValueError as exc:
+        #     if cursor is None: raise   # no agent argument to blame
+        #     _reraise_argument("cursor", exc)
 
     def write_file(
         self,
@@ -287,7 +312,9 @@ class MemoryTools:
     ) -> MemoryFile:
         """Create a memory file or replace one whole. ..."""
         # path = self._path(scope, area, name); check_write(path, self._identity, self._policy)
-        # _exact + _encodable("content"); _exact + _encodable("description"); aliases members _exact;
+        # _exact + _encodable("content"); _exact + _encodable("description");
+        # description with any str.splitlines boundary -> InvalidArgumentError("description");
+        # aliases: real-type Sequence, not str/bytes; members _exact + _encodable("aliases");
         # expected_version None or _exact; FileMetadata ValueError -> "description"
         # return self._client.write_file(path, content, metadata, expected_version, source=self._source)
 
@@ -295,8 +322,9 @@ class MemoryTools:
         self, scope: str, area: str, name: str, line: str, expected_version: VersionToken
     ) -> MemoryFile:
         """Add one fact line to the end of an existing memory file. ..."""
-        # _path; check_write; _exact + _encodable("line"); _exact("expected_version")
-        # try client call except ValueError -> _reraise_argument("line", exc)
+        # _path; check_write; _exact + _encodable("line");
+        # parse_fact(line) is None -> InvalidArgumentError("line") (no __cause__);
+        # _exact("expected_version"); client call (ValueError propagates unchanged)
 
     def replace_fact(
         self,
@@ -308,9 +336,10 @@ class MemoryTools:
         expected_version: VersionToken,
     ) -> MemoryFile:
         """Change one fact in a memory file by quoting the text to replace. ..."""
-        # _path; check_write; _exact("old_string"); _exact + _encodable("new_string");
-        # _exact("expected_version")
-        # try client call except ValueError -> _reraise_argument("old_string", exc)
+        # _path; check_write; _exact("old_string");
+        # old_string == "" -> InvalidArgumentError("old_string") (no __cause__);
+        # _exact + _encodable("new_string"); _exact("expected_version")
+        # client call (ValueError propagates unchanged)
 
     def delete_file(
         self, scope: str, area: str, name: str, expected_version: VersionToken
@@ -392,9 +421,11 @@ def render_error(exc: Exception) -> dict[str, object]:
     #     return {"error": name, "category": "internal", "message": _message(exc)}
     # other non-WenchangError:
     #     return {"error": name, "category": "internal", "message": "internal error"}
+    # category missing / raising / not an Enum member -> the "internal error" dict above
     # out = {"error": name, "category": exc.category.value, "message": _message(exc)}
-    # for key in _ERROR_FIELDS: value = getattr(exc, key, None); skip None
-    #   enum -> .value; frozenset -> sorted list; version -> str; else as-is
+    # for key in _ERROR_FIELDS: value = getattr(exc, key, None) (guarded); skip None
+    #   _json_value: exact str; int but not bool; Enum member -> .value;
+    #   frozenset of str -> sorted list; anything else -> field dropped
     # _ERROR_FIELDS = ("path", "content", "version", "size", "limit", "match_count",
     #                  "reason", "scope", "required_roles", "argument")
 
@@ -404,6 +435,7 @@ def _file_fields(entry: FileEntry | MemoryFile) -> dict[str, object]:
     # {"path", "scope": parts.scope, "area": parts.area, "name": parts.name,
     #  "version": str, "description", "aliases": list, "sources": sorted list,
     #  "last_updated": metadata_to_map(entry.metadata)[LAST_UPDATED_KEY]}
+    # aliases / sources members that are not JSON-safe strings are dropped, never raised on
 ```
 
 `render_error` reads only the ten fixed payload attributes, never `vars(exc)`,

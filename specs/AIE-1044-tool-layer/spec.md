@@ -61,7 +61,9 @@ Add `wenchang.tools` with:
   left to the tool layer. Each mutating tool then calls
   `scope.check_write(built_path, identity, policy)` (for `system/` and
   role checks) and then the client with the built path.
-  `get_memory_index()` takes no arguments and passes `identity.scope_map`.
+  `get_memory_index()` takes no arguments and passes a scope map built from
+  the grants (`{s: g.entity_id for s, g in identity.grants.items()}`),
+  never the overridable `identity.scope_map` property.
 - `bind_tools(client, resolver, credentials, policy, *, source)`: the one
   place credentials are handled. It calls `resolve_identity` and returns a
   `MemoryTools`; a resolution failure raises the permanent
@@ -71,13 +73,15 @@ Add `wenchang.tools` with:
   a host can decorate them without naming each one.
 - Agent-facing docstrings on every tool method, which are the tool
   descriptions a host picks up.
-- A new recoverable error, `InvalidArgumentError(argument, detail)`, into
-  which the tool layer converts the plain `ValueError`s core raises for
-  agent-supplied arguments (a malformed `cursor`, a `line` that is not a
-  fact line, an empty `old_string`), plus its own `scope`/`area`/`name`
-  rejections. ADR 0010 deferred this mapping to the tool layer.
-  `MetadataFormatError` and `UnicodeDecodeError`, both `ValueError`
-  subclasses, are data-integrity errors and pass through unchanged.
+- A new recoverable error, `InvalidArgumentError(argument, detail)`, for
+  every rejected agent-supplied argument. The tool pre-validates a `line`
+  that is not a fact line and an empty `old_string` and raises it itself;
+  it converts a client `ValueError` from `list_prefix` to `cursor` only
+  when a cursor was passed; plus its own `scope`/`area`/`name`
+  rejections. ADR 0010 deferred this mapping to the tool layer. Every
+  other `ValueError` propagates unchanged. `MetadataFormatError` and
+  `UnicodeDecodeError`, both `ValueError` subclasses, are data-integrity
+  errors and pass through unchanged.
 - Rendering helpers `render_result(value)` and `render_error(exc)`, which
   turn a tool's return value or a `WenchangError` into a JSON-safe `dict`
   carrying every field the agent needs, including the repair material
@@ -157,9 +161,13 @@ delegates to the real `scope.check_write`.
    cursor)`. Both arguments are passed positionally (recorded `args ==
    (prefix, cursor)`, `kwargs == {}`). The return value is returned as-is.
 3. **Given** `tools.get_memory_index()`, **Then** the client receives
-   `get_memory_index(scope_map)` with `scope_map ==
-   identity.scope_map` (`{"user": "u-1", "org": "o-9"}`) and the return
-   value is returned as-is. The method takes no parameters.
+   `get_memory_index(scope_map)` with `scope_map == {s: g.entity_id for
+   s, g in identity.grants.items()}` (`{"user": "u-1", "org": "o-9"}`) and
+   the return value is returned as-is. The method takes no parameters.
+   **Given** an `Identity` subclass whose `scope_map` property returns a
+   different map (`{"user": "u-evil"}`), **Then** the client still
+   receives the map built from `grants`: the tool never reads
+   `scope_map`, for the same reason it never calls `entity_id()` (US2.9).
 4. **Given** the client raises `NotFoundError`, `BackendUnavailableError`,
    `MetadataFormatError`, or `UnicodeDecodeError` from `read_file`,
    **Then** the same exception object propagates.
@@ -262,9 +270,13 @@ built, e.g. `user/u-1/notes/a.md` for `("user", "notes", "a")`.
 7. **Given** `write_file` with `expected_version=None`, **Then** the
    forwarded call carries `None` (create). **Given** `aliases` as a
    `list`, **Then** the metadata holds a `tuple`.
-8. **Given** `write_file` with a `description` containing `\n` or `\r`,
-   **Then** `FileMetadata` construction raises `ValueError`, which the tool
-   converts to `InvalidArgumentError("description", ...)`; no client call.
+8. **Given** `write_file` with a `description` containing any line
+   boundary `str.splitlines` recognizes (`\n`, `\r`, `\x0b`, `\x0c`,
+   `\x1c`, `\x1d`, `\x1e`, `\x85`, ` `, ` `), **Then**
+   `InvalidArgumentError("description", ...)`; no client call. A
+   description must be one line under every line-boundary rule a reader
+   may apply, not only `FileMetadata`'s `\n`/`\r` check, whose
+   `ValueError` is still converted to `description` if it fires.
    A non-`str` `description` raises `InvalidArgumentError("description",
    ...)` too (US3.10; the tool checks real type before building
    metadata), and a `str` subclass is normalized with `str.__str__`. A
@@ -274,13 +286,16 @@ built, e.g. `user/u-1/notes/a.md` for `("user", "notes", "a")`.
    construction, so area `system` with a bad description raises
    `RestrictedScopeError`.
 9. **Given** `aliases` that is a bare `str`/`bytes` (a `str` is a
-   `Sequence[str]` of characters), that is not a `Sequence`, or that
-   contains a member whose real type is not `str`, **Then**
-   `InvalidArgumentError("aliases", ...)` before any client call, never
-   `TypeError`. `FileMetadata` validates neither, and a non-`str` member
-   would be stored and make every later `read_file` and `list_prefix` over
-   that prefix raise `MetadataFormatError`. Members are normalized to
-   exact `str`; a `str` subclass member is stored as `str`.
+   `Sequence[str]` of characters), whose real type is not a `Sequence`
+   (`issubclass(type(aliases), Sequence)`, not the spoofable `isinstance`),
+   that contains a member whose real type is not `str`, or that contains a
+   member that cannot be UTF-8-encoded (lone surrogate; chained from the
+   `UnicodeEncodeError`), **Then** `InvalidArgumentError("aliases", ...)`
+   before any client call, never `TypeError`. `FileMetadata` validates
+   neither, and a non-`str` member would be stored and make every later
+   `read_file` and `list_prefix` over that prefix raise
+   `MetadataFormatError`. Members are normalized to exact `str`; a `str`
+   subclass member is stored as `str`.
 10. **One wrong-type rule.** **Given** any agent-supplied argument whose
     real type is wrong — `scope`, `area`, `name`, `content`, `line`,
     `old_string`, `new_string`, `description`, `cursor` (non-`None`
@@ -298,8 +313,9 @@ built, e.g. `user/u-1/notes/a.md` for `("user", "notes", "a")`.
     `"Argument content is invalid: content must be a string, not int"`.
     The same rule (and format) applies to segments in US2.8.
 11. **Given** `content` (write_file), `line` (append_line),
-    `new_string` (replace_fact), or — per US2.8 and US3.8 — `scope`,
-    `area`, `name`, or `description` that cannot be UTF-8-encoded (contains a
+    `new_string` (replace_fact), or — per US2.8, US3.8, and US3.9 — `scope`,
+    `area`, `name`, `description`, or an `aliases` member that cannot be
+    UTF-8-encoded (contains a
     lone surrogate such as `"\ud800"`), **Then** the tool raises
     `InvalidArgumentError` naming that argument before any client call,
     so core's `UnicodeEncodeError` (a `ValueError`) is never converted
@@ -314,14 +330,24 @@ built, e.g. `user/u-1/notes/a.md` for `("user", "notes", "a")`.
 **Acceptance Scenarios**:
 
 1. **Given** the client's `list_prefix` raises `ValueError("Malformed
-   list cursor: 'x'")`, **When** `tools.list_prefix("user", None, "x")`,
-   **Then** `InvalidArgumentError` is raised with `argument == "cursor"`,
-   `detail` containing the original message, category `RECOVERABLE`, and
-   the original `ValueError` as `__cause__`.
-2. **Given** the client's `append_line` raises `ValueError` (non-fact
-   line), **Then** `InvalidArgumentError(argument="line")`. **Given**
-   `replace_fact` raises `ValueError` (empty `old_string`), **Then**
-   `InvalidArgumentError(argument="old_string")`.
+   list cursor: 'x'")`, **When** `tools.list_prefix("user", None, "x")`
+   (a cursor was passed), **Then** `InvalidArgumentError` is raised with
+   `argument == "cursor"`, `detail` containing the original message,
+   category `RECOVERABLE`, and the original `ValueError` as `__cause__`.
+   **Given** the same client `ValueError` but **When**
+   `tools.list_prefix("user")` (no cursor), **Then** the same `ValueError`
+   object propagates unchanged: with no cursor there is no agent argument
+   to blame.
+2. **Given** `append_line` with a `line` for which `parse_fact(line) is
+   None` (not a single fact line), **Then** the tool raises
+   `InvalidArgumentError(argument="line")` itself, after `check_write` and
+   the type and UTF-8 checks, with no `__cause__` and no client call.
+   **Given** `replace_fact` with `old_string == ""`, **Then** the tool
+   raises `InvalidArgumentError(argument="old_string")` itself, likewise
+   with no `__cause__` and no client call. **Given** a well-formed `line` /
+   non-empty `old_string` and the client's `append_line` / `replace_fact`
+   raises `ValueError`, **Then** the same `ValueError` object propagates
+   unchanged (no conversion).
 3. **Given** the client raises `MetadataFormatError` or
    `UnicodeDecodeError` (both `ValueError` subclasses) from any tool,
    **Then** it propagates unchanged, never converted.
@@ -333,14 +359,16 @@ built, e.g. `user/u-1/notes/a.md` for `("user", "notes", "a")`.
    `argument` raises `ValueError`; a non-`str` `argument` raises
    `TypeError`.
 5. **Given** the client raises `ValueError` from `read_file`,
-   `delete_file`, `write_file`, or `get_memory_index` (core raises none for
-   well-typed arguments there), **Then** it propagates unchanged: only the
-   three client-side argument conversions exist, and the tool layer never
-   guesses.
+   `delete_file`, `write_file`, `get_memory_index`, `append_line`,
+   `replace_fact`, or `list_prefix` called without a cursor, **Then** it
+   propagates unchanged (and `render_error` renders it as `"internal
+   error"`): the only client-side conversion is `list_prefix` with a
+   cursor (US4.1), and the tool layer never guesses.
 6. **Given** the tool layer's own rejections (US2.5–6), **Then** the
    `argument` is exactly one of `"scope"`, `"area"`, `"name"`; for
    `build_path`/`build_prefix` failures the original `ValueError` is the
-   `__cause__`; the ungranted-scope rejection has no `__cause__` (it is
+   `__cause__`; the ungranted-scope rejection and the `line` /
+   `old_string` pre-validations (US4.2) have no `__cause__` (they are
    raised directly, not converted).
 
 ---
@@ -420,8 +448,10 @@ rendered fields are `path`, `scope`, `area`, `name` (from
 `metadata_to_map(metadata)[LAST_UPDATED_KEY]` produces); a `MemoryFile`
 adds `content`. If `parse_path` raises `ValueError` on an entry's path
 (malformed path from a remote client), `scope`, `area`, and `name` are
-`None` and rendering continues; `render_result` never raises for a
-supported value type. Host contract: every tool failure is renderable —
+`None` and rendering continues. An `aliases` or `sources` member that is
+not a JSON-safe string is dropped from the rendered list rather than
+raising; `render_result` never raises for a supported value type, even
+with hostile metadata members. Host contract: every tool failure is renderable —
 `render_error` accepts any `Exception` and never raises, so a host
 adapter wraps each tool call in `except Exception as exc: return
 render_error(exc)`.
@@ -452,7 +482,12 @@ render_error(exc)`.
 5a. **Given** a `ListPage` (built with `FileEntry` directly, bypassing
    core) whose entry path is `"not-a-path"`, **Then** that entry renders
    with `"path": "not-a-path"`, `"scope": None`, `"area": None`, `"name":
-   None` and the other fields as usual; no exception.
+   None` and the other fields as usual; no exception. **Given** an entry
+   (or `MemoryFile`) whose metadata `aliases` or `sources` holds a member
+   that is not a JSON-safe string (e.g. an `int`, or an object with a
+   raising `__str__`), **Then** that member is dropped from the rendered
+   list, the remaining members render as usual, and no exception is
+   raised.
 6. **Given** any `WenchangError` `exc` (`render_error(exc: Exception)`),
    **When** `render_error(exc)`,
    **Then** the result has `error == type(exc).__name__`, `category ==
@@ -492,7 +527,15 @@ render_error(exc)`.
     falling back to `"<unnamed>"` and `"<unreadable>"` respectively (the
     message guard matters for `WenchangError`, `MetadataFormatError`, and
     `UnicodeDecodeError`, whose `str(exc)` is rendered); both are exact
-    `str`.
+    `str`. **Given** a `WenchangError` subclass whose `category` is
+    missing, raises on access, or is not an `Enum` member, **Then**
+    `render_error` falls back to the off-contract rendering `{"error":
+    <type name>, "category": "internal", "message": "internal error"}`.
+    **Given** a `WenchangError` whose payload attribute holds a value that
+    is not JSON-safe, **Then** that field is dropped and the rest render.
+    Payload values are rendered only if they are an exact `str`, an `int`
+    that is not a `bool`, an `Enum` member (rendered as its value), or a
+    `frozenset` of `str` (rendered sorted); anything else is dropped.
 
 ### Edge Cases
 
@@ -503,11 +546,12 @@ render_error(exc)`.
   `MemoryTools`; the agent cannot set it.
 - The tool layer validates `scope` (granted), `area`, and `name` (via
   `build_path`/`build_prefix`), `description`, `aliases`, the real type of
-  every agent-supplied argument, and UTF-8 encodability of `scope`,
-  `area`, `name`, `description`, `content`, `line`, and `new_string`;
-  beyond that it does not validate `content`,
-  `line`, etc., and converts only the three documented client
-  `ValueError`s. A wrongly typed agent argument is always
+  every agent-supplied argument, UTF-8 encodability of `scope`, `area`,
+  `name`, `description`, `aliases` members, `content`, `line`, and
+  `new_string`, that `line` is a single fact line, and that `old_string`
+  is non-empty; beyond that it does not validate `content` etc., and
+  converts only one client `ValueError` (`list_prefix` with a cursor). A
+  wrongly typed agent argument is always
   `InvalidArgumentError` naming it, never `TypeError` (US3.10): a host
   schema may be loose, and the agent can repair the call. `TypeError`
   remains only for adopter-side mistakes (constructor arguments).
@@ -541,20 +585,23 @@ render_error(exc)`.
   (`TypeError` for a non-`str` `argument`, `ValueError` for an empty one,
   US4.4). The tool layer raises `InvalidArgumentError` from exactly these
   sources, and no others:
-  (a) **core `ValueError`s converted**, chained as `__cause__`: from the
-  client's `list_prefix` → `cursor`, `append_line` → `line`,
-  `replace_fact` → `old_string` (US4.1–2); `MetadataFormatError` and
-  `UnicodeDecodeError` pass through unconverted;
+  (a) **one client `ValueError` converted**, chained as `__cause__`: from
+  the client's `list_prefix` → `cursor`, only when a cursor was passed
+  (US4.1); every other client `ValueError` propagates unchanged (US4.1,
+  US4.2, US4.5), and `MetadataFormatError` and `UnicodeDecodeError` pass
+  through unconverted;
   (b) **path-building `ValueError`s converted**, chained: `build_path` /
   `build_prefix` → `area` or `name` (US2.6); `FileMetadata`'s newline
   check → `description` (US3.8);
   (c) **`UnicodeEncodeError` from the tool's own UTF-8 check**, chained:
-  `scope`, `area`, `name`, `description`, `content`, `line`,
-  `new_string` (US2.8, US3.8, US3.11);
+  `scope`, `area`, `name`, `description`, `aliases` members, `content`,
+  `line`, `new_string` (US2.8, US3.8, US3.9, US3.11);
   (d) **the tool's own checks, raised directly (no `__cause__`)**: wrong
   real type of any agent argument, with detail `f"{argument} must be a
   string, not {type_name}"` (US3.10; never `TypeError`); malformed
-  `aliases` (US3.9); ungranted `scope` (FR-008).
+  `aliases` (US3.9); a `description` containing any `str.splitlines`
+  line boundary (US3.8); a `line` that is not a single fact line and an
+  empty `old_string` (US4.2); ungranted `scope` (FR-008).
   `str` subclasses MUST be normalized with `str.__str__`.
 - **FR-008**: Every tool that takes `scope` MUST reject a scope not in
   `identity.grants` with `InvalidArgumentError("scope", f"scope {scope!r}
@@ -568,9 +615,12 @@ render_error(exc)`.
 - **FR-009**: `render_result` and `render_error` MUST behave as in US7 and
   produce JSON-safe output. `render_result` raises `TypeError` for an
   unsupported value type and otherwise never raises (a malformed entry
-  path renders `scope`/`area`/`name` as `None`, US7.5a; capped rows carry
+  path renders `scope`/`area`/`name` as `None`, and non-JSON-safe
+  `aliases`/`sources` members are dropped, US7.5a; capped rows carry
   `scope` and `area`, US7.3). `render_error` accepts any `Exception` and
-  never raises (guarded type name and message, US7.12); exceptions
+  never raises (guarded type name and message; a `WenchangError` subclass
+  with a missing or non-`Enum` `category` falls back to the internal
+  rendering; non-JSON-safe payload fields are dropped, US7.12); exceptions
   outside the taxonomy and the two data-integrity types render the fixed
   message `"internal error"` (US7.11).
 - **FR-005**: `bind_tools` MUST be the only function in `tools` that takes
@@ -633,6 +683,27 @@ calls, pending PR review:
    and adopter prompt text.
 5. **`InvalidArgumentError` as a new recoverable kind → yes.** ADR 0010
    deferred exactly this mapping here, and it is tool-layer only.
+
+## Adversarial code review (2026-10-02)
+
+The code review of the implementation changed these scenarios: US2.3
+(index scope map built from `grants`), US4.1, US4.2, US4.5, US4.6, and
+FR-004(a) (conversions narrowed to `list_prefix` with a cursor; `line` and
+`old_string` pre-validated), US3.8 (every `str.splitlines` boundary),
+US3.9 and US3.11 (alias members UTF-8-checked; real-type `Sequence`
+check), US7.5a, US7.12, and FR-009 (rendering never raises on hostile
+metadata or `WenchangError` subclasses). It also raised two points outside
+this issue's scope, recorded in ADR 0022 Consequences:
+
+- **Lookalike `system` areas are writable.** `System`, a Cyrillic `ѕ`, or
+  a name containing a zero-width (`Cf`) character passes the exact
+  `system` comparison in `scope` and `paths`. This is a policy question
+  for the human: NFKC/casefold rejection in the tool, or `Cf` rejection in
+  `paths`. Open.
+- **`resolve_identity`'s `from None` keeps `__context__`.** It suppresses
+  display of the original exception but leaves it reachable as
+  `__context__`, with the frame holding the credentials, to error
+  reporters that walk the chain. A follow-up for `identity`.
 
 ## Assumptions
 

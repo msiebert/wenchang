@@ -11,18 +11,18 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-nine implemented modules: the cross-cutting `errors` and `version_token`; the
+ten implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); `core`, whose
 implemented operations so far are `read_file`, `write_file`, `replace_fact`,
 `list_prefix`, `append_line`, and `delete_file`, plus the index value types
 `MemoryIndex` and `CappedPrefix`; `identity`, the injected identity resolver
 boundary; `scope`, the tool-layer write checks (`system/` read-only and
-role-gated write restriction); and `transport`, the `TransportClient`
-protocol the tool layer will call. `scope` takes an `Identity` value, but
-no module calls `identity` or `scope` yet, and nothing implements or calls
-`TransportClient` yet. A tenth, `testing`, is adopter-facing rather than
-part of the runtime: the
+role-gated write restriction); `transport`, the `TransportClient` protocol;
+and `tools`, the agent-facing tool layer, which resolves identity through
+`identity`, checks writes through `scope`, and calls a `TransportClient`.
+Nothing in the library implements `TransportClient` yet. An eleventh,
+`testing`, is adopter-facing rather than part of the runtime: the
 executable resolver conformance suite an adopter runs against their own
 identity resolver, installed with the optional `wenchang[testing]` extra.
 The module map below is the
@@ -36,8 +36,13 @@ implemented.
   `RecoverableError`, `PermanentError`, `TransientError` — each fixing that
   category's next-action guidance text. Concrete kinds: recoverable
   `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
-  `NotFoundError`; permanent `RestrictedScopeError`, `ResolverFailureError`;
-  transient `BackendUnavailableError`.
+  `NotFoundError`, `InvalidArgumentError`; permanent `RestrictedScopeError`,
+  `ResolverFailureError`; transient `BackendUnavailableError`.
+  `InvalidArgumentError(argument, detail)` is raised only by the tool layer
+  for a rejected agent-supplied argument. `argument` names it (a non-`str`
+  raises `TypeError`, an empty one `ValueError`; a `str` subclass is stored
+  as an exact `str`), and `detail` is the composed sentence `Argument
+  {argument} is invalid: {detail}`.
   `RestrictedScopeError(path, scope, reason, required_roles: frozenset[str]
   | None = None)` exposes all four as attributes. `required_roles` is the
   set of roles permitted to write the scope. It is checked in this order: a
@@ -112,8 +117,8 @@ implemented.
   contain `{root}`. `paths` imports nothing from `wenchang`. The builders
   raise `ValueError`, not `NotFoundError`, because they are for values
   library code controls; a caller passing agent-supplied values must
-  validate them first or convert the `ValueError` into
-  `NotFoundError(INVALID_PATH)`. See
+  validate them first or convert the `ValueError` (the tool layer converts
+  it into `InvalidArgumentError` naming the bad argument). See
   [ADR 0015](docs/adr/0015-path-construction.md).
 - **storage** — an internal protocol mirroring GCS object semantics (custom
   metadata, a generation-backed version token): `Storage` (`get`, `put`,
@@ -515,13 +520,115 @@ implemented.
   `scope.check_write` before any mutating client call; a remote client
   binds whatever it authenticates with at construction (per session or
   connection), never per call. It imports from `wenchang` only `core`,
-  `file_format`, and `version_token`, and `core` never imports it. Nothing
-  implements or calls it yet: the in-process client and
-  `MemoryStore.get_memory_index` are planned, the tool layer is planned,
-  and the transport conformance suite is planned. See
+  `file_format`, and `version_token`, and `core` never imports it. `tools`
+  calls it. Nothing implements it yet: the in-process client,
+  `MemoryStore.get_memory_index`, and the transport conformance suite are
+  planned. See
   [ADR 0019](docs/adr/0019-transport-client-interface.md).
-- **tools** *(planned)* — the agent-facing tool layer: thin wrappers over
-  the transport client, carrying no policy, each described by a docstring.
+- **tools** — the agent-facing tool layer: thin verbs over a
+  `TransportClient`, carrying no judgment, each described by its
+  docstring. `MemoryTools(client, identity, policy, *, source)` is one
+  session: a resolved `Identity`, the adopter's `ScopePolicy`, the client,
+  and the calling surface's name, stamped as `source` on every write and
+  not settable by the agent. Constructor arguments are adopter-side: a
+  client failing `isinstance(..., TransportClient)`, an `identity` or
+  `policy` of the wrong real type, or a non-`str` `source` raises
+  `TypeError`, an empty `source` `ValueError`. All four are read-only
+  properties. `bind_tools(client, resolver, credentials, policy, *,
+  source)` is the only function in the layer that takes credentials: it
+  passes them to `resolve_identity` and returns a `MemoryTools`, retaining
+  nothing; a resolution failure is the permanent `ResolverFailureError`. A
+  host serving many sessions binds one `MemoryTools` per session; the
+  client may be shared.
+  The seven tools are methods. `TOOL_NAMES` is `("get_memory_index",
+  "read_file", "list_prefix", "write_file", "append_line", "replace_fact",
+  "delete_file")`, and `tools()` returns a fresh read-only mapping from
+  each name to its bound method, in that order, for a host to decorate.
+  Tools are scope-relative: `read_file(scope, area, name)`,
+  `write_file(scope, area, name, content, description, aliases,
+  expected_version)`, `append_line(scope, area, name, line,
+  expected_version)`, `replace_fact(scope, area, name, old_string,
+  new_string, expected_version)`, `delete_file(scope, area, name,
+  expected_version)`, and `list_prefix(scope, area=None, cursor=None)`. No
+  tool accepts a path, prefix, or entity ID. The tool builds the path with
+  `build_path(scope, entity_id, area, name)` (or `build_prefix(scope,
+  entity_id, area)`), where `entity_id` is `identity.grants[scope].entity_id`
+  read directly, never through `Identity.entity_id()`, which a subclass
+  could override. `name` excludes `.md`, which `build_path` always appends.
+  So reads and listing reach only the caller's own entity in each granted
+  scope; shared content lives under a scope's entity the caller is granted.
+  `get_memory_index()` takes no arguments and passes a scope map built from
+  the grants (`{s: g.entity_id for s, g in grants.items()}`), never the
+  overridable `Identity.scope_map` property.
+  `write_file` exposes only `description` and `aliases` of the metadata:
+  it builds `FileMetadata(description, tuple(aliases), frozenset(),
+  <1970-01-01 UTC>)`, and core stamps `last_updated` and unions `source`
+  into `sources`.
+  Each tool runs its checks in a fixed order, raising the first failure:
+  `scope`, `area`, `name` type check (normalized to exact `str` via
+  `str.__str__`) and UTF-8 encodability check; the grant check (`scope in
+  identity.grants`); path building; for mutating tools only,
+  `scope.check_write(path, identity, policy)`; the remaining arguments;
+  then the client call, which receives the same path object `check_write`
+  validated. `read_file`, `list_prefix`, and `get_memory_index` never call
+  `check_write`. Because the path is tool-built, `check_write`'s
+  `NOT_GRANTED` and `INVALID_PATH` are unreachable through the tools; it
+  still runs on every mutation as the single home of the `system/` and role
+  rules.
+  Every rejection of an agent-supplied argument is the recoverable
+  `InvalidArgumentError`, never `TypeError`: a wrong real type (detail
+  `"{argument} must be a string, not {type_name}"`, `str` subclasses
+  normalized), text that cannot be UTF-8-encoded (`scope`, `area`, `name`,
+  `description`, each `aliases` member, `content`, `line`, `new_string`),
+  malformed `aliases` (a bare `str`/`bytes`, a value whose real type is not
+  a `Sequence`, or a non-`str` member), a `description` containing any
+  `str.splitlines` line boundary, a `line` that `parse_fact` rejects, an
+  empty `old_string`, and an ungranted scope, raised directly with detail
+  `"scope {scope!r} is not available in this session; available scopes:
+  {sorted, comma-separated}"` so the error itself tells the agent which
+  scopes exist. `line` and `old_string` are pre-validated by the tool,
+  so the client never sees them malformed. These conversions are chained
+  as `__cause__`: `build_path`/`build_prefix`'s `ValueError` → `area` or
+  `name`; `FileMetadata`'s newline check → `description`; and one client
+  site, `list_prefix`'s `ValueError` → `cursor`, only when a cursor was
+  passed. There is no blanket conversion: any other client `ValueError`
+  (including from `append_line`, `replace_fact`, and `list_prefix` without
+  a cursor) propagates unchanged, and `MetadataFormatError` and
+  `UnicodeDecodeError` (`ValueError` subclasses, but data-integrity
+  failures) pass through every tool. Every other client exception
+  propagates as the same object.
+  `render_result(value)` and `render_error(exc)` turn a tool's result or
+  failure into the JSON-safe `dict` a host shows the agent. A file renders
+  as `path`, `scope`, `area`, `name` (from `parse_path`, or all `None` for
+  a malformed path), `version` (`str`), `description`, `aliases` (list),
+  `sources` (sorted list), and `last_updated` (the `metadata_to_map`
+  string), plus `content` for a `MemoryFile`; an `aliases` or `sources`
+  member that is not a JSON-safe string is dropped; a `ListPage` as `entries` and
+  `next_cursor`; a `MemoryIndex` as `entries` and `capped` rows of
+  `prefix`, `scope`, `area` (`None` for a scope- or entity-level prefix),
+  and `omitted`; `None` as `{"ok": True}`; any other value raises
+  `TypeError`. `render_error` accepts any `Exception` and never raises. A
+  `WenchangError` renders `error` (type name), `category`, `message`, and
+  each non-`None` attribute from a fixed list (`path`, `content`,
+  `version`, `size`, `limit`, `match_count`, `reason`, `scope`,
+  `required_roles`, `argument`), so the repair material `str(err)` omits
+  reaches the agent; it never reads `vars(exc)`, so `detail` and
+  `__cause__` stay hidden. A payload value renders only if it is an exact
+  `str`, an `int` that is not a `bool`, an `Enum` member (as its value),
+  or a `frozenset` of `str` (sorted); any other value drops that field. A
+  `WenchangError` subclass whose `category` is missing, raises, or is not
+  an `Enum` member renders as an off-contract exception. Anything else renders with category
+  `"internal"`: `MetadataFormatError` and `UnicodeDecodeError` with
+  `str(exc)` as the message, any other exception with the fixed message
+  `"internal error"`, so an off-contract exception does not leak internals.
+  Type names and messages are read through guards (`"<unnamed>"`,
+  `"<unreadable>"`). A host wraps each call in one `except Exception`.
+  The layer is framework-agnostic and adds no runtime dependency; mounting
+  it on a host server is a host adapter's job. It imports from `wenchang`
+  only `core`, `errors`, `file_format`, `identity`, `paths`, `scope`,
+  `transport`, and `version_token`, and none of `core`, `scope`,
+  `identity`, or `transport` imports it. See
+  [ADR 0022](docs/adr/0022-tool-layer.md).
 - **prompts** *(planned)* — instruction text for filing, deduplication,
   alias upkeep, confidence calibration, write mechanics, curated-content
   correction, applying memory, forgetting, and privacy, plus the
@@ -559,19 +666,23 @@ flowchart TB
 
 `errors` and `version_token` are cross-cutting (imported by every layer
 above) and are omitted from the diagram to keep it readable. `file_format`
-is dependency-free and used by `core`, `storage`, and `transport` (for the
-`FileMetadata` annotation); it is also omitted
+is dependency-free and used by `core`, `storage`, `transport` (for the
+`FileMetadata` annotation), and `tools` (to build the write metadata and
+render `last_updated`); it is also omitted
 from the diagram since it isn't wired into the request path shown there.
 `paths` is likewise dependency-free and omitted; `core`, `identity`, and
-`scope` use it for validation, and `scope` reads the area via `parse_path`.
-`identity` sits beside `core` with no arrow: the tool layer will call
-`resolve_identity`, and nothing calls it yet; `transport` never sees an
-identity. `scope` imports the
-`Identity` type to read grants but never calls a resolver, so the diagram
-shows no edge between them. `scope` sits outside
-the Core subgraph with only the `tools --> scope` edge: the tool layer
-checks a write before handing it to `core`, and `core` does not depend on
-`scope`. Nothing calls `scope` yet. `testing` is omitted from the diagram:
+`scope` use it for validation, `scope` reads the area via `parse_path`, and
+`tools` builds every path and prefix with `build_path` / `build_prefix`
+and renders `scope`/`area`/`name` with `parse_path`.
+`identity` sits beside `core` with no arrow: `tools` calls
+`resolve_identity` once per session, in `bind_tools`, and reads the
+resolved grants to build paths; `transport` never sees an identity. `scope`
+imports the `Identity` type to read grants but never calls a resolver, so
+the diagram shows no edge between them. `scope` sits outside the Core
+subgraph with only the `tools --> scope` edge: every mutating tool calls
+`scope.check_write` before handing the write to the transport, and `core`
+does not depend on `scope`. `tools --> transport` is the tool layer's only
+route to memory. `testing` is omitted from the diagram:
 it is not part of the runtime layers, is imported only by adopters' test
 code, and depends on `identity`, `paths`, `scope`, and `errors` with no
 module depending on it.
@@ -617,10 +728,21 @@ module depending on it.
   role check against `ScopePolicy` runs only after that, so a permitted
   role in one scope never opens another entity's prefix. Violations are
   permanent `RestrictedScopeError(NOT_GRANTED)` or `(ROLE_REQUIRED)`.
-  Reads and listing are never checked (see
-  [ADR 0017](docs/adr/0017-write-restriction-enforcement.md)).
+  `scope` never checks reads and listing (see
+  [ADR 0017](docs/adr/0017-write-restriction-enforcement.md)); the tools
+  scope them to the caller's own entity by construction.
 - **Write-check order is fixed.** `scope.check_write` raises the first
   applicable error in the order invalid path, `system/`, not granted, role.
+- **Every mutating tool checks the write before the transport sees it.**
+  `write_file`, `append_line`, `replace_fact`, and `delete_file` call
+  `scope.check_write` on the path they built, and the client receives that
+  same path object only if the check passes; a rejected write never reaches
+  the transport (see [ADR 0022](docs/adr/0022-tool-layer.md)).
+- **The agent never has to type an entity ID.** Tools take `scope`,
+  `area`, and `name`, and build the path under the caller's own entity in
+  that scope from the resolved grant; no tool accepts a path, prefix, or
+  entity ID, so the agent can neither mistype its own entity nor name
+  another's.
 - **`scope` and `core` stay independent.** `scope` never imports `core` or
   `storage`, and `core` never imports `scope`, so a restriction check can't
   be wired into `MemoryStore` without breaking the boundary.
@@ -679,7 +801,9 @@ cause. Defined in `wenchang.errors` (see [ADR
   version; `OversizeWriteError` returns current size and limit;
   `ReplaceFactMatchError` returns content, version, and match count;
   `NotFoundError` distinguishes an invalid path from a valid path with no
-  file yet). The agent corrects and retries in the same turn.
+  file yet; `InvalidArgumentError`, raised only by the tool layer, names
+  the agent-supplied argument to correct, and for an ungranted scope lists
+  the available scopes). The agent corrects and retries in the same turn.
 - **Permanent** (`PermanentError`) — stop, do not retry
   (`RestrictedScopeError` for a `system/` write (`SYSTEM_READ_ONLY`), a
   role-gated scope the caller's role is not permitted to write
@@ -693,4 +817,7 @@ cause. Defined in `wenchang.errors` (see [ADR
   the first attempt actually landed.
 
 This taxonomy is expected to apply uniformly across the core API, the
-transport layer, and tool-facing error messages.
+transport layer, and tool-facing error messages. At the tool layer,
+`render_error` turns any failure into the agent-facing form: a taxonomy
+error keeps its category and repair material; anything outside it renders
+as category `"internal"` (see the `tools` entry above).

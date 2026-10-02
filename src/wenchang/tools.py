@@ -10,20 +10,15 @@ render_result and render_error produce the JSON-safe form a host shows the
 agent.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
 from typing import Final, NoReturn, cast
 
 from wenchang.core import CappedPrefix, FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
-from wenchang.errors import InvalidArgumentError, WenchangError
-from wenchang.file_format import (
-    LAST_UPDATED_KEY,
-    FileMetadata,
-    MetadataFormatError,
-    metadata_to_map,
-)
+from wenchang.errors import ErrorCategory, InvalidArgumentError, WenchangError
+from wenchang.file_format import FileMetadata, MetadataFormatError, parse_fact
 from wenchang.identity import Identity, IdentityResolver, resolve_identity
 from wenchang.paths import build_path, build_prefix, is_valid_segment, parse_path
 from wenchang.scope import ScopePolicy, check_write
@@ -55,6 +50,21 @@ _ERROR_FIELDS: Final[tuple[str, ...]] = (
     "required_roles",
     "argument",
 )
+
+# The str.splitlines boundaries other than "\n" and "\r", which FileMetadata rejects itself.
+_LINE_BOUNDARIES: Final[tuple[str, ...]] = (
+    "\x0b",
+    "\x0c",
+    "\x1c",
+    "\x1d",
+    "\x1e",
+    "\x85",
+    "\u2028",
+    "\u2029",
+)
+
+# Marks a field render_error omits because it has no JSON-safe form.
+_DROP: Final = object()
 
 # Core overrides last_updated on every write.
 _UNSET_TIMESTAMP: Final = datetime(1970, 1, 1, tzinfo=UTC)
@@ -122,7 +132,9 @@ class MemoryTools:
         the number omitted, and you page through it with
         `list_prefix(scope, area)` (or `list_prefix(scope)` for a whole scope).
         """
-        return self._client.get_memory_index(self._identity.scope_map)
+        # Built from grants, never Identity.scope_map, which a subclass may override.
+        scope_map = {scope: grant.entity_id for scope, grant in self._identity.grants.items()}
+        return self._client.get_memory_index(scope_map)
 
     def read_file(self, scope: str, area: str, name: str) -> MemoryFile:
         """Read one memory file: its content, metadata, and version.
@@ -147,8 +159,9 @@ class MemoryTools:
         get the next page.
         """
         prefix = self._prefix(scope, area)
-        if cursor is not None:
-            cursor = ListCursor(_exact("cursor", cursor))
+        if cursor is None:
+            return self._client.list_prefix(prefix, None)
+        cursor = ListCursor(_exact("cursor", cursor))
         try:
             return self._client.list_prefix(prefix, cursor)
         except ValueError as exc:
@@ -185,6 +198,8 @@ class MemoryTools:
         _encodable("content", content)
         description = _exact("description", description)
         _encodable("description", description)
+        if any(boundary in description for boundary in _LINE_BOUNDARIES):
+            raise InvalidArgumentError("description", "description must be a single line")
         alias_tuple = _aliases(aliases)
         if expected_version is not None:
             expected_version = VersionToken(_exact("expected_version", expected_version))
@@ -217,11 +232,14 @@ class MemoryTools:
         check_write(path, self._identity, self._policy)
         line = _exact("line", line)
         _encodable("line", line)
+        if parse_fact(line) is None:
+            raise InvalidArgumentError(
+                "line",
+                "line must be a single fact line with a [stated], [observed], [inferred], "
+                "or [system] label and non-empty text",
+            )
         expected_version = VersionToken(_exact("expected_version", expected_version))
-        try:
-            return self._client.append_line(path, line, expected_version, source=self._source)
-        except ValueError as exc:
-            _reraise_argument("line", exc)
+        return self._client.append_line(path, line, expected_version, source=self._source)
 
     def replace_fact(
         self,
@@ -250,14 +268,13 @@ class MemoryTools:
         check_write(path, self._identity, self._policy)
         old_string = _exact("old_string", old_string)
         new_string = _exact("new_string", new_string)
+        if old_string == "":
+            raise InvalidArgumentError("old_string", "old_string must not be empty")
         _encodable("new_string", new_string)
         expected_version = VersionToken(_exact("expected_version", expected_version))
-        try:
-            return self._client.replace_fact(
-                path, old_string, new_string, expected_version, source=self._source
-            )
-        except ValueError as exc:
-            _reraise_argument("old_string", exc)
+        return self._client.replace_fact(
+            path, old_string, new_string, expected_version, source=self._source
+        )
 
     def delete_file(self, scope: str, area: str, name: str, expected_version: VersionToken) -> None:
         """Delete a memory file.
@@ -352,18 +369,25 @@ def _encodable(argument: str, value: str) -> None:
 
 def _aliases(aliases: object) -> tuple[str, ...]:
     # A bare str or bytes is a Sequence of characters, never a list of aliases.
-    if issubclass(type(aliases), str | bytes | bytearray) or not isinstance(aliases, Sequence):
+    # type() rather than isinstance, which consults a spoofable __class__.
+    kind = type(aliases)
+    if issubclass(kind, str | bytes | bytearray) or not issubclass(kind, Sequence):
         raise InvalidArgumentError(
-            "aliases", f"aliases must be a list of strings, not {_type_name(type(aliases))}"
+            "aliases", f"aliases must be a list of strings, not {_type_name(kind)}"
         )
-    return tuple(_exact("aliases", member) for member in cast(Sequence[object], aliases))
+    members: list[str] = []
+    for member in cast(Sequence[object], aliases):
+        alias = _exact("aliases", member)
+        _encodable("aliases", alias)
+        members.append(alias)
+    return tuple(members)
 
 
 def _reraise_argument(argument: str, exc: ValueError) -> NoReturn:
     """Re-raise a data-integrity ValueError unchanged; convert any other to InvalidArgumentError."""
     if issubclass(type(exc), MetadataFormatError | UnicodeDecodeError):
         raise exc
-    raise InvalidArgumentError(argument, str(exc)) from exc
+    raise InvalidArgumentError(argument, _message(exc)) from exc
 
 
 def bind_tools[C](
@@ -408,33 +432,62 @@ def render_error(exc: Exception) -> dict[str, object]:
     name = _type_name(kind)
     if issubclass(kind, MetadataFormatError | UnicodeDecodeError):
         return {"error": name, "category": "internal", "message": _message(exc)}
+    # Off-contract exceptions may carry internals the agent must not see.
+    internal: dict[str, object] = {
+        "error": name,
+        "category": "internal",
+        "message": "internal error",
+    }
     if not issubclass(kind, WenchangError):
-        # Off-contract exceptions may carry internals the agent must not see.
-        return {"error": name, "category": "internal", "message": "internal error"}
-    error = cast(WenchangError, exc)
+        return internal
+    try:
+        return _wenchang_error_fields(cast(WenchangError, exc), name)
+    except Exception:
+        return internal
+
+
+def _wenchang_error_fields(error: WenchangError, name: str) -> dict[str, object]:
+    category = cast(object, getattr(error, "category", None))
+    if not issubclass(type(category), ErrorCategory):
+        raise TypeError("category is not an ErrorCategory")
+    category_value = _json_value(category)
+    if not issubclass(type(category_value), str):
+        raise TypeError("category value is not a str")
     out: dict[str, object] = {
         "error": name,
-        "category": str.__str__(error.category.value),
+        "category": category_value,
         "message": _message(error),
     }
     for key in _ERROR_FIELDS:
         try:
             field = cast(object, getattr(error, key, None))
+            if field is None:
+                continue
+            value = _json_value(field)
         except Exception:
             continue
-        if field is not None:
-            out[key] = _json_value(field)
+        if value is not _DROP:
+            out[key] = value
     return out
 
 
 def _json_value(value: object) -> object:
-    if isinstance(value, Enum):
-        return cast(object, value.value)
-    if isinstance(value, frozenset):
-        return sorted(cast(frozenset[str], value))
-    if isinstance(value, str):
-        return str.__str__(value)
-    return value
+    """Return value in JSON-safe form, or _DROP if it has no such form."""
+    kind = type(value)
+    if issubclass(kind, Enum):
+        member_value = cast(object, cast(Enum, value).value)
+        if issubclass(type(member_value), str):
+            return str.__str__(cast(str, member_value))
+        return _DROP
+    if issubclass(kind, str):
+        return str.__str__(cast(str, value))
+    if issubclass(kind, int) and not issubclass(kind, bool):
+        return int.__int__(cast(int, value))
+    if issubclass(kind, frozenset):
+        members = list(cast(frozenset[object], value))
+        if all(issubclass(type(member), str) for member in members):
+            return sorted(str.__str__(cast(str, member)) for member in members)
+    return _DROP
 
 
 def _file_fields(entry: FileEntry | MemoryFile, content: str | None = None) -> dict[str, object]:
@@ -451,13 +504,23 @@ def _file_fields(entry: FileEntry | MemoryFile, content: str | None = None) -> d
     fields: dict[str, object] = {"path": entry.path, "scope": scope, "area": area, "name": name}
     if content is not None:
         fields["content"] = content
+    # Metadata may hold non-str members; drop them rather than fail to render.
     return fields | {
         "version": str.__str__(entry.version),
         "description": metadata.description,
-        "aliases": list(metadata.aliases),
-        "sources": sorted(metadata.sources),
-        "last_updated": metadata_to_map(metadata)[LAST_UPDATED_KEY],
+        "aliases": _str_members(metadata.aliases),
+        "sources": sorted(_str_members(metadata.sources)),
+        "last_updated": _timestamp(metadata.last_updated),
     }
+
+
+def _str_members(values: Iterable[object]) -> list[str]:
+    return [str.__str__(cast(str, v)) for v in values if issubclass(type(v), str)]
+
+
+def _timestamp(value: datetime) -> str:
+    """Render value as UTC ISO-8601 with a "Z" suffix, as metadata_to_map does."""
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _capped_fields(cap: CappedPrefix) -> dict[str, object]:

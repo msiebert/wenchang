@@ -369,6 +369,27 @@ class _Credentials:
     """A weakref-able credentials sentinel."""
 
 
+class _LyingScopeMapIdentity(Identity):
+    """An Identity whose scope_map names different entities than its grants."""
+
+    @property
+    def scope_map(self) -> dict[str, str]:
+        return {"user": "u-evil", "org": "o-evil"}
+
+
+class _UnreadableValueError(ValueError):
+    """A ValueError whose message cannot be read."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("unreadable")
+
+
+class _ListSpoof:
+    """Claims to be a list through __class__; its real type is not, and it is not iterable."""
+
+    __class__ = list  # pyright: ignore[reportAssignmentType, reportIncompatibleMethodOverride, reportIncompatibleVariableOverride]
+
+
 def _unicode_decode_error() -> UnicodeDecodeError:
     return UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
 
@@ -572,6 +593,21 @@ def test_get_memory_index_passes_scope_map(harness: _Harness) -> None:
     assert [(c[0], _bound(c)) for c in harness.log] == [
         ("get_memory_index", {"scope_map": {"user": "u-1", "org": "o-9"}})
     ]
+
+
+def test_get_memory_index_scope_map_comes_from_grants(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_memory_index builds the scope map from identity.grants, so an
+    Identity subclass overriding scope_map cannot redirect it (AIE-1044, US2.3, US2.9).
+    """
+    lying = _LyingScopeMapIdentity(GRANTS)
+    assert lying.scope_map == {"user": "u-evil", "org": "o-evil"}
+    h = _make(monkeypatch, lying)
+
+    h.tools.get_memory_index()
+
+    calls = h.client_calls()
+    assert len(calls) == 1
+    assert _bound(calls[0])["scope_map"] == {"user": "u-1", "org": "o-9"}
 
 
 def test_get_memory_index_takes_no_parameters() -> None:
@@ -949,6 +985,20 @@ def test_bad_description_in_system_area_is_restricted(harness: _Harness) -> None
     assert harness.client_calls() == []
 
 
+@pytest.mark.parametrize(
+    "separator",
+    ["\u2028", "\u2029", "\x85", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e"],
+    ids=["ls", "ps", "nel", "vt", "ff", "fs", "gs", "rs"],
+)
+def test_description_with_line_boundary_is_invalid_argument(
+    harness: _Harness, separator: str
+) -> None:
+    """A description containing any str.splitlines boundary is not one line
+    and raises InvalidArgumentError("description") (AIE-1044, US3.8).
+    """
+    _invalid(harness, "write_file", "description", description=f"a{separator}b")
+
+
 def test_str_subclass_description_is_normalized(harness: _Harness) -> None:
     """A str-subclass description is stored as an exact str (AIE-1044, US3.8)."""
     _call(harness, "write_file", description=_LyingStr("Tea"))
@@ -978,6 +1028,22 @@ def test_non_str_alias_member_detail(harness: _Harness) -> None:
 
     assert err.detail == _wrong_type_detail("aliases", "int")
     assert err.__cause__ is None
+
+
+def test_unencodable_alias_member_is_invalid_argument(harness: _Harness) -> None:
+    """An alias member with a lone surrogate raises InvalidArgumentError("aliases")
+    chained from UnicodeEncodeError (AIE-1044, US3.9, US3.11).
+    """
+    err = _invalid(harness, "write_file", "aliases", aliases=["ok", "x\ud800"])
+
+    assert type(err.__cause__) is UnicodeEncodeError
+
+
+def test_class_spoofing_aliases_is_invalid_argument(harness: _Harness) -> None:
+    """aliases whose __class__ claims list but whose real type is not a Sequence
+    raises InvalidArgumentError("aliases"), never TypeError (AIE-1044, US3.9, US3.10).
+    """
+    _invalid(harness, "write_file", "aliases", aliases=_ListSpoof())
 
 
 def test_str_subclass_alias_members_are_normalized(harness: _Harness) -> None:
@@ -1099,25 +1165,70 @@ def test_list_prefix_value_error_becomes_cursor_argument(harness: _Harness) -> N
     assert err.__cause__ is original
 
 
-@pytest.mark.parametrize(
-    ("tool", "argument"),
-    [("append_line", "line"), ("replace_fact", "old_string")],
-)
-def test_client_value_error_becomes_named_argument(
-    harness: _Harness, tool: str, argument: str
-) -> None:
-    """A client ValueError from append_line or replace_fact becomes
-    InvalidArgumentError naming line or old_string (AIE-1044, US4.2).
+def test_list_prefix_unreadable_value_error_becomes_cursor_argument(harness: _Harness) -> None:
+    """A cursor-call ValueError whose message cannot be read still becomes
+    InvalidArgumentError("cursor") with <unreadable> in the detail (AIE-1044, US4.1).
     """
-    original = ValueError("rejected by core")
-    harness.client.raises[tool] = original
+    original = _UnreadableValueError()
+    harness.client.raises["list_prefix"] = original
 
     with pytest.raises(InvalidArgumentError) as excinfo:
+        harness.tools.list_prefix("user", None, ListCursor("x"))
+
+    assert excinfo.value.argument == "cursor"
+    assert "<unreadable>" in excinfo.value.detail
+    assert excinfo.value.__cause__ is original
+
+
+def test_list_prefix_value_error_without_cursor_propagates(harness: _Harness) -> None:
+    """A client ValueError from list_prefix called without a cursor is not the
+    agent's cursor and propagates unchanged (AIE-1044, US4.1, US4.5).
+    """
+    error = ValueError("unexpected")
+    harness.client.raises["list_prefix"] = error
+
+    with pytest.raises(ValueError) as excinfo:
+        harness.tools.list_prefix("user", "notes")
+
+    assert excinfo.value is error
+
+
+@pytest.mark.parametrize("tool", ["append_line", "replace_fact"])
+def test_client_value_error_for_valid_argument_propagates(harness: _Harness, tool: str) -> None:
+    """A client ValueError for a valid fact line or non-empty old_string is not
+    an argument error and propagates unchanged (AIE-1044, US4.2, US4.5).
+    """
+    error = ValueError("last_updated must be timezone-aware")
+    harness.client.raises[tool] = error
+
+    with pytest.raises(ValueError) as excinfo:
         _call(harness, tool)
 
-    assert excinfo.value.argument == argument
-    assert "rejected by core" in excinfo.value.detail
-    assert excinfo.value.__cause__ is original
+    assert excinfo.value is error
+    assert type(excinfo.value) is ValueError
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["not a fact", "- [guess] x", "- [stated] ", "- [stated] a\nb", ""],
+    ids=["plain", "bad-label", "empty-text", "two-lines", "empty"],
+)
+def test_non_fact_line_is_rejected_before_client_call(harness: _Harness, line: str) -> None:
+    """A line that parse_fact rejects raises InvalidArgumentError("line") from
+    the tool's own check, with no client call (AIE-1044, US4.2).
+    """
+    err = _invalid(harness, "append_line", "line", line=line)
+
+    assert err.category is ErrorCategory.RECOVERABLE
+
+
+def test_empty_old_string_is_rejected_before_client_call(harness: _Harness) -> None:
+    """An empty old_string raises InvalidArgumentError("old_string") from the
+    tool's own check, with no client call (AIE-1044, US4.2).
+    """
+    err = _invalid(harness, "replace_fact", "old_string", old_string="")
+
+    assert err.category is ErrorCategory.RECOVERABLE
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS)

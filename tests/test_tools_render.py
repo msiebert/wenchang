@@ -4,7 +4,9 @@ Covers AIE-1044, US7.1 through US7.12 (including US7.5a).
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
+from typing import cast
 
 import pytest
 
@@ -15,6 +17,7 @@ from wenchang.errors import (
     NotFoundError,
     NotFoundReason,
     OversizeWriteError,
+    RecoverableError,
     ReplaceFactMatchError,
     ResolverFailureError,
     RestrictedScopeError,
@@ -458,4 +461,99 @@ def test_hostile_type_name_on_wenchang_error_falls_back() -> None:
         "path": _PATH,
         "reason": "file_absent",
     }
+    _round_trips(out)
+
+
+# --- render_error never raises on hostile WenchangError subclasses ------------
+
+
+class _NoCategoryError(WenchangError):
+    """A WenchangError subclass that never sets category."""
+
+    guidance = "Guidance."
+
+
+class _StrCategoryError(RecoverableError):
+    """A WenchangError subclass whose category is a plain str, not an ErrorCategory."""
+
+    category = "notenum"  # pyright: ignore[reportAssignmentType, reportIncompatibleVariableOverride]
+
+
+class _UnsortableRolesError(RecoverableError):
+    """A WenchangError carrying required_roles whose members cannot be sorted together."""
+
+    def __init__(self) -> None:
+        self.required_roles = cast(frozenset[str], frozenset({1, "a"}))
+        super().__init__("unsortable roles")
+
+
+class _BytesContentError(RecoverableError):
+    """A WenchangError carrying non-JSON content."""
+
+    def __init__(self) -> None:
+        self.content = cast(str, b"x")
+        super().__init__("bytes content")
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: _NoCategoryError("no category"),
+        lambda: _StrCategoryError("str category"),
+        _UnsortableRolesError,
+        _BytesContentError,
+    ],
+    ids=["no-category", "str-category", "unsortable-roles", "bytes-content"],
+)
+def test_render_error_never_raises_on_hostile_wenchang_error(
+    make: Callable[[], WenchangError],
+) -> None:
+    """AIE-1044, US7.12: a WenchangError subclass with a missing or wrongly typed
+    category or payload field renders without raising, JSON-safe, with the
+    error, category, and message keys.
+    """
+    out = render_error(make())
+
+    assert {"error", "category", "message"} <= out.keys()
+    assert all(type(out[key]) is str for key in ("error", "category", "message"))
+    _round_trips(out)
+
+
+# --- render_result never raises on hostile metadata ---------------------------
+
+
+def _hostile_metadata() -> FileMetadata:
+    return FileMetadata(
+        description="d",
+        aliases=cast(tuple[str, ...], ("b", datetime(2026, 1, 1, tzinfo=UTC))),
+        sources=cast(frozenset[str], frozenset({"s", 1})),
+        last_updated=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
+def test_render_memory_file_drops_non_str_metadata_members() -> None:
+    """AIE-1044, US7.5: a MemoryFile whose aliases hold a datetime and sources an
+    int renders without raising, drops the bad members, and round-trips JSON.
+    """
+    file = MemoryFile(_PATH, "", _hostile_metadata(), _VERSION)
+
+    out = render_result(file)
+
+    assert out["aliases"] == ["b"]
+    assert out["sources"] == ["s"]
+    assert out["last_updated"] == "2026-01-01T00:00:00Z"
+    _round_trips(out)
+
+
+def test_render_list_page_drops_non_str_metadata_members() -> None:
+    """AIE-1044, US7.5a: a ListPage entry with hostile metadata renders without
+    raising, drops the bad members, and round-trips JSON.
+    """
+    page = ListPage((FileEntry(_PATH, _hostile_metadata(), _VERSION),), None)
+
+    out = render_result(page)
+
+    entries = cast(list[dict[str, object]], out["entries"])
+    assert entries[0]["aliases"] == ["b"]
+    assert entries[0]["sources"] == ["s"]
     _round_trips(out)
