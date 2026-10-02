@@ -13,18 +13,20 @@ no schema and does not search file content.
 Today the repository holds the project skeleton (tooling, tests, docs) plus
 ten implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
-fake and a GCS implementation behind one protocol); `core`, whose
-implemented operations so far are `read_file`, `write_file`, `replace_fact`,
-`list_prefix`, `append_line`, and `delete_file`, plus the index value types
-`MemoryIndex` and `CappedPrefix`; `identity`, the injected identity resolver
-boundary; `scope`, the tool-layer write checks (`system/` read-only and
-role-gated write restriction); `transport`, the `TransportClient` protocol;
-and `tools`, the agent-facing tool layer, which resolves identity through
-`identity`, checks writes through `scope`, and calls a `TransportClient`.
-Nothing in the library implements `TransportClient` yet. An eleventh,
-`testing`, is adopter-facing rather than part of the runtime: the
-executable resolver conformance suite an adopter runs against their own
-identity resolver, installed with the optional `wenchang[testing]` extra.
+fake and a GCS implementation behind one protocol); `core`, which
+implements all seven core operations (`read_file`, `write_file`,
+`replace_fact`, `list_prefix`, `append_line`, `delete_file`, and
+`get_memory_index`, with its value types `MemoryIndex` and
+`CappedPrefix`); `identity`, the injected identity resolver boundary;
+`scope`, the tool-layer write checks (`system/` read-only and role-gated
+write restriction); `transport`, the `TransportClient` protocol plus
+`InProcessClient`, its in-process implementation; and `tools`, the
+agent-facing tool layer, which resolves identity through `identity`,
+checks writes through `scope`, and calls a `TransportClient`. Any remote
+transport is still planned. An eleventh, `testing`, is adopter-facing
+rather than part of the runtime: the executable conformance suites an
+adopter runs against their own identity resolver and their own transport
+client, installed with the optional `wenchang[testing]` extra.
 The module map below is the
 intended shape; each remaining module is marked **(planned)** until
 implemented.
@@ -165,13 +167,28 @@ implemented.
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
   [ADR 0012](docs/adr/0012-delete-file.md).
 - **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
-  list_page_size=100)`,
-  holding the core API as methods on one object (so later operations can
-  share configuration such as a size limit or index cap); `max_file_bytes`
+  list_page_size=100, index_max_bytes=65536, scope_priority=())`,
+  holding the core API as methods on one object so operations share
+  configuration such as the size limit and index cap; `max_file_bytes`
   must be positive, `clock` (default current UTC) is injectable for tests
   and for stamping `last-updated`, and `list_page_size` (default
   `DEFAULT_LIST_PAGE_SIZE = 100`) must be positive, bounding
-  `list_prefix`'s page size. `read_file(path) -> MemoryFile` is
+  `list_prefix`'s page size. `index_max_bytes` (default
+  `DEFAULT_INDEX_MAX_BYTES = 65536`) is the index byte budget and must be
+  positive (any value with `<= 0` false is accepted, as for the other
+  numeric settings). `scope_priority` (default empty) is the adopter's
+  index scope order, exposed with `index_max_bytes` as read-only
+  properties. Constructor validation runs every `TypeError` before any
+  `ValueError`: `scope_priority` whose real type is `str`, `bytes`, or
+  `bytearray` (a bare string is a `Sequence` of its characters), or is not
+  a `Sequence` (`issubclass(type(x), Sequence)`, so a spoofed `__class__`
+  fails), raises `TypeError`, as does any non-`str` member; members are
+  then normalized with `str.__str__` and copied to a tuple, so later
+  mutation of a caller's list has no effect. The positivity checks follow,
+  then, per normalized member in order, `ValueError("invalid
+  scope_priority entry: ...")` if it fails `is_valid_segment` and
+  `ValueError("duplicate scope_priority entry: ...")` if already seen.
+  `read_file(path) -> MemoryFile` is
   implemented: it validates the path, fetches the object, and returns
   content, metadata, path, and version token. `write_file(path, content,
   metadata, expected_version) -> MemoryFile` is implemented: it validates
@@ -267,7 +284,64 @@ implemented.
   version token from before a delete is never equal to the token of a file
   later recreated at the same path, since both GCS generations and the
   in-memory fake's counter are monotonic. `get_memory_index(scope_map) ->
-  MemoryIndex` is *(planned)*, but its two value types exist.
+  MemoryIndex` is implemented: the session bootstrap, returning merged
+  metadata across every scope in a scope-name → entity-ID map, ordered and
+  byte-capped, without reading any file's content. It validates
+  `scope_map` before any storage call, every `TypeError` before any
+  `ValueError`: a value whose real type is not a `Mapping` raises
+  `TypeError`; `items()` is read exactly once into a list; for each item in
+  that order, one that is not exactly a 2-`tuple` (`type(item) is tuple`
+  and length 2) raises `TypeError("scope_map items must be (str, str)
+  pairs")`, then a non-`str` key raises `TypeError("scope_map key must be str,
+  got ...")` and a non-`str` value `TypeError("scope_map value must be
+  str, got ...")`, and both are normalized with `str.__str__`; the
+  normalized pairs are sorted by scope; then for each sorted pair
+  `ValueError(f"invalid scope: {scope!r}")` or `ValueError(f"invalid
+  entity_id: {entity_id!r}")` if it fails `is_valid_segment`, and
+  `ValueError(f"duplicate scope: {scope!r}")` for a scope seen twice (a
+  `Mapping` whose `items()` repeats a key, or two keys equal after
+  normalization), so a lying `Mapping` cannot cause a double fan-out.
+  These are `ValueError`, not `NotFoundError`, because the map is a
+  library-controlled `Identity.scope_map` (ADR 0015). An empty map returns
+  `MemoryIndex()` without touching storage. For each scope in sorted order
+  it drains every page under `build_prefix(scope, entity_id)` through the
+  base method `MemoryStore.list_prefix(self, prefix, cursor)`, looping
+  until `next_cursor is None` and never stopping on an empty page, so
+  malformed keys are skipped and corrupt metadata or
+  `BackendUnavailableError` propagates unwrapped exactly as in
+  `list_prefix`, and a subclass override of `list_prefix` cannot change
+  the index. The merged entries are sorted by: `system/` areas across all
+  scopes first, decided only by `parse_path(path).area ==
+  INDEX_SYSTEM_AREA` (a `core`-local `Final` equal to `"system"`, pinned
+  equal to `scope.SYSTEM_AREA` by a test, since `core` must not import
+  `scope`), and ignoring `scope_priority`; then non-`system/` entries with
+  scopes listed in `scope_priority` as one tier each in list order,
+  followed by every unlisted scope as one trailing tier (so the empty
+  default is one flat tier, and a listed scope absent from the map is
+  ignored); within a tier by `last-updated`, most recent first, keyed on
+  the exact integer microsecond offset from the Unix epoch rather than a
+  float timestamp; then by path ascending, so the order is total. It sizes
+  every ordered entry with `index_entry_bytes` before including any, so an
+  unrenderable entry raises `MetadataFormatError` whether or not it would
+  fall under the cap. It then includes entries in that order while the running total of
+  `index_entry_bytes` stays `<= index_max_bytes` (the cap is inclusive)
+  and stops at the first entry that does not fit, never skipping ahead to
+  a smaller one, so `entries` is an exact prefix of the full order.
+  Everything from that entry on is counted per area prefix
+  (`build_prefix(scope, entity_id, area)`) into `capped`, sorted by prefix
+  string; the `capped` section's own size is not charged to the budget.
+  `index_entry_bytes(entry) -> int` is the public, sole cost rule: the
+  UTF-8 length of `entry.path`, plus every key and value of the canonical
+  rendering `metadata_to_map(entry.metadata)`, plus `entry.version`, all
+  encoded with `errors="surrogatepass"` so a lone surrogate (which
+  `is_valid_segment` accepts) is counted rather than raising. It measures
+  the library's canonical rendering, not the stored bytes (extra stored
+  keys cost nothing; a non-ASCII alias counts its JSON `\uXXXX` escape)
+  and not any tool's rendering. An `OverflowError` from re-rendering an
+  extreme `last-updated` (e.g. `0001-01-01T00:00:00+05:00`, which
+  `metadata_from_map` accepts but cannot be converted to UTC) is raised as
+  `MetadataFormatError("last-updated", ...)`. Like listing, the index is
+  not a snapshot. The two index value types:
   `CappedPrefix(prefix, omitted)` is a frozen value naming a prefix the
   index could not return in full and how many files under it were left
   out. `MemoryIndex(entries=(), capped=())` is a frozen value holding
@@ -307,8 +381,9 @@ implemented.
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md),
   [ADR 0011](docs/adr/0011-append-line-version-guard.md),
   [ADR 0012](docs/adr/0012-delete-file.md),
-  [ADR 0013](docs/adr/0013-write-file-source.md), and
-  [ADR 0019](docs/adr/0019-transport-client-interface.md).
+  [ADR 0013](docs/adr/0013-write-file-source.md),
+  [ADR 0019](docs/adr/0019-transport-client-interface.md), and
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md).
 - **identity** — the injected-dependency boundary through which the
   library learns who the caller is; it has no notion of users,
   organizations, or roles of its own, and imports only `errors` and
@@ -348,8 +423,10 @@ implemented.
   guarded helper that reports `<unnamed>` if `__name__` raises;
   a raised `Exception` (including any `WenchangError`) raises a new
   `ResolverFailureError` naming only the resolver class and exception type,
-  raised `from None`; any other return raises `ResolverFailureError` naming
-  the resolver class and returned type; a `BaseException` that is not an
+  raised `from None`; every `ResolverFailureError` is raised `from None`
+  outside any handler, so no resolver exception is its `__cause__` or
+  `__context__`; any other return raises `ResolverFailureError` naming the
+  resolver class and returned type; a `BaseException` that is not an
   `Exception` propagates unchanged. Credentials are never inspected,
   stored, or included in an error. `SandboxResolver(identity)` returns the
   adopter-supplied `identity` for any credentials and satisfies
@@ -486,15 +563,172 @@ implemented.
   library imports it. It requires the `wenchang[testing]` extra
   (`testing = ["pytest>=8.3"]` under `[project.optional-dependencies]`). See
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md).
+  `wenchang.testing.TransportConformance` (in
+  `wenchang.testing.transport_conformance`) is the same shape for a
+  `TransportClient`: a non-generic pytest mixin, not `Test`-prefixed,
+  subclassed as `class TestMyClient(TransportConformance)` with seven
+  required fixtures: `client` (a fresh `TransportClient` over an empty
+  store, per test; checked by reading each of the seven method names, each
+  of which must exist, be readable, and be callable, with a failure naming
+  the method, and then by `isinstance(client, TransportClient)` run inside
+  a guard, so a client whose `__class__` raises fails rather than errors),
+  `source` (a non-empty exact `str` passed as `source=`), `scope_map` (a
+  `Mapping`, by real type, of at least two distinct scopes to entity IDs,
+  every key and value an exact `str` passing `is_valid_segment`; an
+  `items()` that raises or repeats a key fails), and the values the
+  client's store was configured with: `max_file_bytes` (an exact `int` of
+  at least `MIN_FILE_BYTES = 64`), `index_max_bytes` (an exact `int` of
+  at least `MIN_INDEX_BYTES = 1024`), `list_page_size` (an exact positive
+  `int`; `bool` rejected for all three), and `scope_priority` (an exact `tuple` of distinct
+  exact-`str` valid segments, even though `MemoryStore` accepts any
+  `Sequence`). Fixtures are validated in that fixed order, so the first bad
+  one is reported, with key phrase `fixture <name>`;
+  `test_client_satisfies_protocol` takes all seven and validates them all,
+  so every fixture is required from the first run even though only later
+  cases use the last three. The fixture contract also requires that every
+  mapped scope be writable through `client` under the credentials it was
+  constructed with, and that a client's writes stamp strictly increasing
+  `last_updated` within one test (the repo's reference run uses a ticking
+  clock). Cases call the client sequentially; concurrency is modeled as
+  sequential interleavings on one client, so no thread safety is required.
+  Five baseline methods ship: `test_client_satisfies_protocol` (all seven
+  fixtures, including the client's method and protocol checks),
+  `test_write_then_read_round_trips` (content and all four metadata fields;
+  `source` must be unioned into `sources`),
+  `test_returned_token_is_accepted` (a token from a read is accepted back
+  by `write_file`, and one from a write by `append_line`),
+  `test_read_absent_is_not_found`, and `test_oversize_write_is_rejected`
+  (`OversizeWriteError` with `size` and `limit`, then the path still reads
+  as absent). On top of these, 43 case methods cover all nine §10.2
+  groups, one method per assertion, each self-contained (own writes, own
+  probe paths): round-trip fidelity (unicode, fact-like markdown, no
+  trailing newline, empty content, empty aliases with many sources, a
+  replace whose sources accumulate), atomicity (a stale replace leaves
+  content and metadata together; a delete removes both; an append moves
+  content and `last_updated` together), version token opacity (tokens from
+  every operation and from index entries are accepted when handed back),
+  conflict semantics (stale write and stale delete conflict carrying the
+  current content, and the carried token is accepted; create-on-existing
+  conflicts; a token on an absent path is `FILE_ABSENT`), replace-fact
+  matching (zero and multiple matches carry `match_count` and content; a
+  stale token re-applies a still-unique match and conflicts otherwise),
+  append guarding (two appends at one token: one lands, one conflicts, no
+  duplication; separator rule; no creation on an absent path), enforcement
+  (oversize append and `replace_fact` rejected with the exact UTF-8 size
+  of the would-be content; a `system/` write *accepted* at the transport),
+  index behavior (fan-out over every scope; `system/` first, then
+  `scope_priority` tiers, each by recency; the byte cap; an empty map
+  gives `((), ())`), listing (pagination at `list_page_size` with stable
+  cursors in ascending path order, entity and scope levels, invalid
+  prefix, malformed and foreign cursors), and error parity (invalid path
+  and absent file for every operation, empty `source` per method, full
+  `str(exc)` equal to a locally built core error and ending with the
+  category guidance, `get_memory_index` argument errors). The index cap
+  case replays core's rule over entries the client returned (sized with
+  `index_entry_bytes` and `sentinel_entry_bytes`, never hardcoded),
+  writing up to 20 files under area `INDEX_AREA = "conformance-index"`
+  until the replay omits one of them, and asserts the exact longest
+  fitting prefix and the exact `capped`; it skips only if 20 files never
+  overflow (the reference fixture does not). Argument-error `ValueError`s
+  pin core's exact text through module constants (`MSG_WRITE_ARGS`,
+  `MSG_REPLACE_ARGS`, `MSG_APPEND_ARGS`, one per method where core shares a
+  message across causes, plus `MSG_MALFORMED_CURSOR`,
+  `MSG_FOREIGN_CURSOR`, `MSG_INVALID_SCOPE`, `MSG_INVALID_ENTITY`), and a
+  drift test in the repo's tests provokes every (method, cause) pair on a
+  real `MemoryStore` and requires `str(exc)` to equal the constant.
+  `get_memory_index`'s `TypeError`s (non-`Mapping` map, non-`str` key or
+  value) are checked by type only, since their text names caller-side
+  types a remote may reject at serialization in its own words. Two
+  behaviors are out of the suite: duplicate scopes in `scope_map`
+  (unbuildable with a real `Mapping`, and legitimately collapsed by a
+  remote that serializes to JSON) and corrupt-metadata parity
+  (`MetadataFormatError`, `UnicodeDecodeError`), which a conforming client
+  cannot provoke because it cannot seed corrupt stored data; corrupt
+  stored metadata is covered by core's `read_file`/`list_prefix` tests and
+  the storage conformance suite, and the tool layer passes
+  `MetadataFormatError` through. Calls on absent or malformed paths
+  hand back `_ABSENT_TOKEN = VersionToken("1")`, a plain module constant,
+  since any token there must yield `NotFoundError`; every other token
+  reaches the client only as an argument to a `client.<method>(...)` call
+  written inside the lambda passed to `_call` or `expect_error`, and no
+  helper takes a token parameter, so the token scan needs no exemption.
+  The cases are built from public module-level helpers:
+  `require_fresh`, `sentinel_path`, `without_sentinel`,
+  `sentinel_entry_bytes`, `probe_path`, `expect_error`, `canonical_file`,
+  `canonical_entry`, `canonical_page`, `canonical_index`, and the
+  `check_*` fixture checks. Every failure goes through `pytest.fail`; every
+  message except a fixture check's has the form `name: label: phrase`,
+  where `name` is the client class (read through the guarded `<unnamed>`
+  helper) and `label` names the call or result under check (e.g.
+  `read_file(<path>)`, `write result for <path>`), so a failure says which
+  call fired. Every client call a case makes runs under `expect_error` or a
+  private `_call` wrapper that turns any `Exception` into `unexpected
+  error`, so no raw exception escapes a case. Isolation: every stateful
+  case first calls `require_fresh`, which fails with `not isolated`
+  (naming the type the read returned) if a sentinel file already exists
+  and otherwise writes it; the sentinel is at
+  `build_path(first, scope_map[first], "conformance-sentinel", "sentinel")`
+  where `first` is the first scope in sorted order, i.e. under the caller's
+  own entity in a writable scope, in an area no case uses for data. So a
+  `client` fixture shared across tests fails on the second stateful case in
+  any order. Because entity- and scope-level listings and the index do see
+  the sentinel, later cases filter it with `without_sentinel` (entries,
+  and for a `MemoryIndex` also its `CappedPrefix`, rebuilding the index
+  under `_call` so a malformed index fails rather than raising
+  `ValueError`) and budget it with
+  `sentinel_entry_bytes`, which lists the sentinel through the client and
+  returns `index_entry_bytes` of the returned `FileEntry`. Version tokens
+  are never compared, not even for equality, ordered, sliced, or passed to
+  anything but the client's own methods and `type()`: a remote may return
+  different but equivalent token strings, so a token is checked only by
+  shape (`type(v) is str and v`) and by handing it back. An `ast` scan in
+  the repo's tests pins this rule against the module, including method
+  calls on a token and f-string interpolation of one. `last_updated` is
+  compared only between two results the same client returned in one test
+  (the write result and the read result), never with the test's clock.
+  The canonical readers check every nested field of a client-returned
+  `MemoryFile`, `FileEntry`, `ListPage`, or `MemoryIndex` by exact type
+  (`FileMetadata`, `tuple` of `str` aliases, `frozenset` of `str` sources,
+  aware `datetime`, `CappedPrefix` members with exact `str` prefix and
+  `int` omitted, `str | None` cursor), failing with `wrong result type` or
+  `bad field <name>`. Every attribute read is guarded, so a field that
+  raises on read fails `bad field <name>: unreadable` rather than escaping
+  as an error. `last_updated` is converted to UTC inside the same guard as
+  its offset check (any failure is `bad field last_updated: offset
+  unreadable`), so later comparison and formatting never run client
+  `tzinfo` code, and equal instants at different offsets compare equal.
+  The readers return plain tuples that omit the version; this is the
+  cross-transport parity check for
+  those types that ADR 0019 deferred to the suite. `expect_error(name,
+  label, call, expected, category, /, *, message=None, **payload)` is the
+  one error-parity helper: the raised type must be exactly `expected` (a
+  subclass or a spoofed `__class__` fails), `category` is required for a
+  `WenchangError` subclass and must be `None` otherwise (`harness
+  misuse`), `message` if given must equal `str(exc)`, and each payload
+  attribute is compared by exact type and then value, so a plain `str`
+  never stands in for a `StrEnum` reason. For §10.2's enforcement bullets
+  (`system/` writes and role-restricted writes) the human decided option
+  (a) on 2026-10-02, recorded in ADR 0021: the transport suite asserts such
+  writes are accepted at the transport
+  (`test_system_area_write_is_accepted_at_transport`), and enforcement is
+  tested only by the tool-layer and resolver suites. The repo checks the
+  suite itself: a method-name test pins the exact set of public cases, the
+  reference run against `InProcessClient` passes with no skips, and each
+  §10.2 group has a broken-client self-test that fails with the expected
+  phrase and label. It imports `core`, `errors`, `file_format`, `paths`,
+  `transport`, and `version_token` from `wenchang`, plus `pytest`, applies
+  no pytest marks, and cites no Linear IDs. See
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md) and
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md).
 - **transport** — the transport-agnostic client contract the tool layer
   calls, so a transport is added by writing another implementation without
   touching tool definitions. `TransportClient` is a runtime-checkable,
   synchronous `Protocol` of exactly seven methods: `read_file`,
   `write_file`, `append_line`, `replace_fact`, `list_prefix`,
   `delete_file`, and `get_memory_index(scope_map: Mapping[str, str]) ->
-  MemoryIndex`. The six operations `MemoryStore` already implements mirror
-  it exactly — parameter names, kinds, defaults, annotations, and return
-  type, including keyword-only `source` and `list_prefix`'s `cursor:
+  MemoryIndex`. All seven `MemoryStore` methods mirror it exactly —
+  parameter names, kinds, defaults, annotations, and return type,
+  including keyword-only `source` and `list_prefix`'s `cursor:
   ListCursor | None = None` — pinned by a test comparing
   `inspect.signature(..., eval_str=True)` of each pair, so the tool layer is
   written once and an in-process client can be a pure pass-through. The
@@ -519,12 +753,35 @@ implemented.
   credentials. The tool layer resolves identity and calls
   `scope.check_write` before any mutating client call; a remote client
   binds whatever it authenticates with at construction (per session or
-  connection), never per call. It imports from `wenchang` only `core`,
-  `file_format`, and `version_token`, and `core` never imports it. `tools`
-  calls it. Nothing implements it yet: the in-process client,
-  `MemoryStore.get_memory_index`, and the transport conformance suite are
-  planned. See
-  [ADR 0019](docs/adr/0019-transport-client-interface.md).
+  connection), never per call. The transport accepts every well-formed
+  write, including one under `system/`; scope enforcement happens only in
+  the tool layer, and a remote server must not enforce scope at the
+  transport. It imports from `wenchang` only `core`
+  (including `MemoryStore`), `file_format`, and `version_token`, and `core`
+  never imports it. `InProcessClient(store)` is the in-process
+  implementation, calling the wrapped `MemoryStore` directly with no
+  network hop: each of the seven methods has the protocol's exact
+  signature (pinned by the same `inspect.signature` test), forwards its
+  arguments unchanged, returns the store's result object itself (except
+  `delete_file`, which always returns `None`, even if a store subclass
+  returns a value), and lets every exception propagate as raised, adding
+  no `__cause__` or `__context__`. It adds no caching, retry, or validation
+  beyond its constructor, which raises `TypeError` unless the argument's
+  real type is a `MemoryStore` (`issubclass(type(x), MemoryStore)`; a
+  subclass is accepted, a spoofed `__class__` is not), naming the type
+  through a guarded helper that reports `<unnamed>` if `__name__` raises;
+  the `store` property returns the
+  wrapped store. `MemoryStore` itself also satisfies `TransportClient`
+  structurally, so a host may pass either. `tools` calls the protocol; any
+  remote transport is planned. The transport conformance suite
+  (`testing.TransportConformance`) is complete: its baseline cases and the
+  exhaustive cases for all nine §10.2 groups run against `InProcessClient`
+  in the repo's tests with no skips, and define what a future remote client
+  must pass. See
+  [ADR 0019](docs/adr/0019-transport-client-interface.md),
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md),
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md), and
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md).
 - **tools** — the agent-facing tool layer: thin verbs over a
   `TransportClient`, carrying no judgment, each described by its
   docstring. `MemoryTools(client, identity, policy, *, source)` is one
@@ -698,20 +955,24 @@ render `last_updated`); it is also omitted
 from the diagram since it isn't wired into the request path shown there.
 `paths` is likewise dependency-free and omitted; `core`, `identity`, and
 `scope` use it for validation, `scope` reads the area via `parse_path`, and
-`tools` builds every path and prefix with `build_path` / `build_prefix`
-and renders `scope`/`area`/`name` with `parse_path`.
+`core` builds index prefixes with `build_prefix` and reads index areas
+with `parse_path`. `tools` builds every path and prefix with `build_path` /
+`build_prefix` and renders `scope`/`area`/`name` with `parse_path`.
 `identity` sits beside `core` with no arrow: `tools` calls
 `resolve_identity` once per session, in `bind_tools`, and reads the
-resolved grants to build paths; `transport` never sees an identity. `scope`
-imports the `Identity` type to read grants but never calls a resolver, so
-the diagram shows no edge between them. `scope` sits outside the Core
-subgraph with only the `tools --> scope` edge: every mutating tool calls
-`scope.check_write` before handing the write to the transport, and `core`
-does not depend on `scope`. `tools --> transport` is the tool layer's only
-route to memory. `testing` is omitted from the diagram:
+resolved grants to build paths; `transport` never sees an identity.
+`transport` is implemented in-process (`InProcessClient` over
+`MemoryStore`); the remote half of its box, like `prompts`, is planned.
+`scope` imports the `Identity` type to read grants but never calls a
+resolver, so the diagram shows no edge between them. `scope` sits outside
+the Core subgraph with only the `tools --> scope` edge: every mutating tool
+calls `scope.check_write` before handing the write to the transport, and
+`core` does not depend on `scope`. `tools --> transport` is the tool
+layer's only route to memory. `testing` is omitted from the diagram:
 it is not part of the runtime layers, is imported only by adopters' test
-code, and depends on `identity`, `paths`, `scope`, and `errors` with no
-module depending on it.
+code, and depends on `identity`, `paths`, `scope`, and `errors` (resolver
+suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
+(transport suite), with no module depending on it.
 
 ## Key invariants
 
@@ -801,17 +1062,38 @@ module depending on it.
   construction; the library never handles credentials, only the resolver
   does; resolver failure is permanent and never chained. `resolve_identity`
   passes credentials through opaquely, and every failure it surfaces is a
-  `ResolverFailureError` raised `from None`, so no exception message that
-  might carry a credential reaches a rendered traceback (see
+  `ResolverFailureError` raised `from None` outside any handler for the
+  resolver's exception, so no exception message that might carry a credential is reachable from it,
+  whether through a rendered traceback or the exception chain (see
   [ADR 0014](docs/adr/0014-identity-resolver.md)).
-- **The transport mirrors core exactly.** Each of `TransportClient`'s six
+- **The index cap is a byte budget over `index_entry_bytes`, inclusive,
+  applied as a prefix of the documented order.** `get_memory_index`
+  includes entries in order while the running total stays within
+  `index_max_bytes` and stops at the first that does not fit, so everything
+  omitted ranks below everything returned, and every omitted file is
+  counted under its area prefix in `capped`; nothing is truncated silently
+  (see [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md)).
+- **The transport mirrors core exactly.** Each of `TransportClient`'s seven
   operations shared with `MemoryStore` has an identical signature (held by
   an `inspect.signature` equality test), and for well-typed arguments every
   client raises exactly the exceptions `MemoryStore` raises, taxonomy and
   non-taxonomy alike, with equal attributes and message; only failures of
   the transport itself map to `BackendUnavailableError`. The transport adds
-  no identity, policy, or error vocabulary of its own (see
-  [ADR 0019](docs/adr/0019-transport-client-interface.md)).
+  no identity, policy, or error vocabulary of its own: it accepts every
+  well-formed write, including one under `system/`, and scope enforcement
+  happens only in the tool layer; the transport conformance suite asserts
+  the acceptance (see
+  [ADR 0019](docs/adr/0019-transport-client-interface.md),
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md), and
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md)).
+- **Conformance never compares tokens.** The transport conformance suite
+  treats version tokens as callers must: it never compares (even for
+  equality), orders, parses, slices, or does arithmetic on one, and checks
+  a token only by its shape and by handing it back to the client that
+  issued it, pinned by an `ast` scan of the suite module. Likewise it
+  compares `last_updated` only between two results from the same client,
+  never against the test's clock (see
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md)).
 - **pytest stays optional.** Nothing outside `wenchang.testing` imports
   pytest or `wenchang.testing`; the library imports with pytest absent (see
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md)).

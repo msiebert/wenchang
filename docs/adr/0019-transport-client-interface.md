@@ -161,7 +161,9 @@ review; this section is updated once they are confirmed or changed.
   `BackendUnavailableError`.
 - **The index algorithm is built with the in-process client** (decision 3
   and Context): the semantics written on AIE-1044 are implemented under
-  AIE-1046; AIE-1044 is tools only.
+  AIE-1046; AIE-1044 is tools only. This is realized by
+  [ADR 0020](0020-memory-index-and-in-process-client.md), which implements
+  `MemoryStore.get_memory_index` alongside `InProcessClient`.
 - **A remote client binds credentials once at construction, never per
   call** (decision 6), so the protocol stays identity-free.
 
@@ -193,3 +195,13 @@ unvalidated and rely on conformance testing. Validation runs only in
 contents, including a `str`-subclass `path`, are not validated at all. A
 legitimate adopter subclass of `FileEntry` or `CappedPrefix` cannot be
 placed in a `MemoryIndex`.
+
+**Update (2026-10-02):** decision 6's "a server can enforce scope on its
+side" is amended by the human's answer to the open question in
+[ADR 0021](0021-transport-conformance-harness.md) (option (a)): a remote
+server must not enforce scope at the transport layer. The transport is
+identity-agnostic in both directions, accepting every well-formed write,
+including one under `system/`, and the tool layer, where identity is
+known, is the only enforcement point. Credentials bound at construction
+still authenticate the connection; they do not authorize paths. The rest
+of decision 6 is unchanged.

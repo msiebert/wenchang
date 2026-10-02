@@ -99,3 +99,12 @@ task and the GCS implementation landed together, as `put_if_version` did.
 (AIE-1040) remain out of scope; `list_prefix` lists `system/` areas like
 any other, since read-only enforcement is a tool-layer concern per ADR
 0008's note on `write_file`.
+
+**Update (AIE-1046):** `get_memory_index` and its scope-map fan-out, deferred
+above, are implemented per
+[ADR 0020](0020-memory-index-and-in-process-client.md) (rescoped from
+AIE-1044 by [ADR 0019](0019-transport-client-interface.md)). For each scope
+in the map it drains every page of the base `MemoryStore.list_prefix` until
+`next_cursor` is `None`, never stopping on an empty page, so the paging
+semantics above, including skipped malformed keys and the no-snapshot rule,
+carry over to the index unchanged.

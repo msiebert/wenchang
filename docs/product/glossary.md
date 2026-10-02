@@ -63,7 +63,26 @@ Terms as used throughout wenchang and its spec.
   interface the adopter implements; passing it defines a correct
   implementation. For the identity resolver it is
   `wenchang.testing.ResolverConformance`, a pytest mixin the adopter
-  subclasses, installed with the `wenchang[testing]` extra.
+  subclasses, installed with the `wenchang[testing]` extra; for the
+  transport client it is the transport conformance suite.
+- **Transport conformance suite** — the conformance suite for transport
+  clients, `wenchang.testing.TransportConformance`. It runs the same cases
+  against any transport client (in-process or remote) and fails one that is
+  distinguishable from the in-process client in results or errors,
+  covering round-trip fidelity, atomicity, token opacity, conflicts,
+  replace-fact matching, append guarding, enforcement, index behavior, and
+  error parity, including core's exact wording for argument errors. On
+  enforcement it requires a transport to *accept* a `system/` write: scope
+  rules are enforced by the tools, not the transport. It never
+  compares version tokens, only hands them back. The adopter supplies a
+  fresh client per test plus the settings its store was configured with;
+  every scope in the supplied scope map must be writable through that
+  client, and its writes must stamp strictly increasing last-updated times.
+- **Conformance sentinel** — a small file the transport conformance suite
+  writes under the first mapped scope's own entity, in area
+  `conformance-sentinel`, at the start of every test that touches the
+  store. Finding it already present means the client fixture was shared
+  between tests, which fails the test as not isolated.
 - **Known roles** — the conformance-suite fixture listing every role the
   adopter's resolver may return. The suite requires every granted role, and
   every role the scope policy permits, to be in it, so write-restriction
@@ -78,18 +97,35 @@ Terms as used throughout wenchang and its spec.
   parse, compare, or order it.
 - **Memory index** — the merged, metadata-only view across a set of scopes,
   returned by `get_memory_index` for session bootstrap, subject to a byte
-  cap (default 64 KB) and a documented priority ordering. Represented by
+  cap (default 64 KB, the store's `index_max_bytes`) and a documented
+  priority ordering: `system/` areas first, then scopes in the adopter's
+  scope priority with unlisted scopes as one trailing tier, then most
+  recently updated first, then by path. Each entry costs
+  `core.index_entry_bytes`: the UTF-8 bytes of its path, its canonical
+  metadata, and its version. The cap is inclusive and is applied as a
+  prefix of the order: entries are included until the next one would not
+  fit, and every entry from there on is omitted. Represented by
   `core.MemoryIndex`: the entries in load order, plus the capped prefixes;
   no capped prefixes means the index is complete.
-- **Capped prefix** — a prefix the memory index could not return in full
-  once its byte cap was reached, with a count of the files left out
-  (`core.CappedPrefix`). The agent can list that prefix to page through
-  them.
+- **Capped prefix** — an area prefix (`scope/entity_id/area/`) the memory
+  index could not return in full once its byte cap was reached, with a
+  count of the files left out (`core.CappedPrefix`), listed in prefix
+  order. The agent can list that prefix to page through them.
+- **Scope priority** — the adopter's optional ordering of scope names for
+  the memory index, set when the store is constructed. Listed scopes rank
+  ahead of unlisted ones, in list order; by default it is empty and every
+  scope ranks equally, ordered by recency. It never affects `system/`
+  areas, which always load first.
 - **Transport client** — the object the tool layer calls to reach memory,
   implementing `transport.TransportClient`: the core API's operations with
   identical signatures and identical errors, over any transport (in-process
   or remote). It carries no identity per call; a remote client
   authenticates once, when it is constructed.
+- **In-process client** — `transport.InProcessClient`, the transport client
+  that calls a `MemoryStore` directly with no network hop, passing every
+  call and result through unchanged; the simplest adoption path and the
+  reference implementation. A `MemoryStore` can also be used as a
+  transport client directly.
 - **Tool layer** — the agent-facing verbs (`get_memory_index`,
   `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`,
   `delete_file`), implemented as `tools.MemoryTools` over a transport
