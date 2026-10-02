@@ -157,25 +157,26 @@ existing module changes.
    the likeliest to be capped), so AIE-1045's list and index cases filter
    it with `without_sentinel` (entries and, for a `MemoryIndex`, its
    `CappedPrefix`, rebuilding the index under `_call` so a malformed one
-   fails rather than raising) and budget it with `sentinel_entry_bytes`, which lists
-   the sentinel through the client and returns `index_entry_bytes` of the
-   returned `FileEntry` rather than constructing one around a token.
+   fails rather than raising) and budget it with `sentinel_entry_bytes`,
+   which lists the sentinel through the client and returns
+   `index_entry_bytes` of the returned `FileEntry` rather than
+   constructing one around a token.
    - **Rejected: a single isolation case** that writes and expects a
      clean store. Within one run each case gets its own fixture call, so
      such a case can never observe sharing.
    - **Rejected: a factory fixture** (`make_client()`), which doubles the
      contract.
-   - **Rejected: a sentinel under an unmapped entity**, which a remote
-     server enforcing scope on its side could reject, making the harness
-     depend on the open enforcement question (decision 10).
+   - **Rejected: a sentinel under an unmapped entity**, which made the
+     harness depend on how a remote server treats scope while that was
+     still open (decision 10).
 
    7a. **`test_client_satisfies_protocol` takes all seven fixtures** and
    validates them in the fixed order. The `client` check first reads each
    of the seven method names, failing with the method named if it is
    missing, not callable, or could not be read, and then runs
    `isinstance(client, TransportClient)` inside a guard, so a client whose
-   `__class__` raises fails `fixture client` rather than erroring. So every fixture is required and checked from the first run,
-   even though only AIE-1045's cases use `index_max_bytes`,
+   `__class__` raises fails `fixture client` rather than erroring. So
+   every fixture is required and checked from the first run, even though only AIE-1045's cases use `index_max_bytes`,
    `scope_priority`, and `list_page_size`.
    - **Rejected: validating lazily in the cases that use each fixture**,
      which would let an adopter omit fixtures until the exhaustive cases
@@ -197,8 +198,9 @@ existing module changes.
      untestable.
    - **Rejected: real threads**, which demand a thread-safety guarantee
      nothing else in the library requires.
-10. **Section 10.2's enforcement bullets are not decided here.** See the
-    open question below. AIE-1045 writes the case once it is answered.
+10. **Section 10.2's enforcement bullets are read as option (a).** The
+    transport accepts `system/` and restricted-scope writes; see the
+    decision below. AIE-1045 writes the acceptance case.
 
 Every message except a fixture check's has the form `name: label:
 phrase`, where `name` is the client class (read through a guarded helper
@@ -210,7 +212,7 @@ so no raw exception escapes a case. The self-tests rely on the label: each
 matches the probe path in the message, proving the case under test fired
 rather than `require_fresh`.
 
-### Open question for the human
+### Decision (human, 2026-10-02): option (a)
 
 Section 10.2 lists "`system/` prefix writes rejected; write-restricted
 scopes rejected for callers lacking the role" among the assertions of the
@@ -228,12 +230,18 @@ transport suite. But the transport is identity-agnostic (ADR 0019 decision
 - **(c)** Transport enforcement is left unspecified, and the suite asserts
   nothing about it.
 
-The orchestrator recommends **(a)**: it keeps the transport the pure
-mirror of core that ADR 0019 describes, and enforcement already has one
-home (`scope.check_write`, called by the tool layer). This harness is
-valid under any answer, given the fixture contract that every mapped
-scope is writable through `client`: the sentinel and the probe paths are
-all own-entity, non-`system/` writes in mapped scopes.
+On 2026-10-02 the human chose **(a)**. It keeps the transport the pure
+mirror of core that ADR 0019 describes, and enforcement has one home
+(`scope.check_write`, called by the tool layer, where identity is known).
+The transport conformance suite asserts that a `system/` write is
+accepted at the transport; enforcement of `system/` read-only and role
+restriction is tested only by the tool-layer and resolver suites. A
+remote server must not enforce scope at the transport; ADR 0019 carries
+the matching update to decision 6. AIE-1045 adds the acceptance case
+`test_system_area_write_is_accepted_at_transport`. This harness itself
+needed no change: given the fixture contract that every mapped scope is
+writable through `client`, the sentinel and the probe paths are all
+own-entity, non-`system/` writes in mapped scopes.
 
 ### Adversarial review
 
@@ -312,5 +320,6 @@ returns a stale-but-accepted token, or two different tokens for the same
 version; it detects only a token the client itself rejects. That matches
 what a correct caller can observe.
 
-The enforcement case waits on the open question. AIE-1044, the tool layer,
-records its decisions as ADR 0022.
+Under option (a), a remote transport that rejects a `system/` write fails
+AIE-1045's acceptance case; scope enforcement belongs to the tool layer.
+AIE-1044, the tool layer, records its decisions as ADR 0022.

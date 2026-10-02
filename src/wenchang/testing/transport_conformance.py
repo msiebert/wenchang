@@ -62,6 +62,7 @@ from wenchang.errors import (
 from wenchang.file_format import FileMetadata
 from wenchang.paths import build_path, build_prefix, is_valid_path, is_valid_segment, parse_path
 from wenchang.transport import TransportClient
+from wenchang.version_token import VersionToken
 
 PROBE_AREA: Final = "notes"
 PROBE_STEM: Final = "conformance-probe"
@@ -233,10 +234,9 @@ def sentinel_path(scope_map: Mapping[str, str]) -> str:
 def _drop_sentinel(name: str, label: str, entries: Iterable[object]) -> tuple[FileEntry, ...]:
     kept: list[FileEntry] = []
     for entry in entries:
-        canonical_entry(name, label, entry)
-        checked = cast(FileEntry, entry)
-        if parse_path(checked.path).area != SENTINEL_AREA:
-            kept.append(checked)
+        path = canonical_entry(name, label, entry)[0]
+        if parse_path(path).area != SENTINEL_AREA:
+            kept.append(cast(FileEntry, entry))
     return tuple(kept)
 
 
@@ -252,11 +252,18 @@ def without_sentinel(
     """Drop sentinel-area entries (and, for an index, the sentinel CappedPrefix)."""
     raw = cast(object, value)
     if issubclass(type(raw), MemoryIndex):
-        canonical_index(name, label, raw)
-        index = cast(MemoryIndex, raw)
+        raw_entries, canon_entries, raw_capped, canon_capped = _index_parts(name, label, raw)
         suffix = f"/{SENTINEL_AREA}/"
-        entries = _drop_sentinel(name, label, index.entries)
-        capped = tuple(c for c in index.capped if not c.prefix.endswith(suffix))
+        entries = tuple(
+            cast(FileEntry, e)
+            for e, c in zip(raw_entries, canon_entries, strict=True)
+            if parse_path(c[0]).area != SENTINEL_AREA
+        )
+        capped = tuple(
+            cast(CappedPrefix, cap)
+            for cap, (prefix, _) in zip(raw_capped, canon_capped, strict=True)
+            if not prefix.endswith(suffix)
+        )
         return _call(name, label, lambda: MemoryIndex(entries=entries, capped=capped))
     entries = _call(name, label, lambda: tuple(cast(Iterable[object], raw)))
     return _drop_sentinel(name, label, entries)
@@ -269,12 +276,16 @@ def sentinel_entry_bytes(
     first = _first_scope(scope_map)
     prefix = build_prefix(first, scope_map[first], SENTINEL_AREA)
     label = f"list_prefix({prefix})"
-    page = _call(name, label, lambda: client.list_prefix(prefix))
-    canonical_page(name, label, page)
-    count = len(page.entries)
-    if count != 1:
-        _fail(name, label, f"sentinel missing: expected exactly one entry, got {count}")
-    return _call(name, label, lambda: index_entry_bytes(page.entries[0]))
+    page = cast(object, _call(name, label, lambda: client.list_prefix(prefix)))
+    _outer(name, label, page, ListPage)
+    raw_entries = _get(name, label, page, "entries")
+    _canonical_entries(name, label, raw_entries)
+    _canonical_cursor(name, label, page)
+    entries = cast(tuple[FileEntry, ...], raw_entries)
+    if len(entries) != 1:
+        _fail(name, label, f"sentinel missing: expected exactly one entry, got {len(entries)}")
+    entry = entries[0]
+    return _call(name, label, lambda: index_entry_bytes(entry))
 
 
 def _call[T](name: str, label: str, fn: Callable[[], T], /) -> T:
@@ -509,16 +520,26 @@ def canonical_page(name: str, label: str, value: object, /) -> CanonicalPage:
     """Check a ListPage by exact type; return (canonical entries, next_cursor is None)."""
     _outer(name, label, value, ListPage)
     entries = _canonical_entries(name, label, _get(name, label, value, "entries"))
-    cursor = _get(name, label, value, "next_cursor")
+    return (entries, _canonical_cursor(name, label, value))
+
+
+def _canonical_cursor(name: str, label: str, page: object, /) -> bool:
+    """Check a ListPage's next_cursor; return whether it is None."""
+    cursor = _get(name, label, page, "next_cursor")
     if cursor is not None:
         _exact(name, label, "next_cursor", cursor, str)
-    return (entries, cursor is None)
+    return cursor is None
 
 
-def canonical_index(name: str, label: str, value: object, /) -> CanonicalIndex:
-    """Check a MemoryIndex by exact type; return (canonical entries, ((prefix, omitted), ...))."""
+def _index_parts(
+    name: str, label: str, value: object, /
+) -> tuple[
+    tuple[object, ...], tuple[CanonicalEntry, ...], tuple[object, ...], tuple[tuple[str, int], ...]
+]:
+    """Check a MemoryIndex; return its raw and canonical entries and capped, each read once."""
     _outer(name, label, value, MemoryIndex)
-    entries = _canonical_entries(name, label, _get(name, label, value, "entries"))
+    raw_entries = _get(name, label, value, "entries")
+    entries = _canonical_entries(name, label, raw_entries)
     capped = _get(name, label, value, "capped")
     _exact(name, label, "capped", capped, tuple)
     result: list[tuple[str, int]] = []
@@ -529,7 +550,18 @@ def canonical_index(name: str, label: str, value: object, /) -> CanonicalIndex:
         omitted = _get(name, label, cap, "omitted")
         _exact(name, label, f"capped[{i}].omitted", omitted, int)
         result.append((cast(str, prefix), cast(int, omitted)))
-    return (entries, tuple(result))
+    return (
+        cast(tuple[object, ...], raw_entries),
+        entries,
+        cast(tuple[object, ...], capped),
+        tuple(result),
+    )
+
+
+def canonical_index(name: str, label: str, value: object, /) -> CanonicalIndex:
+    """Check a MemoryIndex by exact type; return (canonical entries, ((prefix, omitted), ...))."""
+    _, entries, _, capped = _index_parts(name, label, value)
+    return (entries, capped)
 
 
 # --- The suite ---------------------------------------------------------------
@@ -558,23 +590,13 @@ class TransportConformance:
     ) -> None:
         """Every fixture is valid and the client exposes the seven TransportClient methods."""
         name = _name(type(client))
-        checked = check_client(name, client)
+        check_client(name, client)
         check_source(name, source)
         check_scope_map(name, scope_map)
         check_positive_int(name, "max_file_bytes", max_file_bytes, MIN_FILE_BYTES)
         check_positive_int(name, "index_max_bytes", index_max_bytes)
         check_scope_priority(name, scope_priority)
         check_positive_int(name, "list_page_size", list_page_size)
-        for method in _METHODS:
-            try:
-                attr = cast(object, getattr(checked, method))
-            except Exception as exc:
-                pytest.fail(
-                    f"{name}: fixture client method {method} could not be read: "
-                    f"raised {_name(type(exc))}"
-                )
-            if not callable(attr):
-                pytest.fail(f"{name}: fixture client method {method} is not callable")
 
     def test_write_then_read_round_trips(
         self, client: TransportClient, source: str, scope_map: Mapping[str, str]
@@ -643,11 +665,12 @@ class TransportConformance:
         )
         canonical_file(name, f"write result for {p}", written)
         read = _call(name, f"read_file({p})", lambda: client.read_file(p))
-        canonical_file(name, f"read result for {p}", read)
+        read_label = f"read result for {p}"
+        canonical_file(name, read_label, read)
+        read_metadata = cast(FileMetadata, _get(name, read_label, read, "metadata"))
+        token = cast(VersionToken, _get(name, read_label, read, "version"))
         try:
-            rewritten = client.write_file(
-                p, "- [stated] b\n", read.metadata, read.version, source=src
-            )
+            rewritten = client.write_file(p, "- [stated] b\n", read_metadata, token, source=src)
         except Exception as exc:
             _fail(name, f"write_file({p})", f"token not accepted: raised {_name(type(exc))}")
         canonical_file(name, f"write result for {p}", rewritten)
@@ -656,9 +679,11 @@ class TransportConformance:
             f"write_file({q})",
             lambda: client.write_file(q, "- [stated] q\n", metadata, None, source=src),
         )
-        canonical_file(name, f"write result for {q}", created)
+        created_label = f"write result for {q}"
+        canonical_file(name, created_label, created)
+        created_token = cast(VersionToken, _get(name, created_label, created, "version"))
         try:
-            appended = client.append_line(q, "- [stated] c", created.version, source=src)
+            appended = client.append_line(q, "- [stated] c", created_token, source=src)
         except Exception as exc:
             _fail(name, f"append_line({q})", f"token not accepted: raised {_name(type(exc))}")
         canonical_file(name, f"append result for {q}", appended)

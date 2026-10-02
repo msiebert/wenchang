@@ -647,10 +647,11 @@ implemented.
   `WenchangError` subclass and must be `None` otherwise (`harness
   misuse`), `message` if given must equal `str(exc)`, and each payload
   attribute is compared by exact type and then value, so a plain `str`
-  never stands in for a `StrEnum` reason. What the transport suite asserts
-  for §10.2's enforcement bullets (`system/` writes and role-restricted
-  writes) is an open question recorded in ADR 0021; the harness is valid
-  under any answer given the writable-scope fixture contract. It imports
+  never stands in for a `StrEnum` reason. For §10.2's enforcement bullets
+  (`system/` writes and role-restricted writes) the human decided option
+  (a) on 2026-10-02, recorded in ADR 0021: the transport suite asserts such
+  writes are accepted at the transport, and enforcement is tested only by
+  the tool-layer and resolver suites. It imports
   `core`, `errors`, `file_format`, `paths`, and `transport` from
   `wenchang`, plus `pytest`, applies no pytest marks, and cites no Linear
   IDs. See
@@ -688,7 +689,10 @@ implemented.
   credentials. The tool layer resolves identity and calls
   `scope.check_write` before any mutating client call; a remote client
   binds whatever it authenticates with at construction (per session or
-  connection), never per call. It imports from `wenchang` only `core`
+  connection), never per call. The transport accepts every well-formed
+  write, including one under `system/`; scope enforcement happens only in
+  the tool layer, and a remote server must not enforce scope at the
+  transport. It imports from `wenchang` only `core`
   (including `MemoryStore`), `file_format`, and `version_token`, and `core`
   never imports it. `InProcessClient(store)` is the in-process
   implementation, calling the wrapped `MemoryStore` directly with no
@@ -867,8 +871,11 @@ suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
   client raises exactly the exceptions `MemoryStore` raises, taxonomy and
   non-taxonomy alike, with equal attributes and message; only failures of
   the transport itself map to `BackendUnavailableError`. The transport adds
-  no identity, policy, or error vocabulary of its own (see
-  [ADR 0019](docs/adr/0019-transport-client-interface.md)).
+  no identity, policy, or error vocabulary of its own: it accepts every
+  well-formed write, including one under `system/`, and scope enforcement
+  happens only in the tool layer (see
+  [ADR 0019](docs/adr/0019-transport-client-interface.md) and
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md)).
 - **Conformance never compares tokens.** The transport conformance suite
   treats version tokens as callers must: it never compares (even for
   equality), orders, parses, slices, or does arithmetic on one, and checks

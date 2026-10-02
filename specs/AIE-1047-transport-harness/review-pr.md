@@ -74,8 +74,12 @@ gate (2038 passed at the last run).
 ## Architecture / ADR changes
 
 - New [ADR 0021](../../docs/adr/0021-transport-conformance-harness.md):
-  decisions 1–10 (with 7a) and their rejected alternatives, the open
-  enforcement question, and the six-round adversarial spec review.
+  decisions 1–10 (with 7a) and their rejected alternatives, the human's
+  enforcement decision (option (a), 2026-10-02), and the six-round
+  adversarial spec review.
+- [ADR 0019](../../docs/adr/0019-transport-client-interface.md): update
+  paragraph amending decision 6 so a remote server must not enforce scope
+  at the transport; the tool layer is the only enforcement point.
 - `ARCHITECTURE.md`: bird's-eye view now names both suites; the `testing`
   entry gains `TransportConformance` (fixtures, order, `MIN_FILE_BYTES`,
   baseline cases, helpers, message form, token and `last_updated` rules,
@@ -89,16 +93,18 @@ gate (2038 passed at the last run).
 
 ## Deviations from spec
 
-- None from Notion, except one item left **open for the human**: §10.2's
-  enforcement bullets ("`system/` prefix writes rejected; write-restricted
-  scopes rejected for callers lacking the role") conflict with an
-  identity-agnostic transport whose in-process client accepts such writes.
-  Options (a) assert acceptance at the transport, enforcement tested in
-  tools/resolver suites, amending ADR 0019 decision 6's "server can
-  enforce" wording; (b) run enforcement cases through the tool layer with
-  identity fixtures; (c) leave unspecified. **Recommendation: (a).** The
-  harness is valid under any answer given the writable-scope fixture
-  contract. Recorded in ADR 0021.
+- One deviation from Notion, **decided by the human on 2026-10-02 as
+  option (a)**: §10.2's enforcement bullets ("`system/` prefix writes
+  rejected; write-restricted scopes rejected for callers lacking the
+  role") conflict with an identity-agnostic transport whose in-process
+  client accepts such writes. The transport suite asserts a `system/`
+  write is accepted at the transport; `system/` read-only and role
+  restriction are enforced only in the tool layer and tested by the
+  tool-layer and resolver suites; a remote server must not enforce scope
+  at the transport. Recorded in ADR 0021; ADR 0019 decision 6 is amended
+  by an update paragraph. AIE-1045 adds
+  `test_system_area_write_is_accepted_at_transport`. The harness needed
+  no code change.
 - Token opacity is read strictly: "never compares" includes equality, so
   the suite cannot check `write.version == read.version`. Tokens are
   checked only by shape and by handing them back.
@@ -184,11 +190,9 @@ equivalent.
   ordering, cap and `capped`; concurrency as sequential interleavings;
   full error parity incl. non-taxonomy errors; pagination), using
   `without_sentinel` / `sentinel_entry_bytes`, checking
-  `VersionConflictError.version` only by handing it back, and the
-  enforcement case once the human answers the open question.
+  `VersionConflictError.version` only by handing it back, and
+  `test_system_area_write_is_accepted_at_transport` (option (a)).
 - **AIE-1044** (tool layer) records its decisions as ADR 0022.
-- If the human picks option (a), amend ADR 0019 decision 6's "a server can
-  enforce scope on its side" wording.
 - `specs/AIE-1047-transport-harness/review-spec.md` still says the sentinel
   lives under "an unmapped entity" in its summary; the decision table and
   the spec say the caller's own entity. Stale wording only.

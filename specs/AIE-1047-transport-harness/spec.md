@@ -77,8 +77,8 @@ case fails for a deliberately broken client.
 
 Out of scope: the exhaustive cases (AIE-1045), any remote client, the tool
 layer, changes to `core` or `transport`. The §10.2 enforcement bullets
-are AIE-1045's to place; this issue only records the open question (see
-Assumptions).
+are AIE-1045's to place; this issue records the human's decision,
+option (a) on 2026-10-02 (see Assumptions).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -142,8 +142,10 @@ that name).
    and index cases (the sentinel is the oldest entry in its tier, so it is
    the likeliest to be capped, and it occupies one slot on entity- and
    scope-level `list_prefix` pages). `sentinel_entry_bytes(name, client,
-   scope_map)` (label is the sentinel prefix) lists `build_prefix(first_scope, scope_map[first_scope],
-   SENTINEL_AREA)` through `client`, checks the page with
+   scope_map)` (no `label` parameter; it labels its calls
+   `list_prefix(<sentinel prefix>)`) lists `build_prefix(first_scope,
+   scope_map[first_scope], SENTINEL_AREA)` through `client`, checks the
+   page with
    `canonical_page`, requires exactly one entry (else fails `sentinel
    missing`), and returns `index_entry_bytes` of that client-returned
    `FileEntry`; it never constructs a `FileEntry` from a token.
@@ -158,11 +160,16 @@ that name).
    starts `f"{name}: {label}: "`**, where `name` is the client class name
    and `label` names what is being checked (e.g. `f"read_file({P})"`,
    `f"write result for {P}"`). Every helper other than the `check_*`
-   fixture functions takes `name, label` as its first two positional-only
-   parameters, and the cases' own failures (`round trip`, `source not
-   stamped`, `token not accepted`) use the same form. So a self-test can
-   match the probe path in the message and know which call fired;
-   `require_fresh` labels its calls with the sentinel path. The `check_*`
+   fixture functions and the three sentinel helpers takes `name, label` as
+   its first two positional-only parameters, and the cases' own failures
+   (`round trip`, `source not stamped`, `token not accepted`) use the same
+   form. So a self-test can match the probe path in the message and know
+   which call fired. The sentinel helpers take no `label` parameter:
+   `sentinel_path(scope_map)` takes neither `name` nor `label` and never
+   fails; `require_fresh(name, client, scope_map)` builds its own labels
+   from the sentinel path (`read_file(<sentinel>)`,
+   `write_file(<sentinel>)`); and `sentinel_entry_bytes(name, client,
+   scope_map)` builds `list_prefix(<sentinel prefix>)`. The `check_*`
    functions take no `label` and their messages carry no path.
 1. **Given** `expect_error(name, label, call, NotFoundError,
    ErrorCategory.RECOVERABLE, path=P, reason=NotFoundReason.FILE_ABSENT)`,
@@ -382,7 +389,8 @@ is US4.8's second client, which misbehaves on the sentinel path.
   a page slot; AIE-1045's cases filter with `without_sentinel` (entries
   and capped) and budget with `sentinel_entry_bytes`. Given the fixture
   contract that every mapped scope is writable, `require_fresh` is valid
-  under every answer to the enforcement question.
+  under the enforcement decision (option (a)) and would have been under
+  any other.
 - `scope_priority` must be an exact `tuple` even though `MemoryStore`
   accepts any `Sequence`; the module docstring says so.
 
@@ -426,7 +434,7 @@ is US4.8's second client, which misbehaves on the sentinel path.
   fixture contract live here.
 - ADR number: this issue takes **ADR 0021**; AIE-1044 (blocked on human
   decisions) moves to 0022.
-- **Open question for the human, not decided here**: §10.2 lists
+- **Decided by the human on 2026-10-02: option (a).** §10.2 lists
   "`system/` prefix writes rejected; write-restricted scopes rejected for
   callers lacking the role" among the transport suite's assertions, but
   the transport is identity-agnostic (ADR 0019) and `MemoryStore`
@@ -437,9 +445,15 @@ is US4.8's second client, which misbehaves on the sentinel path.
   transport, amending ADR 0019 decision 6's "server can enforce"
   wording); (b) run enforcement cases through the tool layer with
   identity fixtures; (c) leave transport enforcement unspecified. The
-  orchestrator recommends **(a)**. AIE-1045 writes the case once
-  answered. This harness is valid under every answer given the fixture
-  contract that every mapped scope is writable through `client`: the
-  sentinel and probes are own-entity writes in those scopes.
+  human chose **(a)**: the transport suite asserts a `system/` write is
+  accepted at the transport; `system/` read-only and role restriction are
+  enforced only in the tool layer (tested by the tool-layer and resolver
+  suites); a remote server must not enforce scope at the transport,
+  since authorization happens in the tool layer, where identity is known.
+  ADR 0021 records the decision and ADR 0019 carries the amendment to
+  decision 6. AIE-1045 adds `test_system_area_write_is_accepted_at_transport`.
+  This harness needed no change: given the fixture contract that every
+  mapped scope is writable through `client`, the sentinel and probes are
+  own-entity writes in those scopes.
 - Branch is rebased onto the final `AIE-1046-inprocess-client` commit
   (ADR 0020 present) before T1; tasks.md checks this.

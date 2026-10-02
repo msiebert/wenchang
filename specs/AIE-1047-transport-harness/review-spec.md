@@ -41,7 +41,7 @@ test's clock. Five baseline cases ship; AIE-1045 adds the rest of §10.2.
 | `last_updated` round-trips between two server results | Drop it | §10.2 "all four metadata fields" |
 | Deep exact-type readers | Duck typing | ADR 0019 deferred `MemoryFile`/`FileEntry`/`ListPage` hardening to this suite |
 | `expect_error` with category rule, message, exact-typed payload | `pytest.raises`; `!=` payload | Names the client; rejects StrEnum/str lookalikes and spoofs |
-| `require_fresh` in every stateful case, sentinel under the caller's own entity in area `conformance-sentinel`; `without_sentinel` / `sentinel_entry_bytes` for AIE-1045 | Single isolation case; factory fixture; unmapped entity | Fires in a real single run; valid under every enforcement answer |
+| `require_fresh` in every stateful case, sentinel under the caller's own entity in area `conformance-sentinel`; `without_sentinel` / `sentinel_entry_bytes` for AIE-1045 | Single isolation case; factory fixture; unmapped entity | Fires in a real single run; valid under the enforcement decision (a) |
 | `test_client_satisfies_protocol` requires and validates all seven fixtures | Lazy per-case validation | Contract enforced from day one |
 | Ticking reference clock; sequential interleavings, no thread safety | Fixed clock; threads | Recency cases testable; no requirement nothing else needs |
 | ADR 0021 (AIE-1044 moves to 0022) | — | 1044 is blocked on human decisions and lands later |
@@ -54,15 +54,22 @@ test's clock. Five baseline cases ship; AIE-1045 adds the rest of §10.2.
 
 ## Open questions / assumptions
 
-- **For the human (AIE-1045 needs the answer; this harness does not)**:
-  §10.2's "`system/` writes rejected; role-restricted writes rejected"
-  bullets vs an identity-agnostic transport whose in-process client
-  accepts them. (a) transport suite asserts *acceptance* and enforcement
-  stays in tools/resolver suites (amends ADR 0019's "server can enforce"
-  wording); (b) run enforcement cases through the tool layer with
-  identity fixtures; (c) leave unspecified. **Recommendation: (a).** The
-  harness itself is valid under any answer given its fixture contract:
-  every mapped scope is writable through `client` (own-entity writes).
+- **Decided by the human on 2026-10-02: option (a).** §10.2's "`system/`
+  writes rejected; role-restricted writes rejected" bullets vs an
+  identity-agnostic transport whose in-process client accepts them.
+  Options were (a) transport suite asserts *acceptance* and enforcement
+  stays in tools/resolver suites; (b) run enforcement cases through the
+  tool layer with identity fixtures; (c) leave unspecified. Under (a), a
+  remote server must not enforce scope at the transport (authorization
+  happens in the tool layer, where identity is known); ADR 0019 decision
+  6 is amended and ADR 0021 records the decision. AIE-1045 adds
+  `test_system_area_write_is_accepted_at_transport`. The harness itself
+  needed no change: every mapped scope is writable through `client`
+  (own-entity writes).
+- Sentinel helpers take no `label`: `sentinel_path(scope_map)` takes
+  neither `name` nor `label`; `require_fresh` and `sentinel_entry_bytes`
+  take `(name, client, scope_map)` and build their own labels from the
+  sentinel path or prefix (US2.0).
 - Clock contract: a client must stamp strictly increasing `last_updated`
   across sequential writes in one test. `max_file_bytes` must be ≥ 64.
   Both stated in the module docstring.
