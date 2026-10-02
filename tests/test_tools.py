@@ -830,7 +830,17 @@ BAD_NAME_CHARS = {
     "noncharacter-plane-1": "\U0001ffff",
 }
 
-GOOD_NAMES = ("\u00dcbersicht", "\u65e5\u672c\u8a9e", "my notes")
+GOOD_NAMES = {
+    "latin-umlaut": "\u00dcbersicht",
+    "cjk": "\u65e5\u672c\u8a9e",
+    "space": "my notes",
+    "capitalized": "Notes",
+    "accented": "caf\u00e9",
+    "dot": "a.b",
+    "cyrillic-dze": "\u0455",
+}
+
+AREA_RULE = "must be a lowercase slug: a-z0-9 first, then a-z0-9, '-' or '_'"
 
 
 @pytest.mark.parametrize("tool", SCOPE_TOOLS)
@@ -841,7 +851,7 @@ def test_non_slug_area_is_invalid_argument(harness: _Harness, tool: str, area: s
     """
     err = _invalid(harness, tool, "area", area=area)
 
-    assert "a-z0-9" in err.detail
+    assert AREA_RULE in err.detail
     assert err.__cause__ is None
     assert harness.log == []
 
@@ -878,7 +888,7 @@ def test_name_with_invisible_or_separator_char_is_invalid_argument(
 
 
 @pytest.mark.parametrize("tool", NAME_TOOLS)
-@pytest.mark.parametrize("name", GOOD_NAMES, ids=["latin-umlaut", "cjk", "space"])
+@pytest.mark.parametrize("name", list(GOOD_NAMES.values()), ids=list(GOOD_NAMES))
 def test_unicode_name_is_accepted(harness: _Harness, tool: str, name: str) -> None:
     """A name with letters in any script or ordinary spaces reaches the client
     as <name>.md (AIE-1136).
@@ -908,7 +918,7 @@ def test_area_slug_check_precedes_check_write(harness: _Harness, tool: str) -> N
     """
     err = _invalid(harness, tool, "area", scope="org", area="System")
 
-    assert "a-z0-9" in err.detail
+    assert AREA_RULE in err.detail
     assert harness.log == []
 
 
@@ -919,7 +929,7 @@ def test_area_slug_check_precedes_name_check(harness: _Harness, tool: str) -> No
     """
     err = _invalid(harness, tool, "area", area="System", name="my\u200bnotes")
 
-    assert "a-z0-9" in err.detail
+    assert AREA_RULE in err.detail
     assert harness.log == []
 
 
