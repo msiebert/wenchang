@@ -272,7 +272,7 @@ built, e.g. `user/u-1/notes/a.md` for `("user", "notes", "a")`.
    `list`, **Then** the metadata holds a `tuple`.
 8. **Given** `write_file` with a `description` containing any line
    boundary `str.splitlines` recognizes (`\n`, `\r`, `\x0b`, `\x0c`,
-   `\x1c`, `\x1d`, `\x1e`, `\x85`, ` `, ` `), **Then**
+   `\x1c`, `\x1d`, `\x1e`, `\x85`, `\u2028`, `\u2029`), **Then**
    `InvalidArgumentError("description", ...)`; no client call. A
    description must be one line under every line-boundary rule a reader
    may apply, not only `FileMetadata`'s `\n`/`\r` check, whose
@@ -451,7 +451,11 @@ adds `content`. If `parse_path` raises `ValueError` on an entry's path
 `None` and rendering continues. An `aliases` or `sources` member that is
 not a JSON-safe string is dropped from the rendered list rather than
 raising, and a `path`, `content`, `version`, `description`, or
-`next_cursor` that is not an exact `str` is dropped from the output.
+`next_cursor` that is not an exact `str` is dropped from the output
+(a dropped `path` takes `scope`, `area`, and `name` with it). Container
+fields are guarded the same way: a non-`FileMetadata` `metadata`,
+non-iterable `aliases`/`sources`, or non-`datetime` `last_updated` is
+dropped, and non-iterable `entries`/`capped` render as empty lists.
 `render_result` never raises for any value of a supported type, and its
 output is always JSON-serializable. Host contract: every tool failure is renderable —
 `render_error` accepts any `Exception` and never raises, so a host
@@ -494,7 +498,19 @@ render_error(exc)`.
    `description`, or `next_cursor` is not an exact `str` (e.g. an `int`;
    `next_cursor=None` still renders as `None`), **Then** that
    field is absent from the output, the other fields render as usual, no
-   exception is raised, and `json.dumps(out)` succeeds.
+   exception is raised, and `json.dumps(out)` succeeds. When `path` is
+   dropped this way, `scope`, `area`, and `name` are omitted along with
+   it, whereas a malformed `str` path (above) still renders those three
+   as `None`. **Given** a `MemoryFile` or entry (built directly,
+   bypassing core) whose `metadata` is not a `FileMetadata`, or whose
+   metadata `aliases` or `sources` is not iterable, or whose
+   `last_updated` is not a `datetime`, **Then** the affected keys are
+   omitted (`description`, `aliases`, `sources`, and `last_updated` for a
+   non-`FileMetadata` `metadata`; otherwise only the bad field), the
+   other fields render as usual, and no exception is raised. **Given** a
+   `ListPage` whose `entries`, or a `MemoryIndex` whose `entries` or
+   `capped`, is not iterable, **Then** that field renders as an empty
+   list and no exception is raised.
 6. **Given** any `WenchangError` `exc` (`render_error(exc: Exception)`),
    **When** `render_error(exc)`,
    **Then** the result has `error == type(exc).__name__`, `category ==
@@ -627,7 +643,11 @@ render_error(exc)`.
   renders `scope`/`area`/`name` as `None`; non-JSON-safe
   `aliases`/`sources` members are dropped; and `path`, `content`,
   `version`, `description`, or `next_cursor` that is not an exact `str`
-  is dropped from the output (US7.5a). Capped rows carry `scope` and
+  is dropped from the output, taking `scope`/`area`/`name` with a dropped
+  `path`; a `metadata` that is not a `FileMetadata`, `aliases`/`sources`
+  that are not iterable, or a `last_updated` that is not a `datetime` is
+  dropped (keys omitted); and `entries`/`capped` that are not iterable
+  render as empty lists (US7.5a). Capped rows carry `scope` and
   `area` (US7.3). `render_error` accepts any `Exception` and
   never raises (guarded type name and message; a `WenchangError` subclass
   whose `category` is missing, raises, or is not an `ErrorCategory` member

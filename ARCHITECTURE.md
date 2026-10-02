@@ -583,9 +583,10 @@ implemented.
   malformed `aliases` (a bare `str`/`bytes`, a value whose real type is not
   a `Sequence`, or a non-`str` member), a `description` containing any
   `str.splitlines` line boundary (the tool rejects `\x0b`, `\x0c`,
-  `\x1c`–`\x1e`, `\x85`, ` `, and ` ` itself; `\n` and `\r` are
-  left to `FileMetadata`, whose `ValueError` is converted), a `line` that `parse_fact` rejects, an
-  empty `old_string`, and an ungranted scope, raised directly with detail
+  `\x1c`–`\x1e`, `\x85`, `\u2028`, and `\u2029` itself; `\n` and `\r` are
+  left to `FileMetadata`, whose `ValueError` is converted), a `line` that
+  `parse_fact` rejects, an empty `old_string`, and an ungranted scope,
+  raised directly with detail
   `"scope {scope!r} is not available in this session; available scopes:
   {sorted, comma-separated}"` so the error itself tells the agent which
   scopes exist. `line` and `old_string` are pre-validated by the tool,
@@ -612,7 +613,14 @@ implemented.
   type and its output is always JSON-serializable: an `aliases` or
   `sources` member that is not a JSON-safe string is dropped, and a
   `path`, `content`, `version`, `description`, or `next_cursor` that is
-  not an exact `str` is dropped from the output. `render_error` accepts any `Exception` and never raises. A
+  not an exact `str` is dropped from the output; a dropped `path` takes
+  `scope`, `area`, and `name` with it (keys omitted), whereas a malformed
+  `str` path still renders those three as `None`. Container fields are
+  guarded the same way: a `metadata` that is not a `FileMetadata`,
+  `aliases` or `sources` that are not iterable, or a `last_updated` that
+  is not a `datetime` is dropped (keys omitted), and `entries` or `capped`
+  that are not iterable render as empty lists. `render_error` accepts any
+  `Exception` and never raises. A
   `WenchangError` renders `error` (type name), `category`, `message`, and
   each non-`None` attribute from a fixed list (`path`, `content`,
   `version`, `size`, `limit`, `match_count`, `reason`, `scope`,

@@ -677,3 +677,112 @@ def test_render_file_entry_drops_tuple_description() -> None:
     assert "description" not in out
     assert out["path"] == _PATH
     assert out["sources"] == ["s"]
+
+
+# --- render_result never raises on wrongly typed container fields -------------
+
+
+def _metadata_with(
+    aliases: object = ("x",),
+    sources: object = frozenset({"s"}),
+    last_updated: object = datetime(2026, 1, 1, tzinfo=UTC),
+) -> FileMetadata:
+    metadata = FileMetadata(
+        description="d",
+        aliases=cast(tuple[str, ...], aliases),
+        sources=cast(frozenset[str], sources),
+        last_updated=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    # Bypasses __post_init__, which rejects a non-datetime last_updated.
+    object.__setattr__(metadata, "last_updated", last_updated)
+    return metadata
+
+
+def test_render_memory_file_drops_none_aliases() -> None:
+    """AIE-1044, US7.5a: metadata aliases of None renders without raising, omits
+    aliases, and keeps the other fields.
+    """
+    file = MemoryFile(_PATH, "body", _metadata_with(aliases=None), _VERSION)
+
+    out = render_result(file)
+
+    assert "aliases" not in out
+    assert out["sources"] == ["s"]
+    assert out["description"] == "d"
+    assert out["last_updated"] == "2026-01-01T00:00:00Z"
+    assert out["content"] == "body"
+    _round_trips(out)
+
+
+def test_render_memory_file_drops_none_sources() -> None:
+    """AIE-1044, US7.5a: metadata sources of None renders without raising, omits
+    sources, and keeps the other fields.
+    """
+    file = MemoryFile(_PATH, "body", _metadata_with(sources=None), _VERSION)
+
+    out = render_result(file)
+
+    assert "sources" not in out
+    assert out["aliases"] == ["x"]
+    assert out["description"] == "d"
+    _round_trips(out)
+
+
+def test_render_memory_file_with_none_metadata() -> None:
+    """AIE-1044, US7.5a: a MemoryFile with metadata None renders path, content, and
+    version, and omits every metadata field.
+    """
+    file = MemoryFile(_PATH, "body", cast(FileMetadata, None), _VERSION)
+
+    out = render_result(file)
+
+    for key in ("aliases", "sources", "description", "last_updated"):
+        assert key not in out
+    assert out["path"] == _PATH
+    assert out["content"] == "body"
+    assert out["version"] == "v-17"
+    _round_trips(out)
+
+
+@pytest.mark.parametrize("last_updated", [None, "x"], ids=["none", "str"])
+def test_render_memory_file_drops_non_datetime_last_updated(last_updated: object) -> None:
+    """AIE-1044, US7.5a: a non-datetime last_updated renders without raising,
+    omits last_updated, and keeps the other fields.
+    """
+    file = MemoryFile(_PATH, "body", _metadata_with(last_updated=last_updated), _VERSION)
+
+    out = render_result(file)
+
+    assert "last_updated" not in out
+    assert out["aliases"] == ["x"]
+    assert out["description"] == "d"
+    _round_trips(out)
+
+
+@pytest.mark.parametrize("entries", [None, 5], ids=["none", "int"])
+def test_render_list_page_with_non_iterable_entries(entries: object) -> None:
+    """AIE-1044, US7.5a: a ListPage whose entries is not a tuple renders entries
+    as [] without raising.
+    """
+    page = ListPage(cast(tuple[FileEntry, ...], entries), None)
+
+    out = render_result(page)
+
+    assert out["entries"] == []
+    assert out["next_cursor"] is None
+    _round_trips(out)
+
+
+@pytest.mark.parametrize("field", ["entries", "capped"])
+def test_render_memory_index_with_none_field(field: str) -> None:
+    """AIE-1044, US7.5a: a MemoryIndex whose entries or capped is None renders
+    that field as [] without raising.
+    """
+    index = MemoryIndex()
+    # Bypasses __post_init__ validation, as a hostile caller could.
+    object.__setattr__(index, field, None)
+
+    out = render_result(index)
+
+    assert out == {"entries": [], "capped": []}
+    _round_trips(out)

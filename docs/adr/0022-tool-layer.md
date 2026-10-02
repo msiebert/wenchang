@@ -245,7 +245,13 @@ imports it.
       type, and its output is always JSON-serializable: it drops
       `aliases` or `sources` members that are not JSON-safe strings, and
       drops a `path`, `content`, `version`, `description`, or
-      `next_cursor` that is not an exact `str`. This relies on ADR 0019
+      `next_cursor` that is not an exact `str`. A dropped `path` takes
+      `scope`, `area`, and `name` with it, whereas a malformed `str` path
+      still renders those three as `None`. Container fields are guarded
+      too: a `metadata` that is not a `FileMetadata`, `aliases` or
+      `sources` that are not iterable, or a `last_updated` that is not a
+      `datetime` is dropped (keys omitted), and `entries` or `capped` that
+      are not iterable render as empty lists. This relies on ADR 0019
       decision 7: a conforming client surfaces every transport failure as
       `BackendUnavailableError`, so nothing the agent must act on arrives
       as an off-contract exception. A host needs one `except Exception` and

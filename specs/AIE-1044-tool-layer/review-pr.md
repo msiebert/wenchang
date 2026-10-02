@@ -70,7 +70,7 @@ AIE-1044 and its scenario ID. Line numbers are as of commit `263076e`.
 | US3.4 `member` → `ROLE_REQUIRED` with roles; `owner` forwarded | `t::test_member_cannot_write_role_gated_scope` (L907), `::test_owner_can_write_role_gated_scope` (L921) |
 | US3.6 client taxonomy errors propagate as the same object | `t::test_client_errors_propagate_from_mutating_tools` (L942) |
 | US3.7 `expected_version=None` forwarded; list aliases → tuple | `t::test_write_file_none_version_creates` (L954), `::test_write_file_metadata_uses_placeholder_and_tuple_aliases` (L881) |
-| US3.8 `description`: every `str.splitlines` boundary, unencodable, `system/` precedence, subclass | `t::test_description_with_newline_is_invalid_argument` (L962, `\n` and `\r`, rejected by `FileMetadata`, `__cause__` is its `ValueError`), `::test_description_with_line_boundary_is_invalid_argument` (L993, ` `, ` `, `\x85`, `\x0b`, `\x0c`, `\x1c`, `\x1d`, `\x1e`, rejected by the tool itself), `::test_unencodable_description_is_invalid_argument` (L971), `::test_bad_description_in_system_area_is_restricted` (L980), `::test_str_subclass_description_is_normalized` (L1002) |
+| US3.8 `description`: every `str.splitlines` boundary, unencodable, `system/` precedence, subclass | `t::test_description_with_newline_is_invalid_argument` (L962, `\n` and `\r`, rejected by `FileMetadata`, `__cause__` is its `ValueError`), `::test_description_with_line_boundary_is_invalid_argument` (L993, `\u2028`, `\u2029`, `\x85`, `\x0b`, `\x0c`, `\x1c`, `\x1d`, `\x1e`, rejected by the tool itself), `::test_unencodable_description_is_invalid_argument` (L971), `::test_bad_description_in_system_area_is_restricted` (L980), `::test_str_subclass_description_is_normalized` (L1002) |
 | US3.9 malformed `aliases`; member detail; unencodable member; real-type `Sequence` check; subclass members normalized | `t::test_malformed_aliases_are_invalid_argument` (L1016), `::test_non_str_alias_member_detail` (L1023), `::test_unencodable_alias_member_is_invalid_argument` (L1033, chained from `UnicodeEncodeError`), `::test_class_spoofing_aliases_is_invalid_argument` (L1042, `_ListSpoof`), `::test_str_subclass_alias_members_are_normalized` (L1049) |
 | US3.10 one wrong-type rule, exact detail, no `TypeError`; subclasses forwarded as `str` | `t::test_wrong_type_argument_is_invalid_argument` (L1075), `::test_wrong_type_content_detail_sentence` (L1087), `::test_str_subclass_arguments_are_forwarded_as_exact_str` (L1107), `::test_str_subclass_cursor_is_forwarded_as_exact_str` (L1121) |
 | US3.11 unencodable `content` / `line` / `new_string` | `t::test_unencodable_text_is_invalid_argument` (L1138) |
@@ -244,7 +244,7 @@ Code review:
 - **`description` line boundaries.** Only `\n` / `\r` were rejected, so
   `\x85`, `\u2028`, `\x0b`, and the other `str.splitlines` boundaries got
   through. All are rejected now (US3.8): the tool itself rejects `\x0b`,
-  `\x0c`, `\x1c`–`\x1e`, `\x85`, ` `, and ` ` before the client
+  `\x0c`, `\x1c`–`\x1e`, `\x85`, `\u2028`, and `\u2029` before the client
   call, while `\n` and `\r` are still rejected by `FileMetadata` and
   surface as `InvalidArgumentError("description")` chained from its
   `ValueError`.
@@ -268,6 +268,20 @@ Gate review:
   which the code doesn't accept) in spec.md, plan.md, ARCHITECTURE.md,
   and ADR 0022; spec status set to implemented, code-reviewed
   2026-10-02; an unwrapped line in ADR 0022 decision 9 rewrapped.
+- **Second round: container-field guards.** The never-raises rule now
+  covers container fields: a `metadata` that is not a `FileMetadata`,
+  `aliases`/`sources` that are not iterable, or a `last_updated` that is
+  not a `datetime` is dropped (keys omitted), and `entries`/`capped` that
+  are not iterable render as empty lists (US7.5a, FR-009, plan decision
+  11, ARCHITECTURE.md, ADR 0022 decision 11).
+- **Second round: path-dropped behaviour.** When a non-`str` `path` is
+  dropped, `scope`, `area`, and `name` are omitted with it; a malformed
+  `str` path still renders those three as `None`. Documented in the same
+  places.
+- **Second round: separator characters.** ARCHITECTURE.md, spec.md, and
+  this file held raw U+2028/U+2029 characters inside backticks; they are
+  now the escaped text `\u2028` / `\u2029`, matching ADR 0022. Overlong
+  lines in the ARCHITECTURE.md tools entry rewrapped.
 - **Merge dependency.** ADRs 0020 and 0021 come from the AIE-1046 and
   AIE-1047 branches; those must land before this PR merges.
 

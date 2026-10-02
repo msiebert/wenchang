@@ -166,7 +166,12 @@ dependencies.
     its output is always JSON-serializable: it drops `aliases`/`sources`
     members that are not JSON-safe strings, and drops a `path`,
     `content`, `version`, `description`, or `next_cursor` that is not an
-    exact `str`. This relies on ADR
+    exact `str`; a dropped `path` takes `scope`/`area`/`name` with it,
+    whereas a malformed `str` path still renders them as `None`. Container
+    fields are guarded too: a `metadata` that is not a `FileMetadata`,
+    `aliases`/`sources` that are not iterable, or a `last_updated` that is
+    not a `datetime` is dropped (keys omitted), and `entries`/`capped` that
+    are not iterable render as empty lists. This relies on ADR
     0019's transport-failure mapping: a conforming client surfaces every
     transport failure as `BackendUnavailableError`, so nothing the agent
     needs to act on arrives as an off-contract exception. A host needs one

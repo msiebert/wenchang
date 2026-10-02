@@ -412,7 +412,12 @@ def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str
         return _file_fields(file, content=file.content)
     if issubclass(kind, ListPage):
         page = cast(ListPage, value)
-        out: dict[str, object] = {"entries": [_file_fields(entry) for entry in page.entries]}
+        out: dict[str, object] = {
+            "entries": [
+                _file_fields(cast(FileEntry, entry))
+                for entry in _iterate_or_empty(lambda: page.entries)
+            ]
+        }
         if page.next_cursor is None:
             out["next_cursor"] = None
         else:
@@ -423,8 +428,14 @@ def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str
     if issubclass(kind, MemoryIndex):
         index = cast(MemoryIndex, value)
         return {
-            "entries": [_file_fields(entry) for entry in index.entries],
-            "capped": [_capped_fields(cap) for cap in index.capped],
+            "entries": [
+                _file_fields(cast(FileEntry, entry))
+                for entry in _iterate_or_empty(lambda: index.entries)
+            ],
+            "capped": [
+                _capped_fields(cast(CappedPrefix, cap))
+                for cap in _iterate_or_empty(lambda: index.capped)
+            ],
         }
     raise TypeError(f"cannot render a {_type_name(kind)}")
 
@@ -516,19 +527,30 @@ def _file_fields(entry: FileEntry | MemoryFile, content: object = None) -> dict[
         content_value = _str_or_drop(lambda: content)
         if content_value is not _DROP:
             fields["content"] = content_value
-    metadata = entry.metadata
     version = _str_or_drop(lambda: entry.version)
     if version is not _DROP:
         fields["version"] = version
-    description = _str_or_drop(lambda: metadata.description)
+    try:
+        metadata = cast(object, entry.metadata)
+    except Exception:
+        return fields
+    if not issubclass(type(metadata), FileMetadata):
+        return fields
+    meta = cast(FileMetadata, metadata)
+    description = _str_or_drop(lambda: meta.description)
     if description is not _DROP:
         fields["description"] = description
-    # Metadata may hold non-str members; drop them rather than fail to render.
-    return fields | {
-        "aliases": _str_members(metadata.aliases),
-        "sources": sorted(_str_members(metadata.sources)),
-        "last_updated": _timestamp(metadata.last_updated),
-    }
+    # Metadata may hold wrongly typed fields or members; drop them rather than fail to render.
+    aliases = _members_or_drop(lambda: meta.aliases)
+    if aliases is not _DROP:
+        fields["aliases"] = aliases
+    sources = _members_or_drop(lambda: meta.sources)
+    if sources is not _DROP:
+        fields["sources"] = sorted(cast(list[str], sources))
+    last_updated = _timestamp_or_drop(lambda: meta.last_updated)
+    if last_updated is not _DROP:
+        fields["last_updated"] = last_updated
+    return fields
 
 
 def _str_or_drop(read: Callable[[], object]) -> object:
@@ -542,8 +564,32 @@ def _str_or_drop(read: Callable[[], object]) -> object:
     return str.__str__(cast(str, value))
 
 
-def _str_members(values: Iterable[object]) -> list[str]:
-    return [str.__str__(cast(str, v)) for v in values if issubclass(type(v), str)]
+def _members_or_drop(read: Callable[[], object]) -> object:
+    """Return the exact-str members of read(), or _DROP if reading or iterating it fails."""
+    try:
+        values = cast(Iterable[object], read())
+        return [str.__str__(cast(str, v)) for v in values if issubclass(type(v), str)]
+    except Exception:
+        return _DROP
+
+
+def _iterate_or_empty(read: Callable[[], object]) -> list[object]:
+    """Return the members of read(), or [] if reading or iterating it fails."""
+    try:
+        return list(cast(Iterable[object], read()))
+    except Exception:
+        return []
+
+
+def _timestamp_or_drop(read: Callable[[], object]) -> object:
+    """Return read() as UTC ISO-8601 with a "Z" suffix, or _DROP if it is not a datetime."""
+    try:
+        value = read()
+        if not issubclass(type(value), datetime):
+            return _DROP
+        return _timestamp(cast(datetime, value))
+    except Exception:
+        return _DROP
 
 
 def _timestamp(value: datetime) -> str:
