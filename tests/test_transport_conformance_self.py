@@ -1,13 +1,18 @@
-"""Helper-level self-tests for the transport conformance harness.
+"""Self-tests for the transport conformance harness.
 
 Covers AIE-1047: US1.6 (sentinel helpers) and US2.0-2.8 (expect_error, canonical
-readers, probe_path, require_fresh, _call). Each failing call is expected to raise
-pytest.fail with a message starting "{name}: {label}: " and containing the key phrase.
+readers, probe_path, require_fresh, _call) at helper level, and US1.2-1.4 and
+US4 (broken clients and bad fixtures make each baseline case fail). Each failing
+call is expected to raise pytest.fail with a message starting "{name}: {label}: "
+and containing the key phrase.
 """
 
 import inspect
+import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
+from typing import cast
 
 import pytest
 
@@ -38,6 +43,7 @@ from wenchang.testing.transport_conformance import (
     PROBE_STEM_2,
     SENTINEL_AREA,
     SENTINEL_STEM,
+    TransportConformance,
     canonical_entry,
     canonical_file,
     canonical_index,
@@ -1106,3 +1112,588 @@ def test_require_fresh_wrong_read_reason_fails() -> None:
     )
 
     assert "reason" in message
+
+
+# --- Running baseline cases (US4 harness) -----------------------------------
+
+SUITE = TransportConformance()
+SOURCE = "conformance"
+PROBES = (P, Q)
+ROUND_TRIP = "test_write_then_read_round_trips"
+TOKEN_CASE = "test_returned_token_is_accepted"
+ABSENT = "test_read_absent_is_not_found"
+OVERSIZE = "test_oversize_write_is_rejected"
+PROTOCOL = "test_client_satisfies_protocol"
+STATEFUL_CASES = (ROUND_TRIP, TOKEN_CASE, ABSENT, OVERSIZE)
+ALL_CASES = (PROTOCOL, *STATEFUL_CASES)
+FIXTURE_ORDER = (
+    "client",
+    "source",
+    "scope_map",
+    "max_file_bytes",
+    "index_max_bytes",
+    "scope_priority",
+    "list_page_size",
+)
+
+
+def _fixtures(client: object, **overrides: object) -> dict[str, object]:
+    """The reference fixture values, with overrides applied."""
+    base: dict[str, object] = {
+        "client": client,
+        "source": SOURCE,
+        "scope_map": dict(SCOPE_MAP),
+        "max_file_bytes": 256,
+        "index_max_bytes": 4096,
+        "scope_priority": ("user", "org"),
+        "list_page_size": 2,
+    }
+    return base | overrides
+
+
+def _case_params(case: str) -> list[str]:
+    method = cast(Callable[..., None], getattr(TransportConformance, case))
+    return [p for p in inspect.signature(method).parameters if p != "self"]
+
+
+def _run(case: str, client: object, **overrides: object) -> None:
+    """Call SUITE.<case> with the fixtures its signature asks for."""
+    values = _fixtures(client, **overrides)
+    method = cast(Callable[..., None], getattr(SUITE, case))
+    method(**{p: values[p] for p in _case_params(case)})
+
+
+def _reference_passes(case: str) -> None:
+    """The case passes for the reference client and the forwarding wrapper (US4.10)."""
+    _run(case, _reference())
+    _run(case, _Forwarding())
+
+
+def _case_fails(case: str, client: object, label: str, phrase: str, **overrides: object) -> str:
+    """Run the case; require a failure "{client type}: {label}: ...{phrase}..."."""
+    prefix = f"{type(client).__name__}: {label}: "
+    pattern = f"(?s)^{re.escape(prefix)}.*{re.escape(phrase)}"
+    with pytest.raises(pytest.fail.Exception, match=pattern) as exc_info:
+        _run(case, client, **overrides)
+    return str(exc_info.value)
+
+
+def _fixture_fails(case: str, client: object, fixture: str, **overrides: object) -> str:
+    """Run the case; require a failure "{client type}: fixture {fixture} ..."."""
+    pattern = f"^{re.escape(type(client).__name__)}: fixture {re.escape(fixture)} "
+    with pytest.raises(pytest.fail.Exception, match=pattern) as exc_info:
+        _run(case, client, **overrides)
+    return str(exc_info.value)
+
+
+def _with(file: MemoryFile, **overrides: object) -> MemoryFile:
+    """A copy of file with fields replaced, bypassing validation."""
+    return _build(MemoryFile, vars(file) | overrides)
+
+
+def _with_meta(file: MemoryFile, **overrides: object) -> MemoryFile:
+    """A copy of file with metadata fields replaced, bypassing validation."""
+    return _with(file, metadata=_build(FileMetadata, vars(file.metadata) | overrides))
+
+
+class _ProbeReadReturns(_Forwarding):
+    """read_file of a probe path returns transform(real result); absent reads still raise."""
+
+    def __init__(self, transform: Callable[[MemoryFile], object]) -> None:
+        super().__init__()
+        self.transform = transform
+
+    def read_file(self, path: str) -> MemoryFile:
+        result = super().read_file(path)
+        if path in PROBES:
+            return cast(MemoryFile, self.transform(result))
+        return result
+
+
+class _StripsSource(_Forwarding):
+    """write_file and read_file drop SOURCE from the sources of probe results."""
+
+    def _strip(self, path: str, result: MemoryFile) -> MemoryFile:
+        if path in PROBES:
+            return _with_meta(result, sources=result.metadata.sources - {SOURCE})
+        return result
+
+    def read_file(self, path: str) -> MemoryFile:
+        return self._strip(path, super().read_file(path))
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        result = super().write_file(path, content, metadata, expected_version, source=source)
+        return self._strip(path, result)
+
+
+class _ProbeReadRaises(_Forwarding):
+    """read_file of a probe path raises `exc`."""
+
+    def __init__(self, exc: Exception) -> None:
+        super().__init__()
+        self.exc = exc
+
+    def read_file(self, path: str) -> MemoryFile:
+        if path in PROBES:
+            raise self.exc
+        return super().read_file(path)
+
+
+class _ProbeWriteRaises(_Forwarding):
+    """write_file of a probe path raises `exc`."""
+
+    def __init__(self, exc: Exception) -> None:
+        super().__init__()
+        self.exc = exc
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        if path in PROBES:
+            raise self.exc
+        return super().write_file(path, content, metadata, expected_version, source=source)
+
+
+class _AcceptsOversize(_Forwarding):
+    """write_file of a probe path goes to a store with a far larger size limit."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lenient = InProcessClient(MemoryStore(InMemoryStorage(), max_file_bytes=1 << 20))
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        target = self.lenient if path in PROBES else self.inner
+        return target.write_file(path, content, metadata, expected_version, source=source)
+
+
+class _ForgetsTokens(_Forwarding):
+    """Rejects any token handed back for a probe path with VersionConflictError."""
+
+    def __init__(self, *, on_write: bool, on_append: bool) -> None:
+        super().__init__()
+        self.on_write = on_write
+        self.on_append = on_append
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        if self.on_write and path in PROBES and expected_version is not None:
+            raise VersionConflictError(path, content, VersionToken("forgotten"))
+        return super().write_file(path, content, metadata, expected_version, source=source)
+
+    def append_line(
+        self, path: str, line: str, expected_version: VersionToken, *, source: str
+    ) -> MemoryFile:
+        if self.on_append and path in PROBES:
+            raise VersionConflictError(path, line, VersionToken("forgotten"))
+        return super().append_line(path, line, expected_version, source=source)
+
+
+class _NotAClient:
+    """Has only read_file, so it does not satisfy TransportClient."""
+
+    def read_file(self, path: str) -> MemoryFile:
+        raise NotImplementedError
+
+
+def test_forwarding_wrapper_satisfies_every_case() -> None:
+    """The forwarding base and reference client pass all five cases (AIE-1047, US1.1, US4.10)."""
+    for case in ALL_CASES:
+        _reference_passes(case)
+
+
+# --- US4.1-4.3: round trip ---------------------------------------------------
+
+READ_RESULT_P = f"read result for {P}"
+
+BAD_READS: list[tuple[str, Callable[[MemoryFile], object], str]] = [
+    ("dict", lambda f: {"path": f.path, "content": f.content}, "wrong result type"),
+    (
+        "aliases-list",
+        lambda f: _with_meta(f, aliases=list(f.metadata.aliases)),
+        "bad field aliases",
+    ),
+    (
+        "last-updated-naive",
+        lambda f: _with_meta(f, last_updated=f.metadata.last_updated.replace(tzinfo=None)),
+        "bad field last_updated",
+    ),
+    ("version-empty", lambda f: _with(f, version=""), "bad field version"),
+    (
+        "drops-alias",
+        lambda f: _with_meta(f, aliases=f.metadata.aliases[:1]),
+        "round trip changed aliases",
+    ),
+    (
+        "strips-newline",
+        lambda f: _with(f, content=f.content.removesuffix("\n")),
+        "round trip changed content",
+    ),
+    (
+        "doubles-newline",
+        lambda f: _with(f, content=f.content + "\n"),
+        "round trip changed content",
+    ),
+    (
+        "other-last-updated",
+        lambda f: _with_meta(f, last_updated=f.metadata.last_updated + timedelta(seconds=1)),
+        "round trip changed last_updated",
+    ),
+    ("wrong-path", lambda f: _with(f, path=Q), "round trip changed path"),
+]
+
+
+@pytest.mark.parametrize(
+    ("transform", "phrase"), [(t, p) for _, t, p in BAD_READS], ids=[i for i, _, _ in BAD_READS]
+)
+def test_round_trip_bad_read_fails(transform: Callable[[MemoryFile], object], phrase: str) -> None:
+    """A misbehaving read_file(P) fails the round trip with its phrase.
+
+    (AIE-1047, US4.1, US4.2, US4.3, US4.10)
+    """
+    _reference_passes(ROUND_TRIP)
+
+    _case_fails(ROUND_TRIP, _ProbeReadReturns(transform), READ_RESULT_P, phrase)
+
+
+def test_round_trip_dict_read_names_dict() -> None:
+    """A dict read result fails "wrong result type" naming dict (AIE-1047, US4.1, US4.10)."""
+    _reference_passes(ROUND_TRIP)
+
+    message = _case_fails(
+        ROUND_TRIP,
+        _ProbeReadReturns(lambda f: {"path": f.path}),
+        READ_RESULT_P,
+        "wrong result type",
+    )
+
+    assert "dict" in message
+    assert "MemoryFile" in message
+
+
+def test_round_trip_dict_reader_still_raises_for_absent() -> None:
+    """The dict-returning client still raises for absent reads (AIE-1047, US4.1, US4.10)."""
+    _reference_passes(ABSENT)
+
+    _run(ABSENT, _ProbeReadReturns(lambda f: {"path": f.path}))
+
+
+# --- US4.4: source stamping --------------------------------------------------
+
+
+def test_round_trip_source_not_stamped_fails() -> None:
+    """Stripping source from both results fails "source not stamped" on the write result.
+
+    (AIE-1047, US4.4, US4.10)
+    """
+    _reference_passes(ROUND_TRIP)
+
+    message = _case_fails(
+        ROUND_TRIP, _StripsSource(), f"write result for {P}", "source not stamped"
+    )
+
+    assert SOURCE in message
+
+
+# --- US4.5: absent read parity -----------------------------------------------
+
+
+def _category_overridden() -> NotFoundError:
+    exc = NotFoundError(P, FILE_ABSENT)
+    vars(exc)["category"] = ErrorCategory.TRANSIENT
+    return exc
+
+
+ABSENT_READ_ERRORS: list[tuple[str, Exception, str, str]] = [
+    ("key-error", KeyError(P), "wrong error type", "KeyError"),
+    ("class-spoof", _SpoofedNotFound(), "wrong error type", "_SpoofedNotFound"),
+    (
+        "plain-str-reason",
+        NotFoundError(P, "file_absent"),  # pyright: ignore[reportArgumentType]
+        "wrong payload",
+        "reason",
+    ),
+    ("category-override", _category_overridden(), "wrong category", "transient"),
+]
+
+
+@pytest.mark.parametrize(
+    ("exc", "phrase", "detail"),
+    [(e, p, d) for _, e, p, d in ABSENT_READ_ERRORS],
+    ids=[i for i, _, _, _ in ABSENT_READ_ERRORS],
+)
+def test_read_absent_wrong_error_fails(exc: Exception, phrase: str, detail: str) -> None:
+    """A wrong absent-read error fails with its phrase and detail (AIE-1047, US4.5, US4.10)."""
+    _reference_passes(ABSENT)
+
+    message = _case_fails(ABSENT, _ProbeReadRaises(exc), f"read_file({P})", phrase)
+
+    assert detail in message
+
+
+# --- US4.6: oversize rejection -----------------------------------------------
+
+
+def test_oversize_accepted_fails_did_not_raise() -> None:
+    """Accepting the oversize write fails "did not raise" with the fixture hint.
+
+    (AIE-1047, US4.6, US4.10)
+    """
+    _reference_passes(OVERSIZE)
+
+    message = _case_fails(OVERSIZE, _AcceptsOversize(), f"write_file({P})", "did not raise")
+
+    assert "max_file_bytes" in message
+
+
+@pytest.mark.parametrize(
+    ("exc", "phrase", "detail"),
+    [
+        (NotFoundError(P, NotFoundReason.INVALID_PATH), "wrong error type", "NotFoundError"),
+        (OversizeWriteError(P, 1, 1), "wrong payload", "size"),
+    ],
+    ids=["not-found", "wrong-size"],
+)
+def test_oversize_wrong_error_fails(exc: Exception, phrase: str, detail: str) -> None:
+    """A wrong oversize error fails with its phrase and detail (AIE-1047, US4.6, US4.10)."""
+    _reference_passes(OVERSIZE)
+
+    message = _case_fails(OVERSIZE, _ProbeWriteRaises(exc), f"write_file({P})", phrase)
+
+    assert detail in message
+
+
+# --- US4.7: token acceptance -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("client", "label"),
+    [
+        (_ForgetsTokens(on_write=True, on_append=False), f"write_file({P})"),
+        (_ForgetsTokens(on_write=False, on_append=True), f"append_line({Q})"),
+    ],
+    ids=["write", "append"],
+)
+def test_forgotten_token_fails_token_not_accepted(client: _ForgetsTokens, label: str) -> None:
+    """A client rejecting its own token fails "token not accepted" (AIE-1047, US4.7, US4.10)."""
+    _reference_passes(TOKEN_CASE)
+
+    message = _case_fails(TOKEN_CASE, client, label, "token not accepted")
+
+    assert "VersionConflictError" in message
+
+
+# --- US1.4, US4.8: isolation and setup failures ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [(a, b) for a in STATEFUL_CASES for b in STATEFUL_CASES if a != b],
+)
+def test_shared_client_second_case_not_isolated(first: str, second: str) -> None:
+    """A client shared by two different cases fails the second "not isolated".
+
+    (AIE-1047, US1.4, US4.8, US4.10)
+    """
+    shared = _reference()
+    _run(first, shared)
+
+    message = _case_fails(second, shared, f"read_file({SENTINEL})", "not isolated")
+
+    assert SENTINEL in message
+
+
+@pytest.mark.parametrize("case", STATEFUL_CASES)
+def test_sentinel_write_failure_fails_every_stateful_case(case: str) -> None:
+    """A sentinel-only write failure fails "sentinel write failed" (AIE-1047, US4.8, US4.10)."""
+    _reference_passes(case)
+
+    message = _case_fails(
+        case, _SentinelWriteFails(), f"write_file({SENTINEL})", "sentinel write failed"
+    )
+
+    assert "RuntimeError" in message
+
+
+def test_round_trip_write_runtime_error_is_unexpected() -> None:
+    """write_file(P) raising RuntimeError fails "unexpected error" (AIE-1047, US4.8, US4.10)."""
+    _reference_passes(ROUND_TRIP)
+
+    message = _case_fails(
+        ROUND_TRIP,
+        _ProbeWriteRaises(RuntimeError("write exploded")),
+        f"write_file({P})",
+        "unexpected error",
+    )
+
+    assert "RuntimeError" in message
+
+
+# --- US1.2, US1.3, US4.8a: fixture validation --------------------------------
+
+BAD_FIXTURES: list[tuple[str, str, object, str]] = [
+    ("source-int", "source", 1, "int"),
+    ("source-empty", "source", "", "empty"),
+    ("source-str-sub", "source", _StrSub("s"), "_StrSub"),
+    ("source-none", "source", None, "NoneType"),
+    ("scope-map-list", "scope_map", [("user", "u-1"), ("org", "o-9")], "list"),
+    ("scope-map-one-entry", "scope_map", {"user": "u-1"}, "two"),
+    ("scope-map-empty", "scope_map", {}, "two"),
+    ("scope-map-int-value", "scope_map", {"user": 1, "org": "o-9"}, "int"),
+    ("scope-map-int-key", "scope_map", {1: "u-1", "org": "o-9"}, "int"),
+    ("scope-map-str-sub-key", "scope_map", {_StrSub("user"): "u-1", "org": "o-9"}, "_StrSub"),
+    ("scope-map-bad-key", "scope_map", {"us/er": "u-1", "org": "o-9"}, "segment"),
+    ("scope-map-bad-value", "scope_map", {"user": "u/1", "org": "o-9"}, "segment"),
+    ("max-file-bytes-small", "max_file_bytes", MIN_FILE_BYTES - 1, str(MIN_FILE_BYTES)),
+    ("max-file-bytes-zero", "max_file_bytes", 0, str(MIN_FILE_BYTES)),
+    ("max-file-bytes-bool", "max_file_bytes", True, "bool"),
+    ("max-file-bytes-float", "max_file_bytes", 256.0, "float"),
+    ("max-file-bytes-str", "max_file_bytes", "256", "str"),
+    ("index-max-bytes-zero", "index_max_bytes", 0, "at least 1"),
+    ("index-max-bytes-negative", "index_max_bytes", -1, "at least 1"),
+    ("index-max-bytes-bool", "index_max_bytes", True, "bool"),
+    ("index-max-bytes-float", "index_max_bytes", 4096.0, "float"),
+    ("scope-priority-str", "scope_priority", "user", "str"),
+    ("scope-priority-list", "scope_priority", ["user", "org"], "list"),
+    ("scope-priority-int-member", "scope_priority", ("user", 1), "int"),
+    ("scope-priority-str-sub-member", "scope_priority", ("user", _StrSub("org")), "_StrSub"),
+    ("scope-priority-duplicate", "scope_priority", ("user", "user"), "duplicate"),
+    ("scope-priority-bad-segment", "scope_priority", ("user", "o/rg"), "segment"),
+    ("list-page-size-zero", "list_page_size", 0, "at least 1"),
+    ("list-page-size-true", "list_page_size", True, "bool"),
+    ("list-page-size-false", "list_page_size", False, "bool"),
+    ("list-page-size-float", "list_page_size", 2.0, "float"),
+]
+
+
+@pytest.mark.parametrize("case", ALL_CASES)
+def test_non_client_fails_every_case(case: str) -> None:
+    """A client not satisfying TransportClient fails every case "fixture client".
+
+    (AIE-1047, US1.2, US4.10)
+    """
+    _reference_passes(case)
+
+    message = _fixture_fails(case, _NotAClient(), "client")
+
+    assert "_NotAClient" in message
+
+
+@pytest.mark.parametrize(
+    ("fixture", "value", "detail"),
+    [(f, v, d) for _, f, v, d in BAD_FIXTURES],
+    ids=[i for i, _, _, _ in BAD_FIXTURES],
+)
+def test_protocol_case_rejects_bad_fixture(fixture: str, value: object, detail: str) -> None:
+    """test_client_satisfies_protocol fails "fixture <name>" for each bad fixture.
+
+    (AIE-1047, US1.3, US4.8a, US4.10)
+    """
+    _reference_passes(PROTOCOL)
+
+    message = _fixture_fails(PROTOCOL, _reference(), fixture, **{fixture: value})
+
+    assert detail in message
+
+
+def test_protocol_case_rejects_bad_client() -> None:
+    """test_client_satisfies_protocol fails "fixture client" for a non-client.
+
+    (AIE-1047, US4.8a, US4.10)
+    """
+    _reference_passes(PROTOCOL)
+
+    _fixture_fails(PROTOCOL, _NotAClient(), "client")
+
+
+BAD_FIXTURE_VALUES: dict[str, object] = {
+    "source": "",
+    "scope_map": {"user": "u-1"},
+    "max_file_bytes": True,
+    "index_max_bytes": 0,
+    "scope_priority": ["user", "org"],
+    "list_page_size": False,
+}
+
+FIXTURE_PAIRS = [
+    *pairwise(FIXTURE_ORDER),
+    ("client", "list_page_size"),
+    ("source", "list_page_size"),
+    ("scope_map", "scope_priority"),
+]
+
+
+@pytest.mark.parametrize(("earlier", "later"), FIXTURE_PAIRS)
+def test_protocol_case_reports_earlier_bad_fixture(earlier: str, later: str) -> None:
+    """With two bad fixtures, the earlier in the fixed order is reported.
+
+    (AIE-1047, US1.3, US4.8a, US4.10)
+    """
+    _reference_passes(PROTOCOL)
+    client: object = _NotAClient() if earlier == "client" else _reference()
+    overrides = {f: BAD_FIXTURE_VALUES[f] for f in (earlier, later) if f != "client"}
+
+    message = _fixture_fails(PROTOCOL, client, earlier, **overrides)
+
+    assert f"fixture {later}" not in message
+
+
+USED_BAD_FIXTURES: list[tuple[str, str, str, object]] = [
+    (f"{case}-{bad_id}", case, fixture, value)
+    for case in STATEFUL_CASES
+    for bad_id, fixture, value, _ in BAD_FIXTURES
+    if fixture in _case_params(case)
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "fixture", "value"),
+    [(c, f, v) for _, c, f, v in USED_BAD_FIXTURES],
+    ids=[i for i, _, _, _ in USED_BAD_FIXTURES],
+)
+def test_stateful_case_rejects_bad_fixture_it_uses(case: str, fixture: str, value: object) -> None:
+    """A stateful case fails "fixture <name>" for a bad fixture it takes.
+
+    (AIE-1047, US1.3, US4.10)
+    """
+    _reference_passes(case)
+
+    _fixture_fails(case, _reference(), fixture, **{fixture: value})
+
+
+def test_every_case_takes_only_the_seven_fixtures() -> None:
+    """Each case's parameters are client plus a subset of the fixtures (AIE-1047, US1.3)."""
+    assert _case_params(PROTOCOL) == list(FIXTURE_ORDER)
+    for case in STATEFUL_CASES:
+        params = _case_params(case)
+        assert params[0] == "client"
+        assert set(params) <= set(FIXTURE_ORDER)
+    assert "max_file_bytes" in _case_params(OVERSIZE)
