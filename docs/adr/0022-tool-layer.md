@@ -297,10 +297,37 @@ imports it.
     `TypeError` has no category, so the agent couldn't repair it.
     - **Rejected: treating `TypeError` as the host schema's concern**,
       which leaves the agent stuck when the host is loose.
+14. **`area` is an ASCII slug; `name` rejects invisible characters
+    (human decision, 2026-10-02).** `scope` compares the area to `system`
+    exactly (ADR 0016 decision 2), and `paths` accepts any segment without
+    a `Cc` character, so `System`, `ѕystem` with a Cyrillic `ѕ`, or
+    `system` with a zero-width character inserted would otherwise be
+    writable areas that look like `system/` to a human or a model. Every
+    tool that takes `area` requires it to match `^[a-z0-9][a-z0-9_-]*$`
+    (`list_prefix` only when an area is given). `name` stays Unicode, since
+    names are human titles, but must not contain a `Cf` character,
+    `\u2028`, `\u2029`, or a Unicode noncharacter (U+FDD0–U+FDEF, or a code
+    point whose low 16 bits are `FFFE` or `FFFF`). A violation raises
+    `InvalidArgumentError("area")` or `InvalidArgumentError("name")` with a
+    detail naming the rule, no `__cause__`, and no client call. The check
+    runs after the grant check and path building, so an `area` or `name`
+    that `build_path` / `build_prefix` rejects keeps that chained error,
+    and before `check_write`, so `system` itself still reaches the
+    `SYSTEM_READ_ONLY` rule. Core `paths`, storage, and the transport are
+    unchanged: files stored under a non-slug area remain valid and
+    readable through core and the transport, but not through the tools.
+    - **Rejected: NFKC normalization and casefolding before comparing to
+      `system`**, which catches `System` and compatibility forms but misses
+      cross-script confusables such as `ѕystem`.
+    - **Rejected: rejecting only invisible (`Cf`) characters**, which
+      leaves `System` and cross-script lookalikes writable.
+    - **Rejected: restricting segments in core `paths`**, which changes
+      storage semantics and invalidates existing stored data.
 
 The resulting check order for every tool is: segment type check,
-normalization, and UTF-8 check; grant check; path building; for mutating
-tools, `check_write`; the remaining arguments; the client call.
+normalization, and UTF-8 check; grant check; path building; the `area`
+slug and `name` character rules; for mutating tools, `check_write`; the
+remaining arguments; the client call.
 
 ## Consequences
 
@@ -344,18 +371,13 @@ The end-to-end test runs over a tests-only `_StoreClient` around a real
 the in-process client once that exists, which also exercises real index
 semantics through the tools.
 
-An adversarial code review raised two points outside this layer's
-decisions, both still open:
+Lookalike `system` areas are not writable through the tools (decision 14).
+An adopter's seed areas must be ASCII slugs to be reachable through the
+tools.
 
-- **Lookalike `system` areas are writable.** `scope` compares the area to
-  `system` exactly (ADR 0016 decision 2), and `paths` accepts any segment
-  without a `Cc` character. So `System`, `ѕystem` with a Cyrillic `ѕ`, or
-  `system` with a zero-width (`Cf`) character inserted is an ordinary,
-  writable area that may look like `system/` to a human or a model. ADR
-  0016 chose exact matching deliberately. Whether to narrow it is a policy
-  question for the human. The options are NFKC/casefold rejection of
-  lookalike areas in the tool layer, or rejecting `Cf` characters in
-  `paths`. Open.
+An adversarial code review raised one point outside this layer's
+decisions, still open:
+
 - **`resolve_identity`'s `from None` keeps `__context__`.** `raise ...
   from None` suppresses display of the resolver's original exception, but
   the exception stays reachable as `__context__`, along with its traceback

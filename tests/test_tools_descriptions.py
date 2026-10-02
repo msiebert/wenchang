@@ -33,6 +33,7 @@ EXPECTED_TOOL_NAMES = (
 )
 MUTATING_TOOLS = ("write_file", "append_line", "replace_fact", "delete_file")
 NAME_TOOLS = ("read_file", *MUTATING_TOOLS)
+AREA_TOOLS = ("read_file", "list_prefix", *MUTATING_TOOLS)
 
 IDENTITY = Identity({"user": ScopeGrant("u-1", "owner"), "org": ScopeGrant("o-9", "member")})
 POLICY = ScopePolicy({"org": frozenset({"admin", "owner"})})
@@ -237,6 +238,12 @@ def test_name_docstring_says_name_excludes_md(tool: str) -> None:
     assert re.search(r"\b(without|excludes?|excluding)\b[^.]{0,40}\.md", doc), (
         f"{tool} must say name excludes .md"
     )
+
+
+@pytest.mark.parametrize("tool", AREA_TOOLS)
+def test_area_docstring_states_slug_rule(tool: str) -> None:
+    """Every tool taking area says areas are lowercase ASCII slugs (AIE-1136, US4.4)."""
+    assert "Areas are lowercase ASCII slugs." in _doc(tool)
 
 
 def test_get_memory_index_docstring_explains_entity_segment() -> None:

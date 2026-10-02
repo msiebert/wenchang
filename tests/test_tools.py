@@ -794,6 +794,145 @@ def test_identity_entity_id_override_cannot_redirect(
     assert _bound(calls[0])["path"] == "user/u-1/notes/a.md"
 
 
+# --- Area slugs and name characters ------------------------------------------------
+
+BAD_AREA_SLUGS = {
+    "uppercase-system": "System",
+    "cyrillic-dze": "\u0455ystem",
+    "zero-width-space": "sys\u200bstem",
+    "dot": "notes.v2",
+    "capitalized": "Notes",
+    "leading-hyphen": "-leading",
+    "leading-underscore": "_leading",
+    "cjk": "\u6709",
+    "space": "a b",
+    "all-caps": "SYSTEM",
+    "soft-hyphen": "a\u00adb",
+    "short-dot": "a.b",
+    "accented": "caf\u00e9",
+    "fullwidth": "\uff53ystem",
+}
+
+GOOD_AREA_SLUGS = ("notes", "notes-2", "a_b", "9lives", "a", "0", "2026-q4", "x9_y-z")
+
+BAD_NAME_CHARS = {
+    "zwsp": "\u200b",
+    "zwj": "\u200d",
+    "word-joiner": "\u2060",
+    "rtl-override": "\u202e",
+    "bom": "\ufeff",
+    "line-separator": "\u2028",
+    "paragraph-separator": "\u2029",
+    "noncharacter": "\ufffe",
+    "soft-hyphen": "\u00ad",
+    "noncharacter-fdd0": "\ufdd0",
+    "noncharacter-ffff": "\uffff",
+    "noncharacter-plane-1": "\U0001ffff",
+}
+
+GOOD_NAMES = {
+    "latin-umlaut": "\u00dcbersicht",
+    "cjk": "\u65e5\u672c\u8a9e",
+    "space": "my notes",
+    "capitalized": "Notes",
+    "accented": "caf\u00e9",
+    "dot": "a.b",
+    "cyrillic-dze": "\u0455",
+}
+
+AREA_RULE = "must be a lowercase slug: a-z0-9 first, then a-z0-9, '-' or '_'"
+
+
+@pytest.mark.parametrize("tool", SCOPE_TOOLS)
+@pytest.mark.parametrize("area", list(BAD_AREA_SLUGS.values()), ids=list(BAD_AREA_SLUGS))
+def test_non_slug_area_is_invalid_argument(harness: _Harness, tool: str, area: str) -> None:
+    """An area not matching ^[a-z0-9][a-z0-9_-]*$ raises InvalidArgumentError("area")
+    naming the rule, with no __cause__ and no client or check_write call (AIE-1136).
+    """
+    err = _invalid(harness, tool, "area", area=area)
+
+    assert AREA_RULE in err.detail
+    assert err.__cause__ is None
+    assert harness.log == []
+
+
+@pytest.mark.parametrize("tool", SCOPE_TOOLS)
+@pytest.mark.parametrize("area", GOOD_AREA_SLUGS)
+def test_slug_area_is_accepted(harness: _Harness, tool: str, area: str) -> None:
+    """An area matching the slug rule reaches the client in the built path (AIE-1136)."""
+    _call(harness, tool, area=area)
+
+    calls = harness.client_calls()
+    assert len(calls) == 1
+    if tool == "list_prefix":
+        assert calls[0][1][0] == f"user/u-1/{area}/"
+    else:
+        assert _bound(calls[0])["path"] == f"user/u-1/{area}/a.md"
+
+
+@pytest.mark.parametrize("tool", NAME_TOOLS)
+@pytest.mark.parametrize("char", list(BAD_NAME_CHARS.values()), ids=list(BAD_NAME_CHARS))
+def test_name_with_invisible_or_separator_char_is_invalid_argument(
+    harness: _Harness, tool: str, char: str
+) -> None:
+    """A name containing a format character, line or paragraph separator, or
+    noncharacter raises InvalidArgumentError("name") naming the code point,
+    with no __cause__ and no client or check_write call (AIE-1136).
+    """
+    err = _invalid(harness, tool, "name", name=f"my{char}notes")
+
+    assert "name must not contain" in err.detail
+    assert f"U+{ord(char):04X}" in err.detail
+    assert err.__cause__ is None
+    assert harness.log == []
+
+
+@pytest.mark.parametrize("tool", NAME_TOOLS)
+@pytest.mark.parametrize("name", list(GOOD_NAMES.values()), ids=list(GOOD_NAMES))
+def test_unicode_name_is_accepted(harness: _Harness, tool: str, name: str) -> None:
+    """A name with letters in any script or ordinary spaces reaches the client
+    as <name>.md (AIE-1136).
+    """
+    _call(harness, tool, name=name)
+
+    calls = harness.client_calls()
+    assert len(calls) == 1
+    path = cast(str, _bound(calls[0])["path"])
+    assert path == f"user/u-1/notes/{name}.md"
+
+
+@pytest.mark.parametrize("tool", SCOPE_TOOLS)
+def test_grant_check_precedes_area_slug_check(harness: _Harness, tool: str) -> None:
+    """An ungranted scope is reported before a non-slug area (AIE-1136)."""
+    err = _invalid(harness, tool, "scope", scope="team", area="System")
+
+    assert err.detail == UNGRANTED_DETAIL
+    assert harness.log == []
+
+
+@pytest.mark.parametrize("tool", MUTATING_TOOLS)
+def test_area_slug_check_precedes_check_write(harness: _Harness, tool: str) -> None:
+    """A non-slug area in a scope the caller may not write is reported as
+    InvalidArgumentError("area"), not a role error, and check_write never
+    runs (AIE-1136).
+    """
+    err = _invalid(harness, tool, "area", scope="org", area="System")
+
+    assert AREA_RULE in err.detail
+    assert harness.log == []
+
+
+@pytest.mark.parametrize("tool", NAME_TOOLS)
+def test_area_slug_check_precedes_name_check(harness: _Harness, tool: str) -> None:
+    """A non-slug area and a core-valid name with a zero-width space report
+    the area (AIE-1136, US3.2).
+    """
+    err = _invalid(harness, tool, "area", area="System", name="my\u200bnotes")
+
+    assert AREA_RULE in err.detail
+    assert harness.log == []
+
+
 # --- US3: checked writes ----------------------------------------------------------
 
 

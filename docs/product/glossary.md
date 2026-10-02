@@ -145,7 +145,11 @@ Terms as used throughout wenchang and its spec.
   ID and reaches only its own entity in each granted scope. A memory path
   `scope/<entity>/area/name.md` from the index or a listing maps to
   `read_file(scope, area, name)`. A scope the session isn't granted is a
-  recoverable error listing the available scopes.
+  recoverable error listing the available scopes. `area` must be a
+  lowercase ASCII slug (`^[a-z0-9][a-z0-9_-]*$`), so no lookalike of
+  `system` can be addressed; `name` may be any Unicode title without
+  invisible format characters, line or paragraph separators, or
+  noncharacters. Core paths are broader; this narrowing is the tools' own.
 - **Description** — a file's one-line human-readable summary; part of the
   metadata-only search surface.
 - **Aliases** — a file's list of alternate names, nicknames, acronyms, and
