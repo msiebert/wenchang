@@ -1,4 +1,4 @@
-"""Tests for index_entry_bytes and the index constants in wenchang.core."""
+"""Tests for index_entry_bytes and the index constants in wenchang.core (AIE-1046)."""
 
 from datetime import UTC, datetime
 

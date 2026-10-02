@@ -16,6 +16,14 @@ from wenchang.version_token import VersionToken
 __all__ = ["InProcessClient", "TransportClient"]
 
 
+def _type_name(t: type) -> str:
+    # A metaclass may make __name__ raise or return a str subclass.
+    try:
+        return str.__str__(t.__name__)
+    except Exception:
+        return "<unnamed>"
+
+
 @runtime_checkable
 class TransportClient(Protocol):
     """The seven memory operations over any transport.
@@ -95,7 +103,7 @@ class InProcessClient:
 
     def __init__(self, store: MemoryStore) -> None:
         if not issubclass(type(cast(object, store)), MemoryStore):
-            raise TypeError(f"store must be a MemoryStore, got {type(store).__name__}")
+            raise TypeError(f"store must be a MemoryStore, got {_type_name(type(store))}")
         self._store = store
 
     @property
@@ -145,7 +153,7 @@ class InProcessClient:
 
     def delete_file(self, path: str, expected_version: VersionToken) -> None:
         """Delete the file at `path` if it is still at `expected_version`."""
-        return self._store.delete_file(path, expected_version)
+        self._store.delete_file(path, expected_version)
 
     def get_memory_index(self, scope_map: Mapping[str, str]) -> MemoryIndex:
         """Return merged metadata across every scope in `scope_map`, byte-capped."""

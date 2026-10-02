@@ -575,6 +575,8 @@ class MemoryStore:
         tier by last-updated, most recent first, then by path. Entries are
         included in that order until the next one would exceed
         `index_max_bytes`; the rest are reported in `capped` by area prefix.
+        Every entry is sized first, so an unrenderable one raises even past
+        the cap.
 
         Raises TypeError if `scope_map` is not a Mapping of str to str, and
         ValueError for an invalid scope or entity_id or a duplicate scope,
@@ -587,7 +589,10 @@ class MemoryStore:
             )
         raw = list(cast(Mapping[object, object], scope_map).items())
         normalized: list[tuple[str, str]] = []
-        for key, value in raw:
+        for item in cast(list[object], raw):
+            if type(item) is not tuple or len(cast(tuple[object, ...], item)) != 2:
+                raise TypeError("scope_map items must be (str, str) pairs")
+            key, value = cast(tuple[object, object], item)
             if not issubclass(type(key), str):
                 raise TypeError(f"scope_map key must be str, got {_type_name(type(key))}")
             if not issubclass(type(value), str):
@@ -629,11 +634,12 @@ class MemoryStore:
             return (1, priority_index.get(parts.scope, unlisted), -micros, entry.path)
 
         ordered = sorted(collected, key=sort_key)
+        # Size every entry up front so an unrenderable one raises regardless of the cap.
+        sized = [(entry, index_entry_bytes(entry)) for entry in ordered]
 
         included: list[FileEntry] = []
         total = 0
-        for entry in ordered:
-            size = index_entry_bytes(entry)
+        for entry, size in sized:
             if total + size > self._index_max_bytes:
                 break
             included.append(entry)

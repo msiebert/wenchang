@@ -117,7 +117,19 @@ _CALLS: tuple[tuple[str, tuple[object, ...], dict[str, object]], ...] = (
     ("delete_file", (PATH, _V1), {}),
     ("get_memory_index", (_SCOPE_MAP,), {}),
 )
+_CALL_IDS = (
+    "read_file",
+    "write_file-create",
+    "write_file-update",
+    "append_line",
+    "replace_fact",
+    "list_prefix-first-page",
+    "list_prefix-cursor",
+    "delete_file",
+    "get_memory_index",
+)
 _VALUE_CALLS = tuple(c for c in _CALLS if c[0] != "delete_file")
+_VALUE_CALL_IDS = tuple(i for c, i in zip(_CALLS, _CALL_IDS, strict=True) if c[0] != "delete_file")
 
 
 def _invoke(
@@ -177,7 +189,7 @@ def test_in_process_client_is_exported() -> None:
     assert "InProcessClient" in wenchang.transport.__all__
 
 
-@pytest.mark.parametrize(("name", "args", "kwargs"), _VALUE_CALLS)
+@pytest.mark.parametrize(("name", "args", "kwargs"), _VALUE_CALLS, ids=_VALUE_CALL_IDS)
 def test_value_methods_forward_unchanged(
     name: str, args: tuple[object, ...], kwargs: dict[str, object]
 ) -> None:
@@ -206,6 +218,27 @@ def test_delete_file_forwards_and_returns_none() -> None:
     assert store.calls == [("delete_file", (PATH, _V1), {})]
 
 
+class _ValueReturningDeleteStore(MemoryStore):
+    """A MemoryStore whose delete_file returns a sentinel instead of None."""
+
+    sentinel = object()
+
+    def __init__(self) -> None:
+        super().__init__(InMemoryStorage())
+
+    def delete_file(self, path: str, expected_version: VersionToken) -> None:
+        return cast(None, self.sentinel)
+
+
+def test_delete_file_returns_none_even_if_store_returns_a_value() -> None:
+    """delete_file returns None even when the store's delete_file returns a
+    value (AIE-1046, US5.2).
+    """
+    client = InProcessClient(_ValueReturningDeleteStore())
+
+    assert client.delete_file(PATH, _V1) is None
+
+
 def _fresh_exceptions() -> list[Callable[[], BaseException]]:
     return [
         lambda: VersionConflictError(PATH, "body", _V1),
@@ -215,7 +248,7 @@ def _fresh_exceptions() -> list[Callable[[], BaseException]]:
 
 
 @pytest.mark.parametrize("make_exc", _fresh_exceptions(), ids=["wenchang", "value", "metadata"])
-@pytest.mark.parametrize(("name", "args", "kwargs"), _CALLS)
+@pytest.mark.parametrize(("name", "args", "kwargs"), _CALLS, ids=_CALL_IDS)
 def test_exceptions_propagate_unchanged(
     name: str,
     args: tuple[object, ...],
@@ -296,6 +329,26 @@ def test_spoofed_class_is_rejected() -> None:
     """A spoofed __class__ does not pass the real-type check (AIE-1046, US5.5)."""
     with pytest.raises(TypeError):
         InProcessClient(cast(MemoryStore, _Spoofed()))
+
+
+class _RaisingNameMeta(type):
+    """A metaclass whose classes raise on __name__ access."""
+
+    @property
+    def __name__(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+        raise ZeroDivisionError
+
+
+class _RaisingName(metaclass=_RaisingNameMeta):
+    """An object whose type's __name__ raises."""
+
+
+def test_non_store_with_raising_type_name_is_rejected_with_type_error() -> None:
+    """A non-store whose type's __name__ raises still yields TypeError
+    (AIE-1046, US5.5).
+    """
+    with pytest.raises(TypeError):
+        InProcessClient(cast(MemoryStore, _RaisingName()))
 
 
 @pytest.mark.parametrize("method", ALL_METHODS)

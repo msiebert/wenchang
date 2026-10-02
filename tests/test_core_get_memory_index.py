@@ -1,5 +1,4 @@
-"""Failing tests for MemoryStore.get_memory_index, ahead of src/wenchang/core.py
-implementing it.
+"""Tests for MemoryStore.get_memory_index.
 
 Covers AIE-1046: US1 (fan-out and merge), US2 (ordering), US3.2-3.8 (byte
 cap), and US4 (constructor settings and input validation).
@@ -239,6 +238,56 @@ class _Str(str):
     """A str subclass, normalized to plain str by validation."""
 
 
+class _DistinctStr(str):
+    """A str subclass whose instances are equal only to themselves, so equal
+    values are distinct dict keys until normalized.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    def __ne__(self, other: object) -> bool:
+        return self is not other
+
+    def __hash__(self) -> int:
+        return id(self)
+
+
+class _LyingStr(str):
+    """A str subclass whose conversion and concatenation hooks lie."""
+
+    def __str__(self) -> str:
+        return "evil"
+
+    def __format__(self, format_spec: str) -> str:
+        return "evil"
+
+    def __add__(self, other: object) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return "evil"
+
+    def __radd__(self, other: object) -> str:
+        return "evil"
+
+
+class _BadItemsMapping(Mapping[str, str]):
+    """A Mapping whose items() yields a configured, malformed item."""
+
+    def __init__(self, item: object) -> None:
+        self._item = item
+
+    def __getitem__(self, key: str) -> str:
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
+
+    def __len__(self) -> int:
+        return 1
+
+    def items(self) -> Any:
+        return [self._item]
+
+
 # --- US1: fan-out and merge ---------------------------------------------------
 
 
@@ -365,6 +414,24 @@ def test_index_propagates_metadata_format_error() -> None:
 
     assert type(excinfo.value) is MetadataFormatError
     assert excinfo.value.key == "description"
+
+
+def test_index_unrenderable_entry_raises_regardless_of_cap() -> None:
+    """An entry whose last-updated parses but cannot be rendered raises
+    MetadataFormatError even when a tiny cap would omit it: every entry's
+    size is computed before capping (AIE-1046, US1.10, US1.7).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, "user/u-1/notes/a.md", T1)
+    bad_map = dict(metadata_to_map(_metadata(T1)))
+    bad_map["last-updated"] = "0001-01-01T00:00:00+05:00"
+    storage.put("user/u-1/notes/b.md", b"body", bad_map)
+    store = MemoryStore(storage, index_max_bytes=10)
+
+    with pytest.raises(MetadataFormatError) as excinfo:
+        store.get_memory_index({"user": "u-1"})
+
+    assert excinfo.value.key == "last-updated"
 
 
 def test_index_propagates_backend_unavailable_error_unwrapped() -> None:
@@ -507,6 +574,20 @@ def test_index_breaks_timestamp_ties_by_path_ascending() -> None:
         "user/u-1/notes/a.md",
         "user/u-1/notes/b.md",
     ]
+
+
+def test_index_tiebreak_uses_full_path_not_fan_out_order() -> None:
+    """Equal timestamps under scopes "a" and "a-b" order by path, where "-"
+    sorts before "/", though fan-out visits "a" first (AIE-1046, US2.4).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, "a/x/notes/f.md", T1)
+    _seed(storage, "a-b/y/notes/f.md", T1)
+    store = _new_store(storage)
+
+    index = store.get_memory_index({"a": "x", "a-b": "y"})
+
+    assert _paths(index) == ["a-b/y/notes/f.md", "a/x/notes/f.md"]
 
 
 def test_index_orders_one_microsecond_difference_newest_first() -> None:
@@ -683,7 +764,7 @@ def test_memory_store_rejects_non_positive_index_max_bytes(cap: int) -> None:
     """index_max_bytes <= 0 raises ValueError at construction (AIE-1046,
     US3.7).
     """
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"^index_max_bytes must be positive$"):
         MemoryStore(InMemoryStorage(), index_max_bytes=cap)
 
 
@@ -738,8 +819,28 @@ def test_scope_priority_and_index_max_bytes_are_read_only_properties() -> None:
 
 @pytest.mark.parametrize(
     "bad",
-    ["user", b"user", bytearray(b"user"), {"user"}, 3, _SpoofedSequence()],
-    ids=["str", "bytes", "bytearray", "set", "int", "spoofed-class"],
+    [
+        "user",
+        b"user",
+        bytearray(b"user"),
+        "",
+        b"",
+        bytearray(),
+        {"user"},
+        3,
+        _SpoofedSequence(),
+    ],
+    ids=[
+        "str",
+        "bytes",
+        "bytearray",
+        "empty-str",
+        "empty-bytes",
+        "empty-bytearray",
+        "set",
+        "int",
+        "spoofed-class",
+    ],
 )
 def test_scope_priority_rejects_non_sequence_or_bare_string(bad: object) -> None:
     """A bare str/bytes/bytearray, a non-Sequence, or a spoofed __class__
@@ -835,6 +936,14 @@ def test_scope_map_non_str_key_raises_type_error() -> None:
         store.get_memory_index({1: "x"})  # pyright: ignore[reportArgumentType]
 
 
+def test_scope_map_key_type_checked_before_value_type() -> None:
+    """{1: 2} reports the key, not the value (AIE-1046, US4.5)."""
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(TypeError, match=r"^scope_map key must be str, got "):
+        store.get_memory_index({1: 2})  # pyright: ignore[reportArgumentType]
+
+
 @pytest.mark.parametrize(
     "scope_map",
     [{"a/": "x", "b": "y/"}, {"b": "y/", "a/": "x"}],
@@ -849,6 +958,40 @@ def test_scope_map_value_errors_follow_sorted_scope_order(scope_map: dict[str, s
 
     with pytest.raises(ValueError, match=r"^invalid scope: 'a/'$"):
         store.get_memory_index(scope_map)
+
+
+def test_scope_map_values_validated_before_any_storage_call() -> None:
+    """A valid first pair does not trigger a scan before a later bad
+    entity_id is reported (AIE-1046, US4.5).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(ValueError, match=r"^invalid entity_id: 'x/'$"):
+        store.get_memory_index({"a": "ok", "b": "x/"})
+
+
+def test_scope_map_duplicate_detected_after_normalization() -> None:
+    """Two str-subclass keys that are distinct dict keys but both "user"
+    raise the duplicate ValueError once normalized (AIE-1046, US4.5).
+    """
+    store = _new_store(_NeverCalledStorage())
+    scope_map: dict[str, str] = {_DistinctStr("user"): "u-1", _DistinctStr("user"): "u-2"}
+    assert len(scope_map) == 2
+
+    with pytest.raises(ValueError, match=r"^duplicate scope: 'user'$"):
+        store.get_memory_index(scope_map)
+
+
+def test_scope_map_prefix_built_from_normalized_values() -> None:
+    """A str-subclass value whose __str__, __format__, and __add__ lie
+    still yields the prefix user/u-1/ (AIE-1046, US4.5).
+    """
+    storage = _RecordingStorage()
+    store = _new_store(storage)
+
+    store.get_memory_index({"user": _LyingStr("u-1")})
+
+    assert storage.list_page_prefixes == ["user/u-1/"]
 
 
 def test_scope_map_invalid_entity_id_raises_value_error() -> None:
@@ -871,6 +1014,22 @@ def test_scope_map_duplicate_scope_raises_value_error() -> None:
         store.get_memory_index(scope_map)
 
     assert scope_map.items_calls == 1
+
+
+@pytest.mark.parametrize(
+    "item",
+    [("user", "u-1", "extra"), "ab"],
+    ids=["three-tuple", "two-char-str"],
+)
+def test_scope_map_items_must_be_pairs(item: object) -> None:
+    """A Mapping whose items() yields something other than a 2-tuple,
+    including the 2-char string "ab", raises TypeError without consulting
+    storage (AIE-1046, US4.5).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(TypeError, match="scope_map items"):
+        store.get_memory_index(_BadItemsMapping(item))
 
 
 def test_scope_map_items_is_read_exactly_once() -> None:
