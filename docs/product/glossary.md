@@ -112,10 +112,12 @@ Terms as used throughout wenchang and its spec.
   count of the files left out (`core.CappedPrefix`), listed in prefix
   order. The agent can list that prefix to page through them.
 - **Scope priority** — the adopter's optional ordering of scope names for
-  the memory index, set when the store is constructed. Listed scopes rank
-  ahead of unlisted ones, in list order; by default it is empty and every
-  scope ranks equally, ordered by recency. It never affects `system/`
-  areas, which always load first.
+  the memory index, set as `MemoryStore(scope_priority=...)` when the store
+  is constructed. It is configuration, not prompt text, and is not one of
+  the prompt slots. Listed scopes rank ahead of unlisted ones, in list
+  order; by default it is empty and every scope ranks equally (one flat
+  tier), ordered by recency. It orders only the capped startup index and
+  never affects `system/` areas, which always load first.
 - **Transport client** — the object the tool layer calls to reach memory,
   implementing `transport.TransportClient`: the core API's operations with
   identical signatures and identical errors, over any transport (in-process
@@ -169,10 +171,23 @@ Terms as used throughout wenchang and its spec.
   Refreshed only by wholesale prefix rewrite through `core`, which does not
   apply the check.
 - **Seed areas** — the starting set of area names an adopter configures per
-  scope; a starting shape the agent is free to extend.
+  scope; a starting shape the agent is free to extend. Supplied as the
+  `seed_areas` prompt slot, which also marks which areas are curated
+  `system/` areas and which are agent-writable.
 - **Systems of record** — data that already has a canonical home in the
   adopter's product (e.g. an event catalog, a dashboard object); memory
-  references and annotates these rather than duplicating them.
+  references and annotates these rather than duplicating them. The agent
+  refers to the canonical object by its name or ID there, stores only its
+  interpretation and the corrections people give, and surfaces any
+  discrepancy rather than letting memory diverge. Listed in the optional
+  `systems_of_record` prompt slot.
+- **Prompt slots** — `prompts.PromptSlots`, the three adopter-supplied text
+  blobs that `build_memory_prompt` splices into the library's generic
+  memory prompt: `scope_guidance` (which scopes exist, which are shared and
+  which private, and when to ask before writing), `seed_areas`, and
+  `systems_of_record`. The first two are required; systems of record is
+  optional, and omitting it drops that whole section. Scope priority is not
+  a slot.
 - **Sources** — a file-level metadata field recording which calling
   surfaces have written to the file; free-form strings, not an enum.
 - **Confidence label** — one of `stated`, `observed`, `inferred`, `system`,

@@ -11,7 +11,7 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-ten implemented modules: the cross-cutting `errors` and `version_token`; the
+eleven implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
 fake and a GCS implementation behind one protocol); `core`, which
 implements all seven core operations (`read_file`, `write_file`,
@@ -22,14 +22,14 @@ implements all seven core operations (`read_file`, `write_file`,
 write restriction); `transport`, the `TransportClient` protocol plus
 `InProcessClient`, its in-process implementation; and `tools`, the
 agent-facing tool layer, which resolves identity through `identity`,
-checks writes through `scope`, and calls a `TransportClient`. Any remote
-transport is still planned. An eleventh, `testing`, is adopter-facing
-rather than part of the runtime: the executable conformance suites an
-adopter runs against their own identity resolver and their own transport
-client, installed with the optional `wenchang[testing]` extra.
-The module map below is the
-intended shape; each remaining module is marked **(planned)** until
-implemented.
+checks writes through `scope`, and calls a `TransportClient`; and
+`prompts`, the instruction text layered over the tools, assembled from
+library-owned sections and adopter-supplied slots. Any remote transport is
+still planned. A twelfth, `testing`, is adopter-facing rather than part of
+the runtime: the executable conformance suites an adopter runs against
+their own identity resolver and their own transport client, installed with
+the optional `wenchang[testing]` extra. Every module in the map below is
+implemented; the remote half of `transport` is the one planned piece.
 
 ## Module map
 
@@ -957,11 +957,63 @@ implemented.
   `transport`, and `version_token`, and none of `core`, `scope`,
   `identity`, or `transport` imports it. See
   [ADR 0022](docs/adr/0022-tool-layer.md).
-- **prompts** *(planned)* — instruction text for filing, deduplication,
-  alias upkeep, confidence calibration, write mechanics, curated-content
-  correction, applying memory, forgetting, and privacy, plus the
-  adopter-configurable slots (scope guidance, seed areas, scope priority,
-  systems of record).
+- **prompts** — the instruction text layered over the tools: a subpackage
+  (`wenchang.prompts`) that turns library-owned section text plus three
+  adopter-supplied text slots into one markdown prompt. Its public names
+  (`__all__`) are `PromptSlots`, `SECTION_ORDER`, and
+  `build_memory_prompt(slots, /) -> str`; nothing is added to the top-level
+  `wenchang` package. Each generic section is its own module holding
+  `Final[str]` constants: `overview`, `applying_memory`, `remembering`,
+  `privacy`, `filing`, `write_mechanics`, `curated_content`, and
+  `forgetting` each hold `HEADING` and `BODY`, and `systems_of_record`
+  holds `HEADING` and `PRINCIPLE` (the generic half of that section).
+  `overview` and the systems-of-record principle carry text; the other
+  seven bodies are empty until their prose is written. The section modules
+  are importable but not exported, and their wording is not API. The two
+  slot-only sections take their headings from
+  `assemble.SCOPE_GUIDANCE_HEADING = "Scopes"` and
+  `assemble.SEED_AREAS_HEADING = "Seed areas"`. `SECTION_ORDER` is the
+  fixed tuple `("overview", "scope_guidance", "seed_areas",
+  "systems_of_record", "applying_memory", "remembering", "privacy",
+  "filing", "write_mechanics", "curated_content", "forgetting")`: the
+  slots, which define the scope vocabulary, come right after the overview,
+  and the generic rules follow in session order. Adopters cannot omit,
+  reorder, or override a generic section; only the three slots are theirs.
+  `PromptSlots(scope_guidance, seed_areas, systems_of_record=None)` is a
+  frozen dataclass validated in `__post_init__`, every type check before
+  any value check, in field order: a field whose real type
+  (`issubclass(type(v), str)`, not the spoofable `__class__`) is not `str`
+  raises `TypeError` (`systems_of_record` also accepts `None`); each `str`
+  field is then normalized with `str.__str__` and `str.strip`, so a `str`
+  subclass is stored as an exact `str`; an empty or whitespace-only value
+  raises `ValueError`, as does one that is not UTF-8 encodable (chained
+  from the `UnicodeEncodeError`). These are adopter-side arguments, so they
+  raise `TypeError`/`ValueError`, not `InvalidArgumentError`, as
+  `ScopePolicy` does. Slot content is not policed beyond that.
+  `build_memory_prompt` raises `TypeError` unless its argument's real type
+  is `PromptSlots`, then renders each section in `SECTION_ORDER` as
+  `## {heading}\n\n{body}` with the body stripped, joins them with a blank
+  line, and ends with a single newline. There is no H1, so a host can nest
+  the prompt under its own heading. A section whose body is empty or
+  whitespace-only is omitted, heading included. The systems-of-record body
+  is `PRINCIPLE`, a blank line, and the slot text; when
+  `systems_of_record` is `None` the whole section is omitted, so the agent
+  never sees the principle without a list. Section bodies are read from
+  their modules at call time. The function is pure: no I/O.
+  Vocabulary contract: generic sections speak of scope shape only as
+  "shared scope", "private scope", and "the `system/` area", so an
+  adopter's `scope_guidance` must say which of its scopes are shared and
+  which are private; the library cannot check this. Division of labor with
+  `tools`: tool docstrings own per-call mechanics (argument meaning, error
+  repair, the slug rule, the byte ceiling), and the prompt owns judgment
+  (what to write, where, with which tool, and when to ask). The prompt
+  names tools and their parameters in tool terms (`scope`, `area`, `name`)
+  and never shows a memory path or entity ID; unit tests check every tool
+  and parameter name it mentions against `tools` at test time. Scope
+  priority is not prompt text: it is `MemoryStore(scope_priority=...)`,
+  which orders only the capped startup index and defaults to one flat tier.
+  `prompts` imports nothing from `wenchang` outside its own package. See
+  [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md).
 
 ```mermaid
 flowchart TB
@@ -1007,7 +1059,9 @@ with `parse_path`. `tools` builds every path and prefix with `build_path` /
 `resolve_identity` once per session, in `bind_tools`, and reads the
 resolved grants to build paths; `transport` never sees an identity.
 `transport` is implemented in-process (`InProcessClient` over
-`MemoryStore`); the remote half of its box, like `prompts`, is planned.
+`MemoryStore`); the remote half of its box is planned. `prompts` imports
+nothing from the other modules; its dotted edge to `tools` means the text
+it produces refers to the tools by name, not that it calls them.
 `scope` imports the `Identity` type to read grants but never calls a
 resolver, so the diagram shows no edge between them. `scope` sits outside
 the Core subgraph with only the `tools --> scope` edge: every mutating tool
