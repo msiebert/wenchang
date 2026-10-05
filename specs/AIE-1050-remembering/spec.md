@@ -62,7 +62,7 @@ organization/project) are already enforced over every section by
 | 2.2 | `BODY` | read | contains `` `[stated]` ``, `` `[observed]` ``, `` `[inferred]` ``, `` `[system]` `` |
 | 2.3 | `BODY` | read | defines stated with "said" and "directly" (said directly by the user), observed with "tool result", "session data", and "behavior", inferred with "pattern across several observations" |
 | 2.4 | `BODY` | read | says `[system]` is curated ("curated") and seeded rather than learned ("seeded"), and that the agent never writes a new `[system]` line ("never write a new") |
-| 2.5 | `BODY` | read | says already-labeled lines keep their labels when merging ("keep") and only new or rewritten lines get a fresh label ("new or rewritten") |
+| 2.5 | `BODY` | read | says already-labeled lines keep their labels when merging ("already carry a label keep it") and only new or rewritten lines get a fresh label ("new or rewritten") |
 
 ### US3 — Calibration (§8.1)
 
@@ -76,9 +76,9 @@ organization/project) are already enforced over every section by
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 4.1 | `BODY` | read | contains "would remembering this change a future session?" |
-| 4.2 | `BODY` | read | contains "better, different, or faster" and "regardless of" (excluded regardless of truth) and "true" |
+| 4.2 | `BODY` | read | contains "better, different, or faster" and "regardless of whether it is true" |
 | 4.3 | `BODY` | read | says the test is applied at write time ("write time") |
-| 4.4 | `BODY` | read | covers observed facts ("observe") and reusable "workflows" and "findings" |
+| 4.4 | `BODY` | read | covers observed facts ("facts you observe") and reusable "workflows" and "findings" |
 | 4.5 | `BODY` | read | excludes "transient" content, names a "one-off number" as stale, and points to "the definition or pattern" behind it |
 
 ### US5 — In-line expiry (Linear issue; §8.1; addendum decision 5)
@@ -87,8 +87,8 @@ organization/project) are already enforced over every section by
 | - | ----- | ---- | ---- |
 | 5.1 | `BODY` | read | contains "end date" and "in the fact line" and "in prose" |
 | 5.2 | `BODY` | read | contains the exact example "prefers JSON output, but only until the v3 migration completes on October 30." |
-| 5.3 | `BODY` | read | says it is "not a metadata field" and that the agent never adds a "per-fact timestamp" |
-| 5.4 | `BODY` | read | ties detection to the user's own framing in this conversation ("user's own framing") and forbids guessing ("never guess") |
+| 5.3 | `BODY` | read | says it is "not a metadata field" and "never add a per-fact timestamp" |
+| 5.4 | `BODY` | read | makes the user's own framing in this conversation the trigger ("user's own framing", "end date explicit") and forbids guessing ("never guess an end date the user did not state") |
 | 5.5 | `BODY` | read | gives the value: a later session judges whether it "still applies"; a "maintenance pass" sees what has "lapsed" |
 | 5.6 | `BODY` (raw) | search | negative pin: no ISO date `\d{4}-\d{2}-\d{2}`, no clock time `\d{1,2}:\d{2}`, no 4-digit year `\b(19|20)\d{2}\b`, and no metadata-style key `\b(expires?|expiry|until|date|timestamp)\s*:` (case-insensitive) |
 | 5.7 | `BODY` (raw) | find example fact lines matching `- \[(stated|observed|inferred|system)\] ` | at most one |

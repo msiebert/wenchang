@@ -67,14 +67,13 @@ facts you observe during work, and workflows and findings you could reuse, count
 transient content. A one-off number goes stale; its durable form is the definition or pattern
 behind it, so save that when you know it, not the number.
 
-When a durable fact has a knowable end date, state that end date in the fact line itself, in
-prose, as part of the sentence:
+When the user's own framing in this conversation makes a durable fact's end date explicit, state
+that end date in the fact line itself, in prose, as part of the sentence:
 
 `- [stated] prefers JSON output, but only until the v3 migration completes on October 30.`
 
 The end date is ordinary fact text: it is not a metadata field, and you never add a per-fact
-timestamp. State an end date only when the user's own framing in this conversation makes the end
-condition explicit; never guess an expiry the user did not imply. A later session can then judge
+timestamp. You never guess an end date the user did not state. A later session can then judge
 whether the fact still applies, and a maintenance pass can see what has lapsed.
 
 Write as facts arise, mid-conversation, before you ask a follow-up question, because the

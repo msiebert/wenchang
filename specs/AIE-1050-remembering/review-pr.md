@@ -10,7 +10,7 @@ as facts arise, and a pointer that the next section's refusals override the
 test. New `tests/test_prompts_remembering.py` pins each acceptance criterion;
 the glossary gains an "In-line expiry" entry. No code outside `BODY` changes.
 
-`make check`: 3365 passed, 6 skipped, 41 deselected.
+`make check`: 3370 passed, 6 skipped, 41 deselected.
 
 ## Acceptance criteria → tests
 
@@ -28,20 +28,20 @@ All tests are in `tests/test_prompts_remembering.py`.
 | US2.5 existing labels kept on merge; only new or rewritten lines labeled | `test_body_preserves_labels_on_merge` (:82) |
 | US3.1 "calibrated" and "evidence" | `test_body_calibrates_phrasing` (:95) |
 | US3.2 exact "investigated X once" contrast | `test_body_calibrates_phrasing` (:95) |
-| US4.1 "would remembering this change a future session?" | `test_body_states_save_criterion` (:116) |
-| US4.2 "better, different, or faster", "regardless of", "true" | `test_body_states_save_criterion` (:116) |
-| US4.3 applied at "write time" | `test_body_states_save_criterion` (:116) |
-| US4.4 covers observed facts, workflows, findings | `test_body_states_save_criterion` (:116) |
-| US4.5 transient / one-off number / the definition or pattern | `test_body_states_save_criterion` (:116) |
+| US4.1 "would remembering this change a future session?" | `test_body_states_save_criterion` (:115) |
+| US4.2 "better, different, or faster", "regardless of whether it is true" | `test_body_states_save_criterion` (:115) |
+| US4.3 applied at "write time" | `test_body_states_save_criterion` (:115) |
+| US4.4 covers "facts you observe", workflows, findings | `test_body_states_save_criterion` (:115) |
+| US4.5 transient / one-off number / the definition or pattern | `test_body_states_save_criterion` (:115) |
 | US5.1 "end date", "in the fact line", "in prose" | `test_body_describes_in_line_expiry` (:137) |
 | US5.2 exact JSON / v3 migration example | `test_body_describes_in_line_expiry` (:137) |
-| US5.3 "not a metadata field", "per-fact timestamp" | `test_body_describes_in_line_expiry` (:137) |
-| US5.4 "user's own framing", "never guess" | `test_body_describes_in_line_expiry` (:137) |
+| US5.3 "not a metadata field", "never add a per-fact timestamp" | `test_body_describes_in_line_expiry` (:137) |
+| US5.4 "user's own framing", "end date explicit", "never guess an end date the user did not state" | `test_body_describes_in_line_expiry` (:137) |
 | US5.5 "still applies", "maintenance pass", "lapsed" | `test_body_describes_in_line_expiry` (:137) |
-| US5.6 no ISO date, clock time, year, or metadata key (raw) | `test_body_has_no_machine_dates_or_metadata` (:143); positive control `test_negative_patterns_match_known_bad_sample` (:149) |
-| US5.7 at most one example fact line (raw) | `test_body_has_at_most_one_example_fact_line` (:154); positive control `test_fact_line_pattern_counts_multiple_lines` (:159) |
-| US6.1 "as facts arise", "mid-conversation", "before you ask a follow-up", "conversation may end" | `test_body_describes_write_timing` (:176) |
-| US6.2 "refusals in the next section", "override" | `test_body_describes_write_timing` (:176) |
+| US5.6 no ISO date, clock time, year, or metadata key (raw) | `test_body_has_no_machine_dates_or_metadata` (:143); positive controls `test_negative_patterns_match_known_bad_sample` (:149), `test_negative_pattern_matches_realistic_sample` (:165) |
+| US5.7 at most one example fact line (raw) | `test_body_has_at_most_one_example_fact_line` (:170); positive control `test_fact_line_pattern_counts_multiple_lines` (:175) |
+| US6.1 "as facts arise", "mid-conversation", "before you ask a follow-up", "conversation may end" | `test_body_describes_write_timing` (:193) |
+| US6.2 "refusals in the next section", "override" | `test_body_describes_write_timing` (:193) |
 
 ## Architecture / ADR changes
 
@@ -77,4 +77,19 @@ All tests are in `tests/test_prompts_remembering.py`.
 
 ## Adversarial review findings
 
-(filled in after code review)
+Code review round 1 (both FAIL):
+- Reviewer A (correctness): SHOULD-FIX, the expiry rule said both "makes the
+  end condition explicit" and "never guess an expiry the user did not imply",
+  and opened with an unconditional "When a durable fact has a knowable end
+  date, state it". Reworded so the user's explicit framing is the trigger and
+  "You never guess an end date the user did not state." NITs kept as is:
+  "in this conversation" (sourced from §8.1 "detected during the conversation
+  in which the fact arises"), next-section pointer merge order, glossary
+  placement; added a comment on the definition-bullet sample in the US5.7
+  control.
+- Reviewer B (tests/docs): SHOULD-FIX, the "observe" pin was satisfied by the
+  `[observed]` label line, and "per-fact timestamp" did not check the
+  "never". Pins tightened to "facts you observe" and "never add a per-fact
+  timestamp"; NITs applied: "already carry a label keep it", "regardless of
+  whether it is true", separate realistic positive controls for each US5.6
+  pattern; this section filled in.

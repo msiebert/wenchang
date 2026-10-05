@@ -78,7 +78,7 @@ def test_body_reserves_system_label(phrase: str) -> None:
     assert phrase in _flat(remembering.BODY)
 
 
-@pytest.mark.parametrize("phrase", ["keep", "new or rewritten"])
+@pytest.mark.parametrize("phrase", ["already carry a label keep it", "new or rewritten"])
 def test_body_preserves_labels_on_merge(phrase: str) -> None:
     """AIE-1050, US2.5: BODY keeps existing labels on merge; only new lines get one."""
     assert phrase in _flat(remembering.BODY)
@@ -102,10 +102,9 @@ def test_body_calibrates_phrasing(phrase: str) -> None:
     [
         "would remembering this change a future session?",
         "better, different, or faster",
-        "regardless of",
-        "true",
+        "regardless of whether it is true",
         "write time",
-        "observe",
+        "facts you observe",
         "workflows",
         "findings",
         "transient",
@@ -126,9 +125,10 @@ def test_body_states_save_criterion(phrase: str) -> None:
         "in prose",
         "prefers JSON output, but only until the v3 migration completes on October 30.",
         "not a metadata field",
-        "per-fact timestamp",
+        "never add a per-fact timestamp",
         "user's own framing",
-        "never guess",
+        "end date explicit",
+        "never guess an end date the user did not state",
         "still applies",
         "maintenance pass",
         "lapsed",
@@ -151,6 +151,22 @@ def test_negative_patterns_match_known_bad_sample(pattern: re.Pattern[str]) -> N
     assert pattern.search(KNOWN_BAD_SAMPLE) is not None
 
 
+@pytest.mark.parametrize(
+    ("sample", "pattern"),
+    [
+        ("(as of 2026-10-30)", ISO_DATE),
+        ("[2026-10-30]", ISO_DATE),
+        ("logged 09:15", CLOCK_TIME),
+        ("since 2025", FOUR_DIGIT_YEAR),
+        ("expiry: soon", METADATA_KEY),
+    ],
+    ids=["iso_date_as_of", "iso_date_bracketed", "clock_time", "four_digit_year", "metadata_key"],
+)
+def test_negative_pattern_matches_realistic_sample(sample: str, pattern: re.Pattern[str]) -> None:
+    """AIE-1050, US5.6: each negative pattern trips on a realistic standalone sample."""
+    assert pattern.search(sample) is not None
+
+
 def test_body_has_at_most_one_example_fact_line() -> None:
     """AIE-1050, US5.7: raw BODY contains at most one example fact line."""
     assert len(FACT_LINE.findall(remembering.BODY)) <= 1
@@ -158,6 +174,7 @@ def test_body_has_at_most_one_example_fact_line() -> None:
 
 def test_fact_line_pattern_counts_multiple_lines() -> None:
     """AIE-1050, US5.7: the fact-line pattern counts each example line in a sample."""
+    # The backticked definition-style bullet must not be counted.
     sample = "`- [stated] prefers JSON`\n`- [observed] runs reports weekly`\n- `[inferred]`: def\n"
     assert len(FACT_LINE.findall(sample)) == 2
 
