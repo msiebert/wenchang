@@ -93,3 +93,8 @@ Code review round 1 (both FAIL):
   timestamp"; NITs applied: "already carry a label keep it", "regardless of
   whether it is true", separate realistic positive controls for each US5.6
   pattern; this section filled in.
+
+Code review round 2: both PASS, no new findings. Final `spec-reviewer` gate:
+PASS 22/0; notes only: "never guess an end date the user did not state" is
+slightly stricter than Notion's "did not imply", consistent with §8.1's
+explicit-framing trigger; the US5.6 clock-time regex adds word boundaries.
