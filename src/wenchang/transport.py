@@ -6,7 +6,7 @@ injected at startup and may run in-process over `MemoryStore` or remotely
 indistinguishable.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Protocol, cast, runtime_checkable
 
 from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex, MemoryStore
@@ -34,8 +34,9 @@ class TransportClient(Protocol):
     types with equal attributes and message. That covers the
     `wenchang.errors` taxonomy (same category, same payload) and the
     non-taxonomy errors core raises, including `ValueError` for an empty
-    `source` or `old_string`, a `line` that is not a fact line, or a
-    malformed or foreign `cursor`; `MetadataFormatError` for corrupt stored
+    `source` or `old_string`, a `line` that is not a fact line, a
+    `description` containing a newline or carriage return, or a malformed
+    or foreign `cursor`; `MetadataFormatError` for corrupt stored
     metadata; and `UnicodeDecodeError` for a non-UTF-8 body. A client never
     reshapes an error into its own vocabulary: a version conflict is a
     `VersionConflictError` carrying current content and version whether it
@@ -64,7 +65,14 @@ class TransportClient(Protocol):
         ...
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Append one fact line to an existing file at `expected_version`."""
         ...
@@ -77,6 +85,8 @@ class TransportClient(Protocol):
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Replace the unique occurrence of `old_string` with `new_string`."""
         ...
@@ -128,10 +138,19 @@ class InProcessClient:
         return self._store.write_file(path, content, metadata, expected_version, source=source)
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Append one fact line to an existing file at `expected_version`."""
-        return self._store.append_line(path, line, expected_version, source=source)
+        return self._store.append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
     def replace_fact(
         self,
@@ -141,10 +160,18 @@ class InProcessClient:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Replace the unique occurrence of `old_string` with `new_string`."""
         return self._store.replace_fact(
-            path, old_string, new_string, expected_version, source=source
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
         )
 
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:

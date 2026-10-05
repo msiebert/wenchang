@@ -4,11 +4,13 @@ validation/error ordering.
 """
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
-from wenchang.core import MemoryStore
+from wenchang.core import MemoryFile, MemoryStore
 from wenchang.errors import (
     BackendUnavailableError,
     NotFoundError,
@@ -711,3 +713,487 @@ def test_append_line_corrupt_metadata_propagates() -> None:
         store.append_line(VALID_PATH, "- [stated] x", v1, source="chat")
 
     assert excinfo.value.key == "description"
+
+
+# --- Optional aliases and description -----------------------------------------
+
+F_BODY = "- [stated] a\n"
+F_LINE = "- [stated] b"
+
+
+def _f_metadata(aliases: tuple[str, ...] = ("x", "y")) -> FileMetadata:
+    return _metadata(description="d", aliases=aliases, sources=frozenset({"s1"}))
+
+
+class _CountingStorage(InMemoryStorage):
+    """InMemoryStorage that records every put_if_version call and counts
+    unconditional puts not made from inside put_if_version.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_if_version_calls: list[tuple[bytes, dict[str, str]]] = []
+        self.put_calls = 0
+        self._in_put_if_version = False
+
+    def put(self, key: str, data: bytes, metadata: Mapping[str, str]) -> VersionToken:
+        if not self._in_put_if_version:
+            self.put_calls += 1
+        return super().put(key, data, metadata)
+
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        self.put_if_version_calls.append((data, dict(metadata)))
+        self._in_put_if_version = True
+        try:
+            return super().put_if_version(key, data, metadata, expected)
+        finally:
+            self._in_put_if_version = False
+
+
+class _LyingStr(str):
+    """A str subclass whose __eq__, __hash__, and __str__ lie."""
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    def __hash__(self) -> int:
+        return 0
+
+    def __str__(self) -> str:
+        return "lie"
+
+
+class _SpoofList:
+    """Claims to be a list through __class__ only; its real type is not a Sequence."""
+
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return list
+
+    def __iter__(self) -> object:
+        return iter(["a"])
+
+
+def _seed_f(
+    storage: InMemoryStorage, aliases: tuple[str, ...] = ("x", "y")
+) -> tuple[MemoryStore, VersionToken]:
+    _seed(storage, VALID_PATH, F_BODY, _f_metadata(aliases))
+    store = _new_store(storage)
+    return store, store.read_file(VALID_PATH).version
+
+
+def _assert_exact_aliases(aliases: object, expected: tuple[str, ...]) -> None:
+    assert type(aliases) is tuple
+    members = cast(tuple[object, ...], aliases)
+    assert all(type(a) is str for a in members)
+    assert members == expected
+
+
+def test_append_line_unions_aliases_in_order_dropping_duplicates() -> None:
+    """Given aliases are added after the stored ones, in given order, skipping
+    any already present or repeated; content appended; description unchanged
+    (AIE-1151, US1.1).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.append_line(VALID_PATH, F_LINE, v, source="chat", aliases=["y", "z", "w", "z"])
+
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "z", "w"))
+    assert result.content == F_BODY + F_LINE + "\n"
+    assert result.metadata.description == "d"
+    reread = store.read_file(VALID_PATH)
+    _assert_exact_aliases(reread.metadata.aliases, ("x", "y", "z", "w"))
+    assert reread.metadata == result.metadata
+
+
+def test_append_line_description_replaces_stored_and_leaves_aliases() -> None:
+    """description replaces the stored description; aliases are unchanged
+    (AIE-1151, US1.2).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.append_line(VALID_PATH, F_LINE, v, source="chat", description="d2")
+
+    assert result.metadata.description == "d2"
+    assert result.metadata.aliases == ("x", "y")
+    reread = store.read_file(VALID_PATH)
+    assert reread.metadata.description == "d2"
+    assert reread.metadata.aliases == ("x", "y")
+
+
+def test_append_line_aliases_and_description_commit_in_one_put() -> None:
+    """Both arguments apply, sources gains the source, last_updated is the
+    clock value, and exactly one put_if_version carries content and metadata
+    together (AIE-1151, US1.3).
+    """
+    storage = _CountingStorage()
+    store, v = _seed_f(storage)
+    storage.put_calls = 0
+
+    result = store.append_line(
+        VALID_PATH, F_LINE, v, source="chat", aliases=["z"], description="d2"
+    )
+
+    assert result.metadata.aliases == ("x", "y", "z")
+    assert result.metadata.description == "d2"
+    assert result.metadata.sources == frozenset({"s1", "chat"})
+    assert result.metadata.last_updated == FIXED_CLOCK_TIME
+    assert storage.put_calls == 0
+    assert storage.put_if_version_calls == [
+        ((F_BODY + F_LINE + "\n").encode("utf-8"), dict(metadata_to_map(result.metadata)))
+    ]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"aliases": None, "description": None},
+        {"aliases": []},
+        {"aliases": ()},
+    ],
+    ids=["omitted", "explicit-none", "empty-list", "empty-tuple"],
+)
+def test_append_line_absent_arguments_leave_metadata_unchanged(
+    kwargs: dict[str, object],
+) -> None:
+    """Omitted, None, or empty aliases leave description and aliases exactly as
+    stored, as today (AIE-1151, US1.4).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+    call = cast(Callable[..., MemoryFile], store.append_line)
+
+    result = call(VALID_PATH, F_LINE, v, source="chat", **kwargs)
+
+    expected = replace(
+        _f_metadata(), sources=frozenset({"s1", "chat"}), last_updated=FIXED_CLOCK_TIME
+    )
+    assert result.content == F_BODY + F_LINE + "\n"
+    assert result.metadata == expected
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y"))
+    assert store.read_file(VALID_PATH).metadata == expected
+
+
+def test_append_line_aliases_all_present_leaves_aliases_unchanged() -> None:
+    """Aliases that are all already stored leave the tuple unchanged
+    (AIE-1151, US1.5).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.append_line(VALID_PATH, F_LINE, v, source="chat", aliases=["x", "y"])
+
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y"))
+
+
+def test_append_line_normalizes_str_subclass_alias_with_exact_comparison() -> None:
+    """A lying str-subclass alias is stored as the exact str from str.__str__,
+    and dedup compares exact strings (AIE-1151, US1.6).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.append_line(
+        VALID_PATH, F_LINE, v, source="chat", aliases=[_LyingStr("q"), "q", _LyingStr("x")]
+    )
+
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "q"))
+    _assert_exact_aliases(store.read_file(VALID_PATH).metadata.aliases, ("x", "y", "q"))
+
+
+def test_append_line_accepts_empty_alias_and_empty_description() -> None:
+    """An empty-string alias and an empty description are accepted, as with
+    write_file (AIE-1151, US1.1, US1.2).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.append_line(VALID_PATH, F_LINE, v, source="chat", aliases=[""], description="")
+
+    assert result.metadata.aliases == ("x", "y", "")
+    assert result.metadata.description == ""
+
+
+BAD_ALIAS_CONTAINERS: tuple[object, ...] = (
+    "ab",
+    b"ab",
+    bytearray(b"ab"),
+    5,
+    {"a"},
+    iter(["a"]),
+    _SpoofList(),
+)
+BAD_ALIAS_CONTAINER_IDS = ("str", "bytes", "bytearray", "int", "set", "iterator", "spoof")
+
+
+@pytest.mark.parametrize("aliases", BAD_ALIAS_CONTAINERS, ids=BAD_ALIAS_CONTAINER_IDS)
+def test_append_line_bad_aliases_container_raises_type_error_without_storage(
+    aliases: object,
+) -> None:
+    """A str, bytes, bytearray, non-Sequence, or __class__-spoofed aliases raises
+    TypeError naming the real type, and storage is never called (AIE-1151, US1.7).
+    """
+    store = _new_store(_NeverCalledStorage())
+    expected = f"aliases must be a sequence of str, not {type(aliases).__name__}"
+
+    with pytest.raises(TypeError) as excinfo:
+        store.append_line(
+            VALID_PATH,
+            F_LINE,
+            VersionToken("v1"),
+            source="chat",
+            aliases=cast(Sequence[str], aliases),
+        )
+
+    assert str(excinfo.value) == expected
+
+
+def test_append_line_non_str_alias_entry_raises_type_error_without_storage() -> None:
+    """A non-str alias member raises TypeError naming its type, and storage is
+    never called (AIE-1151, US1.8).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(TypeError) as excinfo:
+        store.append_line(
+            VALID_PATH,
+            F_LINE,
+            VersionToken("v1"),
+            source="chat",
+            aliases=cast(Sequence[str], ["a", 5]),
+        )
+
+    assert str(excinfo.value) == "aliases entry must be str, got int"
+
+
+def test_append_line_non_str_description_raises_type_error_without_storage() -> None:
+    """A non-str description raises TypeError naming its type, and storage is
+    never called (AIE-1151, US1.9).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(TypeError) as excinfo:
+        store.append_line(
+            VALID_PATH, F_LINE, VersionToken("v1"), source="chat", description=cast(str, 5)
+        )
+
+    assert str(excinfo.value) == "description must be a str, not int"
+
+
+@pytest.mark.parametrize("description", ["a\nb", "a\rb"], ids=["lf", "cr"])
+def test_append_line_multiline_description_raises_value_error_without_storage(
+    description: str,
+) -> None:
+    """A description containing a newline or carriage return raises ValueError,
+    and storage is never called (AIE-1151, US1.10).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(ValueError) as excinfo:
+        store.append_line(
+            VALID_PATH, F_LINE, VersionToken("v1"), source="chat", description=description
+        )
+
+    assert str(excinfo.value) == "description must not contain a newline or carriage return"
+
+
+def test_append_line_normalizes_str_subclass_description() -> None:
+    """A lying str-subclass description is stored as the exact str "d2"
+    (AIE-1151, US1.11).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.append_line(VALID_PATH, F_LINE, v, source="chat", description=_LyingStr("d2"))
+
+    assert type(result.metadata.description) is str
+    assert result.metadata.description == "d2"
+    reread = store.read_file(VALID_PATH).metadata.description
+    assert type(reread) is str
+    assert reread == "d2"
+
+
+def test_append_line_invalid_path_wins_over_bad_aliases() -> None:
+    """An invalid path raises NotFoundError(INVALID_PATH) before bad aliases are
+    checked (AIE-1151, US1.12).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(NotFoundError) as excinfo:
+        store.append_line(
+            "a/b.md",
+            "plain text",
+            VersionToken("v1"),
+            source="",
+            aliases=cast(Sequence[str], "ab"),
+            description=cast(str, 5),
+        )
+
+    assert excinfo.value.reason is NotFoundReason.INVALID_PATH
+
+
+@pytest.mark.parametrize(
+    ("line", "source"),
+    [("- [stated] b", ""), ("plain text", "chat")],
+    ids=["empty-source", "non-fact-line"],
+)
+def test_append_line_existing_value_error_wins_over_bad_aliases(line: str, source: str) -> None:
+    """An empty source or non-fact line raises the existing ValueError before bad
+    aliases or description are checked (AIE-1151, US1.12).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(ValueError) as excinfo:
+        store.append_line(
+            VALID_PATH,
+            line,
+            VersionToken("v1"),
+            source=source,
+            aliases=cast(Sequence[str], "ab"),
+            description=cast(str, 5),
+        )
+
+    assert type(excinfo.value) is ValueError
+    assert str(excinfo.value) == "line must be a single fact line and source must be non-empty"
+
+
+@pytest.mark.parametrize(
+    ("aliases", "description", "error", "message"),
+    [
+        ("ab", 5, TypeError, "aliases must be a sequence of str, not str"),
+        (["a", 5], "a\nb", TypeError, "aliases entry must be str, got int"),
+        (["a"], 5, TypeError, "description must be a str, not int"),
+        (
+            ["a"],
+            "a\nb",
+            ValueError,
+            "description must not contain a newline or carriage return",
+        ),
+    ],
+    ids=[
+        "aliases-before-description-type",
+        "entry-before-description-value",
+        "description-type",
+        "description-value",
+    ],
+)
+def test_append_line_new_argument_errors_in_order(
+    aliases: object, description: object, error: type[Exception], message: str
+) -> None:
+    """aliases TypeError precedes description TypeError, which precedes the
+    description ValueError (AIE-1151, US1.12).
+    """
+    store = _new_store(_NeverCalledStorage())
+
+    with pytest.raises(error) as excinfo:
+        store.append_line(
+            VALID_PATH,
+            F_LINE,
+            VersionToken("v1"),
+            source="chat",
+            aliases=cast(Sequence[str], aliases),
+            description=cast(str, description),
+        )
+
+    assert type(excinfo.value) is error
+    assert str(excinfo.value) == message
+
+
+def test_append_line_landed_retry_with_new_metadata_returns_success() -> None:
+    """A precondition failure whose re-read finds exactly the bytes and metadata
+    map this call wrote, including new aliases and description, returns success
+    with the new metadata and the re-read version (AIE-1151, US1.13).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, F_BODY, _f_metadata())
+    wrapped = _OwnWriteLandsThenPreconditionFailsStorage(storage)
+    store = _new_store(wrapped)
+    before = store.read_file(VALID_PATH)
+
+    result = store.append_line(
+        VALID_PATH, F_LINE, before.version, source="chat", aliases=["z"], description="d2"
+    )
+
+    assert wrapped.put_if_version_calls == 1
+    assert result.metadata.aliases == ("x", "y", "z")
+    assert result.metadata.description == "d2"
+    reread = store.read_file(VALID_PATH)
+    assert reread.version == result.version
+    assert reread.metadata == result.metadata
+    assert reread.content == result.content
+
+
+class _SameBytesDifferentMetadataStorage:
+    """Wraps InMemoryStorage; put_if_version stores the attempted bytes with a
+    different metadata map, then raises PreconditionFailedError.
+    """
+
+    def __init__(self, inner: InMemoryStorage, metadata: Mapping[str, str]) -> None:
+        self._inner = inner
+        self._metadata = metadata
+        self.landed_version: VersionToken | None = None
+
+    def get(self, key: str) -> StoredObject | None:
+        return self._inner.get(key)
+
+    def put(self, key: str, data: bytes, metadata: Mapping[str, str]) -> VersionToken:
+        return self._inner.put(key, data, metadata)
+
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        self.landed_version = self._inner.put(key, data, self._metadata)
+        raise PreconditionFailedError(key)
+
+    def list_page(self, prefix: str, start_after: str | None, limit: int) -> Sequence[ListedObject]:
+        return self._inner.list_page(prefix, start_after, limit)
+
+    def delete_if_version(self, key: str, expected: VersionToken) -> None:
+        self._inner.delete_if_version(key, expected)
+
+
+def test_append_line_same_bytes_different_metadata_map_conflicts() -> None:
+    """A precondition failure whose re-read shows the same bytes but a metadata
+    map without the new aliases raises VersionConflictError (AIE-1151, US1.14).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, F_BODY, _f_metadata())
+    other = replace(_f_metadata(), sources=frozenset({"s1", "chat"}), last_updated=FIXED_CLOCK_TIME)
+    wrapped = _SameBytesDifferentMetadataStorage(storage, metadata_to_map(other))
+    store = _new_store(wrapped)
+    before = store.read_file(VALID_PATH)
+
+    with pytest.raises(VersionConflictError) as excinfo:
+        store.append_line(VALID_PATH, F_LINE, before.version, source="chat", aliases=["z"])
+
+    assert excinfo.value.content == F_BODY + F_LINE + "\n"
+    assert excinfo.value.version == wrapped.landed_version
+
+
+def test_append_line_keeps_stored_duplicate_aliases_as_stored() -> None:
+    """Stored aliases with a pre-existing duplicate are kept as stored, never
+    deduplicated or reordered, with new aliases after them (AIE-1151, US1.15).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage, aliases=("x", "x"))
+
+    result = store.append_line(VALID_PATH, F_LINE, v, source="chat", aliases=["z"])
+
+    _assert_exact_aliases(result.metadata.aliases, ("x", "x", "z"))
+    _assert_exact_aliases(store.read_file(VALID_PATH).metadata.aliases, ("x", "x", "z"))

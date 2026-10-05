@@ -1,12 +1,13 @@
 """Tests for tool enumeration and the agent-facing tool descriptions.
 
 Covers AIE-1044, US5.1 through US5.8: TOOL_NAMES, MemoryTools.tools(), and
-the docstrings a host shows the agent as tool descriptions.
+the docstrings a host shows the agent as tool descriptions; and AIE-1151,
+US5.1: the aliases and description paragraph on append_line and replace_fact.
 """
 
 import re
 import types
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -126,7 +127,14 @@ class _NullClient:
         raise AssertionError("unexpected call")
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         raise AssertionError("unexpected call")
 
@@ -138,6 +146,8 @@ class _NullClient:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         raise AssertionError("unexpected call")
 
@@ -214,6 +224,25 @@ def test_docstring_contains_pinned_phrase(tool: str, phrase: str) -> None:
     (AIE-1044, US5.4, US5.5, US5.6, US5.8).
     """
     assert phrase in _doc(tool)
+
+
+METADATA_PHRASES = (
+    "added to the file's existing aliases",
+    "never removed",
+    "write_file",
+    "replaces the whole set",
+    "one-line `description` replaces the stored one",
+)
+
+
+@pytest.mark.parametrize("tool", ["append_line", "replace_fact"])
+@pytest.mark.parametrize("phrase", METADATA_PHRASES)
+def test_fact_docstring_explains_aliases_and_description(tool: str, phrase: str) -> None:
+    """The append_line and replace_fact docstrings say aliases are added and
+    never removed, point to write_file for removal, and say description
+    replaces the stored one (AIE-1151, US5.1).
+    """
+    assert phrase in " ".join(_doc(tool).split())
 
 
 @pytest.mark.parametrize("tool", MUTATING_TOOLS)

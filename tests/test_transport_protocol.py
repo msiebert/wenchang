@@ -6,7 +6,7 @@ Covers AIE-1048, US1.1 through US1.5, US2.1 through US2.3, and US4.1 through US4
 import ast
 import inspect
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn
 
@@ -79,7 +79,14 @@ class _FullClient:
         raise NotImplementedError
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         raise NotImplementedError
 
@@ -91,6 +98,8 @@ class _FullClient:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         raise NotImplementedError
 

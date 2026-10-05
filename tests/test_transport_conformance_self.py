@@ -9,7 +9,7 @@ and containing the key phrase.
 
 import inspect
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from itertools import pairwise
 from typing import cast
@@ -128,9 +128,18 @@ class _Forwarding:
         return self.inner.write_file(path, content, metadata, expected_version, source=source)
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
-        return self.inner.append_line(path, line, expected_version, source=source)
+        return self.inner.append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
     def replace_fact(
         self,
@@ -140,9 +149,17 @@ class _Forwarding:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         return self.inner.replace_fact(
-            path, old_string, new_string, expected_version, source=source
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
         )
 
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
@@ -1338,11 +1355,20 @@ class _ForgetsTokens(_Forwarding):
         return super().write_file(path, content, metadata, expected_version, source=source)
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         if self.on_append and path in PROBES:
             raise VersionConflictError(path, line, VersionToken("forgotten"))
-        return super().append_line(path, line, expected_version, source=source)
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
 
 class _NotAClient:
@@ -2106,9 +2132,18 @@ class _ReturnsDict(_Forwarding):
         return result
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
-        result = super().append_line(path, line, expected_version, source=source)
+        result = super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
         if self.on_append and path == Q:
             return {"path": path}  # pyright: ignore[reportReturnType]
         return result

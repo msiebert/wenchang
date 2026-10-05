@@ -2,7 +2,8 @@
 
 Covers AIE-1044, US1 (construction and binding), US2 (reads, listing, index),
 US3 (checked writes), US4 (argument-error conversion), and US6 (module
-boundaries).
+boundaries); and AIE-1151, US4 (aliases and description on append_line and
+replace_fact).
 """
 
 import ast
@@ -11,7 +12,7 @@ import gc
 import inspect
 import tomllib
 import weakref
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -153,7 +154,14 @@ class _FakeClient:
 
     @_recorded
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         return cast(MemoryFile, self.returns["append_line"])
 
@@ -166,6 +174,8 @@ class _FakeClient:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         return cast(MemoryFile, self.returns["replace_fact"])
 
@@ -254,6 +264,15 @@ def _bound(call: _Call) -> dict[str, object]:
     return arguments
 
 
+def _forwarded_metadata(kwargs: dict[str, object]) -> dict[str, object]:
+    """The aliases and description a fact tool forwards: None when omitted."""
+    aliases = kwargs.get("aliases")
+    return {
+        "aliases": None if aliases is None else tuple(cast(Sequence[str], aliases)),
+        "description": kwargs.get("description"),
+    }
+
+
 def _expected(tool: str, path: str, kwargs: dict[str, object]) -> dict[str, object]:
     """The forwarded client arguments for a file tool called with kwargs."""
     if tool == "read_file":
@@ -274,6 +293,7 @@ def _expected(tool: str, path: str, kwargs: dict[str, object]) -> dict[str, obje
             "line": kwargs["line"],
             "expected_version": kwargs["expected_version"],
             "source": SOURCE,
+            **_forwarded_metadata(kwargs),
         }
     if tool == "replace_fact":
         return {
@@ -282,6 +302,7 @@ def _expected(tool: str, path: str, kwargs: dict[str, object]) -> dict[str, obje
             "new_string": kwargs["new_string"],
             "expected_version": kwargs["expected_version"],
             "source": SOURCE,
+            **_forwarded_metadata(kwargs),
         }
     assert tool == "delete_file"
     return {"path": path, "expected_version": kwargs["expected_version"]}
@@ -1404,6 +1425,345 @@ def test_unconverted_value_error_propagates(harness: _Harness, tool: str) -> Non
 
     assert excinfo.value is error
     assert type(excinfo.value) is ValueError
+
+
+# --- Aliases and description on append_line and replace_fact ----------------------
+
+FACT_TOOLS = ("append_line", "replace_fact")
+PATH = "user/u-1/notes/a.md"
+
+FACT_TOOL_PARAMETERS: dict[str, list[tuple[str, object]]] = {
+    "append_line": [
+        ("self", inspect.Parameter.empty),
+        ("scope", inspect.Parameter.empty),
+        ("area", inspect.Parameter.empty),
+        ("name", inspect.Parameter.empty),
+        ("line", inspect.Parameter.empty),
+        ("expected_version", inspect.Parameter.empty),
+        ("aliases", None),
+        ("description", None),
+    ],
+    "replace_fact": [
+        ("self", inspect.Parameter.empty),
+        ("scope", inspect.Parameter.empty),
+        ("area", inspect.Parameter.empty),
+        ("name", inspect.Parameter.empty),
+        ("old_string", inspect.Parameter.empty),
+        ("new_string", inspect.Parameter.empty),
+        ("expected_version", inspect.Parameter.empty),
+        ("aliases", None),
+        ("description", None),
+    ],
+}
+
+FACT_POSITIONAL: dict[str, tuple[object, ...]] = {
+    "append_line": (PATH, LINE, VERSION),
+    "replace_fact": (PATH, OLD, NEW, VERSION),
+}
+
+MALFORMED_ALIASES: dict[str, Callable[[], object]] = {
+    "str": lambda: "ab",
+    "bytes": lambda: b"ab",
+    "bytearray": lambda: bytearray(b"ab"),
+    "int": lambda: 5,
+    "iterator": lambda: iter(["a"]),
+    "set": lambda: frozenset({"a"}),
+    "int-member": lambda: ["a", 5],
+    "none-member": lambda: ("a", None),
+    "class-spoof": _ListSpoof,
+    "unencodable-member": lambda: ["ok", "x\ud800"],
+}
+
+LINE_BOUNDARIES = {
+    "vt": "\x0b",
+    "ff": "\x0c",
+    "fs": "\x1c",
+    "gs": "\x1d",
+    "rs": "\x1e",
+    "nel": "\x85",
+    "ls": chr(0x2028),
+    "ps": chr(0x2029),
+}
+
+
+def _only_client_call(h: _Harness) -> _Call:
+    calls = h.client_calls()
+    assert len(calls) == 1
+    return calls[0]
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_signature_has_optional_aliases_and_description(tool: str) -> None:
+    """append_line and replace_fact take aliases and description last, as
+    positional-or-keyword parameters defaulting to None (AIE-1151, US4.14).
+    """
+    parameters = inspect.signature(getattr(MemoryTools, tool)).parameters.values()
+
+    assert [(p.name, p.default) for p in parameters] == FACT_TOOL_PARAMETERS[tool]
+    assert {p.kind for p in parameters} == {inspect.Parameter.POSITIONAL_OR_KEYWORD}
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_forwards_aliases_tuple_and_description_as_keywords(
+    harness: _Harness, tool: str
+) -> None:
+    """The client gets the path and the tool's arguments positionally and
+    source, aliases as an exact tuple, and description as keywords; the tool
+    returns the client's object (AIE-1151, US4.1, US4.3).
+    """
+    preset = _file()
+    harness.client.returns[tool] = preset
+
+    result = _call(harness, tool, aliases=["x", "y"], description="d")
+
+    assert result is preset
+    name, args, kwargs = _only_client_call(harness)
+    assert name == tool
+    assert args == FACT_POSITIONAL[tool]
+    assert kwargs == {"source": SOURCE, "aliases": ("x", "y"), "description": "d"}
+    assert type(kwargs["aliases"]) is tuple
+    assert type(kwargs["description"]) is str
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_accepts_aliases_and_description_positionally(
+    harness: _Harness, tool: str
+) -> None:
+    """aliases and description may be passed positionally after
+    expected_version (AIE-1151, US4.1, US4.3, US4.14).
+    """
+    positional = [_base(tool)[p] for p, _ in FACT_TOOL_PARAMETERS[tool][1:-2]]
+    method: Callable[..., object] = getattr(harness.tools, tool)
+
+    method(*positional, ("x",), "d")
+
+    _, _, kwargs = _only_client_call(harness)
+    assert kwargs == {"source": SOURCE, "aliases": ("x",), "description": "d"}
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+@pytest.mark.parametrize("explicit", [False, True], ids=["omitted", "explicit-none"])
+def test_fact_tool_forwards_none_when_metadata_not_given(
+    harness: _Harness, tool: str, explicit: bool
+) -> None:
+    """Omitted or explicit-None aliases and description reach the client as
+    explicit aliases=None, description=None keywords (AIE-1151, US4.2, US4.3).
+    """
+    overrides: dict[str, object] = {"aliases": None, "description": None} if explicit else {}
+
+    _call(harness, tool, **overrides)
+
+    _, args, kwargs = _only_client_call(harness)
+    assert args == FACT_POSITIONAL[tool]
+    assert kwargs == {"source": SOURCE, "aliases": None, "description": None}
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_forwards_empty_aliases_as_empty_tuple(harness: _Harness, tool: str) -> None:
+    """An empty aliases list is forwarded as the exact empty tuple
+    (AIE-1151, US4.1).
+    """
+    _call(harness, tool, aliases=[])
+
+    _, _, kwargs = _only_client_call(harness)
+    assert type(kwargs["aliases"]) is tuple
+    assert kwargs["aliases"] == ()
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+@pytest.mark.parametrize("make", list(MALFORMED_ALIASES.values()), ids=list(MALFORMED_ALIASES))
+def test_fact_tool_malformed_aliases_match_write_file(
+    harness: _Harness, tool: str, make: Callable[[], object]
+) -> None:
+    """Malformed aliases raise InvalidArgumentError("aliases") with exactly
+    the detail and cause type write_file gives for the same value; no client
+    call (AIE-1151, US4.4, US4.5).
+    """
+    reference = _invalid(harness, "write_file", "aliases", aliases=make())
+
+    err = _invalid(harness, tool, "aliases", aliases=make())
+
+    assert err.detail == reference.detail
+    assert type(err.__cause__) is type(reference.__cause__)
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+@pytest.mark.parametrize(
+    ("make", "detail"),
+    [
+        (lambda: "ab", "aliases must be a list of strings, not str"),
+        (lambda: 5, "aliases must be a list of strings, not int"),
+        (_ListSpoof, "aliases must be a list of strings, not _ListSpoof"),
+        (lambda: ["a", 5], "aliases must be a string, not int"),
+    ],
+    ids=["str", "int", "class-spoof", "int-member"],
+)
+def test_fact_tool_wrong_type_aliases_detail(
+    harness: _Harness, tool: str, make: Callable[[], object], detail: str
+) -> None:
+    """Wrongly typed aliases yield write_file's documented detail with no
+    cause (AIE-1151, US4.4).
+    """
+    reference = _invalid(harness, "write_file", "aliases", aliases=make())
+    assert reference.detail == f"Argument aliases is invalid: {detail}"
+
+    err = _invalid(harness, tool, "aliases", aliases=make())
+
+    assert err.detail == reference.detail
+    assert err.__cause__ is None
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_unencodable_alias_is_chained(harness: _Harness, tool: str) -> None:
+    """An alias member with a lone surrogate raises InvalidArgumentError("aliases")
+    chained from UnicodeEncodeError (AIE-1151, US4.5).
+    """
+    reference = _invalid(harness, "write_file", "aliases", aliases=["ok", "x\ud800"])
+    assert reference.detail == "Argument aliases is invalid: aliases is not valid UTF-8 text"
+
+    err = _invalid(harness, tool, "aliases", aliases=["ok", "x\ud800"])
+
+    assert type(err.__cause__) is UnicodeEncodeError
+    assert err.detail == reference.detail
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_wrong_type_description(harness: _Harness, tool: str) -> None:
+    """description=5 raises InvalidArgumentError("description") with the
+    wrong-type detail and no cause (AIE-1151, US4.6).
+    """
+    reference = _invalid(harness, "write_file", "description", description=5)
+    assert reference.detail == (
+        "Argument description is invalid: description must be a string, not int"
+    )
+
+    err = _invalid(harness, tool, "description", description=5)
+
+    assert err.detail == reference.detail
+    assert err.__cause__ is None
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+@pytest.mark.parametrize("description", ["a\nb", "a\rb"], ids=["newline", "carriage-return"])
+def test_fact_tool_description_with_newline(harness: _Harness, tool: str, description: str) -> None:
+    """A description with \\n or \\r raises InvalidArgumentError("description")
+    chained from ValueError, with write_file's detail (AIE-1151, US4.7).
+    """
+    reference = _invalid(harness, "write_file", "description", description=description)
+    assert reference.detail == (
+        "Argument description is invalid: description must not contain a newline or carriage return"
+    )
+
+    err = _invalid(harness, tool, "description", description=description)
+
+    assert type(err.__cause__) is ValueError
+    assert err.detail == reference.detail
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+@pytest.mark.parametrize("boundary", list(LINE_BOUNDARIES.values()), ids=list(LINE_BOUNDARIES))
+def test_fact_tool_description_with_line_boundary(
+    harness: _Harness, tool: str, boundary: str
+) -> None:
+    """A description containing a line-boundary character raises
+    InvalidArgumentError("description") with write_file's single-line detail
+    (AIE-1151, US4.8).
+    """
+    reference = _invalid(harness, "write_file", "description", description=f"a{boundary}b")
+    assert reference.detail == "Argument description is invalid: description must be a single line"
+
+    err = _invalid(harness, tool, "description", description=f"a{boundary}b")
+
+    assert err.detail == reference.detail
+    assert err.__cause__ is None
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_unencodable_description_is_chained(harness: _Harness, tool: str) -> None:
+    """A description with a lone surrogate raises InvalidArgumentError("description")
+    chained from UnicodeEncodeError (AIE-1151, US4.9).
+    """
+    reference = _invalid(harness, "write_file", "description", description="x\ud800")
+    assert reference.detail == (
+        "Argument description is invalid: description is not valid UTF-8 text"
+    )
+
+    err = _invalid(harness, tool, "description", description="x\ud800")
+
+    assert type(err.__cause__) is UnicodeEncodeError
+    assert err.detail == reference.detail
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_fact_tool_str_subclass_metadata_is_forwarded_as_exact_str(
+    harness: _Harness, tool: str
+) -> None:
+    """str-subclass description and alias members are forwarded as exact str
+    (AIE-1151, US4.10).
+    """
+    _call(harness, tool, aliases=[_LyingStr("x"), "y"], description=_LyingStr("d"))
+
+    _, _, kwargs = _only_client_call(harness)
+    aliases = cast(tuple[str, ...], kwargs["aliases"])
+    description = kwargs["description"]
+    assert type(aliases) is tuple
+    assert [type(alias) for alias in aliases] == [str, str]
+    assert [str.__str__(alias) for alias in aliases] == ["x", "y"]
+    assert type(description) is str
+    assert str.__eq__(description, "d") is True
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+@pytest.mark.parametrize(
+    "overrides",
+    [{"aliases": "ab"}, {"aliases": ["a", 5]}, {"description": 5}, {"description": "a\nb"}],
+    ids=["str-aliases", "int-alias", "int-description", "newline-description"],
+)
+def test_fact_tool_check_write_precedes_metadata_checks(
+    harness: _Harness, tool: str, overrides: dict[str, object]
+) -> None:
+    """Writing system/ with bad aliases or description raises
+    RestrictedScopeError; only check_write runs (AIE-1151, US4.11).
+    """
+    with pytest.raises(RestrictedScopeError):
+        _call(harness, tool, area="system", **overrides)
+
+    assert [call[0] for call in harness.log] == ["check_write"]
+
+
+PRECEDENCE_CASES: list[tuple[str, str, object]] = [
+    ("append_line", "line", 5),
+    ("append_line", "line", "not a fact"),
+    ("append_line", "line", "- [stated] x\ud800"),
+    ("append_line", "expected_version", 5),
+    ("append_line", "expected_version", None),
+    ("replace_fact", "old_string", 5),
+    ("replace_fact", "old_string", ""),
+    ("replace_fact", "new_string", 5),
+    ("replace_fact", "new_string", "x\ud800"),
+    ("replace_fact", "expected_version", 5),
+    ("replace_fact", "expected_version", None),
+]
+
+
+@pytest.mark.parametrize(("tool", "argument", "value"), PRECEDENCE_CASES)
+def test_earlier_argument_error_precedes_metadata_errors(
+    harness: _Harness, tool: str, argument: str, value: object
+) -> None:
+    """A bad line, old_string, new_string, or expected_version is reported
+    before bad aliases and description (AIE-1151, US4.12).
+    """
+    _invalid(harness, tool, argument, **{argument: value, "aliases": "ab", "description": 5})
+
+    assert [call[0] for call in harness.log] == ["check_write"]
+
+
+@pytest.mark.parametrize("tool", FACT_TOOLS)
+def test_aliases_error_precedes_description_error(harness: _Harness, tool: str) -> None:
+    """Bad aliases are reported before a bad description, in signature order
+    (AIE-1151, US4.12).
+    """
+    _invalid(harness, tool, "aliases", aliases=["a", 5], description="a\nb")
 
 
 # --- US6: module boundaries -------------------------------------------------------

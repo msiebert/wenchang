@@ -3,7 +3,8 @@
 Covers AIE-1045, US5.6, US6.5, US9.4, US10.3, US10.5, US11 (FR-004): every
 (method, cause) pair for write_file, replace_fact, append_line, list_prefix, and
 get_memory_index is provoked on a real MemoryStore and
-str(exc) must equal the module constant exactly.
+str(exc) must equal the module constant exactly. AIE-1151, US6.8 adds the
+description-newline message for append_line and replace_fact.
 """
 
 from collections.abc import Callable
@@ -16,6 +17,7 @@ from wenchang.file_format import FileMetadata
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.testing.transport_conformance import (
     MSG_APPEND_ARGS,
+    MSG_DESCRIPTION_NEWLINE,
     MSG_FOREIGN_CURSOR,
     MSG_INVALID_ENTITY,
     MSG_INVALID_SCOPE,
@@ -141,3 +143,31 @@ def test_get_memory_index_invalid_entity_message_matches() -> None:
         store.get_memory_index({"a": "x/"})
 
     assert str(exc_info.value) == MSG_INVALID_ENTITY.format(entity_id="x/")
+
+
+def test_append_line_description_newline_message_matches() -> None:
+    """append_line with a multi-line description raises exactly MSG_DESCRIPTION_NEWLINE.
+
+    (AIE-1151, US6.8)
+    """
+    message = _message(
+        lambda s, w: s.append_line(
+            PATH, "- [stated] beta", w.version, source=SOURCE, description="a\nb"
+        )
+    )
+
+    assert message == MSG_DESCRIPTION_NEWLINE
+
+
+def test_replace_fact_description_newline_message_matches() -> None:
+    """replace_fact with a multi-line description raises exactly MSG_DESCRIPTION_NEWLINE.
+
+    (AIE-1151, US6.8)
+    """
+    message = _message(
+        lambda s, w: s.replace_fact(
+            PATH, "alpha", "beta", w.version, source=SOURCE, description="a\nb"
+        )
+    )
+
+    assert message == MSG_DESCRIPTION_NEWLINE
