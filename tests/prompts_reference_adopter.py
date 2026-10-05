@@ -45,7 +45,7 @@ new area, named as a lowercase slug, whenever none of these fits.
 - project: taxonomy, metrics, entities, conventions, glossary
 - organization: business-context, vocabulary
 
-Every scope also has a system area. It holds curated content maintained for you and is
+Every scope also has a `system/` area. It holds curated content maintained for you and is
 read-only. Every other area is agent-writable, subject to each scope's write rules under
 Scopes."""
 

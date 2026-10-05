@@ -36,11 +36,11 @@ No existing module or test changed. `prompts` imports nothing from
 `s` = `tests/test_prompts_slots.py`, `a` = `tests/test_prompts_assembly.py`,
 `o` = `tests/test_prompts_overview.py`, `r` =
 `tests/test_prompts_systems_of_record.py`, `i` =
-`tests/test_prompts_invariants.py`. Line numbers are as of commit
-`e873dfe`. Every test docstring cites AIE-1055 and its US number.
+`tests/test_prompts_invariants.py`. Line numbers are as of the PR head. Every test docstring cites AIE-1055
+and its US number.
 
-`make check`: lint and typecheck clean; 3093 passed, 6 skipped (the
-pre-existing resolver-conformance skips).
+`make check`: lint and typecheck clean;
+3113 passed, 6 skipped (the pre-existing resolver-conformance skips).
 
 | Acceptance criterion | Test(s) |
 | -------------------- | ------- |
@@ -57,7 +57,7 @@ pre-existing resolver-conformance skips).
 | US1.11 frozen | `s:222::test_assignment_raises_frozen_instance_error` |
 | US1.12 equal post-strip text → equal, equal hashes | `s:229::test_equal_post_strip_text_is_equal_with_equal_hashes`, `s:237::test_equal_text_without_systems_of_record_is_equal_with_equal_hashes` |
 | US1.13 docstring states vocabulary contract (`shared`, `private`, `system/`) | `s:248::test_docstring_states_vocabulary_contract` |
-| US2.1 `__all__` is the three names, each resolvable | `a:108::test_public_all` (RUF022 order; see Deviations) |
+| US2.1 `__all__` is the three names, each resolvable | `a:108::test_public_all` |
 | US2.2 `SECTION_ORDER` is the exact tuple | `a:117::test_section_order` |
 | US2.3 each generic module has a non-empty `HEADING`; SoR has `PRINCIPLE`, no `BODY`; others have `BODY` | `a:125::test_section_module_shape` |
 | US2.4 eleven headings non-empty and distinct; four owned values pinned | `a:140::test_headings_distinct_and_owned_values_pinned` |
@@ -75,14 +75,15 @@ pre-existing resolver-conformance skips).
 | US4.1 overview: non-empty, 4-6 sentences, required phrases | `o:20::test_overview_body_is_four_to_six_sentences`, `o:30::test_overview_body_contains_phrase` |
 | US4.2 SoR principle: non-empty, required words | `r:13::test_principle_is_non_empty`, `r:21::test_principle_contains_word` |
 | US5.1 discovered section modules are exactly the nine | `i:140::test_discovered_section_modules`, `i:146::test_text_set_covers_every_section` |
-| US5.2 ASCII, lines <= 100 | `i:153::test_text_is_ascii_with_short_lines` |
-| US5.3 no `AIE-\d+` under `src/wenchang/prompts/` | `i:160::test_no_linear_ids_in_prompt_sources` |
-| US5.4 no `.md`, `{`, `x/y.md` path, or entity/entities | `i:168::test_text_has_no_paths_braces_or_entity` |
-| US5.5 backticked calls use real tool and parameter names (`inspect.signature`) | `i:177::test_text_tool_calls_use_real_names_and_parameters` |
-| US5.6 backticked snake_case identifiers are agent-visible | `i:194::test_text_snake_case_identifiers_are_agent_visible`, `i:202::test_allowed_identifier_set_is_populated` |
-| US5.7 no organization(s) / project(s) | `i:212::test_text_has_no_adopter_scope_names` |
-| US5.8 each text <= 2500 chars | `i:218::test_text_length_limit` |
-| US5.9 imports from `wenchang` confined to `wenchang.prompts` | `i:240::test_prompts_import_only_prompts_from_wenchang`, `i:257::test_prompt_files_include_package_modules` |
+| US5.2 ASCII, lines <= 100 | `i:229::test_text_is_ascii_with_short_lines` |
+| US5.3 no `AIE-\d+` under `src/wenchang/prompts/` | `i:234::test_no_linear_ids_in_prompt_sources` |
+| US5.4 no `.md`, `{`, `x/y.md` path, or entity/entities | `i:245::test_text_has_no_paths_braces_or_entity` |
+| US5.5 backticked calls use real tool and parameter names (`inspect.signature`) | `i:251::test_text_tool_calls_use_real_names_and_parameters` (arguments split by the quote-aware `_split_args`) |
+| US5.6 backticked snake_case identifiers are agent-visible | `i:258::test_text_snake_case_identifiers_are_agent_visible`, `i:264::test_allowed_identifier_set_is_populated` |
+| US5.7 no organization(s) / project(s) | `i:274::test_text_has_no_adopter_scope_names` |
+| US5.8 each text <= 2500 chars | `i:280::test_text_length_limit` |
+| US5.2-5.8 positive controls: every check rejects a known violation and accepts known-good prose | `i:302::test_text_checks_reject_known_bad_text`, `i:322::test_text_checks_accept_known_good_text` |
+| US5.9 imports from `wenchang` confined to `wenchang.prompts` | `i:345::test_prompts_import_only_prompts_from_wenchang`, `i:362::test_prompt_files_include_package_modules` |
 | US6.1 `REFERENCE_SLOTS` builds, each blob verbatim under its heading | `a:324::test_reference_slots_build_and_appear_under_headings` |
 | US6.2 fixture blobs carry the §9 rules, areas, and systems | `a:343::test_reference_scope_guidance_rules`, `a:364::test_reference_seed_areas_content`, `a:378::test_reference_systems_of_record_content` |
 | US6.3 `systems_of_record=None` omits SoR | `a:386::test_reference_slots_without_systems_of_record` |
@@ -91,7 +92,7 @@ pre-existing resolver-conformance skips).
 | US7.2 glossary | `docs/product/glossary.md`: new **Prompt slots**; **Seed areas**, **Systems of record**, **Scope priority** updated |
 | US7.3 README adopter section | `README.md`: **Adopter configuration** |
 | US7.4 ADR 0025 | `docs/adr/0025-prompt-layer-sections-and-slots.md`: decisions 1-10, the 2026-10-05 decisions in Context and decisions 3-4, overview owning "split rather than bloat" in decision 6 |
-| US7.5 no Linear IDs in `src/`; test docstrings cite AIE-1055 | `i:160` (prompts package); `grep -rE "AIE-[0-9]+" src` finds nothing; every new test docstring cites AIE-1055 |
+| US7.5 no Linear IDs in `src/`; test docstrings cite AIE-1055 | `i:234` (prompts package); `grep -rE "AIE-[0-9]+" src` finds nothing; every new test docstring cites AIE-1055 |
 
 ## Architecture / ADR changes
 
@@ -136,12 +137,6 @@ pre-existing resolver-conformance skips).
   slots but calls it "configuration, not prompt text". It stays on
   `MemoryStore(scope_priority=...)` so there is one source of truth. See
   ADR 0025 decision 5.
-- **`__all__` order.** Spec US2.1 lists `["PromptSlots", "SECTION_ORDER",
-  "build_memory_prompt"]`. The shipped order is `["SECTION_ORDER",
-  "PromptSlots", "build_memory_prompt"]` because ruff's RUF022 requires the
-  sorted order. `a:108` pins the shipped order. The set of names is
-  unchanged.
-
 ## Decisions to confirm
 
 - **Adopters can't omit, reorder, or override generic sections.** This is
@@ -188,23 +183,40 @@ pre-existing resolver-conformance skips).
   - the containment reason "readable by members who can access only some
     projects"
   - the "Scope test" paragraph and its three examples
-  - the seed-area lists per scope
+  - the seed-area lists per scope, and the sentence "Every scope also has
+    a `system/` area", which uses the vocabulary contract's term
   - the event-catalog, dashboard, and cohort bullets
 
   Tests pin the hierarchy, scope-test, ask, contradiction, and containment
   sentences, so any edit will need the matching test updated.
-- **The invariant regexes** (`i:168`-`i:218`):
+- **The invariant regexes** (`i:229`-`i:322`):
   - `\bentit(y|ies)\b` allows "identity".
   - `\b(organizations?|projects?)\b` applies only to section text, not
     slots.
   - The tool-call regex ``` `name(args)` ``` accepts only bare parameter
-    names, `name=...`, or `...` as arguments.
+    names, `name=...`, or `...` as arguments. Arguments are split by
+    `_split_args`, which ignores commas inside single- or double-quoted
+    strings, so `` `replace_fact(..., old_string="a, b")` `` passes.
   - The snake_case regex catches only identifiers that contain at least
     one `_`, so a single-word backticked token like `` `scope` `` is not
     checked.
 
   Are any of these too loose, or too strict for the prose AIE-1049..1054
   will write?
+- **Positive controls for the invariants.** Every check is a helper
+  function, and two tests exercise each one directly:
+  - `i:302::test_text_checks_reject_known_bad_text` feeds each check a
+    known violation, for example an unknown tool, an unknown parameter,
+    `the project`, `a/b.md`, `AIE-12`, `café`, or a 101-column line. With
+    the section bodies still empty, this keeps any check from passing
+    vacuously.
+  - `i:322::test_text_checks_accept_known_good_text` runs every check
+    over prose a section may legitimately use, for example
+    `` `replace_fact(..., new_string="")` ``, "identity", `` `system/` ``,
+    and `` `list_prefix(scope, area)` ``.
+
+  Is the known-good list representative of what the generic sections
+  will need to say?
 
 ## Follow-ups
 

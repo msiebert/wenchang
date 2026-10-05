@@ -111,7 +111,9 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
    `UnicodeEncodeError`. These are adopter-side arguments, so the errors
    are `TypeError`/`ValueError`, not `InvalidArgumentError`, as for
    `ScopePolicy`. Slot content is not policed beyond that; adopter prose
-   is the adopter's.
+   is the adopter's. `build_memory_prompt` accepts `PromptSlots`
+   subclasses and trusts their validated fields; a subclass that bypasses
+   `__post_init__` validation is unsupported.
    `systems_of_record` is optional (human decision, 2026-10-05). This
    deviates from Section 8.2, which lists it beside the required blobs.
    Not every adopter has a system of record. When it is `None`, the whole
@@ -159,11 +161,15 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
      `[system]` included. The `remembering` section must say `[system]`
      marks curated content and the agent uses `stated`, `observed`, or
      `inferred`.
-   - **Alias upkeep vs. write mechanics.** Section 8.1 says every write
-     keeps aliases current, while full-file writes are reserved for new
-     files. ADR 0024 (AIE-1151, being built concurrently in this
-     milestone) resolves this by giving `append_line` and
-     `replace_fact` optional `aliases` and `description` arguments.
+   - **Alias upkeep vs. write mechanics.** "Every write adds aliases"
+     conflicts with "reserve full-file writes for new files": only
+     `write_file` carries `aliases` and `description`, and it replaces
+     them. The same applies to `description` drift. This gap is open on
+     this branch. A separate issue in this milestone (AIE-1151) handles it
+     by adding optional `aliases` and `description` arguments to
+     `append_line` and `replace_fact`; that issue's own ADR records the
+     resolution. The generic prose that depends on it (AIE-1049, AIE-1051)
+     is written after it lands.
    - **Dropping one fact.** Removing a line uses `replace_fact` with an
      empty `new_string`; the text must say to quote the line with its line
      break, or a blank line is left behind. The write-mechanics and

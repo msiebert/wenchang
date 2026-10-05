@@ -9,7 +9,7 @@ import importlib
 import inspect
 import pkgutil
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -149,40 +149,49 @@ def test_text_set_covers_every_section() -> None:
         assert f"{module_name}.HEADING" in TEXT_IDS, module_name
 
 
-@text_param
-def test_text_is_ascii_with_short_lines(text: str) -> None:
-    """AIE-1055, US5.2: every text is ASCII and every line is at most 100 characters."""
+def _split_args(args: str) -> list[str]:
+    """Split on commas outside single- or double-quoted strings."""
+    parts: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    for char in args:
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char == ",":
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _check_ascii_and_lines(text: str) -> None:
     assert text.isascii()
     for line in text.split("\n"):
         assert len(line) <= 100, line
 
 
-def test_no_linear_ids_in_prompt_sources() -> None:
-    """AIE-1055, US5.3: no file under src/wenchang/prompts/ contains a Linear issue ID."""
-    assert PROMPT_FILES
-    for file in PROMPT_FILES:
-        assert re.search(r"AIE-\d+", file.read_text(encoding="utf-8")) is None, file.name
+def _check_no_linear_ids(text: str) -> None:
+    assert re.search(r"AIE-\d+", text) is None
 
 
-@text_param
-def test_text_has_no_paths_braces_or_entity(text: str) -> None:
-    """AIE-1055, US5.4: no `.md`, no `{`, no `x/y.md` path, and no word entity/entities."""
+def _check_no_paths(text: str) -> None:
     assert ".md" not in text
     assert "{" not in text
     assert re.search(r"\S+/\S+\.md", text) is None
     assert re.search(r"\bentit(y|ies)\b", text, re.IGNORECASE) is None
 
 
-@text_param
-def test_text_tool_calls_use_real_names_and_parameters(text: str) -> None:
-    """AIE-1055, US5.5: every backticked call names a tool, and each argument is `...`
-    or a parameter of that tool read from inspect.signature."""
+def _check_tool_calls(text: str) -> None:
     for match in re.finditer(r"`([a-z][a-z0-9_]*)\(([^`]*)\)`", text):
         tool = match.group(1)
         assert tool in TOOL_NAMES, match.group(0)
         parameters = _tool_parameters(tool)
-        args = [a.strip() for a in match.group(2).split(",") if a.strip()]
-        for arg in args:
+        for arg in _split_args(match.group(2)):
             if arg == "...":
                 continue
             arg_match = re.match(r"^([a-z_][a-z0-9_]*)(\s*=.*)?$", arg)
@@ -190,13 +199,66 @@ def test_text_tool_calls_use_real_names_and_parameters(text: str) -> None:
             assert arg_match.group(1) in parameters, match.group(0)
 
 
+def _check_identifiers(text: str) -> None:
+    allowed = _allowed_identifiers()
+    for match in re.finditer(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`", text):
+        assert match.group(1) in allowed, match.group(0)
+
+
+def _check_no_adopter_scope_names(text: str) -> None:
+    assert re.search(r"\b(organizations?|projects?)\b", text, re.IGNORECASE) is None
+
+
+def _check_length(text: str) -> None:
+    assert len(text) <= 2500
+
+
+TextCheck = Callable[[str], None]
+ALL_CHECKS: list[TextCheck] = [
+    _check_ascii_and_lines,
+    _check_no_linear_ids,
+    _check_no_paths,
+    _check_tool_calls,
+    _check_identifiers,
+    _check_no_adopter_scope_names,
+    _check_length,
+]
+
+
+@text_param
+def test_text_is_ascii_with_short_lines(text: str) -> None:
+    """AIE-1055, US5.2: every text is ASCII and every line is at most 100 characters."""
+    _check_ascii_and_lines(text)
+
+
+def test_no_linear_ids_in_prompt_sources() -> None:
+    """AIE-1055, US5.3: no file under src/wenchang/prompts/ contains a Linear issue ID."""
+    assert PROMPT_FILES
+    for file in PROMPT_FILES:
+        try:
+            _check_no_linear_ids(file.read_text(encoding="utf-8"))
+        except AssertionError:
+            pytest.fail(file.name)
+
+
+@text_param
+def test_text_has_no_paths_braces_or_entity(text: str) -> None:
+    """AIE-1055, US5.4: no `.md`, no `{`, no `x/y.md` path, and no word entity/entities."""
+    _check_no_paths(text)
+
+
+@text_param
+def test_text_tool_calls_use_real_names_and_parameters(text: str) -> None:
+    """AIE-1055, US5.5: every backticked call names a tool, and each argument is `...`
+    or a parameter of that tool read from inspect.signature."""
+    _check_tool_calls(text)
+
+
 @text_param
 def test_text_snake_case_identifiers_are_agent_visible(text: str) -> None:
     """AIE-1055, US5.6: every backticked snake_case identifier is a tool name, tool
     parameter, rendered result/error key, or enum value."""
-    allowed = _allowed_identifiers()
-    for match in re.finditer(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`", text):
-        assert match.group(1) in allowed, match.group(0)
+    _check_identifiers(text)
 
 
 def test_allowed_identifier_set_is_populated() -> None:
@@ -211,13 +273,56 @@ def test_allowed_identifier_set_is_populated() -> None:
 @text_param
 def test_text_has_no_adopter_scope_names(text: str) -> None:
     """AIE-1055, US5.7: no text names organization(s) or project(s)."""
-    assert re.search(r"\b(organizations?|projects?)\b", text, re.IGNORECASE) is None
+    _check_no_adopter_scope_names(text)
 
 
 @text_param
 def test_text_length_limit(text: str) -> None:
     """AIE-1055, US5.8: every text is at most 2500 characters."""
-    assert len(text) <= 2500
+    _check_length(text)
+
+
+@pytest.mark.parametrize(
+    ("check", "bad_text"),
+    [
+        pytest.param(_check_tool_calls, "`foo_bar(x)`", id="tool-calls-unknown-tool"),
+        pytest.param(_check_tool_calls, "`append_line(bogus=1)`", id="tool-calls-unknown-param"),
+        pytest.param(_check_identifiers, "`not_a_real_name`", id="identifiers"),
+        pytest.param(_check_no_adopter_scope_names, "the project", id="scope-names-project"),
+        pytest.param(_check_no_adopter_scope_names, "Organizations", id="scope-names-orgs"),
+        pytest.param(_check_no_paths, "an entity", id="paths-entity"),
+        pytest.param(_check_no_paths, "a/b.md", id="paths-md"),
+        pytest.param(_check_no_paths, "{x}", id="paths-brace"),
+        pytest.param(_check_no_linear_ids, "AIE-12", id="linear-ids"),
+        pytest.param(_check_ascii_and_lines, "café", id="ascii"),
+        pytest.param(_check_ascii_and_lines, "a" * 101, id="line-length"),
+        pytest.param(_check_length, "a" * 2501, id="length"),
+    ],
+)
+def test_text_checks_reject_known_bad_text(check: TextCheck, bad_text: str) -> None:
+    """AIE-1055, US5: each text check rejects a known violation, so no check passes
+    vacuously."""
+    with pytest.raises(AssertionError):
+        check(bad_text)
+
+
+KNOWN_GOOD_TEXTS = [
+    '`replace_fact(..., new_string="")`',
+    '`replace_fact(..., old_string="a, b")`',
+    "`replace_fact(scope, area, name, old_string, new_string, expected_version)`",
+    "`role_required`",
+    "identity",
+    "`system/`",
+    "`get_memory_index()`",
+    "`list_prefix(scope, area)`",
+]
+
+
+@pytest.mark.parametrize("good_text", KNOWN_GOOD_TEXTS)
+def test_text_checks_accept_known_good_text(good_text: str) -> None:
+    """AIE-1055, US5: prose a section may legitimately use passes every text check."""
+    for check in ALL_CHECKS:
+        check(good_text)
 
 
 def _resolved_import(node: ast.ImportFrom) -> str:

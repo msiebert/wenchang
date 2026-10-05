@@ -370,7 +370,7 @@ def test_reference_seed_areas_content() -> None:
     assert "- user: identity, preferences, workflows, people" in lines
     assert "- project: taxonomy, metrics, entities, conventions, glossary" in lines
     assert "- organization: business-context, vocabulary" in lines
-    assert "Every scope also has a system area." in text
+    assert "Every scope also has a `system/` area." in text
     assert "is read-only." in text
     assert "not a fixed list" in text
 
