@@ -18,9 +18,8 @@ duplicate. This check runs only when you create a file; appending to a file you 
 does not trigger it.
 
 Every write should carry any new names the subject will later be looked up by: nicknames,
-acronyms, and the phrasings people use for it. Pass them as `aliases` on the same `append_line`
-or `replace_fact` call that writes the fact, or in `write_file` when you create or restructure a
-file. Descriptions and aliases are the entire search surface: there is no content search, so a
-later mention finds a file only through them, and each write should make the next match more
-likely. Removing an alias is a `write_file`.
+acronyms, and the phrasings people use for it. Pass them as `aliases` on the same write that
+records the fact. Descriptions and aliases are the entire search surface: there is no content
+search, so a later mention finds a file only through them, and each write should make the next
+match more likely.
 """

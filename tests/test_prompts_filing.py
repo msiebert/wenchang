@@ -67,22 +67,12 @@ def test_filing_section_in_assembled_prompt() -> None:
         pytest.param("acronyms", id="US4.1-acronyms"),
         pytest.param("phrasings", id="US4.1-phrasings"),
         pytest.param("`aliases`", id="US4.2-aliases"),
-        pytest.param(
-            "`aliases` on the same `append_line` or `replace_fact` call",
-            id="US4.2-same-call",
-        ),
-        pytest.param("`append_line`", id="US4.2-append-line"),
-        pytest.param("`replace_fact`", id="US4.2-replace-fact"),
-        pytest.param(
-            "in `write_file` when you create or restructure",
-            id="US4.2-write-file-when-create-or-restructure",
-        ),
+        pytest.param("`aliases` on the same write that records the fact", id="US4.2-same-write"),
         pytest.param("entire search surface", id="US4.3-entire-search-surface"),
-        pytest.param("Removing an alias is a `write_file`", id="US4.4-removing-an-alias"),
     ],
 )
 def test_filing_body_contains_phrase(phrase: str) -> None:
-    """AIE-1049, US2.1-US4.4: filing.BODY contains each required phrase."""
+    """AIE-1049, US2.1-US4.3: filing.BODY contains each required phrase."""
     assert phrase in _normalized(filing.BODY)
 
 
@@ -92,8 +82,11 @@ def test_filing_body_contains_phrase(phrase: str) -> None:
         pytest.param("slug", id="US2.3-slug"),
         pytest.param("lowercase", id="US2.3-lowercase"),
         pytest.param("`list_prefix(scope)`", id="US3.6-list-prefix-scope"),
+        pytest.param("`append_line`", id="US4.2-no-append-line"),
+        pytest.param("`replace_fact`", id="US4.2-no-replace-fact"),
+        pytest.param("`write_file`", id="US4.2-no-write-file"),
     ],
 )
 def test_filing_body_omits_phrase(phrase: str) -> None:
-    """AIE-1049, US2.3/US3.6: filing.BODY omits the forbidden phrases."""
+    """AIE-1049, US2.3/US3.6/US4.2: filing.BODY omits the forbidden phrases."""
     assert phrase.lower() not in _normalized(filing.BODY).lower()

@@ -51,12 +51,11 @@ file creation off the index, and alias upkeep. No other `src/` change. One
 new test file, `tests/test_prompts_filing.py`, pins the load-bearing tokens.
 
 Binding cross-issue decisions (wave 2 addendum):
-- Decision 1: aliases ride on the same `append_line` / `replace_fact` call
-  (or `write_file` when creating or restructuring); removing an alias is a
-  `write_file`. This section states the rule and why; the write-tool
-  section (AIE-1051) states which tool carries what. No tool mechanics
-  beyond naming the call that carries `aliases` and that removing an alias
-  is a `write_file`.
+- Decision 1: new lookup names go in `aliases` on the same write that
+  records the fact. This section states the rule and why; the write-tool
+  section (AIE-1051) owns which call carries `aliases` and that removing an
+  alias is a `write_file` (orchestrator decisions, 2026-10-05). This
+  section names no write tool.
 - Decision 4: if the relevant area is listed as capped in the index, one
   `list_prefix(scope, area)` on that area only, never the whole store.
 
@@ -98,9 +97,9 @@ never breaks a pin.
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 4.1 | `BODY` | read | every write carries any new names the subject will be looked up by: contains `Every write should carry any new names`, `nicknames`, `acronyms`, `phrasings` |
-| 4.2 | `BODY` | read | aliases go on the same `append_line`/`replace_fact` call, or in `write_file` when creating or restructuring: contains `` `aliases` ``, `` `aliases` on the same `append_line` or `replace_fact` call ``, `` `append_line` ``, `` `replace_fact` ``, ``in `write_file` when you create or restructure`` |
+| 4.2 | `BODY` | read | new names go in `aliases` on the same write that records the fact, naming no write tool: contains `` `aliases` `` and `` `aliases` on the same write that records the fact ``; omits `` `append_line` ``, `` `replace_fact` ``, `` `write_file` `` |
 | 4.3 | `BODY` | read | the reason: contains `entire search surface` |
-| 4.4 | `BODY` | read | removing an alias is a `write_file`: contains ``Removing an alias is a `write_file` `` |
+| 4.4 | `BODY` | read | (withdrawn: alias removal belongs to AIE-1051, orchestrator decision 2026-10-05) |
 
 ## Behavioral evaluation scenarios (Notion §10.3; not executed)
 

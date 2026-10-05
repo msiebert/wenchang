@@ -16,7 +16,7 @@ only search surface.
 | US1 | `filing` module | imported / assembled | heading "Filing"; body non-empty, <= 2000 chars; appears under `## Filing` in `build_memory_prompt()` |
 | US2 | body | read | domain filing; seed areas are a starting shape; no restated slug rule |
 | US3 | body | read | dedup before creating a file, off the index's descriptions and aliases; one or two `read_file` candidates when ambiguous, never the whole store; if nothing in the index matches and the area is capped -> `list_prefix(scope, area)` on that area only, never `list_prefix(scope)`; appends to a known file do not trigger it |
-| US4 | body | read | every write carries any new nicknames/acronyms/phrasings as `aliases` on the same `append_line`/`replace_fact` call, or in `write_file` when creating or restructuring; reason: entire search surface; removing an alias is a `write_file` |
+| US4 | body | read | every write carries any new nicknames/acronyms/phrasings as `aliases` on the same write that records the fact (no write tool named; AIE-1051 owns which call); reason: entire search surface (alias removal is AIE-1051's) |
 
 ## Key design decisions
 
@@ -25,7 +25,7 @@ only search surface.
 | Exact prose fixed in plan.md | Let implementer draft | Prose is the deliverable; reviewers check it at the spec stage |
 | Pin tokens, not sentences, after whitespace normalization | Pin the whole body | Wording can evolve without test churn; load-bearing rules stay pinned |
 | Body budget 2000 chars in this test | Rely on the 2500 invariant only | Brief asks for "well under 2500" |
-| Name only the call that carries `aliases` | Explain union/replace semantics | Addendum decision 1: mechanics belong to AIE-1051 and the docstrings |
+| Name no write tool; say aliases ride on the same write | Name the calls; explain union/replace semantics | Addendum decision 1 and orchestrator decision: which call, and mechanics, belong to AIE-1051 and the docstrings |
 | Capped area: one `list_prefix(scope, area)` | Forbid listing entirely | Addendum decision 4; matches the `get_memory_index` docstring |
 
 ## Files/modules to be touched
@@ -36,12 +36,11 @@ only search surface.
 
 ## Open questions / assumptions
 
-- Overlap with AIE-1051: both sections name the call that carries `aliases`
-  and say removing an alias is a `write_file`. The orchestrator's content
-  requirements for this issue require both sentences here, so they stay;
-  this section states them as the rule and its reason, 1051 as tool choice.
-  If the assembled prompt reads as repetitive, drop the removal sentence
-  from one of the two at merge (orchestrator call).
+- Resolved (orchestrator decision, 2026-10-05): AIE-1051 owns the
+  alias-removal rule. "Removing an alias is a `write_file`." was removed
+  from this section and criterion US4.4 withdrawn. A follow-up decision the
+  same day also gave AIE-1051 the which-call rule: this section now says
+  "on the same write that records the fact" and names no write tool.
 
 ## Risks
 

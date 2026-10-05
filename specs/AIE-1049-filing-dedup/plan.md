@@ -61,11 +61,10 @@ duplicate. This check runs only when you create a file; appending to a file you 
 does not trigger it.
 
 Every write should carry any new names the subject will later be looked up by: nicknames,
-acronyms, and the phrasings people use for it. Pass them as `aliases` on the same `append_line`
-or `replace_fact` call that writes the fact, or in `write_file` when you create or restructure a
-file. Descriptions and aliases are the entire search surface: there is no content search, so a
-later mention finds a file only through them, and each write should make the next match more
-likely. Removing an alias is a `write_file`.
+acronyms, and the phrasings people use for it. Pass them as `aliases` on the same write that
+records the fact. Descriptions and aliases are the entire search surface: there is no content
+search, so a later mention finds a file only through them, and each write should make the next
+match more likely.
 ```
 
 Traceability:
@@ -75,9 +74,11 @@ Traceability:
   gated on no index match (consistent with the `get_memory_index` docstring).
 - Paragraph 3: §8.1 Alias upkeep, scoped to new names per addendum
   decision 1 ("when a write introduces a name"); "entire search surface" /
-  "no content search" from §4; the same-call sentence (with decision 1's
-  `write_file` qualifier) and the removal sentence are addendum decision 1,
-  both explicitly required by the orchestrator's content requirements.
+  "no content search" from §4; the same-write sentence is addendum decision 1;
+  it names no write tool because the write-mechanics section (AIE-1051) owns
+  which call carries `aliases`. The alias-removal rule
+  belongs to the write-mechanics section (AIE-1051), orchestrator decision
+  2026-10-05.
 
 ## Tests (`tests/test_prompts_filing.py`)
 
@@ -92,7 +93,7 @@ space; every test docstring starts `AIE-1049, USx.y:`.
   `PromptSlots(scope_guidance="Scopes text.", seed_areas="Seed text.")`,
   `"## Filing\n\n" + filing.BODY.strip()` is in `build_memory_prompt(slots)`.
 - `test_filing_body_contains_phrase` parametrized with ids per criterion
-  over the "contains" phrases of US2.1, 2.2, 3.1-3.5, 3.7, 4.1-4.4, matched
+  over the "contains" phrases of US2.1, 2.2, 3.1-3.5, 3.7, 4.1-4.3, matched
   against the normalized body.
 - `test_filing_body_omits_phrase` parametrized over US2.3 (`slug`,
   `lowercase`, case-insensitive) and US3.6 (`` `list_prefix(scope)` ``).
