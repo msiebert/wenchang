@@ -104,6 +104,7 @@ class PromptSlots:
     scope_guidance: str
     seed_areas: str
     systems_of_record: str | None = None
+
     def __post_init__(self) -> None: ...
 ```
 
@@ -143,12 +144,21 @@ whole systems-of-record section. Scope priority is not a slot: it is
 
 ```python
 SECTION_ORDER: Final[tuple[str, ...]] = (
-    "overview", "scope_guidance", "seed_areas", "systems_of_record",
-    "applying_memory", "remembering", "privacy", "filing",
-    "write_mechanics", "curated_content", "forgetting",
+    "overview",
+    "scope_guidance",
+    "seed_areas",
+    "systems_of_record",
+    "applying_memory",
+    "remembering",
+    "privacy",
+    "filing",
+    "write_mechanics",
+    "curated_content",
+    "forgetting",
 )
 SCOPE_GUIDANCE_HEADING: Final[str] = "Scopes"
 SEED_AREAS_HEADING: Final[str] = "Seed areas"
+
 
 def build_memory_prompt(slots: PromptSlots, /) -> str: ...
 ```
@@ -175,8 +185,8 @@ def build_memory_prompt(slots: PromptSlots, /) -> str: ...
 ## `__init__.py`
 
 Module docstring; imports `PromptSlots` from `slots`, `SECTION_ORDER` and
-`build_memory_prompt` from `assemble`; `__all__ = ["PromptSlots",
-"SECTION_ORDER", "build_memory_prompt"]`. Nothing added to
+`build_memory_prompt` from `assemble`; `__all__ = ["SECTION_ORDER",
+"PromptSlots", "build_memory_prompt"]` (RUF022 order). Nothing added to
 `wenchang/__init__.py`.
 
 ## Test fixture `tests/prompts_reference_adopter.py` (exact text)

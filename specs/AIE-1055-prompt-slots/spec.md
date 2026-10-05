@@ -61,7 +61,7 @@ their wording is not API.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 2.1 | `wenchang.prompts` | import | `__all__ == ["PromptSlots", "SECTION_ORDER", "build_memory_prompt"]`, each resolvable |
+| 2.1 | `wenchang.prompts` | import | `__all__ == ["SECTION_ORDER", "PromptSlots", "build_memory_prompt"]` (RUF022 sort order, as in `tools.py`), each resolvable |
 | 2.2 | `SECTION_ORDER` | read | exactly `("overview", "scope_guidance", "seed_areas", "systems_of_record", "applying_memory", "remembering", "privacy", "filing", "write_mechanics", "curated_content", "forgetting")` |
 | 2.3 | each id in `SECTION_ORDER` except `scope_guidance` and `seed_areas` | import `wenchang.prompts.<id>` | the module exists and has a non-empty `str` `HEADING`; `systems_of_record` has `PRINCIPLE` (no `BODY`), every other has `BODY` |
 | 2.4 | all eleven headings (nine section `HEADING`s plus `assemble.SCOPE_GUIDANCE_HEADING`, `assemble.SEED_AREAS_HEADING`) | read | each non-empty and all distinct; exact values pinned only for the four this issue owns: `overview.HEADING == "Memory"`, `SCOPE_GUIDANCE_HEADING == "Scopes"`, `SEED_AREAS_HEADING == "Seed areas"`, `systems_of_record.HEADING == "Systems of record"` (later issues may retitle their own sections without touching shared tests) |
