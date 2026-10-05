@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-05
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Linear AIE-1053; Notion spec §8.1 (Forgetting paragraph); milestone 4
 design doc (`wenchang.prompts`); wave 2 addendum cross-issue wording decisions

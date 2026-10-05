@@ -88,4 +88,10 @@ Round 1:
   deleting the targeted sentence would not fail the test; both re-pinned on
   phrases unique to their sentence, and US3.5 re-pinned on the rule's phrase.
   Declined: rewording the module docstring (out of the wave's edit scope,
-  which is `BODY` only). This section filled in.
+  which is `BODY` only).
+
+Round 2:
+- Reviewer B: PASS (each pin now appears exactly once in the body).
+- spec-reviewer gate: PASS, 21/21 criteria. Applied its NITs: the only-fact
+  sentence moved before the `delete_file` sentence so "that fact line" refers
+  to the drop-one-fact move; spec status set to Implemented.

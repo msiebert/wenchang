@@ -6,10 +6,9 @@ HEADING: Final[str] = "Forgetting"
 BODY: Final[str] = """\
 Forgetting has two moves: drop one fact, or delete the whole file. To drop one fact, call
 `replace_fact` with the whole fact line as `old_string` and an empty `new_string`; the write-tool
-section says how to take the line break with it. To remove a whole file, call `delete_file`. If
-that fact line is the file's only fact, call `delete_file` instead of leaving an empty file. When
-it is ambiguous whether the user means one fact or the whole file, ask before you remove
-anything.
+section says how to take the line break with it. If that fact line is the file's only fact,
+delete the file instead of leaving it empty. To remove a whole file, call `delete_file`. When it
+is ambiguous whether the user means one fact or the whole file, ask before you remove anything.
 
 Removal is total. Do not rewrite a removed fact as something once believed, and do not leave a
 softened note that it was ever true. Anything derived solely from the removed fact goes too: drop

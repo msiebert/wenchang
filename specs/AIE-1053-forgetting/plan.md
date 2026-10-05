@@ -53,10 +53,9 @@ columns).
 ```text
 Forgetting has two moves: drop one fact, or delete the whole file. To drop one fact, call
 `replace_fact` with the whole fact line as `old_string` and an empty `new_string`; the write-tool
-section says how to take the line break with it. To remove a whole file, call `delete_file`. If
-that fact line is the file's only fact, call `delete_file` instead of leaving an empty file. When
-it is ambiguous whether the user means one fact or the whole file, ask before you remove
-anything.
+section says how to take the line break with it. If that fact line is the file's only fact,
+delete the file instead of leaving it empty. To remove a whole file, call `delete_file`. When it
+is ambiguous whether the user means one fact or the whole file, ask before you remove anything.
 
 Removal is total. Do not rewrite a removed fact as something once believed, and do not leave a
 softened note that it was ever true. Anything derived solely from the removed fact goes too: drop
@@ -79,7 +78,7 @@ Sentence trace:
 - `replace_fact` / `delete_file` sentences — Linear content requirement; addendum
   decision 2 (line-break detail deferred to the write-tool section).
 - "When it is ambiguous ... ask" — §8.1 sentence 3.
-- "If that fact line is the file's only fact, call `delete_file` instead" —
+- "If that fact line is the file's only fact, delete the file instead" —
   dropping the last fact is in effect the delete-file move; an empty file with a
   description and aliases would leave a trace (§8.1 "Removal is total").
 - "Removal is total ... ever true" — §8.1 sentence 2 (paraphrases "no
