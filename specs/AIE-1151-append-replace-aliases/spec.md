@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-05
 
-**Status**: Draft — human decision recorded 2026-10-05 (API change over
+**Status**: Implemented — human decision recorded 2026-10-05 (API change over
 prompt-only guidance or relaxing the alias-upkeep rule).
 
 **Input**: Notion §8.1 says every write adds the names the subject will later

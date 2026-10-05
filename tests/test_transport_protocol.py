@@ -203,6 +203,15 @@ def test_class_docstring_states_error_parity(name: str) -> None:
     assert name in doc
 
 
+def test_class_docstring_lists_description_line_break_value_error() -> None:
+    """The error-parity list names line-break descriptions (AIE-1151, US3.6)."""
+    doc = TransportClient.__doc__
+
+    assert doc is not None
+    normalized = " ".join(doc.split())
+    assert "a `description` containing a newline or carriage return" in normalized
+
+
 def test_full_client_is_a_transport_client() -> None:
     """A class with all seven methods passes isinstance (AIE-1048, US2.1)."""
     candidate: object = _FullClient()

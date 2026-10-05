@@ -62,7 +62,7 @@ Abbreviations: `ca` = `tests/test_core_append_line.py`, `cr` =
 `src/wenchang/testing/transport_conformance.py`. Line numbers are as of
 `b68a7b3`. New test docstrings cite "AIE-1151, USx.y".
 
-`make check` at `b68a7b3`: lint and typecheck clean; **3037 passed, 6
+`make check` at the PR head: lint and typecheck clean; **3038 passed, 6
 skipped** (the existing resolver-conformance skips), 41 deselected
 (integration).
 
@@ -109,7 +109,7 @@ skipped** (the existing resolver-conformance skips), 41 deselected
 | 3.3 | `ip::test_omitted_alias_and_description_forward_as_none` (L324) |
 | 3.4 | L294 and L324, both parametrized over `append_line` and `replace_fact` |
 | 3.5 | `ip::test_exceptions_propagate_unchanged` (L261), existing; its `_CALLS` rows now include the new keywords |
-| 3.6 | Docs only, no test: `TransportClient` class docstring, `src/wenchang/transport.py` L38 |
+| 3.6 | `tp` L206 `test_class_docstring_lists_description_line_break_value_error`; docstring at `src/wenchang/transport.py` L37-38 |
 
 ### US4 — tools
 
@@ -164,7 +164,7 @@ clients in `cs::test_reference_client_passes_aliases_description_case`
 | 7.2 | `ARCHITECTURE.md`: **core**, **transport**, **tools**, and **testing** module-map entries, and the "One lock, one token per file" key invariant |
 | 7.3 | `docs/product/glossary.md`, **Aliases** (L156) |
 
-All 58 criteria are mapped. No test exists for 3.6, 7.1, 7.2, or 7.3
+All 58 criteria are mapped. No test exists for 7.1, 7.2, or 7.3
 (docs). 3.1, 3.5, 4.13, and 5.2 rely on existing tests, which pass
 unchanged.
 
@@ -311,3 +311,9 @@ A version conflict is routine: someone else changed the file since
 you read it. The error carries the current content and version;
 merge your change into it and retry with that version.
 ```
+
+Final gate (spec-reviewer): PASS with one SHOULD-FIX, now fixed (US3.6 had
+no test; `tests/test_transport_protocol.py` now pins the docstring phrase),
+and two NITs: spec status updated to Implemented; ADR 0024 decision 11 stays
+pending human confirmation at this PR.
+
