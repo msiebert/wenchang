@@ -1,6 +1,6 @@
 """Tests for InProcessClient, the in-process TransportClient.
 
-Covers AIE-1046, US5.1 through US5.6, US6.1, and US6.3.
+Covers AIE-1046, US5.1 through US5.6, US6.1, and US6.3, and AIE-1151, US3.2 through US3.5.
 """
 
 import ast
@@ -104,14 +104,23 @@ class _RecordingStore(MemoryStore):
 
 _SCOPE_MAP: Mapping[str, str] = {"user": "u-1", "org": "o-9"}
 _V1 = VersionToken("v1")
+_ALIASES = ("q",)
 
 # Each call: method name, positional args, keyword args, as a client caller passes them.
 _CALLS: tuple[tuple[str, tuple[object, ...], dict[str, object]], ...] = (
     ("read_file", (PATH,), {}),
     ("write_file", (PATH, "- [stated] x\n", META, None), {"source": "chat"}),
     ("write_file", (PATH, "- [stated] x\n", META, _V1), {"source": "chat"}),
-    ("append_line", (PATH, "- [stated] y", _V1), {"source": "chat"}),
-    ("replace_fact", (PATH, "x", "z", _V1), {"source": "chat"}),
+    (
+        "append_line",
+        (PATH, "- [stated] y", _V1),
+        {"source": "chat", "aliases": _ALIASES, "description": "d2"},
+    ),
+    (
+        "replace_fact",
+        (PATH, "x", "z", _V1),
+        {"source": "chat", "aliases": _ALIASES, "description": "d2"},
+    ),
     ("list_prefix", ("user/u-1/", None), {}),
     ("list_prefix", ("user/u-1/", ListCursor("abc")), {}),
     ("delete_file", (PATH, _V1), {}),
@@ -269,6 +278,59 @@ def test_exceptions_propagate_unchanged(
     assert exc_info.value is configured
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
+
+
+class _Description(str):
+    """A str subclass, so forwarding by identity is distinguishable from normalizing."""
+
+
+_FACT_CALLS: tuple[tuple[str, tuple[object, ...]], ...] = (
+    ("append_line", (PATH, "- [stated] y", _V1)),
+    ("replace_fact", (PATH, "x", "z", _V1)),
+)
+
+
+@pytest.mark.parametrize(("name", "args"), _FACT_CALLS, ids=[c[0] for c in _FACT_CALLS])
+def test_alias_and_description_keywords_forward_by_identity(
+    name: str, args: tuple[object, ...]
+) -> None:
+    """append_line and replace_fact pass path and strings positionally and
+    source, aliases, and description as keywords, the same objects, returning
+    the store's object (AIE-1151, US3.2, US3.4).
+    """
+    store = _RecordingStore()
+    client = InProcessClient(store)
+    source = _Description("chat")
+    aliases = ["q", "r"]
+    description = _Description("d2")
+
+    result = _invoke(
+        client, name, args, {"source": source, "aliases": aliases, "description": description}
+    )
+
+    assert result is store.sentinels[name]
+    assert len(store.calls) == 1
+    recorded_name, recorded_args, recorded_kwargs = store.calls[0]
+    assert recorded_name == name
+    assert len(recorded_args) == len(args)
+    assert all(r is a for r, a in zip(recorded_args, args, strict=True))
+    assert set(recorded_kwargs) == {"source", "aliases", "description"}
+    assert recorded_kwargs["source"] is source
+    assert recorded_kwargs["aliases"] is aliases
+    assert recorded_kwargs["description"] is description
+
+
+@pytest.mark.parametrize(("name", "args"), _FACT_CALLS, ids=[c[0] for c in _FACT_CALLS])
+def test_omitted_alias_and_description_forward_as_none(name: str, args: tuple[object, ...]) -> None:
+    """Omitting aliases and description forwards them explicitly as None
+    (AIE-1151, US3.3, US3.4).
+    """
+    store = _RecordingStore()
+    client = InProcessClient(store)
+
+    _invoke(client, name, args, {"source": "chat"})
+
+    assert store.calls == [(name, args, {"source": "chat", "aliases": None, "description": None})]
 
 
 def _run_sequence(target: TransportClient) -> list[object]:

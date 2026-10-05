@@ -4,11 +4,13 @@ the bounded retry loop.
 """
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
-from wenchang.core import MemoryStore
+from wenchang.core import MemoryFile, MemoryStore
 from wenchang.errors import (
     BackendUnavailableError,
     NotFoundError,
@@ -888,3 +890,400 @@ def test_replace_fact_unminted_expected_version_with_zero_matches_raises_version
         store.replace_fact(VALID_PATH, "absent", "x", bogus, source="src")
 
     assert excinfo.value.content == "no such text"
+
+
+# --- Optional aliases and description -----------------------------------------
+
+F_BODY = "- [stated] beta\n"
+
+
+def _f_metadata(description: str = "d", aliases: tuple[str, ...] = ("x", "y")) -> FileMetadata:
+    return _metadata(description=description, aliases=aliases, sources=frozenset({"s1"}))
+
+
+class _CountingStorage(InMemoryStorage):
+    """InMemoryStorage that records every put_if_version call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_if_version_calls: list[tuple[bytes, dict[str, str]]] = []
+
+    def put_if_version(
+        self,
+        key: str,
+        data: bytes,
+        metadata: Mapping[str, str],
+        expected: VersionToken | None,
+    ) -> VersionToken:
+        self.put_if_version_calls.append((data, dict(metadata)))
+        return super().put_if_version(key, data, metadata, expected)
+
+
+class _LyingStr(str):
+    """A str subclass whose __eq__, __hash__, and __str__ lie."""
+
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    def __ne__(self, other: object) -> bool:
+        return False
+
+    def __hash__(self) -> int:
+        return 0
+
+    def __str__(self) -> str:
+        return "lie"
+
+
+class _SpoofList:
+    """Claims to be a list through __class__ only; its real type is not a Sequence."""
+
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleMethodOverride]
+        return list
+
+    def __iter__(self) -> object:
+        return iter(["a"])
+
+
+def _seed_f(storage: InMemoryStorage) -> tuple[MemoryStore, VersionToken]:
+    _seed(storage, VALID_PATH, F_BODY, _f_metadata())
+    store = _new_store(storage)
+    return store, store.read_file(VALID_PATH).version
+
+
+def _assert_exact_aliases(aliases: object, expected: tuple[str, ...]) -> None:
+    assert type(aliases) is tuple
+    members = cast(tuple[object, ...], aliases)
+    assert all(type(a) is str for a in members)
+    assert members == expected
+
+
+def test_replace_fact_unions_aliases_and_replaces_description_in_one_put() -> None:
+    """Content is replaced, aliases are unioned with duplicates dropped, the
+    description is replaced, sources gains the source, and one put_if_version
+    carries it all (AIE-1151, US2.1).
+    """
+    storage = _CountingStorage()
+    store, v = _seed_f(storage)
+
+    result = store.replace_fact(
+        VALID_PATH, "beta", "gamma", v, source="src", aliases=["y", "z", "z"], description="d2"
+    )
+
+    assert result.content == "- [stated] gamma\n"
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "z"))
+    assert result.metadata.description == "d2"
+    assert result.metadata.sources == frozenset({"s1", "src"})
+    assert result.metadata.last_updated == FIXED_CLOCK_TIME
+    assert storage.put_if_version_calls == [
+        (b"- [stated] gamma\n", dict(metadata_to_map(result.metadata)))
+    ]
+    assert store.read_file(VALID_PATH).metadata == result.metadata
+
+
+def test_replace_fact_normalizes_str_subclass_alias_and_description() -> None:
+    """Lying str-subclass aliases and description are stored as exact str, and
+    alias dedup compares exact strings (AIE-1151, US2.1, US1.6, US1.11).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+
+    result = store.replace_fact(
+        VALID_PATH,
+        "beta",
+        "gamma",
+        v,
+        source="src",
+        aliases=[_LyingStr("q"), "q"],
+        description=_LyingStr("d2"),
+    )
+
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "q"))
+    assert type(result.metadata.description) is str
+    assert result.metadata.description == "d2"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"aliases": None, "description": None}],
+    ids=["omitted", "explicit-none"],
+)
+def test_replace_fact_absent_arguments_leave_metadata_unchanged(
+    kwargs: dict[str, object],
+) -> None:
+    """Omitted or None arguments leave metadata other than sources and
+    last_updated unchanged (AIE-1151, US2.2).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+    call = cast(Callable[..., MemoryFile], store.replace_fact)
+
+    result = call(VALID_PATH, "beta", "gamma", v, source="src", **kwargs)
+
+    expected = replace(
+        _f_metadata(), sources=frozenset({"s1", "src"}), last_updated=FIXED_CLOCK_TIME
+    )
+    assert result.content == "- [stated] gamma\n"
+    assert result.metadata == expected
+    assert store.read_file(VALID_PATH).metadata == expected
+
+
+def test_replace_fact_stale_reapply_unions_onto_current_aliases() -> None:
+    """A stale-token replace_fact whose match is still unique unions its aliases
+    onto the aliases another writer committed since the caller's read
+    (AIE-1151, US2.3).
+    """
+    storage = InMemoryStorage()
+    store, stale = _seed_f(storage)
+    storage.put(
+        VALID_PATH,
+        (F_BODY + "- [stated] other\n").encode("utf-8"),
+        metadata_to_map(_f_metadata(aliases=("x", "y", "w"))),
+    )
+
+    result = store.replace_fact(VALID_PATH, "beta", "gamma", stale, source="src", aliases=["z"])
+
+    assert result.content == "- [stated] gamma\n- [stated] other\n"
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "w", "z"))
+    assert store.read_file(VALID_PATH).metadata.aliases == ("x", "y", "w", "z")
+
+
+def test_replace_fact_union_uses_the_committing_attempts_read() -> None:
+    """When the first put fails because a concurrent write changed the aliases,
+    the union is computed on the object read by the attempt that commits
+    (AIE-1151, US2.4).
+    """
+    storage = InMemoryStorage()
+    _seed(storage, VALID_PATH, F_BODY, _f_metadata())
+    wrapped = _RacingPutStorage(
+        storage,
+        race_contents=[F_BODY],
+        race_metadata=metadata_to_map(_f_metadata(aliases=("x", "y", "q"))),
+    )
+    store = _new_store(wrapped)
+    before = store.read_file(VALID_PATH)
+
+    result = store.replace_fact(
+        VALID_PATH, "beta", "gamma", before.version, source="src", aliases=["z"]
+    )
+
+    assert wrapped.put_if_version_calls == 2
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "q", "z"))
+    assert store.read_file(VALID_PATH).metadata.aliases == ("x", "y", "q", "z")
+
+
+BAD_ALIAS_CONTAINERS: tuple[object, ...] = (
+    "ab",
+    b"ab",
+    bytearray(b"ab"),
+    5,
+    {"a"},
+    iter(["a"]),
+    _SpoofList(),
+)
+BAD_ALIAS_CONTAINER_IDS = ("str", "bytes", "bytearray", "int", "set", "iterator", "spoof")
+
+_BAD_ARGUMENTS: list[tuple[object, object, type[Exception], str]] = [
+    *(
+        (a, None, TypeError, f"aliases must be a sequence of str, not {type(a).__name__}")
+        for a in BAD_ALIAS_CONTAINERS
+    ),
+    (["a", 5], None, TypeError, "aliases entry must be str, got int"),
+    (None, 5, TypeError, "description must be a str, not int"),
+    (None, "a\nb", ValueError, "description must not contain a newline or carriage return"),
+    (None, "a\rb", ValueError, "description must not contain a newline or carriage return"),
+]
+_BAD_ARGUMENT_IDS = [
+    *(f"aliases-{i}" for i in BAD_ALIAS_CONTAINER_IDS),
+    "alias-entry-int",
+    "description-int",
+    "description-lf",
+    "description-cr",
+]
+
+
+@pytest.mark.parametrize(
+    ("aliases", "description", "error", "message"), _BAD_ARGUMENTS, ids=_BAD_ARGUMENT_IDS
+)
+def test_replace_fact_bad_aliases_or_description_raise_without_storage(
+    aliases: object, description: object, error: type[Exception], message: str
+) -> None:
+    """Bad aliases or description raise the same errors and messages as
+    append_line, without calling storage (AIE-1151, US2.5).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(error) as excinfo:
+        store.replace_fact(
+            VALID_PATH,
+            "beta",
+            "gamma",
+            VersionToken("v1"),
+            source="src",
+            aliases=cast(Sequence[str] | None, aliases),
+            description=cast(str | None, description),
+        )
+
+    assert type(excinfo.value) is error
+    assert str(excinfo.value) == message
+    assert stub.get_calls == []
+    assert stub.put_if_version_calls == []
+
+
+def test_replace_fact_invalid_path_wins_over_bad_aliases() -> None:
+    """An invalid path raises NotFoundError(INVALID_PATH) before bad aliases are
+    checked (AIE-1151, US2.6).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(NotFoundError) as excinfo:
+        store.replace_fact(
+            "a/b.md",
+            "",
+            "gamma",
+            VersionToken("v1"),
+            source="",
+            aliases=cast(Sequence[str], "ab"),
+            description=cast(str, 5),
+        )
+
+    assert excinfo.value.reason is NotFoundReason.INVALID_PATH
+    assert stub.get_calls == []
+
+
+@pytest.mark.parametrize(
+    ("old_string", "source"), [("", "src"), ("beta", "")], ids=["empty-old", "empty-source"]
+)
+def test_replace_fact_existing_value_error_wins_over_bad_aliases(
+    old_string: str, source: str
+) -> None:
+    """An empty old_string or source raises the existing ValueError before bad
+    aliases or description are checked (AIE-1151, US2.6).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(ValueError) as excinfo:
+        store.replace_fact(
+            VALID_PATH,
+            old_string,
+            "gamma",
+            VersionToken("v1"),
+            source=source,
+            aliases=cast(Sequence[str], "ab"),
+            description=cast(str, 5),
+        )
+
+    assert type(excinfo.value) is ValueError
+    assert str(excinfo.value) == "old_string and source must be non-empty"
+    assert stub.get_calls == []
+
+
+@pytest.mark.parametrize(
+    ("aliases", "description", "error", "message"),
+    [
+        ("ab", 5, TypeError, "aliases must be a sequence of str, not str"),
+        (["a", 5], "a\nb", TypeError, "aliases entry must be str, got int"),
+        (["a"], 5, TypeError, "description must be a str, not int"),
+        (
+            ["a"],
+            "a\nb",
+            ValueError,
+            "description must not contain a newline or carriage return",
+        ),
+    ],
+    ids=[
+        "aliases-before-description-type",
+        "entry-before-description-value",
+        "description-type",
+        "description-value",
+    ],
+)
+def test_replace_fact_new_argument_errors_in_order(
+    aliases: object, description: object, error: type[Exception], message: str
+) -> None:
+    """aliases TypeError precedes description TypeError, which precedes the
+    description ValueError (AIE-1151, US2.6).
+    """
+    stub = _StubStorage()
+    store = _new_store(stub)
+
+    with pytest.raises(error) as excinfo:
+        store.replace_fact(
+            VALID_PATH,
+            "beta",
+            "gamma",
+            VersionToken("v1"),
+            source="src",
+            aliases=cast(Sequence[str], aliases),
+            description=cast(str, description),
+        )
+
+    assert str(excinfo.value) == message
+    assert stub.get_calls == []
+
+
+def test_replace_fact_match_error_leaves_content_and_metadata_unchanged() -> None:
+    """A ReplaceFactMatchError outcome with aliases and description leaves the
+    stored bytes, metadata, and version unchanged (AIE-1151, US2.7).
+    """
+    storage = InMemoryStorage()
+    store, v = _seed_f(storage)
+    before = storage.get(VALID_PATH)
+
+    with pytest.raises(ReplaceFactMatchError):
+        store.replace_fact(
+            VALID_PATH, "absent", "gamma", v, source="src", aliases=["z"], description="d2"
+        )
+
+    assert storage.get(VALID_PATH) == before
+
+
+def test_replace_fact_version_conflict_leaves_content_and_metadata_unchanged() -> None:
+    """A VersionConflictError outcome with aliases and description leaves the
+    file exactly as the other writer left it (AIE-1151, US2.7).
+    """
+    storage = InMemoryStorage()
+    store, stale = _seed_f(storage)
+    storage.put(VALID_PATH, b"- [stated] gone\n", metadata_to_map(_f_metadata()))
+    before = storage.get(VALID_PATH)
+
+    with pytest.raises(VersionConflictError):
+        store.replace_fact(
+            VALID_PATH, "beta", "gamma", stale, source="src", aliases=["z"], description="d2"
+        )
+
+    assert storage.get(VALID_PATH) == before
+
+
+def test_replace_fact_stale_reapply_overwrites_concurrent_description() -> None:
+    """A stale-token re-apply with a description overwrites a description
+    committed since the caller's read, with no conflict (AIE-1151, US2.8).
+    """
+    storage = InMemoryStorage()
+    store, stale = _seed_f(storage)
+    storage.put(VALID_PATH, F_BODY.encode("utf-8"), metadata_to_map(_f_metadata(description="q")))
+
+    result = store.replace_fact(VALID_PATH, "beta", "gamma", stale, source="src", description="d2")
+
+    assert result.metadata.description == "d2"
+    assert store.read_file(VALID_PATH).metadata.description == "d2"
+
+
+def test_replace_fact_old_equals_new_with_aliases_changes_only_metadata() -> None:
+    """old_string == new_string with aliases leaves content unchanged, unions the
+    aliases, and produces a new version through one conditional put
+    (AIE-1151, US2.9).
+    """
+    storage = _CountingStorage()
+    store, v = _seed_f(storage)
+
+    result = store.replace_fact(VALID_PATH, "beta", "beta", v, source="src", aliases=["z"])
+
+    assert result.content == F_BODY
+    _assert_exact_aliases(result.metadata.aliases, ("x", "y", "z"))
+    assert result.version != v
+    assert len(storage.put_if_version_calls) == 1

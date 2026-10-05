@@ -153,10 +153,15 @@ Terms as used throughout wenchang and its spec.
   invisible format characters, line or paragraph separators, or
   noncharacters. Core paths are broader; this narrowing is the tools' own.
 - **Description** — a file's one-line human-readable summary; part of the
-  metadata-only search surface.
+  metadata-only search surface. `write_file`, `append_line`, and
+  `replace_fact` can each replace it.
 - **Aliases** — a file's list of alternate names, nicknames, acronyms, and
   phrasings; the other half of the metadata-only search surface used to
-  find an existing file before creating a duplicate.
+  find an existing file before creating a duplicate. `append_line` and
+  `replace_fact` can add aliases in the same write as the fact (existing
+  aliases kept as stored, new ones appended, exact duplicates skipped) but
+  never remove one; only `write_file`, which replaces the whole list,
+  removes or reorders aliases.
 - **System area (`system/`)** — a read-only-to-the-agent area within any
   scope, holding content a human deliberately curated; enforced at the
   tool layer by `scope.check_not_system`, which rejects any write whose area

@@ -92,6 +92,52 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _normalize_aliases(aliases: object) -> tuple[str, ...]:
+    """Validate `aliases` by real type and return its members as exact str."""
+    # A str is a Sequence of its characters, and a spoofed __class__ must not pass.
+    if issubclass(type(aliases), (str, bytes, bytearray)) or not issubclass(
+        type(aliases), Sequence
+    ):
+        raise TypeError(f"aliases must be a sequence of str, not {_type_name(type(aliases))}")
+    members: list[str] = []
+    for member in cast(Sequence[object], aliases):
+        if not issubclass(type(member), str):
+            raise TypeError(f"aliases entry must be str, got {_type_name(type(member))}")
+        members.append(str.__str__(cast(str, member)))
+    return tuple(members)
+
+
+def _normalize_description(description: object) -> str:
+    """Validate `description` by real type and return it as an exact single-line str."""
+    if not issubclass(type(description), str):
+        raise TypeError(f"description must be a str, not {_type_name(type(description))}")
+    exact = str.__str__(cast(str, description))
+    if "\n" in exact or "\r" in exact:
+        raise ValueError("description must not contain a newline or carriage return")
+    return exact
+
+
+def _merge_metadata(
+    stored: FileMetadata,
+    source: str,
+    aliases: tuple[str, ...] | None,
+    description: str | None,
+    now: datetime,
+) -> FileMetadata:
+    """`stored` with `aliases` unioned in order, `description` replaced, and `source` added."""
+    merged = list(stored.aliases)
+    for alias in aliases or ():
+        if alias not in merged:
+            merged.append(alias)
+    return dataclasses.replace(
+        stored,
+        aliases=tuple(merged),
+        description=stored.description if description is None else description,
+        sources=stored.sources | {source},
+        last_updated=now,
+    )
+
+
 @dataclass(frozen=True)
 class MemoryFile:
     """A memory file's content, metadata, path, and version, as read from storage."""
@@ -370,19 +416,28 @@ class MemoryStore:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Replace the single occurrence of `old_string` with `new_string`.
 
         Raises NotFoundError with reason INVALID_PATH if `path` is not
         well-formed, without calling storage. Raises ValueError if
         `old_string` or `source` is empty, without calling storage. Raises
-        NotFoundError with reason FILE_ABSENT if no object exists at `path`.
+        TypeError for a wrongly typed `aliases`, alias, or `description`,
+        and ValueError for a `description` containing a newline or carriage
+        return, all without calling storage. Raises NotFoundError with
+        reason FILE_ABSENT if no object exists at `path`.
         Raises ReplaceFactMatchError if `old_string` matches zero or more
         than one span of the current content, carrying that content,
         version, and match count; the file is left unchanged. On success,
         stamps `metadata.sources` with `source` added and `last_updated`
         with the store's clock, raising ValueError (from FileMetadata's own
-        validation) if the clock returns a naive datetime. Retries on a
+        validation) if the clock returns a naive datetime. `aliases`, if
+        given, are added to the stored aliases in order, skipping any
+        already present; stored aliases are never removed or reordered.
+        `description`, if given, replaces the stored description. Both
+        commit in the same write as the content. Retries on a
         concurrent write up to a fixed number of attempts, each time
         re-reading the current content and re-checking the match count
         against it; if `expected_version` no longer matches the version
@@ -397,6 +452,9 @@ class MemoryStore:
 
         if old_string == "" or source == "":
             raise ValueError("old_string and source must be non-empty")
+
+        new_aliases = None if aliases is None else _normalize_aliases(aliases)
+        new_description = None if description is None else _normalize_description(description)
 
         content = ""
         version: VersionToken = expected_version
@@ -420,11 +478,7 @@ class MemoryStore:
             if len(data) > self._max_file_bytes:
                 raise OversizeWriteError(path, len(data), self._max_file_bytes)
 
-            stamped = dataclasses.replace(
-                metadata,
-                sources=metadata.sources | {source},
-                last_updated=self._clock(),
-            )
+            stamped = _merge_metadata(metadata, source, new_aliases, new_description, self._clock())
 
             try:
                 new_version = self._storage.put_if_version(
@@ -444,20 +498,29 @@ class MemoryStore:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Append `line` to the current content, if it is at `expected_version`.
 
         Raises NotFoundError with reason INVALID_PATH if `path` is not
         well-formed, without calling storage. Raises ValueError if `line`
         does not parse as a single fact line, or if `source` is empty,
-        without calling storage. Raises NotFoundError with reason
+        without calling storage. Raises TypeError for a wrongly typed
+        `aliases`, alias, or `description`, and ValueError for a
+        `description` containing a newline or carriage return, all without
+        calling storage. Raises NotFoundError with reason
         FILE_ABSENT if no object exists at `path`. Raises
         VersionConflictError if `expected_version` does not match the
         current version, carrying the current content and version; there is
         no automatic re-apply. Raises OversizeWriteError if the resulting
         content exceeds max_file_bytes. On success, stamps
         `metadata.sources` with `source` added and `last_updated` with the
-        store's clock, leaving other metadata unchanged. If the conditional
+        store's clock. `aliases`, if given, are added to the stored aliases
+        in order, skipping any already present; stored aliases are never
+        removed or reordered. `description`, if given, replaces the stored
+        description. Both commit in the same write as the content. Other
+        metadata is left unchanged. If the conditional
         write fails its precondition, re-reads and returns success if the
         stored content and metadata already equal exactly what was written
         (a backend-level retry of its own landed write); otherwise raises
@@ -470,6 +533,9 @@ class MemoryStore:
 
         if parse_fact(line) is None or source == "":
             raise ValueError("line must be a single fact line and source must be non-empty")
+
+        new_aliases = None if aliases is None else _normalize_aliases(aliases)
+        new_description = None if description is None else _normalize_description(description)
 
         obj = self._storage.get(path)
         if obj is None:
@@ -486,11 +552,7 @@ class MemoryStore:
         if len(data) > self._max_file_bytes:
             raise OversizeWriteError(path, len(data), self._max_file_bytes)
 
-        stamped = dataclasses.replace(
-            metadata,
-            sources=metadata.sources | {source},
-            last_updated=self._clock(),
-        )
+        stamped = _merge_metadata(metadata, source, new_aliases, new_description, self._clock())
         meta_map = metadata_to_map(stamped)
 
         try:

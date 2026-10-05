@@ -85,6 +85,10 @@ _SENTINEL_CONTENT: Final = "- [system] conformance sentinel\n"
 _REPR_LIMIT: Final = 80
 _MAX_PAGES: Final = 1000
 _FACTS: Final = "- [stated] alpha\n- [stated] beta\n- [stated] alpha\n"
+_META_FACTS: Final = "- [stated] alpha\n- [stated] beta\n"
+_META_LINE: Final = "- [stated] c"
+_META_DESCRIPTION: Final = "d"
+_META_ALIASES: Final = ("x", "y")
 # Handed only to calls on absent paths, where any token must yield FILE_ABSENT.
 _ABSENT_TOKEN: Final = VersionToken("1")
 
@@ -96,6 +100,7 @@ MSG_MALFORMED_CURSOR: Final = "Malformed list cursor: {cursor!r}"
 MSG_FOREIGN_CURSOR: Final = "Cursor {cursor!r} was not issued for prefix {prefix!r}"
 MSG_INVALID_SCOPE: Final = "invalid scope: {scope!r}"
 MSG_INVALID_ENTITY: Final = "invalid entity_id: {entity_id!r}"
+MSG_DESCRIPTION_NEWLINE: Final = "description must not contain a newline or carriage return"
 _INVALID_PATHS: Final = ("a/b", "a/b/c/d", "a/../c/d.md")
 
 _SYSTEM_AREA: Final = "system"
@@ -770,6 +775,45 @@ def _create(
         f"write_file({path})",
         lambda: client.write_file(path, "- [stated] a\n", metadata, None, source=src),
     )
+
+
+def _create_meta_probe(name: str, client: TransportClient, path: str, src: str, /) -> MemoryFile:
+    """Create path with _META_FACTS, description "d" and aliases ("x", "y"), then read it."""
+    metadata = _meta(_META_DESCRIPTION, _META_ALIASES, sources=frozenset({_seed(src)}))
+    _write(
+        name,
+        f"write_file({path})",
+        lambda: client.write_file(path, _META_FACTS, metadata, None, source=src),
+    )
+    return _read(name, f"read_file({path})", lambda: client.read_file(path))
+
+
+def _expect_metadata(
+    name: str,
+    client: TransportClient,
+    path: str,
+    result: MemoryFile,
+    want: tuple[str, tuple[str, ...]],
+    phrases: tuple[str, str],
+    /,
+) -> None:
+    """Check description and aliases of result and of a read-back of path.
+
+    `want` is (description, aliases); `phrases` the failure phrases for each.
+    """
+    read = _read(name, f"read_file({path})", lambda: client.read_file(path))
+    for label, value in ((f"returned file for {path}", result), (f"read result for {path}", read)):
+        got = canonical_file(name, label, value)
+        for field, got_field, want_field, phrase in (
+            ("description", got[2], want[0], phrases[0]),
+            ("aliases", got[3], want[1], phrases[1]),
+        ):
+            if got_field != want_field:
+                _fail(
+                    name,
+                    label,
+                    f"{phrase}: {field} expected {_short(want_field)}, got {_short(got_field)}",
+                )
 
 
 def _tier(priority: tuple[str, ...], scope: str, /) -> int:
@@ -2456,3 +2500,217 @@ class TransportConformance:
                 None,
                 message=message,
             )
+
+    # --- Aliases and description -----------------------------------------------
+
+    def test_append_unions_aliases(
+        self, client: TransportClient, source: str, scope_map: Mapping[str, str]
+    ) -> None:
+        """append_line adds new aliases after the stored ones, in order, dropping duplicates."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        require_fresh(name, client, scopes)
+        p = probe_path(name, _PROBE_LABEL, scopes, _first_scope(scopes), PROBE_AREA, PROBE_STEM)
+        r = _create_meta_probe(name, client, p, src)
+        result = _write(
+            name,
+            f"append_line({p})",
+            lambda: client.append_line(
+                p, _META_LINE, r.version, source=src, aliases=["y", "z", "w", "z"]
+            ),
+        )
+        _expect_metadata(
+            name,
+            client,
+            p,
+            result,
+            (_META_DESCRIPTION, ("x", "y", "z", "w")),
+            ("description changed", "aliases not unioned"),
+        )
+
+    def test_append_replaces_description(
+        self, client: TransportClient, source: str, scope_map: Mapping[str, str]
+    ) -> None:
+        """append_line with a description replaces the stored one and leaves aliases unchanged."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        require_fresh(name, client, scopes)
+        p = probe_path(name, _PROBE_LABEL, scopes, _first_scope(scopes), PROBE_AREA, PROBE_STEM)
+        r = _create_meta_probe(name, client, p, src)
+        result = _write(
+            name,
+            f"append_line({p})",
+            lambda: client.append_line(p, _META_LINE, r.version, source=src, description="d2"),
+        )
+        _expect_metadata(
+            name,
+            client,
+            p,
+            result,
+            ("d2", _META_ALIASES),
+            ("description not replaced", "aliases changed"),
+        )
+
+    def test_replace_fact_unions_aliases_and_replaces_description(
+        self, client: TransportClient, source: str, scope_map: Mapping[str, str]
+    ) -> None:
+        """replace_fact with both arguments unions aliases and replaces the description."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        require_fresh(name, client, scopes)
+        p = probe_path(name, _PROBE_LABEL, scopes, _first_scope(scopes), PROBE_AREA, PROBE_STEM)
+        r = _create_meta_probe(name, client, p, src)
+        result = _write(
+            name,
+            f"replace_fact({p})",
+            lambda: client.replace_fact(
+                p,
+                "beta",
+                "zeta",
+                r.version,
+                source=src,
+                aliases=["y", "z", "z"],
+                description="d2",
+            ),
+        )
+        _expect_metadata(
+            name,
+            client,
+            p,
+            result,
+            ("d2", ("x", "y", "z")),
+            ("description not replaced", "aliases not unioned"),
+        )
+        _expect_content(name, client, p, "wrong content", "- [stated] alpha\n- [stated] zeta\n")
+
+    def test_omitted_aliases_and_description_leave_metadata_unchanged(
+        self, client: TransportClient, source: str, scope_map: Mapping[str, str]
+    ) -> None:
+        """Omitted or None aliases and description leave the stored metadata unchanged."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        require_fresh(name, client, scopes)
+        p = probe_path(name, _PROBE_LABEL, scopes, _first_scope(scopes), PROBE_AREA, PROBE_STEM)
+        append_label = f"append_line({p})"
+        replace_label = f"replace_fact({p})"
+        current = _create_meta_probe(name, client, p, src)
+        steps: tuple[tuple[str, Callable[[MemoryFile], object]], ...] = (
+            (append_label, lambda f: client.append_line(p, _META_LINE, f.version, source=src)),
+            (
+                append_label,
+                lambda f: client.append_line(
+                    p, _META_LINE, f.version, source=src, aliases=None, description=None
+                ),
+            ),
+            (
+                replace_label,
+                lambda f: client.replace_fact(p, "beta", "zeta", f.version, source=src),
+            ),
+            (
+                replace_label,
+                lambda f: client.replace_fact(
+                    p, "zeta", "beta", f.version, source=src, aliases=None, description=None
+                ),
+            ),
+        )
+        for label, step in steps:
+            current = _write(name, label, lambda step=step, f=current: step(f))
+            _expect_metadata(
+                name,
+                client,
+                p,
+                current,
+                (_META_DESCRIPTION, _META_ALIASES),
+                ("metadata changed", "metadata changed"),
+            )
+
+    def test_replace_fact_reapply_unions_onto_current_aliases(
+        self, client: TransportClient, source: str, scope_map: Mapping[str, str]
+    ) -> None:
+        """A stale-token replace_fact re-apply unions aliases onto the current stored ones."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        require_fresh(name, client, scopes)
+        p = probe_path(name, _PROBE_LABEL, scopes, _first_scope(scopes), PROBE_AREA, PROBE_STEM)
+        r1 = _create_meta_probe(name, client, p, src)
+        _write(
+            name,
+            f"append_line({p})",
+            lambda: client.append_line(p, _META_LINE, r1.version, source=src, aliases=["w"]),
+        )
+        result = _write(
+            name,
+            f"replace_fact({p})",
+            lambda: client.replace_fact(p, "beta", "zeta", r1.version, source=src, aliases=["z"]),
+        )
+        _expect_metadata(
+            name,
+            client,
+            p,
+            result,
+            (_META_DESCRIPTION, ("x", "y", "w", "z")),
+            ("description changed", "aliases not unioned"),
+        )
+
+    def test_alias_and_description_argument_errors_match_core(
+        self, client: TransportClient, source: str, scope_map: Mapping[str, str]
+    ) -> None:
+        """Ill-typed aliases or description raise TypeError; a multi-line one ValueError."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        require_fresh(name, client, scopes)
+        p = probe_path(name, _PROBE_LABEL, scopes, _first_scope(scopes), PROBE_AREA, PROBE_STEM)
+        r = _create_meta_probe(name, client, p, src)
+        observed = canonical_file(name, f"read result for {p}", r)[1]
+        str_aliases = cast(list[str], "ab")
+        mixed_aliases = cast(list[str], ["a", 5])
+        int_description = cast(str, 5)
+        # (what, aliases, description, expected type, message)
+        cases: tuple[tuple[str, list[str] | None, str | None, type[Exception], str | None], ...] = (
+            ("aliases as a str", str_aliases, None, TypeError, None),
+            ("a non-str alias", mixed_aliases, None, TypeError, None),
+            ("a non-str description", None, int_description, TypeError, None),
+            ("a multi-line description", None, "a\nb", ValueError, MSG_DESCRIPTION_NEWLINE),
+        )
+        for what, aliases, description, expected, message in cases:
+            expect_error(
+                name,
+                f"append_line({p}) with {what}",
+                lambda a=aliases, d=description: client.append_line(
+                    p, _META_LINE, r.version, source=src, aliases=a, description=d
+                ),
+                expected,
+                None,
+                message=message,
+            )
+            expect_error(
+                name,
+                f"replace_fact({p}) with {what}",
+                lambda a=aliases, d=description: client.replace_fact(
+                    p, "beta", "zeta", r.version, source=src, aliases=a, description=d
+                ),
+                expected,
+                None,
+                message=message,
+            )
+        _expect_content(name, client, p, "content changed", observed)
+        _expect_metadata(
+            name,
+            client,
+            p,
+            r,
+            (_META_DESCRIPTION, _META_ALIASES),
+            ("metadata changed", "metadata changed"),
+        )
