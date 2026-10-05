@@ -52,7 +52,8 @@ principle 2).
   NITs applied: "the store keeps no version history" so it is not read as
   shared-only; stronger `veto before` pin; eval scenarios 3 and 5
   aligned with the refused categories. Noted: "previous section" points
-  at "Applying memory" until the remembering body lands.
+  at whichever non-empty section precedes privacy until the remembering
+  body lands (empty sections are omitted).
 - Round 2 (PASS): all pins and invariants re-verified mechanically
   (1103 chars, longest line 94 columns); two cosmetic NITs, no change.
 
