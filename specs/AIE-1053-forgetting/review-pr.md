@@ -16,8 +16,8 @@ changed.
 ## Acceptance criteria → tests
 
 `f` = `tests/test_prompts_forgetting.py`, `i` = `tests/test_prompts_invariants.py`.
-Line numbers are as of commit `6cee80f`. Phrase pins are cases of
-`f::test_forgetting_body_contains_phrase` (L62); the parametrize id is shown.
+Phrase pins are cases of
+`f::test_forgetting_body_contains_phrase` (L68); the parametrize id is shown.
 
 `make check`: lint and typecheck clean; 3331 passed, 6 skipped.
 
@@ -29,15 +29,15 @@ Line numbers are as of commit `6cee80f`. Phrase pins are cases of
 | US2.1 `two moves` | `[US2.1-two-moves]` |
 | US2.2 `` `replace_fact` ``, `fact line` | `[US2.2-replace-fact]`, `[US2.2-fact-line]` |
 | US2.3 `` `delete_file` ``, `whole file` | `[US2.3-delete-file]`, `[US2.3-whole-file]` |
-| US2.4 no `` `write_file` `` / `` `append_line` `` | `f::test_forgetting_body_omits_write_tools` (L72) |
-| US2.5 `write-tool section` | `[US2.5-write-tool-section]` |
-| US2.6 `only content` | `[US2.6-only-content]` |
+| US2.4 no `` `write_file` `` / `` `append_line` `` | `f::test_forgetting_body_omits_write_tools` (L78) |
+| US2.5 `write-tool section says how to take the line break` | `[US2.5-write-tool-section-line-break]` |
+| US2.6 `the file's only fact` | `[US2.6-files-only-fact]` |
 | US3.1 `Removal is total` | `[US3.1-removal-is-total]` |
-| US3.2 no `used to` / `used-to` / `formerly` / `previously believed` | `f::test_forgetting_body_has_no_used_to_tombstones` (L80) |
+| US3.2 no `used to` / `used-to` / `formerly` / `previously believed` | `f::test_forgetting_body_has_no_used_to_tombstones` (L86) |
 | US3.3 `solely` | `[US3.3-solely]` |
 | US3.4 `` `[inferred]` `` | `[US3.4-inferred]` |
-| US3.5 `description`, `aliases` | `[US3.5-description]`, `[US3.5-aliases]` |
-| US4.1 `ambiguous` and `\bask\b` | `[US4.1-ambiguous]`, `f::test_forgetting_body_says_ask` (L67) |
+| US3.5 `description or alias`, `exists only because of the removed fact` | `[US3.5-description-or-alias]`, `[US3.5-exists-only-because]` |
+| US4.1 `ambiguous` and `\bask\b` | `[US4.1-ambiguous]`, `f::test_forgetting_body_says_ask` (L73) |
 | US5.1 `end date`, `candidate` | `[US5.1-end-date]`, `[US5.1-candidate]` |
 | US5.2 `not automatically` | `[US5.2-not-automatically]` |
 | US5.3 `maintenance` | `[US5.3-maintenance]` |
@@ -66,8 +66,8 @@ Line numbers are as of commit `6cee80f`. Phrase pins are cases of
   still carries the rule.
 - **Two rules added during spec review**, both derived from "Removal is
   total": dropping a file's only fact means deleting the file (US2.6), and a
-  description or aliases that still point to the removed fact get updated
-  (US3.5).
+  description or alias that exists only because of the removed fact gets
+  updated (US3.5).
 
 ## Follow-ups
 
@@ -76,4 +76,16 @@ Line numbers are as of commit `6cee80f`. Phrase pins are cases of
 
 ## Adversarial review findings
 
-(Filled in after code review.)
+Round 1:
+- Reviewer A (correctness, spec fidelity): PASS with NITs. Applied: the
+  only-fact sentence now names `delete_file` and says "the file's only fact"
+  (the earlier "only content" could misread a file with non-fact text); the
+  description/alias sentence now targets only what "exists only because of
+  the removed fact", so a general alias for the subject stays. Declined:
+  glossing "maintenance" (the Linear issue's own term).
+- Reviewer B (tests, docs): FAIL, 2 SHOULD-FIX. The US2.5 (`write-tool
+  section`) and US2.6 (`only content`) pins each matched two sentences, so
+  deleting the targeted sentence would not fail the test; both re-pinned on
+  phrases unique to their sentence, and US3.5 re-pinned on the rule's phrase.
+  Declined: rewording the module docstring (out of the wave's edit scope,
+  which is `BODY` only). This section filled in.

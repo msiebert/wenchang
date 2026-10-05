@@ -72,8 +72,8 @@ matter. "Contains" is a case-sensitive substring check unless stated.
 | 2.2 | `BODY` | read | contains `` `replace_fact` `` (drop one fact line) and the phrase `fact line` |
 | 2.3 | `BODY` | read | contains `` `delete_file` `` (delete the whole file) and `whole file` |
 | 2.4 | `BODY` | read | names no other write tool: does not contain `` `write_file` `` or `` `append_line` `` |
-| 2.5 | `BODY` | read | refers to the write-tool section for the line-break detail in plain words: contains `write-tool section` |
-| 2.6 | `BODY` | read | contains `only content` (dropping a file's only fact is the delete-file move) |
+| 2.5 | `BODY` | read | refers to the write-tool section for the line-break detail in plain words: contains `write-tool section says how to take the line break` (unique to the line-break pointer) |
+| 2.6 | `BODY` | read | contains `the file's only fact` (dropping a file's only fact is the delete-file move) |
 
 ### US3 — Removal is total
 
@@ -83,7 +83,7 @@ matter. "Contains" is a case-sensitive substring check unless stated.
 | 3.2 | `BODY` | read, lowercased | contains none of `used to`, `used-to`, `formerly`, `previously believed` (negative pin: the text never models softened phrasing, not even as a quoted example) |
 | 3.3 | `BODY` | read | contains `solely` (anything derived solely from the removed fact goes too) |
 | 3.4 | `BODY` | read | contains `` `[inferred]` `` (derived lines that rested only on the removed fact go too) |
-| 3.5 | `BODY` | read | contains `description` and `aliases` (a description or alias that still points to the removed fact is updated too) |
+| 3.5 | `BODY` | read | contains `description or alias` and `exists only because of the removed fact` (a description or alias that exists only because of the removed fact is updated too) |
 
 ### US4 — Ask when ambiguous
 

@@ -7,14 +7,15 @@ BODY: Final[str] = """\
 Forgetting has two moves: drop one fact, or delete the whole file. To drop one fact, call
 `replace_fact` with the whole fact line as `old_string` and an empty `new_string`; the write-tool
 section says how to take the line break with it. To remove a whole file, call `delete_file`. If
-the fact is the file's only content, delete the file instead. When it is ambiguous whether the
-user means one fact or the whole file, ask before you remove anything.
+that fact line is the file's only fact, call `delete_file` instead of leaving an empty file. When
+it is ambiguous whether the user means one fact or the whole file, ask before you remove
+anything.
 
 Removal is total. Do not rewrite a removed fact as something once believed, and do not leave a
 softened note that it was ever true. Anything derived solely from the removed fact goes too: drop
 each `[inferred]` line that rested only on it, and delete a file whose only content was derived
-from it. Keep anything that has support of its own. If the description or aliases of the file
-that held it still point to the removed fact, update them too, as the write-tool section
+from it. Keep anything that has support of its own. If a description or alias of the file that
+held it exists only because of the removed fact, update it too, as the write-tool section
 describes.
 
 A fact line may state its own end date in prose. Once that date has passed, the fact is a

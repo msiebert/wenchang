@@ -16,8 +16,8 @@ pins the load-bearing tokens.
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | US1 | `forgetting` module / valid slots | read / `build_memory_prompt` | body non-empty; heading `Forgetting`; assembled prompt ends with that section |
-| US2 | `BODY` | read | `two moves`, `` `replace_fact` `` + `fact line`, `` `delete_file` `` + `whole file`, `write-tool section`, `only content`; no `` `write_file` `` / `` `append_line` `` |
-| US3 | `BODY` | read | `Removal is total`, `solely`, `` `[inferred]` ``, `description` + `aliases`; never `used to` / `used-to` / `formerly` / `previously believed` |
+| US2 | `BODY` | read | `two moves`, `` `replace_fact` `` + `fact line`, `` `delete_file` `` + `whole file`, `write-tool section says how to take the line break`, `the file's only fact`; no `` `write_file` `` / `` `append_line` `` |
+| US3 | `BODY` | read | `Removal is total`, `solely`, `` `[inferred]` ``, `description or alias` + `exists only because of the removed fact`; never `used to` / `used-to` / `formerly` / `previously believed` |
 | US4 | `BODY` | read | `ambiguous` and the word `ask` |
 | US5 | `BODY` | read | `end date`, `candidate`, `not automatically`, `maintenance` |
 | US6 | `BODY` | read | `` `system/` ``, `curated-content section`, `Never drop or delete` |
@@ -71,3 +71,6 @@ Round 1 (FAIL, 4 SHOULD-FIX, 4 NIT), all applied except NIT 6:
 Round 2: PASS. Three NITs applied: clarified which file's description and
 aliases are updated, aligned scenario E4 with "still holds", reordered the
 sentence trace.
+
+Code review then tightened three pins to phrases unique to one sentence and
+reworded the only-fact and description/alias sentences (see review-pr.md).
