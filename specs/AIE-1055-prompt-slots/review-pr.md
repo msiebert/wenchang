@@ -36,8 +36,8 @@ No existing module or test changed. `prompts` imports nothing from
 `s` = `tests/test_prompts_slots.py`, `a` = `tests/test_prompts_assembly.py`,
 `o` = `tests/test_prompts_overview.py`, `r` =
 `tests/test_prompts_systems_of_record.py`, `i` =
-`tests/test_prompts_invariants.py`. Line numbers are as of the PR head. Every test docstring cites AIE-1055
-and its US number.
+`tests/test_prompts_invariants.py`. Line numbers are as of the PR head.
+Every test docstring cites AIE-1055 and its US number.
 
 `make check`: lint and typecheck clean;
 3113 passed, 6 skipped (the pre-existing resolver-conformance skips).
@@ -137,6 +137,7 @@ and its US number.
   slots but calls it "configuration, not prompt text". It stays on
   `MemoryStore(scope_priority=...)` so there is one source of truth. See
   ADR 0025 decision 5.
+
 ## Decisions to confirm
 
 - **Adopters can't omit, reorder, or override generic sections.** This is
@@ -146,6 +147,32 @@ and its US number.
   orchestrator's default; no milestone issue owned it.
 
 ## Adversarial review findings
+
+- **Spec review, 3 rounds.**
+  - Round 1 found eight should-fixes:
+    - empty-body and heading pins in a shared test file, which would collide with the parallel issues;
+    - sentence, tool-call and identifier regexes that were not pinned down;
+    - an `entity` substring check that would have banned "identity";
+    - error-reason values missing from the allowed identifiers;
+    - a fixture with no explicit hierarchy;
+    - a fixture whose seed-area writability contradicted the organization write rule.
+  - Round 2 found an overview line 106 columns long and markdown-escaped `\|` in the regexes.
+  - Round 3 passed.
+- **Build.**
+  - Spoofed `__class__` objects broke pytest's parametrize id generation; fixed with explicit ids.
+  - `ruff format` also formats Python blocks inside markdown, so `plan.md` and `README.md` were reformatted.
+  - `__all__` now follows RUF022 order.
+- **Code review A (correctness).** Passed. Two nits:
+  - a `PromptSlots` subclass that skips validation is unsupported; ADR 0025 now says so;
+  - the overview's index wording; left as is, since the tool docstring covers the cap.
+- **Code review B (tests and docs).**
+  - Round 1 failed:
+    - the invariant checks had no positive controls, so a regex that never matches would still pass; known-bad and known-good controls were added, and every mutation is now caught;
+    - review-pr.md listed a false `__all__` deviation;
+    - the ADR claimed ADR 0024 existed;
+    - minor: the fixture said "system area" instead of `system/` area, and the argument split ignored quotes.
+  - Round 2 passed with formatting nits, which are fixed.
+- **spec-reviewer gate.** Passed: 36 of 36 criteria. It suggested relabeling "no adopter override of generic sections" as a human decision. Not done: the milestone brief records it as an orchestrator default flagged for the human, so the label stays as written. It also flagged a duplicated `_type_name` helper (slots/assemble) as a non-blocking nit; it was left in place, since each module stays self-contained.
 
 ## Look closely at
 

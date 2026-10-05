@@ -164,8 +164,8 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
    - **Alias upkeep vs. write mechanics.** "Every write adds aliases"
      conflicts with "reserve full-file writes for new files": only
      `write_file` carries `aliases` and `description`, and it replaces
-     them. The same applies to `description` drift. This gap is open on
-     this branch. A separate issue in this milestone (AIE-1151) handles it
+     them. The same applies to `description` drift. This gap is open
+     here; a separate issue in this milestone (AIE-1151) handles it
      by adding optional `aliases` and `description` arguments to
      `append_line` and `replace_fact`; that issue's own ADR records the
      resolution. The generic prose that depends on it (AIE-1049, AIE-1051)
