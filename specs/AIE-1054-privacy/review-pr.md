@@ -15,10 +15,10 @@ checks content (Notion §8.1, design principle 2). Files:
 ## Acceptance criteria → tests
 
 All tests are in `tests/test_prompts_privacy.py`. Line numbers are as of
-commit `700777c`. Phrase checks run on `BODY` with whitespace collapsed.
+commit `d4b318f`. Phrase checks run on `BODY` with whitespace collapsed.
 Every test docstring cites AIE-1054.
 
-`make check` at `700777c`: lint and typecheck clean; 3332 passed, 6
+`make check` at `d4b318f`: lint and typecheck clean; 3332 passed, 6
 skipped, 41 deselected.
 
 | Acceptance criterion | Test(s) |
@@ -26,17 +26,17 @@ skipped, 41 deselected.
 | US1.1 `BODY.strip()` non-empty | `test_privacy_body_is_non_empty` (L20) |
 | US1.2 `HEADING == "What never to store"` | `test_privacy_heading` (L25) |
 | US1.3 ASCII, lines <= 100 columns, `len(BODY) <= 2500` | `test_privacy_body_format` (L30); also `tests/test_prompts_invariants.py` |
-| US2.1 veto before write-worthiness | `test_privacy_body_contains_phrase` (L62): `US2.1-veto-before`, `US2.1-worth-remembering` |
-| US3.1 the three categories | L62: `US3.1-financial`, `US3.1-health`, `US3.1-minor` |
-| US3.2 however directly stated | L62: `US3.2-no-matter-how-directly` |
-| US3.3 every scope, even when asked | L62: `US3.3-no-scope`, `US3.3-even-when-asked` |
-| US3.4 what to do instead | L62: `US3.4-continue-task`, `US3.4-will-not-be-kept` |
-| US4.1 shared vs private scope | L62: `US4.1-shared-scope`, `US4.1-private-scope` |
-| US4.2 the reason for graduation | L62: `US4.2-disclosure`, `US4.2-note-to-self`, `US4.2-version-history` |
-| US4.3 unsure-in-shared rule | L62: `US4.3-unsure`, `US4.3-non-sensitive-part` |
-| US5.1 judgment, not a filter | L62: `US5.1-judgment`, `US5.1-no-tool-filter` |
-| US5.2 names no tool from `TOOL_NAMES`, no backtick | `test_privacy_body_names_no_tools` (L67) |
-| US5.3 no off-contract scope terms | `test_privacy_body_avoids_noncanonical_scope_terms` (L77; `team scope`, `personal scope`, `public scope`, `user scope`) |
+| US2.1 veto before write-worthiness | `test_privacy_body_contains_phrase` (L64): `US2.1-veto-before`, `US2.1-worth-remembering` |
+| US3.1 the three categories | L64: `US3.1-financial`, `US3.1-health`, `US3.1-minor` |
+| US3.2 however directly stated | L64: `US3.2-no-matter-how-directly` |
+| US3.3 every scope, even when asked | L64: `US3.3-no-scope`, `US3.3-even-when-asked` |
+| US3.4 what to do instead | L64: `US3.4-continue-task`, `US3.4-will-not-be-kept` |
+| US4.1 shared vs private scope | L64: `US4.1-shared-scope`, `US4.1-private-scope` |
+| US4.2 the reason for graduation | L64: `US4.2-disclosure`, `US4.2-note-to-self`, `US4.2-version-history` |
+| US4.3 unsure-in-shared rule | L64: `US4.3-unsure-sensitive-detail`, `US4.3-non-sensitive-part` |
+| US5.1 judgment, not a filter | L64: `US5.1-judgment`, `US5.1-no-tool-filter` |
+| US5.2 names no tool from `TOOL_NAMES`, no backtick | `test_privacy_body_names_no_tools` (L69) |
+| US5.3 no off-contract scope terms | `test_privacy_body_avoids_noncanonical_scope_terms` (L79; `team scope`, `personal scope`, `public scope`, `user scope`) |
 
 ## Architecture / ADR changes
 
@@ -71,9 +71,9 @@ skipped, 41 deselected.
 
   For other sensitive personal detail, be stricter in a shared scope than in a private scope. A
   slip in a shared scope is disclosure to a team rather than a note to self, and the store keeps
-  no version history to unwind it. When you are unsure whether something belongs in a shared
-  scope, do not write it there: leave it out, or write only the non-sensitive part to a private
-  scope.
+  no version history to unwind it. When you are unsure whether a sensitive detail is safe to
+  write to a shared scope, do not write it there: leave it out, or write only its non-sensitive
+  part to a private scope.
 
   This is your judgment alone. No tool filter checks what you write for sensitive content, so a
   write that succeeds tells you nothing about whether it was safe to make.
@@ -100,7 +100,22 @@ skipped, 41 deselected.
 
 ## Adversarial review findings
 
-(Filled in after code review.)
+- Reviewer A (correctness and spec fidelity), round 1: FAIL on one
+  SHOULD-FIX. The unsure-in-shared sentence said "whether something
+  belongs in a shared scope", which read as a general filing rule that
+  could block legitimate shared writes. It is now limited to "a sensitive
+  detail" (commit `d4b318f`), and the US4.3 pin tightened to
+  `unsure whether a sensitive detail is safe`. The reviewer also suggested
+  dropping the private-scope redirect as untraced to the Linear text; it
+  stays because the orchestrator's content requirements for this issue
+  ask for it. NITs not applied: "or willingly" (orchestrator requirement),
+  "you may tell the user" (connective).
+- Reviewer B (tests and docs), round 1: PASS. NITs: capitalized pins
+  (`Continue the task`, `No tool filter`) are case-sensitive; generic
+  single-word pins; this section was a placeholder. The US4.3 pin was
+  tightened as part of the fix above.
+- Reviewer A, round 2: PASS. Final `spec-reviewer` gate: PASS, 14/14
+  criteria, no BLOCKING or SHOULD-FIX.
 
 ## Follow-ups
 
