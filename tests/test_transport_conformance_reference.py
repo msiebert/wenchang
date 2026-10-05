@@ -96,6 +96,17 @@ ERROR_PARITY_CASES = frozenset(
     }
 )
 
+ALIASES_DESCRIPTION_CASES = frozenset(
+    {
+        "test_append_unions_aliases",
+        "test_append_replaces_description",
+        "test_replace_fact_unions_aliases_and_replaces_description",
+        "test_omitted_aliases_and_description_leave_metadata_unchanged",
+        "test_replace_fact_reapply_unions_onto_current_aliases",
+        "test_alias_and_description_argument_errors_match_core",
+    }
+)
+
 
 class _Ticking:
     """A clock returning a strictly later aware datetime on each call."""
@@ -166,7 +177,8 @@ def test_suite_public_methods_are_exactly_the_listed_cases() -> None:
 
     AIE-1047, US5.3; AIE-1045, US11.1 (adds the round-trip, atomicity, token,
     conflict, replace-fact, append, enforcement, index, listing, and US10
-    error-parity cases).
+    error-parity cases); AIE-1151, US6.7 (adds the aliases and description
+    cases).
     """
     public = {
         name
@@ -180,4 +192,5 @@ def test_suite_public_methods_are_exactly_the_listed_cases() -> None:
         | CONFLICT_REPLACE_APPEND_CASES
         | ENFORCEMENT_INDEX_LISTING_CASES
         | ERROR_PARITY_CASES
+        | ALIASES_DESCRIPTION_CASES
     )

@@ -8,7 +8,7 @@ same case without skipping it.
 
 import inspect
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -116,9 +116,18 @@ class _Forwarding:
         return self.inner.write_file(path, content, metadata, expected_version, source=source)
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
-        return self.inner.append_line(path, line, expected_version, source=source)
+        return self.inner.append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
     def replace_fact(
         self,
@@ -128,9 +137,17 @@ class _Forwarding:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         return self.inner.replace_fact(
-            path, old_string, new_string, expected_version, source=source
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
         )
 
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
@@ -357,10 +374,19 @@ class _IssuesRejectedTokens(_Forwarding):
         return self._file("write_file", result)
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         self._check(path, expected_version)
-        result = super().append_line(path, line, expected_version, source=source)
+        result = super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
         return self._file("append_line", result)
 
     def replace_fact(
@@ -371,9 +397,19 @@ class _IssuesRejectedTokens(_Forwarding):
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         self._check(path, expected_version)
-        result = super().replace_fact(path, old_string, new_string, expected_version, source=source)
+        result = super().replace_fact(
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
+        )
         return self._file("replace_fact", result)
 
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
@@ -498,10 +534,18 @@ class _MisreportsZeroMatches(_Forwarding):
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         try:
             return super().replace_fact(
-                path, old_string, new_string, expected_version, source=source
+                path,
+                old_string,
+                new_string,
+                expected_version,
+                source=source,
+                aliases=aliases,
+                description=description,
             )
         except ReplaceFactMatchError as exc:
             if path not in PROBES or exc.match_count != 0:
@@ -523,14 +567,30 @@ class _LandsStaleAppends(_Forwarding):
     """A conflicting append to a probe path is re-applied at the current version."""
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         try:
-            return super().append_line(path, line, expected_version, source=source)
+            return super().append_line(
+                path,
+                line,
+                expected_version,
+                source=source,
+                aliases=aliases,
+                description=description,
+            )
         except VersionConflictError as exc:
             if path not in PROBES:
                 raise
-            return super().append_line(path, line, exc.version, source=source)
+            return super().append_line(
+                path, line, exc.version, source=source, aliases=aliases, description=description
+            )
 
 
 def test_concurrent_appends_both_landing_fails() -> None:
@@ -842,10 +902,18 @@ class _MutatesBeforeMatchError(_Forwarding):
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         try:
             return super().replace_fact(
-                path, old_string, new_string, expected_version, source=source
+                path,
+                old_string,
+                new_string,
+                expected_version,
+                source=source,
+                aliases=aliases,
+                description=description,
             )
         except ReplaceFactMatchError as exc:
             if path in PROBES and exc.match_count == 0:
@@ -867,12 +935,21 @@ class _AppliesOversizeAppend(_AcceptsOversize):
     """An append to a probe path past 256 bytes is applied, then rejected as oversize."""
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         current = self.inner.read_file(path).content if path in PROBES else ""
         separator = "\n" if current and not current.endswith("\n") else ""
         size = len((current + separator + line + "\n").encode("utf-8"))
-        result = super().append_line(path, line, expected_version, source=source)
+        result = super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
         if path in PROBES and size > 256:
             raise OversizeWriteError(path, size, 256)
         return result
@@ -893,13 +970,27 @@ class _OnAppendRetry(_Forwarding):
         self.conflicted: set[str] = set()
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         if path in self.conflicted:
             self.conflicted.discard(path)
             return self.retry(path, line, expected_version, source)
         try:
-            return super().append_line(path, line, expected_version, source=source)
+            return super().append_line(
+                path,
+                line,
+                expected_version,
+                source=source,
+                aliases=aliases,
+                description=description,
+            )
         except VersionConflictError:
             if path in PROBES:
                 self.conflicted.add(path)
@@ -966,7 +1057,14 @@ class _NoSeparator(_Forwarding):
     """An append to a probe path lacking a trailing newline joins the line without one."""
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         if path in PROBES:
             current = self.inner.read_file(path)
@@ -978,7 +1076,9 @@ class _NoSeparator(_Forwarding):
                     expected_version,
                     source=source,
                 )
-        return super().append_line(path, line, expected_version, source=source)
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
 
 def test_append_without_separator_fails() -> None:
@@ -999,11 +1099,20 @@ class _FrozenAppendClock(_Forwarding):
         self.frozen: dict[str, datetime] = {}
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         if path in PROBES:
             self.frozen[path] = self.inner.read_file(path).metadata.last_updated
-        return super().append_line(path, line, expected_version, source=source)
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
     def read_file(self, path: str) -> MemoryFile:
         result = super().read_file(path)
@@ -1027,11 +1136,20 @@ class _DropsSourceAfterAppend(_Forwarding):
         self.appended: dict[str, str] = {}
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         if path in PROBES:
             self.appended[path] = source
-        return super().append_line(path, line, expected_version, source=source)
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
     def read_file(self, path: str) -> MemoryFile:
         result = super().read_file(path)
@@ -1409,3 +1527,459 @@ def test_invalid_path_write_stored_fails() -> None:
     _reference_passes(INVALID_PATH)
 
     _case_fails(INVALID_PATH, _StoresInvalidPathWrite(), P, r"did not raise")
+
+
+# --- Aliases and description on append_line and replace_fact -----------------
+
+APPEND_UNIONS_ALIASES = "test_append_unions_aliases"
+APPEND_REPLACES_DESCRIPTION = "test_append_replaces_description"
+REPLACE_UNIONS_AND_REPLACES = "test_replace_fact_unions_aliases_and_replaces_description"
+OMITTED_LEAVE_METADATA = "test_omitted_aliases_and_description_leave_metadata_unchanged"
+REPLACE_REAPPLY_UNIONS = "test_replace_fact_reapply_unions_onto_current_aliases"
+ALIAS_DESCRIPTION_ERRORS = "test_alias_and_description_argument_errors_match_core"
+
+ALIASES_DESCRIPTION_CASES = (
+    APPEND_UNIONS_ALIASES,
+    APPEND_REPLACES_DESCRIPTION,
+    REPLACE_UNIONS_AND_REPLACES,
+    OMITTED_LEAVE_METADATA,
+    REPLACE_REAPPLY_UNIONS,
+    ALIAS_DESCRIPTION_ERRORS,
+)
+
+
+@pytest.mark.parametrize("case", ALIASES_DESCRIPTION_CASES)
+def test_reference_client_passes_aliases_description_case(case: str) -> None:
+    """The reference client and forwarding wrapper pass each aliases and description case.
+
+    (AIE-1151, US6.1-US6.6)
+    """
+    _reference_passes(case)
+
+
+def _rewrite(
+    client: _Forwarding,
+    path: str,
+    result: MemoryFile,
+    source: str,
+    *,
+    description: str | None = None,
+    aliases: tuple[str, ...] | None = None,
+) -> MemoryFile:
+    """Overwrite path's stored metadata with the given fields, keeping its content."""
+    meta = result.metadata
+    metadata = FileMetadata(
+        meta.description if description is None else description,
+        meta.aliases if aliases is None else aliases,
+        meta.sources,
+        meta.last_updated,
+    )
+    return client.inner.write_file(path, result.content, metadata, result.version, source=source)
+
+
+class _ReplacesAliases(_Forwarding):
+    """Given aliases replace the stored set (duplicates dropped) instead of being unioned."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        result = super().append_line(
+            path, line, expected_version, source=source, description=description
+        )
+        if aliases is None:
+            return result
+        return _rewrite(self, path, result, source, aliases=tuple(dict.fromkeys(aliases)))
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        result = super().replace_fact(
+            path, old_string, new_string, expected_version, source=source, description=description
+        )
+        if aliases is None:
+            return result
+        return _rewrite(self, path, result, source, aliases=tuple(dict.fromkeys(aliases)))
+
+
+@pytest.mark.parametrize("case", [APPEND_UNIONS_ALIASES, REPLACE_UNIONS_AND_REPLACES])
+def test_aliases_replaced_instead_of_unioned_fails(case: str) -> None:
+    """Given aliases replacing the stored set fails "aliases not unioned".
+
+    (AIE-1151, US6.1, US6.3)
+    """
+    _reference_passes(case)
+
+    _case_fails(case, _ReplacesAliases(), P, r"aliases not unioned")
+
+
+class _IgnoresDescription(_Forwarding):
+    """append_line and replace_fact drop the description argument."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        return super().append_line(path, line, expected_version, source=source, aliases=aliases)
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        return super().replace_fact(
+            path, old_string, new_string, expected_version, source=source, aliases=aliases
+        )
+
+
+@pytest.mark.parametrize("case", [APPEND_REPLACES_DESCRIPTION, REPLACE_UNIONS_AND_REPLACES])
+def test_description_ignored_fails(case: str) -> None:
+    """An ignored description fails "description not replaced" (AIE-1151, US6.2, US6.3)."""
+    _reference_passes(case)
+
+    _case_fails(case, _IgnoresDescription(), P, r"description not replaced")
+
+
+class _DescriptionClearsAliases(_Forwarding):
+    """append_line with a description also clears the stored aliases."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        result = super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
+        if description is None:
+            return result
+        return _rewrite(self, path, result, source, aliases=())
+
+
+def test_description_changing_aliases_fails() -> None:
+    """A description-only append that changes aliases fails "aliases changed" (AIE-1151, US6.2)."""
+    _reference_passes(APPEND_REPLACES_DESCRIPTION)
+
+    _case_fails(APPEND_REPLACES_DESCRIPTION, _DescriptionClearsAliases(), P, r"aliases changed")
+
+
+class _ResetsDescriptionWhenOmitted(_Forwarding):
+    """append_line without a description overwrites the stored one."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        result = super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
+        if description is not None:
+            return result
+        return _rewrite(self, path, result, source, description="reset")
+
+
+class _ClearsAliasesWhenOmitted(_Forwarding):
+    """replace_fact without aliases clears the stored ones."""
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        result = super().replace_fact(
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
+        )
+        if aliases is not None:
+            return result
+        return _rewrite(self, path, result, source, aliases=())
+
+
+@pytest.mark.parametrize("client_type", [_ResetsDescriptionWhenOmitted, _ClearsAliasesWhenOmitted])
+def test_omitted_arguments_changing_metadata_fails(client_type: type[_Forwarding]) -> None:
+    """Omitted aliases or description that still change metadata fail "metadata changed".
+
+    (AIE-1151, US6.4)
+    """
+    _reference_passes(OMITTED_LEAVE_METADATA)
+
+    _case_fails(OMITTED_LEAVE_METADATA, client_type(), P, r"metadata changed")
+
+
+class _UnionsOntoStaleAliases(_Forwarding):
+    """replace_fact unions given aliases onto those seen at expected_version, not current ones."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen: list[tuple[VersionToken, tuple[str, ...]]] = []
+
+    def _record(self, result: MemoryFile) -> MemoryFile:
+        self.seen.append((result.version, result.metadata.aliases))
+        return result
+
+    def read_file(self, path: str) -> MemoryFile:
+        return self._record(super().read_file(path))
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        return self._record(
+            super().write_file(path, content, metadata, expected_version, source=source)
+        )
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        return self._record(
+            super().append_line(
+                path,
+                line,
+                expected_version,
+                source=source,
+                aliases=aliases,
+                description=description,
+            )
+        )
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        result = super().replace_fact(
+            path, old_string, new_string, expected_version, source=source, description=description
+        )
+        if aliases is None:
+            return self._record(result)
+        stale = next(
+            (seen for version, seen in self.seen if version == expected_version),
+            result.metadata.aliases,
+        )
+        union = tuple(dict.fromkeys((*stale, *aliases)))
+        return self._record(_rewrite(self, path, result, source, aliases=union))
+
+
+def test_reapply_unioning_onto_stale_aliases_fails() -> None:
+    """A stale-token re-apply unioning onto the caller's old aliases fails "aliases not unioned".
+
+    (AIE-1151, US6.5)
+    """
+    _reference_passes(REPLACE_REAPPLY_UNIONS)
+
+    _case_fails(REPLACE_REAPPLY_UNIONS, _UnionsOntoStaleAliases(), P, r"aliases not unioned")
+
+
+class _ValueErrorForNonStrDescription(_Forwarding):
+    """append_line and replace_fact raise ValueError for a non-str description."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        if description is not None and not issubclass(type(cast(object, description)), str):
+            raise ValueError("description must be a string")
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        if description is not None and not issubclass(type(cast(object, description)), str):
+            raise ValueError("description must be a string")
+        return super().replace_fact(
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
+        )
+
+
+class _ReshapedNewlineMessage(_Forwarding):
+    """append_line and replace_fact reject a multi-line description with their own message."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        if isinstance(description, str) and ("\n" in description or "\r" in description):
+            raise ValueError("bad description")
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        if isinstance(description, str) and ("\n" in description or "\r" in description):
+            raise ValueError("bad description")
+        return super().replace_fact(
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
+        )
+
+
+class _AcceptsStrAliases(_Forwarding):
+    """append_line and replace_fact treat a str passed as aliases as a single alias."""
+
+    def append_line(
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        return super().append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
+
+    def replace_fact(
+        self,
+        path: str,
+        old_string: str,
+        new_string: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
+    ) -> MemoryFile:
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        return super().replace_fact(
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
+        )
+
+
+@pytest.mark.parametrize(
+    ("client_type", "phrase"),
+    [
+        (_ValueErrorForNonStrDescription, r"wrong error type"),
+        (_ReshapedNewlineMessage, r"wrong message"),
+        (_AcceptsStrAliases, r"did not raise"),
+    ],
+)
+def test_alias_and_description_argument_error_drift_fails(
+    client_type: type[_Forwarding], phrase: str
+) -> None:
+    """Argument errors that are swallowed or differ in type or message from core's fail.
+
+    (AIE-1151, US6.6)
+    """
+    _reference_passes(ALIAS_DESCRIPTION_ERRORS)
+
+    _case_fails(ALIAS_DESCRIPTION_ERRORS, client_type(), P, phrase)

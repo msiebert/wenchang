@@ -200,23 +200,24 @@ class MemoryTools:
         check_write(path, self._identity, self._policy)
         content = _exact("content", content)
         _encodable("content", content)
-        description = _exact("description", description)
-        _encodable("description", description)
-        if any(boundary in description for boundary in _LINE_BOUNDARIES):
-            raise InvalidArgumentError("description", "description must be a single line")
+        description = _description(description)
         alias_tuple = _aliases(aliases)
         if expected_version is not None:
             expected_version = VersionToken(_exact("expected_version", expected_version))
-        try:
-            metadata = FileMetadata(description, alias_tuple, frozenset(), _UNSET_TIMESTAMP)
-        except ValueError as exc:
-            raise InvalidArgumentError("description", str(exc)) from exc
+        metadata = FileMetadata(description, alias_tuple, frozenset(), _UNSET_TIMESTAMP)
         return self._client.write_file(
             path, content, metadata, expected_version, source=self._source
         )
 
     def append_line(
-        self, scope: str, area: str, name: str, line: str, expected_version: VersionToken
+        self,
+        scope: str,
+        area: str,
+        name: str,
+        line: str,
+        expected_version: VersionToken,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Add one fact line to the end of an existing memory file.
 
@@ -227,6 +228,11 @@ class MemoryTools:
         `- [stated] Prefers tea`. Pass the version you read as
         `expected_version`. The per-file byte ceiling applies to the result.
         The `system/` area is read-only. Areas are lowercase ASCII slugs.
+
+        Optional `aliases` are added to the file's existing aliases and
+        never removed; to drop an alias, use `write_file`, which replaces
+        the whole set. An optional one-line `description` replaces the
+        stored one.
 
         A version conflict is routine: someone else changed the file since
         you read it. The error carries the current content and version;
@@ -243,7 +249,17 @@ class MemoryTools:
                 "or [system] label and non-empty text",
             )
         expected_version = VersionToken(_exact("expected_version", expected_version))
-        return self._client.append_line(path, line, expected_version, source=self._source)
+        alias_tuple = None if aliases is None else _aliases(aliases)
+        if description is not None:
+            description = _description(description)
+        return self._client.append_line(
+            path,
+            line,
+            expected_version,
+            source=self._source,
+            aliases=alias_tuple,
+            description=description,
+        )
 
     def replace_fact(
         self,
@@ -253,6 +269,8 @@ class MemoryTools:
         old_string: str,
         new_string: str,
         expected_version: VersionToken,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         """Change one fact in a memory file by quoting the text to replace.
 
@@ -264,6 +282,11 @@ class MemoryTools:
         it. Pass the version you read as `expected_version`. The per-file
         byte ceiling applies to the result. The `system/` area is read-only.
         Areas are lowercase ASCII slugs.
+
+        Optional `aliases` are added to the file's existing aliases and
+        never removed; to drop an alias, use `write_file`, which replaces
+        the whole set. An optional one-line `description` replaces the
+        stored one.
 
         A version conflict is routine: someone else changed the file since
         you read it. The error carries the current content and version;
@@ -277,8 +300,17 @@ class MemoryTools:
             raise InvalidArgumentError("old_string", "old_string must not be empty")
         _encodable("new_string", new_string)
         expected_version = VersionToken(_exact("expected_version", expected_version))
+        alias_tuple = None if aliases is None else _aliases(aliases)
+        if description is not None:
+            description = _description(description)
         return self._client.replace_fact(
-            path, old_string, new_string, expected_version, source=self._source
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=self._source,
+            aliases=alias_tuple,
+            description=description,
         )
 
     def delete_file(self, scope: str, area: str, name: str, expected_version: VersionToken) -> None:
@@ -416,6 +448,19 @@ def _aliases(aliases: object) -> tuple[str, ...]:
         _encodable("aliases", alias)
         members.append(alias)
     return tuple(members)
+
+
+def _description(value: object) -> str:
+    """Return value as an exact one-line str; InvalidArgumentError("description") otherwise."""
+    description = _exact("description", value)
+    _encodable("description", description)
+    if any(boundary in description for boundary in _LINE_BOUNDARIES):
+        raise InvalidArgumentError("description", "description must be a single line")
+    try:
+        FileMetadata(description, (), frozenset(), _UNSET_TIMESTAMP)
+    except ValueError as exc:
+        raise InvalidArgumentError("description", str(exc)) from exc
+    return description
 
 
 def _reraise_argument(argument: str, exc: ValueError) -> NoReturn:

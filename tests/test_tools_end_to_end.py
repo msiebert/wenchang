@@ -1,11 +1,12 @@
 """End-to-end test of the tool layer over a real MemoryStore.
 
 Covers AIE-1044, SC-002: bind_tools with SandboxResolver over a tests-only
-client wrapping MemoryStore(InMemoryStorage()).
+client wrapping MemoryStore(InMemoryStorage()); and AIE-1151, US4.15 through
+InProcessClient.
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 import pytest
@@ -23,7 +24,7 @@ from wenchang.identity import Identity, SandboxResolver, ScopeGrant
 from wenchang.scope import ScopePolicy
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.tools import MemoryTools, bind_tools, render_error, render_result
-from wenchang.transport import TransportClient
+from wenchang.transport import InProcessClient, TransportClient
 from wenchang.version_token import VersionToken
 
 pytestmark = pytest.mark.unit
@@ -55,9 +56,18 @@ class _StoreClient:
         return self.store.write_file(path, content, metadata, expected_version, source=source)
 
     def append_line(
-        self, path: str, line: str, expected_version: VersionToken, *, source: str
+        self,
+        path: str,
+        line: str,
+        expected_version: VersionToken,
+        *,
+        source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
-        return self.store.append_line(path, line, expected_version, source=source)
+        return self.store.append_line(
+            path, line, expected_version, source=source, aliases=aliases, description=description
+        )
 
     def replace_fact(
         self,
@@ -67,9 +77,17 @@ class _StoreClient:
         expected_version: VersionToken,
         *,
         source: str,
+        aliases: Sequence[str] | None = None,
+        description: str | None = None,
     ) -> MemoryFile:
         return self.store.replace_fact(
-            path, old_string, new_string, expected_version, source=source
+            path,
+            old_string,
+            new_string,
+            expected_version,
+            source=source,
+            aliases=aliases,
+            description=description,
         )
 
     def list_prefix(self, prefix: str, cursor: ListCursor | None = None) -> ListPage:
@@ -174,6 +192,28 @@ def test_end_to_end_lifecycle() -> None:
         tools.read_file("user", "notes", "a")
     assert excinfo.value.reason is NotFoundReason.FILE_ABSENT
     _json_safe(render_error(excinfo.value))
+
+
+def test_append_line_unions_aliases_and_replaces_description_end_to_end() -> None:
+    """AIE-1151, US4.15: append_line with aliases and description through
+    InProcessClient over a real MemoryStore adds the alias and replaces the
+    description in what read_file returns.
+    """
+    store = MemoryStore(InMemoryStorage(), clock=lambda: _NOW)
+    tools = bind_tools(
+        InProcessClient(store), SandboxResolver(_identity()), object(), _policy(), source=_SOURCE
+    )
+    created = tools.write_file("user", "notes", "a", "- [stated] a\n", "d", ["x"], None)
+
+    tools.append_line(
+        "user", "notes", "a", "- [stated] b", created.version, aliases=["z"], description="d2"
+    )
+
+    read = tools.read_file("user", "notes", "a")
+    assert read.content == "- [stated] a\n- [stated] b\n"
+    assert read.metadata.aliases == ("x", "z")
+    assert type(read.metadata.aliases) is tuple
+    assert read.metadata.description == "d2"
 
 
 def test_end_to_end_rejections() -> None:

@@ -210,7 +210,8 @@ implemented.
   raises `VersionConflictError(path, current_content, current_version)`, or
   `NotFoundError(FILE_ABSENT)` if the file is now absent; there is no
   automatic re-apply. `replace_fact(path,
-  old_string, new_string, expected_version, *, source) -> MemoryFile` is
+  old_string, new_string, expected_version, *, source, aliases=None,
+  description=None) -> MemoryFile` is
   implemented: it changes one span of a file's content without the caller
   resending the rest. `old_string` must match a unique anchor — every start
   index counts, so overlapping occurrences (e.g. `"aa"` in `"aaa"`) count
@@ -229,7 +230,12 @@ implemented.
   carried over from the object read on the attempt that commits, with
   `source` unioned into `sources` and `last_updated` stamped from the
   clock; `old_string == ""` or `source == ""` raises `ValueError` before
-  storage is consulted. `list_prefix(prefix, cursor=None) -> ListPage` is
+  storage is consulted. The optional `aliases` and `description` work as
+  for `append_line` (below), merged into the metadata of the object read on
+  the committing attempt, so a stale-token re-apply unions onto the current
+  aliases and its `description` overwrites any committed since the caller's
+  read; `new_string == old_string` with either argument is a metadata
+  change through the same conditional put. `list_prefix(prefix, cursor=None) -> ListPage` is
   implemented: it returns one page of well-formed memory files under a
   segment-aligned `prefix` as `FileEntry(path, metadata, version)`, in
   ascending path order, without reading any file's content. An invalid
@@ -248,7 +254,8 @@ implemented.
   Listing is not a snapshot: a file written or deleted between two pages of
   the same listing is reflected at whatever page reads it (or not at all,
   if deleted before its page). `append_line(path, line, expected_version, *,
-  source) -> MemoryFile` is implemented: it appends one fact line to the end
+  source, aliases=None, description=None) -> MemoryFile` is implemented: it
+  appends one fact line to the end
   of an existing file's content, only if the file is still at
   `expected_version`. It reads the current object, checks the version,
   inserts a `"\n"` separator first if the content is non-empty and doesn't
@@ -266,8 +273,18 @@ implemented.
   current content and version, or `NotFoundError(FILE_ABSENT)` if the
   object is now gone. A missing file raises `NotFoundError(FILE_ABSENT)`
   and is never created. Metadata is stamped the same way as `replace_fact`:
-  `source` unioned into `sources`, `last_updated` from the clock, other
-  fields unchanged. `delete_file(path, expected_version) -> None` is
+  `source` unioned into `sources`, `last_updated` from the clock. For both
+  calls, `aliases: Sequence[str] | None` is unioned into the stored aliases
+  (stored aliases first, exactly as stored, then each given alias not
+  already present, in order, by exact string equality; never removed), and
+  `description: str | None` replaces the stored description; `None` leaves
+  a field unchanged. The merged metadata commits in the same conditional
+  put as the content. After the existing argument checks, and before
+  storage is consulted, a wrongly typed `aliases` (by real type, rejecting
+  `str`/`bytes`/`bytearray`), alias member, or `description` raises
+  `TypeError`, and a `description` containing `\n` or `\r` raises
+  `ValueError` (see [ADR 0024](docs/adr/0024-append-replace-aliases-description.md)).
+  `delete_file(path, expected_version) -> None` is
   implemented: it removes the file at `path` only if it is still at
   `expected_version`. It reads the current object, checks the version — a
   mismatch raises `VersionConflictError(path, current_content,
@@ -382,8 +399,9 @@ implemented.
   [ADR 0011](docs/adr/0011-append-line-version-guard.md),
   [ADR 0012](docs/adr/0012-delete-file.md),
   [ADR 0013](docs/adr/0013-write-file-source.md),
-  [ADR 0019](docs/adr/0019-transport-client-interface.md), and
-  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md).
+  [ADR 0019](docs/adr/0019-transport-client-interface.md),
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md), and
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
 - **identity** — the injected-dependency boundary through which the
   library learns who the caller is; it has no notion of users,
   organizations, or roles of its own, and imports only `errors` and
@@ -623,7 +641,16 @@ implemented.
   prefix, malformed and foreign cursors), and error parity (invalid path
   and absent file for every operation, empty `source` per method, full
   `str(exc)` equal to a locally built core error and ending with the
-  category guidance, `get_memory_index` argument errors). The index cap
+  category guidance, `get_memory_index` argument errors). Six more cases
+  cover `append_line`/`replace_fact`'s optional `aliases` and
+  `description`: the alias union and description replacement, in both the
+  returned file and a read-back, for each method; omitted and explicit-`None`
+  arguments leaving metadata unchanged; a stale-token `replace_fact`
+  re-apply unioning onto the current aliases; and argument errors (a `str`
+  `aliases`, a non-`str` alias, and a non-`str` `description` raise
+  `TypeError`, checked by type only; a newline `description` raises
+  `ValueError` with core's exact text, `MSG_DESCRIPTION_NEWLINE`), leaving
+  the file unchanged. The index cap
   case replays core's rule over entries the client returned (sized with
   `index_entry_bytes` and `sentinel_entry_bytes`, never hardcoded),
   writing up to 20 files under area `INDEX_AREA = "conformance-index"`
@@ -633,11 +660,13 @@ implemented.
   pin core's exact text through module constants (`MSG_WRITE_ARGS`,
   `MSG_REPLACE_ARGS`, `MSG_APPEND_ARGS`, one per method where core shares a
   message across causes, plus `MSG_MALFORMED_CURSOR`,
-  `MSG_FOREIGN_CURSOR`, `MSG_INVALID_SCOPE`, `MSG_INVALID_ENTITY`), and a
+  `MSG_FOREIGN_CURSOR`, `MSG_INVALID_SCOPE`, `MSG_INVALID_ENTITY`,
+  `MSG_DESCRIPTION_NEWLINE`), and a
   drift test in the repo's tests provokes every (method, cause) pair on a
   real `MemoryStore` and requires `str(exc)` to equal the constant.
   `get_memory_index`'s `TypeError`s (non-`Mapping` map, non-`str` key or
-  value) are checked by type only, since their text names caller-side
+  value) and the `aliases`/`description` `TypeError`s are checked by type
+  only, since their text names caller-side
   types a remote may reject at serialization in its own words. Two
   behaviors are out of the suite: duplicate scopes in `scope_map`
   (unbuildable with a real `Mapping`, and legitimately collapsed by a
@@ -718,8 +747,9 @@ implemented.
   phrase and label. It imports `core`, `errors`, `file_format`, `paths`,
   `transport`, and `version_token` from `wenchang`, plus `pytest`, applies
   no pytest marks, and cites no Linear IDs. See
-  [ADR 0021](docs/adr/0021-transport-conformance-harness.md) and
-  [ADR 0023](docs/adr/0023-transport-conformance-cases.md).
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md),
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md), and
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
 - **transport** — the transport-agnostic client contract the tool layer
   calls, so a transport is added by writing another implementation without
   touching tool definitions. `TransportClient` is a runtime-checkable,
@@ -728,8 +758,10 @@ implemented.
   `delete_file`, and `get_memory_index(scope_map: Mapping[str, str]) ->
   MemoryIndex`. All seven `MemoryStore` methods mirror it exactly —
   parameter names, kinds, defaults, annotations, and return type,
-  including keyword-only `source` and `list_prefix`'s `cursor:
-  ListCursor | None = None` — pinned by a test comparing
+  including keyword-only `source`, `append_line`/`replace_fact`'s
+  keyword-only `aliases: Sequence[str] | None = None` and `description: str
+  | None = None`, and `list_prefix`'s `cursor: ListCursor | None = None` —
+  pinned by a test comparing
   `inspect.signature(..., eval_str=True)` of each pair, so the tool layer is
   written once and an in-process client can be a pure pass-through. The
   module therefore has no `from __future__ import annotations` and imports
@@ -741,12 +773,14 @@ implemented.
   `MemoryStore` method raises, with equal attributes and message — the
   `wenchang.errors` taxonomy (same category and payload) and the
   non-taxonomy types core raises, including `ValueError` (empty `source` or
-  `old_string`, non-fact `line`, malformed or foreign `cursor`),
+  `old_string`, non-fact `line`, a `description` containing a newline or
+  carriage return, malformed or foreign `cursor`),
   `MetadataFormatError`, and `UnicodeDecodeError`. A client never reshapes
   an error into its own vocabulary or lets a transport library's exception
   escape; a failure of the transport itself (timeout, refused connection,
   crashed server) surfaces as `BackendUnavailableError` with the matching
-  `TransientReason`. Wrongly typed arguments are outside the contract.
+  `TransientReason`. Wrongly typed arguments (including a wrongly typed
+  `aliases` or `description`) are outside the contract.
   `get_memory_index` follows `MemoryStore.get_memory_index` the same way.
   The protocol is identity-agnostic: `scope_map` is the plain
   `Identity.scope_map` shape, and no method carries identity or
@@ -780,8 +814,9 @@ implemented.
   must pass. See
   [ADR 0019](docs/adr/0019-transport-client-interface.md),
   [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md),
-  [ADR 0021](docs/adr/0021-transport-conformance-harness.md), and
-  [ADR 0023](docs/adr/0023-transport-conformance-cases.md).
+  [ADR 0021](docs/adr/0021-transport-conformance-harness.md),
+  [ADR 0023](docs/adr/0023-transport-conformance-cases.md), and
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
 - **tools** — the agent-facing tool layer: thin verbs over a
   `TransportClient`, carrying no judgment, each described by its
   docstring. `MemoryTools(client, identity, policy, *, source)` is one
@@ -804,8 +839,9 @@ implemented.
   Tools are scope-relative: `read_file(scope, area, name)`,
   `write_file(scope, area, name, content, description, aliases,
   expected_version)`, `append_line(scope, area, name, line,
-  expected_version)`, `replace_fact(scope, area, name, old_string,
-  new_string, expected_version)`, `delete_file(scope, area, name,
+  expected_version, aliases=None, description=None)`, `replace_fact(scope,
+  area, name, old_string, new_string, expected_version, aliases=None,
+  description=None)`, `delete_file(scope, area, name,
   expected_version)`, and `list_prefix(scope, area=None, cursor=None)`. No
   tool accepts a path, prefix, or entity ID. The tool builds the path with
   `build_path(scope, entity_id, area, name)` (or `build_prefix(scope,
@@ -820,13 +856,21 @@ implemented.
   `write_file` exposes only `description` and `aliases` of the metadata:
   it builds `FileMetadata(description, tuple(aliases), frozenset(),
   <1970-01-01 UTC>)`, and core stamps `last_updated` and unions `source`
-  into `sources`.
+  into `sources`. `append_line` and `replace_fact` take optional `aliases`
+  and `description` (positional-or-keyword with `None` defaults, like
+  `list_prefix`'s), validated by the same `_aliases` and `_description`
+  helpers as `write_file`'s and forwarded to the client as an exact `tuple`
+  of `str` and an exact `str`, or `None`; core unions the aliases and
+  replaces the description, so only `write_file` removes an alias (see
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md)).
   Each tool runs its checks in a fixed order, raising the first failure:
   `scope`, `area`, `name` type check (normalized to exact `str` via
   `str.__str__`) and UTF-8 encodability check; the grant check (`scope in
   identity.grants`); path building; the `area` and `name` rules (below);
   for mutating tools only,
-  `scope.check_write(path, identity, policy)`; the remaining arguments;
+  `scope.check_write(path, identity, policy)`; the remaining arguments, in
+  signature order (so `write_file` checks `description`, including its
+  `\n`/`\r` rule, before `aliases` and `expected_version`);
   then the client call, which receives the same path object `check_write`
   validated. `read_file`, `list_prefix`, and `get_memory_index` never call
   `check_write`. Because the path is tool-built, `check_write`'s
@@ -851,7 +895,8 @@ implemented.
   a `Sequence`, or a non-`str` member), a `description` containing any
   `str.splitlines` line boundary (the tool rejects `\x0b`, `\x0c`,
   `\x1c`–`\x1e`, `\x85`, `\u2028`, and `\u2029` itself; `\n` and `\r` are
-  left to `FileMetadata`, whose `ValueError` is converted), a `line` that
+  left to a `FileMetadata` construction in the `_description` helper, whose
+  `ValueError` is converted), a `line` that
   `parse_fact` rejects, an empty `old_string`, and an ungranted scope,
   raised directly with detail
   `"scope {scope!r} is not available in this session; available scopes:
@@ -996,7 +1041,11 @@ suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
   would duplicate a landed line on retry (see
   [ADR 0011](docs/adr/0011-append-line-version-guard.md)).
 - **One lock, one token per file.** Content and metadata commit together;
-  there is no metadata-only update.
+  there is no metadata-only update. `write_file` replaces `description`
+  and `aliases`; `append_line` and `replace_fact` may also add aliases and
+  replace the description, computed on the committing attempt's read and
+  committed in the same conditional put as their content change (see
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md)).
 - **A per-file byte ceiling bounds writes, not reads.** `write_file` rejects
   content whose UTF-8 encoding exceeds the store's `max_file_bytes` (default
   16384, configurable, exactly the limit allowed) before consulting storage;
@@ -1034,7 +1083,9 @@ suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
   `storage`, and `core` never imports `scope`, so a restriction check can't
   be wired into `MemoryStore` without breaking the boundary.
 - **Metadata-only navigation.** `description` and `aliases` are the entire
-  search surface; there is no content search over file bodies.
+  search surface; there is no content search over file bodies. Every
+  content write can maintain them: `append_line` and `replace_fact` only
+  add aliases, and only `write_file` removes one.
 - **Listing never reads content and is not a snapshot.** `list_prefix` and
   the `Storage.list_page` primitive beneath it return keys, metadata, and
   version tokens only, never object bodies; a listing spans multiple pages
