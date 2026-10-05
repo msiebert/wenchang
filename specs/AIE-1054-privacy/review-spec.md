@@ -28,7 +28,7 @@ principle 2).
 | Prompt-only; no classifier | Tool-layer filter for account numbers etc. | §8.1: detection over free-form markdown is not exact; a partial filter overstates coverage |
 | Name no tools | "do not call `write_file`/`append_line`..." | Pure judgment section; the veto covers every write path, so listing tools invites gaps |
 | Refusal covers private scopes too | Allow refused categories in a private scope | §8.1 "refused outright"; Linear "however directly stated" |
-| Unsure in shared -> nothing, or non-sensitive part to a private scope | Ask the user each time | Linear content requirements; avoids inventing an ask rule |
+| Unsure whether a sensitive detail is safe in a shared scope -> leave it out, or write only its non-sensitive part to a private scope | Ask the user each time; leave it out only (no private redirect) | Orchestrator content requirements for this issue; limited to sensitive detail so it is not a general filing rule; avoids inventing an ask rule |
 | No ADR | ADR for the section | Wording is not API (ADR 0025 decision 2); no deviation from §8.1 |
 
 ## Files/modules to be touched

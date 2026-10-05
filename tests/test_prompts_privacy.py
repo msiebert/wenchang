@@ -53,7 +53,9 @@ def test_privacy_body_format() -> None:
         pytest.param("disclosure to a team", id="US4.2-disclosure"),
         pytest.param("note to self", id="US4.2-note-to-self"),
         pytest.param("version history", id="US4.2-version-history"),
-        pytest.param("unsure", id="US4.3-unsure"),
+        pytest.param(
+            "unsure whether a sensitive detail is safe", id="US4.3-unsure-sensitive-detail"
+        ),
         pytest.param("non-sensitive part", id="US4.3-non-sensitive-part"),
         pytest.param("judgment", id="US5.1-judgment"),
         pytest.param("No tool filter", id="US5.1-no-tool-filter"),

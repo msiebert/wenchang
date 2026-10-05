@@ -42,7 +42,7 @@ no import changes in `src/`.
   - US3.4: `Continue the task`, `will not be kept`
   - US4.1: `shared scope`, `private scope`
   - US4.2: `disclosure to a team`, `note to self`, `version history`
-  - US4.3: `unsure`, `non-sensitive part`
+  - US4.3: `unsure whether a sensitive detail is safe`, `non-sensitive part`
   - US5.1: `judgment`, `No tool filter`
 - Negative pins:
   - US5.2: for every `t` in `TOOL_NAMES`, `re.search(rf"\b{t}\b", BODY)` is
@@ -68,9 +68,9 @@ no import changes in `src/`.
 
     For other sensitive personal detail, be stricter in a shared scope than in a private scope. A
     slip in a shared scope is disclosure to a team rather than a note to self, and the store keeps
-    no version history to unwind it. When you are unsure whether something belongs in a shared
-    scope, do not write it there: leave it out, or write only the non-sensitive part to a private
-    scope.
+    no version history to unwind it. When you are unsure whether a sensitive detail is safe to
+    write to a shared scope, do not write it there: leave it out, or write only its non-sensitive
+    part to a private scope.
 
     This is your judgment alone. No tool filter checks what you write for sensitive content, so a
     write that succeeds tells you nothing about whether it was safe to make.
@@ -88,8 +88,10 @@ Traceability of each sentence:
 - Scope graduation and its reason: §8.1 sentence 2. "the store keeps no
   version history" places that clause on the whole store, so it is not
   read as a shared-only property.
-- Unsure-in-shared rule: Linear content requirements, applying "tighter in
-  shared scopes".
+- Unsure-in-shared rule: orchestrator content requirements for this issue
+  ("when unsure in a shared scope, do not write, or write the non-sensitive
+  part to the private scope"), applying "tighter in shared scopes". It is
+  limited to sensitive detail so it does not read as a general filing rule.
 - Judgment and no filter, no false comfort: §8.1 sentences 3-4 ("a filter
   catching only some cases would overstate its coverage").
 

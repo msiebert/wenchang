@@ -70,7 +70,7 @@ collapsed to one space (wrapping-tolerant), in `tests/test_prompts_privacy.py`.
 | - | ----- | ---- | ---- |
 | 4.1 | the body | read | contains `shared scope` and `private scope` |
 | 4.2 | the body | read | gives the reason: contains `disclosure to a team`, `note to self`, and `version history` |
-| 4.3 | the body | read | gives the unsure-in-shared rule: contains `unsure` and `non-sensitive part` |
+| 4.3 | the body | read | gives the unsure-in-shared rule for sensitive detail: contains `unsure whether a sensitive detail is safe` and `non-sensitive part` |
 
 ### US5 — Judgment, not a filter; no tool names
 

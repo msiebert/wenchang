@@ -20,9 +20,9 @@ not be kept.
 
 For other sensitive personal detail, be stricter in a shared scope than in a private scope. A
 slip in a shared scope is disclosure to a team rather than a note to self, and the store keeps
-no version history to unwind it. When you are unsure whether something belongs in a shared
-scope, do not write it there: leave it out, or write only the non-sensitive part to a private
-scope.
+no version history to unwind it. When you are unsure whether a sensitive detail is safe to
+write to a shared scope, do not write it there: leave it out, or write only its non-sensitive
+part to a private scope.
 
 This is your judgment alone. No tool filter checks what you write for sensitive content, so a
 write that succeeds tells you nothing about whether it was safe to make.
