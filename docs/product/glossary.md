@@ -192,6 +192,10 @@ Terms as used throughout wenchang and its spec.
   surfaces have written to the file; free-form strings, not an enum.
 - **Confidence label** — one of `stated`, `observed`, `inferred`, `system`,
   marking how a fact came to be known.
+- **In-line expiry** — a durable fact's knowable end date, stated in prose
+  inside the fact line itself; not a metadata field and not a per-fact
+  timestamp. Written only when the user's own framing makes the end
+  condition explicit.
 - **Body line** — a parsed line of a file's body: either a fact, or a
   verbatim non-fact line (heading, blank line, prose) tolerated by the
   parser but not part of the format presented to the agent.
