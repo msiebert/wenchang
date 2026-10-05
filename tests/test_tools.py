@@ -1766,6 +1766,22 @@ def test_aliases_error_precedes_description_error(harness: _Harness, tool: str) 
     _invalid(harness, tool, "aliases", aliases=["a", 5], description="a\nb")
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [{"aliases": "ab"}, {"expected_version": 5}],
+    ids=["before-aliases", "before-expected-version"],
+)
+def test_write_file_description_error_precedes_later_arguments(
+    harness: _Harness, overrides: dict[str, object]
+) -> None:
+    """write_file reports a multi-line description before bad aliases or
+    expected_version (AIE-1151, US4.13; ADR 0024).
+    """
+    err = _invalid(harness, "write_file", "description", description="a\nb", **overrides)
+
+    assert type(err.__cause__) is ValueError
+
+
 # --- US6: module boundaries -------------------------------------------------------
 
 

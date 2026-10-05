@@ -122,8 +122,9 @@ prompt guidance or relax the alias-upkeep rule.
    `test_replace_fact_reapply_unions_onto_current_aliases`, and
    `test_alias_and_description_argument_errors_match_core`, plus the
    message constant `MSG_DESCRIPTION_NEWLINE`, pinned to core's text by the
-   drift test. Each checks the returned file and a read-back, and each has
-   a broken-client self-test.
+   drift test. Each success case checks the returned file and a read-back;
+   the argument-errors case checks the unchanged state through a read-back.
+   Each case has a broken-client self-test.
 10. **Deviation from the Notion Section 5 signatures.** The spec lists
     `append_line` and `replace_fact` without metadata arguments. This
     extension is deliberate: it is the only way to satisfy Section 8.1's

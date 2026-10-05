@@ -1187,13 +1187,27 @@ def test_replace_fact_existing_value_error_wins_over_bad_aliases(
     [
         ("ab", 5, TypeError, "aliases must be a sequence of str, not str"),
         (["a", 5], "a\nb", TypeError, "aliases entry must be str, got int"),
+        (["a"], 5, TypeError, "description must be a str, not int"),
+        (
+            ["a"],
+            "a\nb",
+            ValueError,
+            "description must not contain a newline or carriage return",
+        ),
     ],
-    ids=["aliases-before-description-type", "entry-before-description-value"],
+    ids=[
+        "aliases-before-description-type",
+        "entry-before-description-value",
+        "description-type",
+        "description-value",
+    ],
 )
 def test_replace_fact_new_argument_errors_in_order(
     aliases: object, description: object, error: type[Exception], message: str
 ) -> None:
-    """The aliases TypeError precedes description errors (AIE-1151, US2.6)."""
+    """aliases TypeError precedes description TypeError, which precedes the
+    description ValueError (AIE-1151, US2.6).
+    """
     stub = _StubStorage()
     store = _new_store(stub)
 
