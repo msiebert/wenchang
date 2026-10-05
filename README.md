@@ -25,10 +25,13 @@ from wenchang.storage.memory import InMemoryStorage
 
 prompt = build_memory_prompt(
     PromptSlots(
-        scope_guidance="...",     # which scopes exist, which are shared vs private,
-                                  # ask-before-write, contradiction, containment rules
-        seed_areas="...",         # starting areas per scope; which are curated system/ areas
-        systems_of_record="...",  # optional; None omits the section
+        # Which scopes exist, which are shared vs private, and the
+        # ask-before-write, contradiction, and containment rules.
+        scope_guidance="...",
+        # Starting areas per scope; which are curated system/ areas.
+        seed_areas="...",
+        # Optional; None omits the section.
+        systems_of_record="...",
     )
 )
 store = MemoryStore(InMemoryStorage(), scope_priority=("user", "project", "organization"))
