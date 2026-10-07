@@ -8,7 +8,8 @@ import re
 import pytest
 
 from prompts_reference_adopter import REFERENCE_SLOTS
-from wenchang.prompts import build_memory_prompt, write_mechanics
+from wenchang.prompts import build_memory_prompt, filing, write_mechanics
+from wenchang.tools import MemoryTools
 
 pytestmark = pytest.mark.unit
 
@@ -64,24 +65,26 @@ def test_us2_2_add_one_fact_sentence_names_append_line() -> None:
     "phrase",
     [
         "`replace_fact`",
-        "change one fact",
-        "quote the existing line",
-        "surrounding lines stay intact",
+        "`replace_fact` to change one fact",
+        "quoting the existing line as `old_string`",
+        "so surrounding lines stay intact",
     ],
 )
 def test_us2_3_replace_fact_changes_one_fact(phrase: str) -> None:
-    """AIE-1051, US2.3: body assigns changing one fact to replace_fact, quoting the line."""
+    """AIE-1051, US2.3; AIE-1165: body assigns changing one fact to replace_fact."""
     assert phrase in _body()
 
 
 def test_us2_3_change_one_fact_sentence_names_replace_fact() -> None:
-    """AIE-1051, US2.3: the sentence about changing one fact names replace_fact."""
-    assert "`replace_fact`" in _only_sentence_containing("change one fact")
+    """AIE-1051, US2.3; AIE-1165: the sentence quoting the existing line names replace_fact."""
+    assert "`replace_fact`" in _only_sentence_containing("quoting the existing line")
 
 
-@pytest.mark.parametrize("phrase", ["`write_file`", "new file", "restructuring many lines"])
+@pytest.mark.parametrize(
+    "phrase", ["`write_file`", "only for creating a file", "restructuring many lines"]
+)
 def test_us2_4_write_file_for_new_or_restructure(phrase: str) -> None:
-    """AIE-1051, US2.4: body reserves write_file for new files or restructuring many lines."""
+    """AIE-1051, US2.4; AIE-1165: body reserves write_file for new files or restructuring."""
     assert phrase in _body()
 
 
@@ -104,30 +107,48 @@ def test_us3_1_names_metadata_parameters(phrase: str) -> None:
     assert phrase in _body()
 
 
-@pytest.mark.parametrize("anchor", ["pass that name in `aliases`", "pass the new `description`"])
-def test_us3_2_metadata_on_same_call(anchor: str) -> None:
-    """AIE-1051, US3.2: the aliases and description sentences each say "same call"."""
-    assert "same call" in _only_sentence_containing(anchor)
+def test_us3_2_same_write_rule_lives_in_filing() -> None:
+    """AIE-1051, US3.2; AIE-1165: filing owns the same-write metadata rule, not this body.
+
+    The one filing sentence that passes new names in `aliases` also passes a new
+    `description` on the same write; the write mechanics body does not restate it.
+    """
+    filing_sentences = _sentences(re.sub(r"\s+", " ", filing.BODY))
+    matches = [s for s in filing_sentences if "pass in `aliases`" in s]
+    assert len(matches) == 1, matches
+    assert "pass a new `description`" in matches[0]
+    assert "On the same write" in matches[0]
+    assert _body().strip() != ""
+    assert "same call" not in _body()
+    assert "same write" not in _body()
 
 
 @pytest.mark.parametrize(
     "phrase",
-    ["Removing an alias", "rewriting the description wholesale with no fact to write"],
+    ["dropping a name from `aliases`", "rewriting the `description` with no fact to write"],
 )
 def test_us3_3_removal_phrases_present(phrase: str) -> None:
-    """AIE-1051, US3.3: body covers removing an alias and wholesale description rewrites."""
+    """AIE-1051, US3.3; AIE-1165: body covers dropping an alias and description rewrites."""
     assert phrase in _body()
 
 
 def test_us3_3_removing_alias_sentence_names_write_file() -> None:
-    """AIE-1051, US3.3: the sentence about removing an alias names write_file."""
-    assert "`write_file`" in _only_sentence_containing("Removing an alias")
+    """AIE-1051, US3.3; AIE-1165: the sentence about dropping an alias names write_file."""
+    assert "`write_file`" in _only_sentence_containing("dropping a name from `aliases`")
 
 
-@pytest.mark.parametrize("tool", ["`append_line`", "`replace_fact`", "`write_file`"])
-def test_us3_4_alias_sentence_names_all_write_tools(tool: str) -> None:
-    """AIE-1051, US3.4: the sentence passing a new name in aliases names each write tool."""
-    assert tool in _only_sentence_containing("pass that name in `aliases`")
+@pytest.mark.parametrize("tool", ["append_line", "replace_fact", "write_file"])
+def test_us3_4_every_write_tool_docstring_carries_aliases_and_description(tool: str) -> None:
+    """AIE-1051, US3.4; AIE-1165: each write tool's docstring covers aliases and description.
+
+    Adding a name never forces a full rewrite because every write tool takes the
+    metadata parameters. This replaces a sentence pin on the write mechanics body,
+    whose subject now lives in the filing section and the tool docstrings.
+    """
+    doc = getattr(MemoryTools, tool).__doc__
+    assert doc is not None
+    assert "`aliases`" in doc
+    assert "`description`" in doc
 
 
 @pytest.mark.parametrize("phrase", ["drop one fact line", "`old_string`", "empty `new_string`"])
@@ -141,9 +162,9 @@ def test_us4_1_drop_sentence_names_replace_fact() -> None:
     assert "`replace_fact`" in _only_sentence_containing("drop one fact line")
 
 
-@pytest.mark.parametrize("phrase", ["line break that follows it", "the line break before it"])
+@pytest.mark.parametrize("phrase", ["the line break after it", "or before it, if none follows"])
 def test_us4_2_drop_includes_line_break(phrase: str) -> None:
-    """AIE-1051, US4.2: body says which line break to include when dropping a line."""
+    """AIE-1051, US4.2; AIE-1165: body says which line break to include when dropping."""
     assert phrase in _body()
 
 

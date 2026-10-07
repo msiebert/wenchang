@@ -41,38 +41,49 @@ def test_filing_section_in_assembled_prompt() -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
-        pytest.param("file that is about", id="US2.1-file-that-is-about"),
-        pytest.param("not in whichever file", id="US2.1-not-in-whichever-file"),
+        pytest.param("in the file that is about its subject", id="US2.1-file-about-subject"),
+        pytest.param(
+            "not whichever file happens to be open", id="US2.1-not-whichever-file-is-open"
+        ),
         pytest.param("starting shape", id="US2.2-starting-shape"),
-        pytest.param("new files and areas", id="US2.2-new-files-and-areas"),
-        pytest.param("Before you create a new file", id="US3.1-before-you-create"),
+        pytest.param(
+            "create files and areas as subjects need them", id="US2.2-create-files-and-areas"
+        ),
+        pytest.param("Before creating a file", id="US3.1-before-creating"),
         pytest.param("descriptions and aliases", id="US3.2-descriptions-and-aliases"),
-        pytest.param("the index you loaded", id="US3.2-the-index-you-loaded"),
-        pytest.param("`get_memory_index()`", id="US3.2-get-memory-index"),
-        pytest.param("append to it or edit it", id="US3.3-append-or-edit"),
-        pytest.param("creating a duplicate", id="US3.3-creating-a-duplicate"),
+        pytest.param("the index's descriptions and aliases", id="US3.2-index-descriptions"),
+        pytest.param(
+            "If one exists, append to it or edit it instead of creating a duplicate",
+            id="US3.3-append-or-edit-not-duplicate",
+        ),
         pytest.param("ambiguous", id="US3.4-ambiguous"),
         pytest.param("one or two", id="US3.4-one-or-two"),
         pytest.param("`read_file`", id="US3.4-read-file"),
         pytest.param("never the whole store", id="US3.4-never-the-whole-store"),
-        pytest.param("If nothing there matches", id="US3.5-if-nothing-there-matches"),
-        pytest.param("listed under `capped` in the index", id="US3.5-listed-under-capped"),
+        pytest.param("If none matches", id="US3.5-if-none-matches"),
+        pytest.param("listed under `capped`", id="US3.5-listed-under-capped"),
         pytest.param("`list_prefix(scope, area)`", id="US3.5-list-prefix-scope-area"),
-        pytest.param("that one area only", id="US3.5-that-one-area-only"),
-        pytest.param("check its entries the same way", id="US3.5-check-its-entries"),
-        pytest.param("only when you create a file", id="US3.7-only-when-you-create"),
-        pytest.param("does not trigger it", id="US3.7-does-not-trigger-it"),
-        pytest.param("Every write should carry any new names", id="US4.1-every-write-should-carry"),
+        pytest.param("for that area only", id="US3.5-for-that-area-only"),
+        pytest.param("check it the same way", id="US3.5-check-it-the-same-way"),
+        pytest.param("any new names the subject will be looked up by", id="US4.1-new-lookup-names"),
         pytest.param("nicknames", id="US4.1-nicknames"),
         pytest.param("acronyms", id="US4.1-acronyms"),
         pytest.param("phrasings", id="US4.1-phrasings"),
         pytest.param("`aliases`", id="US4.2-aliases"),
-        pytest.param("`aliases` on the same write that records the fact", id="US4.2-same-write"),
+        pytest.param(
+            "On the same write that records a fact, pass in `aliases`", id="US4.2-same-write"
+        ),
         pytest.param("entire search surface", id="US4.3-entire-search-surface"),
+        pytest.param("there is no content search", id="US4.3-no-content-search"),
+        pytest.param("next match more likely", id="US4.3-next-match-more-likely"),
+        pytest.param(
+            "pass a new `description` if the fact changes what it should say",
+            id="US4.4-new-description",
+        ),
     ],
 )
 def test_filing_body_contains_phrase(phrase: str) -> None:
-    """AIE-1049, US2.1-US4.3: filing.BODY contains each required phrase."""
+    """AIE-1049, US2.1-US4.4; AIE-1165: filing.BODY contains each required phrase."""
     assert phrase in _normalized(filing.BODY)
 
 

@@ -28,26 +28,23 @@ def test_heading_and_body() -> None:
     "phrase",
     [
         # US2.2
-        "changes the substance",
-        "what you conclude",
-        "what you recommend",
-        "what you ask",
+        "changes the substance: what you conclude, recommend, or ask",
         # US2.3
-        "just as good without it",
-        "leave it out",
+        "Use a stored fact only if",
         # US2.4
         "surveillance rather than attentiveness",
         # US2.5
-        "level it was recorded",
+        "at the level recorded",
+        "no more broadly or certainly than its wording and confidence label support",
         # US2.6
         "single passing mention",
         "trait",
         # US2.7
-        "only if it changes what you suggest",
+        "one late night before a deadline does not make the user someone who always works late",
     ],
 )
 def test_body_contains_phrase(phrase: str) -> None:
-    """AIE-1052, US2.2-US2.7: applying_memory.BODY contains each required phrase."""
+    """AIE-1052, US2.2-US2.7; AIE-1165: applying_memory.BODY contains each required phrase."""
     assert phrase in _normalized(applying_memory.BODY)
 
 

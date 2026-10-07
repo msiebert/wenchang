@@ -4,24 +4,17 @@ from typing import Final
 
 HEADING: Final[str] = "Forgetting"
 BODY: Final[str] = """\
-Forgetting has two moves: drop one fact, or delete the whole file. To drop one fact, call
-`replace_fact` with the whole fact line as `old_string` and an empty `new_string`; the write-tool
-section says how to take the line break with it. If that fact line is the file's only fact,
-delete the file instead of leaving it empty. To remove a whole file, call `delete_file`. When it
-is ambiguous whether the user means one fact or the whole file, ask before you remove anything.
+Forgetting has two moves: drop one fact's line, or delete the whole file. Delete the file if the
+fact was the file's only fact or the user means the whole file; if it is ambiguous which they mean,
+ask before removing anything.
 
-Removal is total. Do not rewrite a removed fact as something once believed, and do not leave a
-softened note that it was ever true. Anything derived solely from the removed fact goes too: drop
-each `[inferred]` line that rested only on it, and delete a file whose only content was derived
-from it. Keep anything that has support of its own. If a description or alias of the file that
-held it exists only because of the removed fact, update it too, as the write-tool section
-describes.
+Removal is total: leave no note that the fact was ever true. Also drop each `[inferred]` line that
+rested solely on it, delete any file derived solely from it, and remove description text or aliases
+that exist only because of it. Keep anything with support of its own.
 
-A fact line may state its own end date in prose. Once that date has passed, the fact is a
-candidate for dropping, not automatically removable: when you read the file or during
-maintenance, judge whether the fact still holds, and drop the line only if it no longer does.
+A fact whose stated end date has passed is a candidate for dropping, not automatically removed: when
+you read it or during maintenance, drop it only if it no longer holds.
 
-Never drop or delete anything in the `system/` area. If the user asks you to forget a curated
-fact, tell them you cannot remove it; if they say it is wrong, correct it as the curated-content
-section describes.
+Never drop or delete anything in `system/`. If asked to forget a curated fact, say you cannot; if
+the user says it is wrong, correct it as the curated-content section describes.
 """

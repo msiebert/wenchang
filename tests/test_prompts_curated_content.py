@@ -54,35 +54,37 @@ def test_heading_and_body() -> None:
         "`system/`",
         "curated",
         "read-only",
-        "tools reject",
         "never attempt",
-        # US1.3
-        "`[system]`",
+        "a person maintains and replaces wholesale",
         # US1.4
-        "only when the user explicitly",
-        "explicitly tells you it is wrong",
+        "only when the user explicitly says it is wrong",
         "observed or inferred",
-        "never grounds for a correction",
+        "never because of something you observed or inferred",
         # US1.5
         "new fact line",
-        "its own confidence label rather than the curated fact's",
+        "with its own label",
         "topical file",
         "writable area",
         # US1.6
-        "If that scope is shared",
+        "in a shared scope",
         "Scopes section",
-        "ask first",
+        "asking first",
         # US1.7
-        "Once the correction is saved, tell the user where",
+        "tell the user where you saved it",
         # US1.8
-        "correction wins",
         "answer from the correction",
-        "survives the next refresh",
+        "survives refreshes",
     ],
 )
 def test_body_contains_phrase(phrase: str) -> None:
-    """AIE-1052, US1.2-US1.8: curated_content.BODY contains each required phrase."""
+    """AIE-1052, US1.2-US1.8; AIE-1165: curated_content.BODY contains each required phrase."""
     assert phrase in _normalized(curated_content.BODY)
+
+
+def test_body_leaves_label_set_to_remembering() -> None:
+    """AIE-1052, US1.3; AIE-1165: BODY leaves the `[system]` label to the remembering section."""
+    assert curated_content.BODY.strip() != ""
+    assert "`[system]`" not in curated_content.BODY
 
 
 def test_body_does_not_redefine_labels() -> None:
