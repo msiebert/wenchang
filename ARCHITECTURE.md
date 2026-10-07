@@ -974,8 +974,8 @@ implemented; the remote half of `transport` is the one planned piece.
   `privacy`, `filing`, `write_mechanics`, `curated_content`, and
   `forgetting` each hold `HEADING` and `BODY`, and `systems_of_record`
   holds `HEADING` and `PRINCIPLE` (the generic half of that section).
-  `overview` and the systems-of-record principle carry text; the other
-  seven bodies are empty until their prose is written. The section modules
+  Every section body and the systems-of-record principle hold their prose.
+  The section modules
   are importable but not exported, and their wording is not API. The two
   slot-only sections take their headings from
   `assemble.SCOPE_GUIDANCE_HEADING = "Scopes"` and

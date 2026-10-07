@@ -5,7 +5,7 @@
 The assembled memory prompt and the seven tool descriptions repeat themselves: the slug
 rule, the scope/area/name explanation, and the version-conflict paragraph each appear in up
 to six docstrings, and several sections restate each other or justify their own rules. This
-change trims the nine section texts by 36.2%, the seven docstrings by 40.1%, and
+change trims the nine section texts by 35.5%, the seven docstrings by 40.1%, and
 the reference adopter slots by 28.5%, without dropping a rule, exception, or spec-quoted
 phrase. Every target text is in plan.md verbatim.
 
@@ -30,7 +30,7 @@ phrase. Every target text is in plan.md verbatim.
 | Keep "even if true" (decision 5) | Rely on "only if" | The spec states it; review fidelity |
 | Override stated once, in privacy (decision 6) | Pointer in remembering too | One statement is enough |
 | Overview floor 3 sentences (decision 7) | Keep 4-6 | The 4-6 range was a design-time guess, not a spec rule |
-| Keep every §8.1 phrase earlier tests pinned ("changes the substance", "at the level recorded", "refused outright", "surrounding lines stay intact", "Match the write to the change", "mechanically impossible", "two moves", "happens to be open", "creating a duplicate", "file that is about", "ambiguous", "change one fact", "restructuring many lines", "rather than a note to self", "entire search surface", "next match more likely") | The audit's shorter paraphrases | The Linear issue keeps the exact §8.1 phrases; the generic text still lands at 36.2% |
+| Keep every §8.1 phrase earlier tests pinned ("changes the substance", "at the level recorded", "refused outright", "surrounding lines stay intact", "Match the write to the change", "mechanically impossible", "two moves", "happens to be open", "creating a duplicate", "file that is about", "ambiguous", "change one fact", "restructuring many lines", "rather than a note to self", "entire search surface", "next match more likely") | The audit's shorter paraphrases | The Linear issue keeps the exact §8.1 phrases; the generic text still lands at 35.5% |
 | Amend ADR 0025 (decision 11) and add a dated note to ADR 0022 decision 8 | No ADR | ADR 0022 decision 8 makes docstrings part of the public contract, so moving shared mechanics changes it (the Linear exception applies) |
 | Same-write `aliases`/`description` guidance lives in filing only | Keep the write mechanics paragraph | Removes the cross-section repeat; write mechanics keeps the tool-choice consequence (`write_file` to drop an alias or rewrite the description) |
 | Headings unchanged, no merges | Shorter headings; merge curated into filing | Under 1% saving; cross-section pointers depend on headings |
