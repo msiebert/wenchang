@@ -341,29 +341,39 @@ def test_reference_slots_build_and_appear_under_headings() -> None:
 
 
 def test_reference_scope_guidance_rules() -> None:
-    """AIE-1055, US6.2: the reference scope guidance states the hierarchy, the scope
-    test, ask-before-shared-write, contradiction, and containment rules."""
+    """AIE-1055, US6.2; AIE-1165, US3.4: the reference scope guidance states the
+    hierarchy, which scopes are shared or private and who writes each, the scope
+    test, ask-before-shared-write, contradiction, containment, and examples."""
     text = re.sub(r"\s+", " ", REFERENCE_SCOPE_GUIDANCE)
 
     assert (
         "There are three scopes: user, project, and organization. An organization contains "
         "projects, and a user can belong to several organizations." in text
     )
-    assert "Scope test: scope a fact by who it is true for, not who said it." in text
+    assert "Scope a fact by who it is true for, not who said it" in text
     assert (
-        "Before saving a new fact to a shared scope (project or organization), ask the user "
-        "first and say which scope you intend to use." in text
+        "Before saving a new fact to project or organization, ask the user and name the scope."
+        in text
     )
     assert (
-        "If a new fact contradicts one already stored in a shared scope, do not overwrite it "
-        "silently" in text
+        "If a new fact contradicts one stored in a shared scope, show the stored fact, say "
+        "what conflicts, and ask which to keep." in text
     )
     assert "Never write a fact about one project there." in text
+    assert "user is a private scope" in text
+    assert "project is a shared scope" in text
+    assert "organization is a shared scope" in text
+    assert "When in doubt, write narrow." in text
+    assert "any member may write to it" in text
+    assert "only admins and owners may write to it" in text
+    assert '"I prefer charts with a dark background" goes in user' in text
+    assert '"This project\'s weekly report goes out on Mondays" in project' in text
+    assert '"Our fiscal year starts in February" in organization' in text
 
 
 def test_reference_seed_areas_content() -> None:
-    """AIE-1055, US6.2: the reference seed areas list each scope's areas, mark the
-    system area read-only, and present the list as extensible."""
+    """AIE-1055, US6.2; AIE-1165, US3.1: the reference seed areas list each scope's areas
+    and say every scope has a `system/` area."""
     lines = REFERENCE_SEED_AREAS.split("\n")
     text = re.sub(r"\s+", " ", REFERENCE_SEED_AREAS)
 
@@ -371,8 +381,21 @@ def test_reference_seed_areas_content() -> None:
     assert "- project: taxonomy, metrics, entities, conventions, glossary" in lines
     assert "- organization: business-context, vocabulary" in lines
     assert "Every scope also has a `system/` area." in text
-    assert "is read-only." in text
-    assert "not a fixed list" in text
+
+
+def test_reference_slots_state_only_deployment_facts() -> None:
+    """AIE-1055, US6.2; AIE-1165, US3.2-US3.3: the reference slots do not restate
+    rules the generic sections own (extensible areas, `system/` read-only, slugs,
+    never copying systems of record)."""
+    seed = re.sub(r"\s+", " ", REFERENCE_SEED_AREAS)
+    sor = re.sub(r"\s+", " ", REFERENCE_SYSTEMS_OF_RECORD)
+    scope = re.sub(r"\s+", " ", REFERENCE_SCOPE_GUIDANCE)
+
+    for phrase in ("read-only", "slug", "not a fixed list", "agent-writable"):
+        assert phrase not in seed, phrase
+    for phrase in ("copy", "mirror"):
+        assert phrase not in sor, phrase
+    assert "slug" not in scope
 
 
 def test_reference_systems_of_record_content() -> None:

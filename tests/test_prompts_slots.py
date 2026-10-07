@@ -249,3 +249,11 @@ def test_docstring_states_vocabulary_contract(term: str) -> None:
     """The class docstring names the generic scope vocabulary (AIE-1055, US1.13)."""
     assert PromptSlots.__doc__ is not None
     assert term in PromptSlots.__doc__
+
+
+def test_docstring_says_slots_state_only_deployment_facts() -> None:
+    """The class docstring says slots carry only deployment facts (AIE-1055, US1.13;
+    AIE-1165, US3.5).
+    """
+    assert PromptSlots.__doc__ is not None
+    assert "Slots state only deployment facts" in re.sub(r"\s+", " ", PromptSlots.__doc__)
