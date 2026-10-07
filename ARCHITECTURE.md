@@ -819,7 +819,14 @@ implemented; the remote half of `transport` is the one planned piece.
   [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
 - **tools** — the agent-facing tool layer: thin verbs over a
   `TransportClient`, carrying no judgment, each described by its
-  docstring. `MemoryTools(client, identity, policy, *, source)` is one
+  docstring. The mechanics every tool shares (what `scope`, `area`, and
+  `name` mean, the `.md` exclusion, the slug rule, `system/` being
+  read-only, capped paging) are stated once, in the `get_memory_index`
+  docstring; each mutating tool's docstring keeps its own one-sentence
+  version-conflict rule, since a host that loads tool schemas on demand
+  may show it alone (see
+  [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) decision
+  11). `MemoryTools(client, identity, policy, *, source)` is one
   session: a resolved `Identity`, the adopter's `ScopePolicy`, the client,
   and the calling surface's name, stamped as `source` on every write and
   not settable by the agent. Constructor arguments are adopter-side: a
@@ -1005,8 +1012,11 @@ implemented; the remote half of `transport` is the one planned piece.
   adopter's `scope_guidance` must say which of its scopes are shared and
   which are private; the library cannot check this. Division of labor with
   `tools`: tool docstrings own per-call mechanics (argument meaning, error
-  repair, the slug rule, the byte ceiling), and the prompt owns judgment
-  (what to write, where, with which tool, and when to ask). The prompt
+  repair, the slug rule, the byte ceiling), the prompt owns judgment
+  (what to write, where, with which tool, and when to ask), and the slots
+  state only deployment facts (which scopes exist and their rules, seed
+  area names, which systems hold canonical information), leaving generic
+  rules to the generic sections. The prompt
   names tools and their parameters in tool terms (`scope`, `area`, `name`)
   and never shows a memory path or entity ID; unit tests check every tool
   and parameter name it mentions against `tools` at test time. Scope
