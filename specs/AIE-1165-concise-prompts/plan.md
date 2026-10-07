@@ -548,7 +548,7 @@ and "`delete_file`" are absent (write mechanics owns them). Other tests unchange
   negative test below).
 - Add `test_reference_slots_state_only_deployment_facts`: seed areas contain none of
   "read-only", "slug", "not a fixed list", "agent-writable"; systems of record contain none of
-  "copy", "mirror"; scope guidance contains no "slug".
+  "copy", "mirror" (F14 removed a scope-guidance "slug" assert that could never fail).
 - Other tests unchanged.
 
 **F13. `tests/test_prompts_slots.py`**: add

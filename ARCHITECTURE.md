@@ -975,9 +975,8 @@ implemented; the remote half of `transport` is the one planned piece.
   `forgetting` each hold `HEADING` and `BODY`, and `systems_of_record`
   holds `HEADING` and `PRINCIPLE` (the generic half of that section).
   Every section body and the systems-of-record principle hold their prose.
-  The section modules
-  are importable but not exported, and their wording is not API. The two
-  slot-only sections take their headings from
+  The section modules are importable but not exported, and their wording
+  is not API. The two slot-only sections take their headings from
   `assemble.SCOPE_GUIDANCE_HEADING = "Scopes"` and
   `assemble.SEED_AREAS_HEADING = "Seed areas"`. `SECTION_ORDER` is the
   fixed tuple `("overview", "scope_guidance", "seed_areas",

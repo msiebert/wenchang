@@ -157,8 +157,9 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
    `system/` being read-only, capped paging) are stated once, in the
    `get_memory_index` docstring; each mutating tool's docstring states its
    own conflict rule and `expected_version`, and, where it applies, the
-   byte ceiling and metadata behavior (decision 11). The prompt covers what to write, where, with which
-   tool, and when to ask. It refers to tools by name in tool terms
+   byte ceiling and metadata behavior (decision 11). The prompt covers
+   what to write, where, with which tool, and when to ask. It refers to
+   tools by name in tool terms
    (`scope`, `area`, `name`) and does not restate argument contracts,
    except where judgment depends on one. Known contradiction risks between
    the two, and how each is handled:
