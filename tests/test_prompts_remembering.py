@@ -113,6 +113,7 @@ def test_body_calibrates_phrasing(phrase: str) -> None:
         "transient",
         "one-off number",
         "definition or pattern",
+        "behind it, if you know it",
     ],
 )
 def test_body_states_save_criterion(phrase: str) -> None:
@@ -127,11 +128,12 @@ def test_body_states_save_criterion(phrase: str) -> None:
         "into the fact line",
         "as prose",
         "prefers JSON output, but only until the v3 migration completes on October 30.",
-        "Never put an end date in metadata",
-        "add a per-fact timestamp",
+        (
+            "Never put an end date in metadata, add a per-fact timestamp, or guess an end"
+            " date the user did not state."
+        ),
         "user's own framing",
         "end date explicit",
-        "guess an end date the user did not state",
     ],
 )
 def test_body_describes_in_line_expiry(phrase: str) -> None:

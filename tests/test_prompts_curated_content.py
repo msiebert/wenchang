@@ -73,6 +73,7 @@ def test_heading_and_body() -> None:
         "tell the user where you saved it",
         # US1.8
         "answer from the correction",
+        "When a correction and a curated fact conflict, answer from the correction",
         "survives refreshes",
     ],
 )

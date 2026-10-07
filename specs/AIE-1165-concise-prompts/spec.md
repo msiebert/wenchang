@@ -108,8 +108,8 @@ text, a justification sentence, or a mechanic owned by a docstring. Per section:
 - **curated_content**: "facts a person deliberately maintains for you, not facts you learned"
   (wording); "Fact lines labeled `[system]` are curated" (remembering owns labels); "the
   tools reject any change to it" (docstring; "never attempt" is the judgment); "When the
-  correction and the curated fact conflict, the correction wins" ("answer from the correction
-  from then on"); "in the appropriate scope" (Scopes section).
+  correction and the curated fact conflict, the correction wins" (kept as "When a correction
+  and a curated fact conflict, answer from the correction"); "in the appropriate scope" (Scopes section).
 - **forgetting**: the `replace_fact`/`delete_file` call mechanics and the line-break pointer
   (write mechanics owns them; "drop" and "delete" are its verbs); "Do not rewrite a removed fact as something once
   believed, and do not leave a softened note" ("leave no note that the fact was ever true").

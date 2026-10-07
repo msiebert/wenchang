@@ -10,8 +10,8 @@ areas are a starting shape; create files and areas as subjects need them.
 Before creating a file, check the index's descriptions and aliases for one on the subject. If none
 matches and the target area is listed under `capped`, call `list_prefix(scope, area)` for that area
 only and check it the same way. If a match is ambiguous, read the top one or two candidates with
-`read_file`, never the whole store. If one exists, append to it or edit it instead of creating a
-duplicate.
+`read_file`, never the whole store. If a file on the subject exists, append to it or edit it instead
+of creating a duplicate.
 
 Descriptions and aliases are the entire search surface; there is no content search. On the same
 write that records a fact, pass in `aliases` any new names the subject will be looked up by

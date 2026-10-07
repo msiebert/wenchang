@@ -85,23 +85,22 @@ Give every fact line a confidence label for how you know it:
 - `[observed]`: you saw it in a tool result, session data, or behavior.
 - `[inferred]`: you concluded it from a pattern across several observations.
 
-`[system]` marks curated content; never write a new `[system]` line. When you merge into or
-rewrite a file, unchanged lines keep their labels; only new or changed lines get a fresh one.
-Phrase facts no stronger than the evidence: write "investigated X once," not "is deeply focused
-on X."
+`[system]` marks curated content; never write a new `[system]` line. When you merge into or rewrite
+a file, unchanged lines keep their labels; only new or changed lines get a fresh one. Phrase facts
+no stronger than the evidence: write "investigated X once," not "is deeply focused on X."
 
-Save a fact only if it would let a future session answer better, differently, or faster;
-otherwise leave it out, even if true. This includes what you observe, reusable workflows, and
-findings, not only what the user tells you. Skip transient content: instead of a one-off number,
-save the definition or pattern behind it.
+Save a fact only if it would let a future session answer better, differently, or faster; otherwise
+leave it out, even if true. This includes what you observe, reusable workflows, and findings, not
+only what the user tells you. Skip transient content: instead of a one-off number, save the
+definition or pattern behind it, if you know it.
 
-When the user's own framing makes a fact's end date explicit, write the date into the fact line
-as prose:
+When the user's own framing makes a fact's end date explicit, write the date into the fact line as
+prose:
 
 `- [stated] prefers JSON output, but only until the v3 migration completes on October 30.`
 
-Never put an end date in metadata, add a per-fact timestamp, or guess an end date the user did
-not state.
+Never put an end date in metadata, add a per-fact timestamp, or guess an end date the user did not
+state.
 
 Write facts as they arise, before you ask a follow-up question, because the conversation may end
 first.
@@ -132,8 +131,8 @@ areas are a starting shape; create files and areas as subjects need them.
 Before creating a file, check the index's descriptions and aliases for one on the subject. If none
 matches and the target area is listed under `capped`, call `list_prefix(scope, area)` for that area
 only and check it the same way. If a match is ambiguous, read the top one or two candidates with
-`read_file`, never the whole store. If one exists, append to it or edit it instead of creating a
-duplicate.
+`read_file`, never the whole store. If a file on the subject exists, append to it or edit it instead
+of creating a duplicate.
 
 Descriptions and aliases are the entire search surface; there is no content search. On the same
 write that records a fact, pass in `aliases` any new names the subject will be looked up by
@@ -162,9 +161,9 @@ refresh. It is read-only; never attempt to change it.
 
 Correct a curated fact only when the user explicitly says it is wrong, never because of something
 you observed or inferred. Record the correction as a new fact line, with its own label, in the
-topical file of a writable area; in a shared scope, follow the Scopes section on asking first.
-Then tell the user where you saved it, and answer from the correction from then on. Because it
-lives outside `system/`, it survives refreshes.
+topical file of a writable area; in a shared scope, follow the Scopes section on asking first. Then
+tell the user where you saved it. When a correction and a curated fact conflict, answer from the
+correction. Because it lives outside `system/`, it survives refreshes.
 ```
 
 #### A9. `wenchang.prompts.forgetting.BODY` (heading "Forgetting")
@@ -178,8 +177,8 @@ Removal is total: leave no note that the fact was ever true. Also drop each `[in
 rested solely on it, delete any file derived solely from it, and remove description text or aliases
 that exist only because of it. Keep anything with support of its own.
 
-A fact whose stated end date has passed is a candidate for dropping, not automatically removed: when
-you read it or during maintenance, drop it only if it no longer holds.
+A fact whose stated end date has passed is a candidate for dropping, not to be removed
+automatically: when you read it or during maintenance, drop it only if it no longer holds.
 
 Never drop or delete anything in `system/`. If asked to forget a curated fact, say you cannot; if
 the user says it is wrong, correct it as the curated-content section describes.
@@ -493,7 +492,7 @@ one fact's line, or delete the whole file" (US2.1-US2.3), "whole file" (US2.3), 
 file if the fact was the file's only fact" (US2.6),
 "Removal is total", "leave no note that the fact was ever true" (US3.1, US3.2), "solely"
 (US3.3), "`[inferred]`" (US3.4), "description text or aliases", "exist only because of it"
-(US3.5), "ambiguous which they mean" (US4.1), "end date", "candidate", "not automatically",
+(US3.5), "ambiguous which they mean" (US4.1), "end date", "candidate", "not to be removed automatically",
 "maintenance" (US5), "`system/`", "curated-content section", "Never drop or delete" (US6).
 Add `test_forgetting_body_leaves_mechanics_to_write_section`: "line break", "`replace_fact`",
 and "`delete_file`" are absent (write mechanics owns them). Other tests unchanged.
@@ -556,32 +555,55 @@ and "`delete_file`" are absent (write mechanics owns them). Other tests unchange
 `test_docstring_says_slots_state_only_deployment_facts`: the whitespace-collapsed
 `PromptSlots.__doc__` contains "Slots state only deployment facts".
 
-### G. Measurements (planned; review-pr.md recomputes from the final source)
+**F14. Code-review round 1 additions (AIE-1165).**
+- remembering `test_body_describes_in_line_expiry`: replace the pins "Never put an end date in
+  metadata", "add a per-fact timestamp", "guess an end date the user did not state" with the
+  whole sentence "Never put an end date in metadata, add a per-fact timestamp, or guess an end
+  date the user did not state." `test_body_states_save_criterion`: add "behind it, if you know
+  it".
+- privacy: replace the pin "asks you to remember it" with "even if the user states it directly
+  or asks you to remember it".
+- filing US3.3: the pin becomes "If a file on the subject exists, append to it or edit it
+  instead of creating a duplicate".
+- curated US1.8: add "When a correction and a curated fact conflict, answer from the
+  correction".
+- forgetting US5.2: the pin "not automatically" becomes "not to be removed automatically".
+- tools descriptions: add "Pass the version you read as `expected_version`." to `PHRASES`
+  for `delete_file`, `append_line`, and `replace_fact` only where it sits on one source line
+  (it does for `delete_file`; check the others against B5/B6 and use the collapsed form in a
+  separate assert if not).
+- assembly `test_reference_slots_state_only_deployment_facts`: drop the scope-guidance "slug"
+  assert (it could never fail).
+- write mechanics `test_us3_4_*` docstring: describe the present state ("The filing section and
+  the tool docstrings own this rule; this pins the docstring half.").
+
+### G. Measurements (main vs this branch's source)
 
 Chars of the stripped BODY/PRINCIPLE, the stripped reference blob, or
 `inspect.cleandoc(__doc__)`; tokens are chars/4.
 
-| Kind | Piece | Current chars | ~tok | New chars | ~tok | Cut |
+| Kind | Piece | Before chars | ~tok | After chars | ~tok | Cut |
 |---|---|---:|---:|---:|---:|---:|
-| section | overview | 688 | 172 | 322 | 80 | 53.2% |
-| section | systems_of_record | 522 | 130 | 400 | 100 | 23.4% |
-| section | applying_memory | 627 | 157 | 423 | 106 | 32.5% |
-| section | remembering | 1901 | 475 | 1276 | 319 | 32.9% |
-| section | privacy | 1120 | 280 | 792 | 198 | 29.3% |
-| section | filing | 1261 | 315 | 927 | 232 | 26.5% |
-| section | write_mechanics | 1197 | 299 | 679 | 170 | 43.3% |
-| section | curated_content | 1042 | 260 | 581 | 145 | 44.2% |
-| section | forgetting | 1440 | 360 | 848 | 212 | 41.1% |
-| slot | scope_guidance | 1458 | 364 | 1248 | 312 | 14.4% |
-| slot | seed_areas | 504 | 126 | 195 | 49 | 61.3% |
-| slot | systems_of_record | 391 | 98 | 239 | 60 | 38.9% |
-| doc | get_memory_index | 599 | 150 | 553 | 138 | 7.7% |
-| doc | read_file | 348 | 87 | 101 | 25 | 71.0% |
-| doc | list_prefix | 400 | 100 | 241 | 60 | 39.8% |
-| doc | write_file | 781 | 195 | 432 | 108 | 44.7% |
-| doc | append_line | 911 | 228 | 586 | 146 | 35.7% |
-| doc | replace_fact | 963 | 241 | 606 | 152 | 37.1% |
-| doc | delete_file | 487 | 122 | 170 | 42 | 65.1% |
-| total | generic prompt text (9) | 9798 | 2450 | 6248 | 1562 | 36.2% |
-| total | reference slots (3) | 2353 | 588 | 1682 | 420 | 28.5% |
-| total | docstrings (7) | 4489 | 1122 | 2689 | 672 | 40.1% |
+| section | `overview.BODY` | 688 | 172 | 322 | 80 | 53.2% |
+| section | `systems_of_record.PRINCIPLE` | 522 | 130 | 400 | 100 | 23.4% |
+| section | `applying_memory.BODY` | 627 | 157 | 423 | 106 | 32.5% |
+| section | `remembering.BODY` | 1901 | 475 | 1292 | 323 | 32.0% |
+| section | `privacy.BODY` | 1120 | 280 | 792 | 198 | 29.3% |
+| section | `filing.BODY` | 1261 | 315 | 945 | 236 | 25.1% |
+| section | `write_mechanics.BODY` | 1197 | 299 | 679 | 170 | 43.3% |
+| section | `curated_content.BODY` | 1042 | 260 | 611 | 153 | 41.4% |
+| section | `forgetting.BODY` | 1440 | 360 | 854 | 214 | 40.7% |
+| slot | `REFERENCE_SCOPE_GUIDANCE` | 1458 | 364 | 1248 | 312 | 14.4% |
+| slot | `REFERENCE_SEED_AREAS` | 504 | 126 | 195 | 49 | 61.3% |
+| slot | `REFERENCE_SYSTEMS_OF_RECORD` | 391 | 98 | 239 | 60 | 38.9% |
+| doc | `get_memory_index` | 599 | 150 | 553 | 138 | 7.7% |
+| doc | `read_file` | 348 | 87 | 101 | 25 | 71.0% |
+| doc | `list_prefix` | 400 | 100 | 241 | 60 | 39.8% |
+| doc | `write_file` | 781 | 195 | 432 | 108 | 44.7% |
+| doc | `append_line` | 911 | 228 | 586 | 146 | 35.7% |
+| doc | `replace_fact` | 963 | 241 | 606 | 152 | 37.1% |
+| doc | `delete_file` | 487 | 122 | 170 | 42 | 65.1% |
+| **total** | Generic prompt text (9 bodies) | 9798 | 2450 | 6318 | 1580 | **35.5%** |
+| **total** | Reference slots (3 blobs) | 2353 | 588 | 1682 | 420 | **28.5%** |
+| **total** | Tool docstrings (7) | 4489 | 1122 | 2689 | 672 | **40.1%** |
+assembled reference prompt after: 8228 2057

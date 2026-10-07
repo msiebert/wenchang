@@ -142,8 +142,8 @@ def test_us3_4_every_write_tool_docstring_carries_aliases_and_description(tool: 
     """AIE-1051, US3.4; AIE-1165: each write tool's docstring covers aliases and description.
 
     Adding a name never forces a full rewrite because every write tool takes the
-    metadata parameters. This replaces a sentence pin on the write mechanics body,
-    whose subject now lives in the filing section and the tool docstrings.
+    metadata parameters. The filing section and the tool docstrings own this rule;
+    this pins the docstring half.
     """
     doc = getattr(MemoryTools, tool).__doc__
     assert doc is not None

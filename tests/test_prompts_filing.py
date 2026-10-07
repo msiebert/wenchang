@@ -53,7 +53,10 @@ def test_filing_section_in_assembled_prompt() -> None:
         pytest.param("descriptions and aliases", id="US3.2-descriptions-and-aliases"),
         pytest.param("the index's descriptions and aliases", id="US3.2-index-descriptions"),
         pytest.param(
-            "If one exists, append to it or edit it instead of creating a duplicate",
+            (
+                "If a file on the subject exists, append to it or edit it"
+                " instead of creating a duplicate"
+            ),
             id="US3.3-append-or-edit-not-duplicate",
         ),
         pytest.param("ambiguous", id="US3.4-ambiguous"),

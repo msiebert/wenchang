@@ -54,7 +54,7 @@ def test_build_memory_prompt_ends_with_forgetting_section() -> None:
         pytest.param("ambiguous which they mean", id="US4.1-ambiguous"),
         pytest.param("end date", id="US5.1-end-date"),
         pytest.param("candidate", id="US5.1-candidate"),
-        pytest.param("not automatically", id="US5.2-not-automatically"),
+        pytest.param("not to be removed automatically", id="US5.2-not-automatically"),
         pytest.param("maintenance", id="US5.3-maintenance"),
         pytest.param("`system/`", id="US6.1-system"),
         pytest.param("curated-content section", id="US6.1-curated-content-section"),

@@ -48,7 +48,10 @@ def test_privacy_body_format() -> None:
         pytest.param("indicating the user is a minor", id="US3.1-minor"),
         pytest.param("even if the user states it directly", id="US3.2-even-if-stated-directly"),
         pytest.param("not in any file or scope, private included", id="US3.3-no-file-or-scope"),
-        pytest.param("asks you to remember it", id="US3.3-even-when-asked"),
+        pytest.param(
+            "even if the user states it directly or asks you to remember it",
+            id="US3.3-even-when-asked",
+        ),
         pytest.param("Continue the task", id="US3.4-continue-task"),
         pytest.param("will not be kept", id="US3.4-will-not-be-kept"),
         pytest.param("shared scope", id="US4.1-shared-scope"),

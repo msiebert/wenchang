@@ -89,6 +89,7 @@ PHRASES: dict[str, tuple[str, ...]] = {
     "delete_file": (
         "routine",
         "expected_version",
+        "Pass the version you read as `expected_version`.",
         "only if the file should still go",
     ),
 }
@@ -251,6 +252,15 @@ def test_merging_docstring_says_merge_and_retry(tool: str) -> None:
     doc = " ".join(_doc(tool).split())
 
     assert "merge your change into the content it returns and retry with its version" in doc
+
+
+@pytest.mark.parametrize("tool", ["append_line", "replace_fact"])
+def test_fact_docstring_says_pass_version_you_read(tool: str) -> None:
+    """The append_line and replace_fact docstrings say to pass the version you
+    read as expected_version; the sentence spans a line break, so it is matched
+    whitespace-collapsed (AIE-1044, US5.4; AIE-1165, US4).
+    """
+    assert "Pass the version you read as `expected_version`." in " ".join(_doc(tool).split())
 
 
 def test_name_docstring_says_name_excludes_md() -> None:

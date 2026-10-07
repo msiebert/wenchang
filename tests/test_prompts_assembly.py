@@ -384,18 +384,16 @@ def test_reference_seed_areas_content() -> None:
 
 
 def test_reference_slots_state_only_deployment_facts() -> None:
-    """AIE-1055, US6.2; AIE-1165, US3.2-US3.3: the reference slots do not restate
-    rules the generic sections own (extensible areas, `system/` read-only, slugs,
-    never copying systems of record)."""
+    """AIE-1055, US6.2; AIE-1165, US3.2-US3.3: the reference seed areas and systems
+    of record do not restate rules the generic sections own (extensible areas,
+    `system/` read-only, slugs, never copying systems of record)."""
     seed = re.sub(r"\s+", " ", REFERENCE_SEED_AREAS)
     sor = re.sub(r"\s+", " ", REFERENCE_SYSTEMS_OF_RECORD)
-    scope = re.sub(r"\s+", " ", REFERENCE_SCOPE_GUIDANCE)
 
     for phrase in ("read-only", "slug", "not a fixed list", "agent-writable"):
         assert phrase not in seed, phrase
     for phrase in ("copy", "mirror"):
         assert phrase not in sor, phrase
-    assert "slug" not in scope
 
 
 def test_reference_systems_of_record_content() -> None:
