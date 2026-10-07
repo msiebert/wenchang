@@ -64,6 +64,11 @@ def test_privacy_body_format() -> None:
         pytest.param("non-sensitive part", id="US4.3-non-sensitive-part"),
         pytest.param("No tool filter", id="US5.1-no-tool-filter"),
         pytest.param("successful write does not mean it was safe", id="US5.1-success-not-safe"),
+        pytest.param(
+            "Be stricter with other sensitive personal detail in a shared scope than in a "
+            "private scope",
+            id="AIE-1165-stricter-in-shared",
+        ),
     ],
 )
 def test_privacy_body_contains_phrase(phrase: str) -> None:

@@ -208,7 +208,7 @@ def test_docstring_first_line_is_one_sentence(tool: str) -> None:
 @pytest.mark.parametrize(("tool", "phrase"), PHRASE_CASES)
 def test_docstring_contains_pinned_phrase(tool: str, phrase: str) -> None:
     """Each tool docstring contains the phrases a host must not lose
-    (AIE-1044, US5.4, US5.5, US5.6, US5.8; AIE-1165, US2, US4).
+    (AIE-1044, US5.4, US5.5, US5.6, US5.8; AIE-1165, US2.3, US2.4, US2.6).
     """
     assert phrase in _doc(tool)
 
@@ -236,7 +236,7 @@ def test_fact_docstring_explains_aliases_and_description(tool: str, phrase: str)
 def test_mutating_docstring_presents_conflict_as_merge_and_retry(tool: str) -> None:
     """Each mutating docstring presents a version conflict as routine and says
     to retry; delete_file has no merge step, it retries only if the file should
-    still go (AIE-1044, US5.4; AIE-1165, US4).
+    still go (AIE-1044, US5.4; AIE-1165, US2.4, US2.6).
     """
     doc = " ".join(_doc(tool).split())
 
@@ -247,7 +247,7 @@ def test_mutating_docstring_presents_conflict_as_merge_and_retry(tool: str) -> N
 @pytest.mark.parametrize("tool", ["write_file", "append_line", "replace_fact"])
 def test_merging_docstring_says_merge_and_retry(tool: str) -> None:
     """Each write tool that changes content says to merge into the returned
-    content and retry with its version (AIE-1044, US5.4; AIE-1165, US4).
+    content and retry with its version (AIE-1044, US5.4; AIE-1165, US2.5).
     """
     doc = " ".join(_doc(tool).split())
 
@@ -258,14 +258,14 @@ def test_merging_docstring_says_merge_and_retry(tool: str) -> None:
 def test_fact_docstring_says_pass_version_you_read(tool: str) -> None:
     """The append_line and replace_fact docstrings say to pass the version you
     read as expected_version; the sentence spans a line break, so it is matched
-    whitespace-collapsed (AIE-1044, US5.4; AIE-1165, US4).
+    whitespace-collapsed (AIE-1044, US5.4; AIE-1165, US2.4).
     """
     assert "Pass the version you read as `expected_version`." in " ".join(_doc(tool).split())
 
 
 def test_name_docstring_says_name_excludes_md() -> None:
     """The name rule (name excludes the .md extension) is stated once, in
-    get_memory_index (AIE-1044, US5.8; AIE-1165, US4).
+    get_memory_index (AIE-1044, US5.8; AIE-1165, US2.3).
     """
     doc = _doc("get_memory_index")
 
@@ -276,7 +276,7 @@ def test_name_docstring_says_name_excludes_md() -> None:
 
 def test_area_docstring_states_slug_rule() -> None:
     """The area slug rule is stated once, in get_memory_index
-    (AIE-1136, US4.4; AIE-1165, US4).
+    (AIE-1136, US4.4; AIE-1165, US2.3).
     """
     assert "Areas are lowercase ASCII slugs." in _doc("get_memory_index")
 
@@ -284,7 +284,7 @@ def test_area_docstring_states_slug_rule() -> None:
 def test_shared_mechanics_stated_once() -> None:
     """The slug rule, the .md rule, and the read-only rule appear in
     get_memory_index and no other tool docstring, and no docstring repeats the
-    per-tool scope/area glossary (AIE-1165, US4).
+    per-tool scope/area glossary (AIE-1165, US2.2).
     """
     holders = {
         phrase: [tool for tool in EXPECTED_TOOL_NAMES if phrase in _doc(tool)]

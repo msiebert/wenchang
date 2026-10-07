@@ -59,6 +59,11 @@ def test_build_memory_prompt_ends_with_forgetting_section() -> None:
         pytest.param("`system/`", id="US6.1-system"),
         pytest.param("curated-content section", id="US6.1-curated-content-section"),
         pytest.param("Never drop or delete", id="US6.2-never-drop-or-delete"),
+        pytest.param(
+            "Keep anything with support of its own", id="AIE-1165-keep-independent-support"
+        ),
+        pytest.param("drop it only if it no longer holds", id="AIE-1165-drop-only-if-stale"),
+        pytest.param("say you cannot", id="AIE-1165-say-you-cannot"),
     ],
 )
 def test_forgetting_body_contains_phrase(phrase: str) -> None:

@@ -94,7 +94,7 @@ Paths are under `tests/`; line numbers are the `def` line.
 | `test_prompts_slots.py` | 15 | 16 |
 | `test_prompts_invariants.py` | 14 | 14 |
 
-No file lost a test function. Collected pytest cases went from 3553 to 3529 passed, because the parametrized phrase cases removed (for example the `name` and `area` checks, formerly parametrized over five and six tools and now run once on `get_memory_index`, and the shorter phrase lists) outnumber the cases added.
+No file lost a test function. Collected pytest cases went from 3553 to 3533 passed, because the parametrized phrase cases removed (for example the `name` and `area` checks, formerly parametrized over five and six tools and now run once on `get_memory_index`, and the shorter phrase lists) outnumber the cases added.
 
 ## Architecture / ADR changes
 
@@ -128,4 +128,4 @@ Code review round 1:
 - Reviewer A (fidelity) FAIL, 2 SHOULD-FIX: the curated precedence rule had become only a step in the correction procedure (restored as "When a correction and a curated fact conflict, answer from the correction."); remembering dropped "when you know it" on saving a pattern (restored as "if you know it"). NITs applied: forgetting "not to be removed automatically", filing "If a file on the subject exists". NITs not applied: a `delete_file` docstring mention of content (no room in the 40% budget; the conflict sentence still says to retry only if the file should still go); the pre-existing `append_line` `[system]` label and `write_file` "current size" wording (out of scope, listed as follow-ups).
 - Reviewer B (tests/docs) FAIL, 1 SHOULD-FIX: the remembering and privacy negation pins lost "never"/"even" (they now pin the whole rule sentence). NITs applied: vacuous slug assert removed, `delete_file` and fact-tool `expected_version` guidance pinned, ADR 0025 decision 6 and ADR 0022 note wording, this file's US1.4 row, a test docstring's history wording, a stale ARCHITECTURE.md line.
 
-Code review round 2: reviewer A PASS (one NIT: plan F12 still described a removed assert; plan updated). Reviewer B PASS (re-ran HEAD tests against the round-1 source: exactly the four new wording pins fail there; one NIT: two doc paragraphs needed re-wrapping, done). Spec-reviewer gate: (pending)
+Code review round 2: reviewer A PASS (one NIT: plan F12 still described a removed assert; plan updated). Reviewer B PASS (re-ran HEAD tests against the round-1 source: exactly the four new wording pins fail there; one NIT: two doc paragraphs needed re-wrapping, done). Spec-reviewer gate: PASS, 34 of 34 criteria, no BLOCKING or SHOULD-FIX. NITs applied: pins added for three short forgetting rules and the privacy strictness rule (unpinned on main too); story IDs in the new tool-description test docstrings; this line; spec status.

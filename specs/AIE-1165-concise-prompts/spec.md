@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-07
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Linear AIE-1165; the conciseness audit (measurements, proposed text, test changes,
 structural options); orchestrator decisions on the audit's seven questions (below); ADR 0025;
