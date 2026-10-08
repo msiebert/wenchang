@@ -13,7 +13,7 @@ silently here.
 
 | File | Change |
 | ---- | ------ |
-| `tests/reference_adopter.py` | New. The single reference adopter fixture: everything in `tests/prompts_reference_adopter.py` (moved verbatim) plus the interface below. `git mv` from the old module so history follows. |
+| `tests/reference_adopter.py` | New. The single reference adopter fixture: everything in `tests/prompts_reference_adopter.py` (slot constants moved verbatim; docstring and imports rewritten) plus the interface below. Git does not record a rename because the file grew. |
 | `tests/prompts_reference_adopter.py` | Removed (moved). |
 | `tests/test_prompts_assembly.py`, `tests/test_prompts_write_mechanics.py` | Import from `reference_adopter` instead. No other change. |
 | `tests/test_reference_adopter_config.py` | New. US1 (config shape, slot consistency, resolver conformance for all four identities). |
@@ -155,13 +155,21 @@ other entities (2.3, 4.3, 4.4) are written by the tests with
 builds two stores and replays one step function on each:
 
 1. `uncapped = InProcessClient(reference_store())`; run the steps (seed,
-   then `M` writes `project/metrics/budget-a`, then `budget-b`, both content
-   ending in `"\n"`).
+   then `M` writes `project/metrics/budget-a` with a long description, then
+   `budget-b` with a short one, both content ending in `"\n"`).
 2. From `uncapped`'s `MemoryIndex`, sum `index_entry_bytes` over every
    `system` entry, every `user` entry, and the `budget-b` entry. Assert
-   `budget-b` is the first `project` entry, so the cap admits exactly one.
-3. `capped = InProcessClient(reference_store(index_max_bytes=cap))`; run the
-   same steps.
+   `budget-b` is the first `project` entry. Let `slack` be the smallest
+   `index_entry_bytes` among the entries after `budget-b`; assert the first
+   of those is `budget-a` and is larger than `slack`. The cap is the sum plus
+   `slack`. With the include loop stopping at the first entry that does not
+   fit, the cap admits exactly one project entry; a loop that skipped and
+   kept filling would admit the smallest later entry and fail the prefix
+   assertion.
+3. `capped = InProcessClient(reference_store(index_max_bytes=cap,
+   list_page_size=1))`; run the same steps. The small page size makes 8.3's
+   `next_cursor` loop take more than one page. `reference_store` gains a
+   `list_page_size` keyword passed through to `MemoryStore`.
 4. Assert the capped rendered entries are a prefix of the uncapped rendered
    entries, then the 8.1 and 8.2 expectations.
 

@@ -11,14 +11,18 @@ import pytest
 
 from reference_adopter import (
     ADMIN_IDENTITY,
+    ADMIN_USER_ID,
     AGENT_SOURCE,
     MEMBER_IDENTITY,
+    MEMBER_USER_ID,
     ORGANIZATION,
+    ORGANIZATION_ID,
     OTHER_ORGANIZATION_ID,
     OTHER_PROJECT_ID,
     PARTIAL_IDENTITY,
     PARTIAL_PROJECT_ID,
     PROJECT,
+    PROJECT_ID,
     REFERENCE_CLOCK_START,
     REFERENCE_SEED_FILES,
     SEED_SOURCE,
@@ -85,6 +89,7 @@ def _version(rendered: dict[str, object]) -> VersionToken:
 def _seeded(
     identity: Identity = MEMBER_IDENTITY,
 ) -> tuple[InProcessClient, MemoryTools]:
+    """Seed the member's entities and bind tools for the given identity."""
     client = InProcessClient(reference_store())
     seed_reference_memory(client)
     return client, bind_reference_tools(client, identity)
@@ -135,7 +140,7 @@ def test_us2_2_index_orders_system_then_user_project_organization() -> None:
 def test_us2_3_index_omits_another_users_file() -> None:
     """AIE-1059, US2.3: the scope map comes from the bound identity."""
     client, tools = _seeded()
-    other = build_path(USER, "u-grace", "preferences", "grace-note")
+    other = build_path(USER, ADMIN_USER_ID, "preferences", "grace-note")
     _put(client, other)
 
     rendered = _rendered(tools.get_memory_index())
@@ -160,7 +165,11 @@ _LIFECYCLE_ROWS = [
 ]
 
 
-@pytest.mark.parametrize(("scope", "identity", "area"), _LIFECYCLE_ROWS)
+@pytest.mark.parametrize(
+    ("scope", "identity", "area"),
+    _LIFECYCLE_ROWS,
+    ids=["user-member", "project-member", "organization-admin"],
+)
 def test_us3_scope_lifecycle(scope: str, identity: Identity, area: str) -> None:
     """AIE-1059, US3.1-3.7: read, write, append, replace, delete, and read-after-delete."""
     _, tools = _seeded(identity)
@@ -281,9 +290,9 @@ def test_us4_2_admin_index_sees_shared_scopes_not_user_ada() -> None:
     paths = set(_paths(rendered))
     shared_seeds = {seed_path(s) for s in REFERENCE_SEED_FILES if s.scope != USER}
     assert shared_seeds <= paths
-    assert "project/p-checkout/metrics/session-note.md" in paths
-    assert "organization/o-acme/vocabulary/session-note.md" in paths
-    assert not any(p.startswith("user/u-ada/") for p in paths)
+    assert build_path(PROJECT, PROJECT_ID, "metrics", "session-note") in paths
+    assert build_path(ORGANIZATION, ORGANIZATION_ID, "vocabulary", "session-note") in paths
+    assert not any(p.startswith(build_prefix(USER, MEMBER_USER_ID)) for p in paths)
 
 
 def test_us4_3_traveler_follows_the_user_across_organizations() -> None:
@@ -370,6 +379,7 @@ def _assert_system_untouched(
 @pytest.mark.parametrize(
     ("scope", "identity"),
     [(USER, MEMBER_IDENTITY), (PROJECT, ADMIN_IDENTITY), (ORGANIZATION, ADMIN_IDENTITY)],
+    ids=["user-member", "project-admin", "organization-admin"],
 )
 def test_us5_1_system_area_is_read_only_through_tools(
     tool: str, scope: str, identity: Identity
@@ -414,7 +424,7 @@ def test_us5_4_transport_accepts_the_system_write_the_tools_reject() -> None:
     client, tools = _seeded(ADMIN_IDENTITY)
     seed = _seed_of(PROJECT, "system")
     path = seed_path(seed)
-    assert path == "project/p-checkout/system/event-catalog.md"
+    assert path == build_path(PROJECT, PROJECT_ID, "system", "event-catalog")
     current = client.read_file(path)
 
     with pytest.raises(RestrictedScopeError) as excinfo:
@@ -483,7 +493,7 @@ def test_us7_1_stale_append_conflicts_with_current_content() -> None:
 
     error = _rendered_error(excinfo.value)
     assert error["category"] == "recoverable"
-    assert error["path"] == "project/p-checkout/metrics/activation.md"
+    assert error["path"] == seed_path(seed, MEMBER_IDENTITY)
     assert error["content"] == seed.content + "- [observed] LA fact.\n"
     assert error["version"] == appended["version"]
     assert error["version"] != v0
@@ -514,8 +524,9 @@ def _run_budget_steps(client: InProcessClient) -> MemoryTools:
     """Seed, then M writes project/metrics/budget-a and budget-b."""
     seed_reference_memory(client)
     tools = bind_reference_tools(client)
-    for name in ("budget-a", "budget-b"):
-        tools.write_file(PROJECT, "metrics", name, "- [stated] Budget.\n", "Budget", [], None)
+    long_description = "Budget notes covering " + "quarterly planning detail, " * 8
+    for name, description in (("budget-a", long_description), ("budget-b", "Budget")):
+        tools.write_file(PROJECT, "metrics", name, "- [stated] Budget.\n", description, [], None)
     return tools
 
 
@@ -523,21 +534,32 @@ def _capped_budget_run() -> tuple[MemoryTools, MemoryIndex, MemoryIndex]:
     """Return the capped store's tools, its index, and the uncapped store's index."""
     uncapped_tools = _run_budget_steps(InProcessClient(reference_store()))
     uncapped = uncapped_tools.get_memory_index()
-    budget_b = "project/p-checkout/metrics/budget-b.md"
+    budget_a = build_path(PROJECT, PROJECT_ID, "metrics", "budget-a")
+    budget_b = build_path(PROJECT, PROJECT_ID, "metrics", "budget-b")
     first_project = next(
         e
         for e in uncapped.entries
         if parse_path(e.path).scope == PROJECT and parse_path(e.path).area != "system"
     )
     assert first_project.path == budget_b
-    cap = sum(
-        index_entry_bytes(e)
-        for e in uncapped.entries
-        if parse_path(e.path).area == "system"
-        or parse_path(e.path).scope == USER
-        or e.path == budget_b
+    b_position = [e.path for e in uncapped.entries].index(budget_b)
+    later = uncapped.entries[b_position + 1 :]
+    # Slack equals the smallest later entry: a skip-and-keep-filling index would admit it.
+    slack = min(index_entry_bytes(e) for e in later)
+    assert later[0].path == budget_a
+    assert index_entry_bytes(later[0]) > slack
+    cap = (
+        sum(
+            index_entry_bytes(e)
+            for e in uncapped.entries
+            if parse_path(e.path).area == "system"
+            or parse_path(e.path).scope == USER
+            or e.path == budget_b
+        )
+        + slack
     )
-    capped_tools = _run_budget_steps(InProcessClient(reference_store(index_max_bytes=cap)))
+    capped_store = reference_store(index_max_bytes=cap, list_page_size=1)
+    capped_tools = _run_budget_steps(InProcessClient(capped_store))
     return capped_tools, capped_tools.get_memory_index(), uncapped
 
 
@@ -549,8 +571,12 @@ def test_us8_1_capped_index_is_a_priority_prefix_of_the_uncapped_index() -> None
     uncapped_entries = _entries(_rendered(uncapped))
 
     assert capped_entries == uncapped_entries[: len(capped_entries)]
-    assert [_tier(e) for e in capped_entries] == ["system"] * 3 + [USER] * 2 + [PROJECT]
-    assert capped_entries[-1]["path"] == "project/p-checkout/metrics/budget-b.md"
+    system_count = sum(1 for s in REFERENCE_SEED_FILES if s.area == "system")
+    user_count = sum(1 for s in REFERENCE_SEED_FILES if s.scope == USER and s.area != "system")
+    assert [_tier(e) for e in capped_entries] == (
+        ["system"] * system_count + [USER] * user_count + [PROJECT]
+    )
+    assert capped_entries[-1]["path"] == build_path(PROJECT, PROJECT_ID, "metrics", "budget-b")
     assert not any(e["scope"] == ORGANIZATION and e["area"] != "system" for e in capped_entries)
 
 
@@ -586,12 +612,15 @@ def test_us8_3_list_prefix_recovers_the_omitted_files() -> None:
     rendered = _rendered(capped)
     in_index = set(_paths(rendered))
 
+    max_pages = 0
     for row in cast(list[dict[str, object]], rendered["capped"]):
         prefix = _text(row, "prefix")
         listed: list[str] = []
         cursor: ListCursor | None = None
+        pages = 0
         while True:
             page = _rendered(tools.list_prefix(_text(row, "scope"), _text(row, "area"), cursor))
+            pages += 1
             listed += _paths(page)
             next_cursor = page["next_cursor"]
             if next_cursor is None:
@@ -600,5 +629,7 @@ def test_us8_3_list_prefix_recovers_the_omitted_files() -> None:
         omitted = {
             e.path for e in uncapped.entries if e.path.startswith(prefix) and e.path not in in_index
         }
+        max_pages = max(max_pages, pages)
         assert len(omitted) == row["omitted"]
         assert omitted <= set(listed)
+    assert max_pages > 1

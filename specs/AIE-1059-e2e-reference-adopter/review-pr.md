@@ -4,8 +4,8 @@
 
 Nothing exercised the whole stack the way an adopter would use it. This adds
 one reference adopter fixture, `tests/reference_adopter.py`, that folds in the
-old `tests/prompts_reference_adopter.py` (moved with `git mv`, content
-verbatim) and adds the write policy, identities, seed areas, and seed files
+old `tests/prompts_reference_adopter.py` (slot constants moved verbatim;
+docstring and imports rewritten; git does not record a rename) and adds the write policy, identities, seed areas, and seed files
 of Notion Section 9. `tests/test_reference_adopter_end_to_end.py` drives the
 tools over `InProcessClient` and a real `MemoryStore` on `InMemoryStorage`:
 startup index, per-scope lifecycle, session writes, `system/` read-only,
@@ -44,12 +44,12 @@ credential).
 | 2.2 | `E::test_us2_2_index_orders_system_then_user_project_organization` |
 | 2.3 | `E::test_us2_3_index_omits_another_users_file` |
 | 2.4 | `E::test_us2_4_index_entries_carry_the_seed_source` |
-| 3.1-3.7 | `E::test_us3_scope_lifecycle[user/member, project/member, organization/admin]` |
+| 3.1-3.7 | `E::test_us3_scope_lifecycle[user-member]`, `[project-member]`, `[organization-admin]` |
 | 4.1 | `E::test_us4_1_index_reflects_session_writes_and_deletes` |
 | 4.2 | `E::test_us4_2_admin_index_sees_shared_scopes_not_user_ada` |
 | 4.3 | `E::test_us4_3_traveler_follows_the_user_across_organizations` |
 | 4.4 | `E::test_us4_4_partial_member_reads_the_organization_scope` |
-| 5.1, 5.3 | `E::test_us5_1_system_area_is_read_only_through_tools` (4 tools x 3 scopes) |
+| 5.1, 5.3 | `E::test_us5_1_system_area_is_read_only_through_tools[{user-member,project-admin,organization-admin}-{write_file,append_line,replace_fact,delete_file}]` (12 cases, e.g. `[user-member-write_file]`) |
 | 5.2, 5.3 | `E::test_us5_2_system_check_precedes_role_check` (4 tools) |
 | 5.4 | `E::test_us5_4_transport_accepts_the_system_write_the_tools_reject` |
 | 6.1, 6.3 | `E::test_us6_1_organization_writes_require_admin_or_owner` (4 tools) |
@@ -78,8 +78,12 @@ credential).
 
 ## Look closely at
 
-- The `git mv`: the moved slot text should be byte-identical; the two prompt
-  tests change only their import (9.2).
+- The fixture move: slot constants moved verbatim; docstring and imports
+  rewritten; git does not record a rename, so diff the slot text against the
+  deleted file. The two prompt tests change only their import (9.2).
+- The US8 cap: the slack equals the smallest entry after `budget-b`, and
+  `budget-a` is larger, so changing the index include loop's `break` to
+  `continue` fails all three US8 tests (verified by hand, then reverted).
 - The 12 new skips are the invalid-credential resolver cases; confirm that is
   acceptable for `SandboxResolver`.
 - US5.4 pins that the transport accepts a `system/` write the tools reject,
@@ -93,3 +97,11 @@ credential).
 
 Round 1 FAIL (2 blocking, 7 should-fix, 8 nits, all folded in). Round 2
 PASS with 1 should-fix and 2 nits folded in.
+
+## Code review
+
+Two reviews PASS. Mutation testing caught 14 of 16 library mutations in the
+new modules; the rest are caught elsewhere. Folded in: the US8 cap now
+catches a skip-and-keep-filling index, readable parametrize ids, fixture
+constants instead of literal paths and IDs, tier counts derived from the
+seed files, and a second `list_prefix` page in 8.3.

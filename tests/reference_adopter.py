@@ -13,7 +13,12 @@ from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from typing import Final
 
-from wenchang.core import DEFAULT_INDEX_MAX_BYTES, MemoryFile, MemoryStore
+from wenchang.core import (
+    DEFAULT_INDEX_MAX_BYTES,
+    DEFAULT_LIST_PAGE_SIZE,
+    MemoryFile,
+    MemoryStore,
+)
 from wenchang.file_format import FileMetadata
 from wenchang.identity import Identity, SandboxResolver, ScopeGrant
 from wenchang.paths import build_path
@@ -237,13 +242,17 @@ def ticking_clock(
 
 
 def reference_store(
-    *, index_max_bytes: int = DEFAULT_INDEX_MAX_BYTES, clock: Callable[[], datetime] | None = None
+    *,
+    index_max_bytes: int = DEFAULT_INDEX_MAX_BYTES,
+    list_page_size: int = DEFAULT_LIST_PAGE_SIZE,
+    clock: Callable[[], datetime] | None = None,
 ) -> MemoryStore:
     """An in-memory store with the reference scope priority and a fresh ticking_clock() default."""
     return MemoryStore(
         InMemoryStorage(),
         scope_priority=REFERENCE_SCOPE_PRIORITY,
         index_max_bytes=index_max_bytes,
+        list_page_size=list_page_size,
         clock=ticking_clock() if clock is None else clock,
     )
 

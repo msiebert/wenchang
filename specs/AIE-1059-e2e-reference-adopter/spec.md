@@ -141,11 +141,16 @@ for `user` and `project`, `A` for `organization`. The area is
 Two stores are built with `reference_store`, each on a fresh
 `ticking_clock()` with a whole-second step, and each runs the same
 sequence: seed, then `M` writes `project/metrics/budget-a`, then
-`project/metrics/budget-b`. The first store is uncapped (default
+`project/metrics/budget-b`. `budget-a` has a long description, so it is the
+largest entry after `budget-b`. The first store is uncapped (default
 `index_max_bytes`). Its index gives entry sizes via
 `wenchang.core.index_entry_bytes`. The second store's `index_max_bytes` is
 the sum of the sizes of every `system` entry, every `user` entry, and the
-`budget-b` entry, so the next entry does not fit. Byte sizes match across
+`budget-b` entry, plus a slack equal to the size of the smallest entry after
+`budget-b`. The next entry, `budget-a`, is larger than the slack and does
+not fit; an index that skipped it and kept filling would admit the smallest
+later entry and break the prefix property. The capped store also uses
+`list_page_size=1`, so 8.3 pages more than once. Byte sizes match across
 the two stores because `InMemoryStorage` version tokens are a counter and
 both stores run the same sequence on the same clock start and step.
 
@@ -153,7 +158,7 @@ both stores run the same sequence on the same clock start and step.
 | - | ----- | ---- | ---- |
 | 8.1 | the capped store | `get_memory_index()` for `M` | rendered entries are a prefix of the uncapped store's rendered entries: every `system` entry, then every `user` entry, then exactly one `project` entry, `budget-b`; no non-system `organization` entry |
 | 8.2 | as 8.1 | rendered `capped` is read | it is exactly, in this order: `{prefix: "organization/o-acme/vocabulary/", scope: "organization", area: "vocabulary", omitted: 1}`, `{prefix: "project/p-checkout/entities/", scope: "project", area: "entities", omitted: 1}`, `{prefix: "project/p-checkout/metrics/", scope: "project", area: "metrics", omitted: 2}` |
-| 8.3 | the result of 8.2 | `list_prefix(scope, area)` for each capped row, following `next_cursor` | the rendered entries cover every file of that area omitted from 8.1 |
+| 8.3 | the result of 8.2 | `list_prefix(scope, area)` for each capped row, following `next_cursor` | the rendered entries cover every file of that area omitted from 8.1; at least one row takes more than one page |
 
 ### US9 — Runs under `make check`
 
