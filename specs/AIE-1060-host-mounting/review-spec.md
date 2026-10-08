@@ -41,7 +41,7 @@ Supporting changes:
 | US8 | stdio subprocess | real client | Tools, instructions, and a round trip work |
 | US9 | docs | read | ADR 0027; notes in ADRs 0003, 0022, and 0026; ARCHITECTURE; README; glossary |
 
-Full Given/When/Then is in [spec.md](spec.md): 67 numbered criteria.
+Full Given/When/Then is in [spec.md](spec.md): 70 numbered criteria.
 
 ## Key design decisions
 
@@ -131,3 +131,26 @@ Full Given/When/Then is in [spec.md](spec.md): 67 numbered criteria.
   - The prefix may not end with `_` or `-`, and is capped at 64 characters.
   - More schema pins.
   - `bind_tools` is a module global.
+
+**Round 2: FAIL** (2 blocking), then folded in, with the build approved
+without a further review.
+
+- **Race tests that cannot fail.** US6.1 to US6.3 passed against the
+  unlocked storage. They are now deterministic: a `_objects` whose `get`
+  sleeps, and a tiny switch interval over 20 rounds. They must fail before
+  the lock is added. US6.4 and US6.5 are labeled smoke checks.
+- **Silent tool loss on a name collision.** `register_memory_tools` now
+  checks the target tool names and the resource URI against the server
+  first, and raises `ValueError` naming the collisions, with nothing
+  registered (US3.18).
+- **Should-fix and nits.**
+  - `on_call` gets a threading contract and deep-copied records (US7.1),
+    and the observer's error text never reaches the client (US7.5).
+  - A warning is logged when the server's instructions lack the prompt
+    (US3.19).
+  - A public `memory_instructions(slots)` is added (US3.20).
+  - `server` is type-checked.
+  - "Server gains nothing" is checked through the public async
+    `list_tools()` and `list_resources()`.
+  - The pre-parse tests carry quirk docstrings.
+  - T2 also runs `test_core_append_line.py`.

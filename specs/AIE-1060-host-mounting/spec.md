@@ -71,7 +71,7 @@ These terms are used throughout:
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 3.1 | `wenchang.mcp` | import | `__all__` is exactly `["PROMPT_RESOURCE_URI", "ToolCallRecord", "build_server", "register_memory_tools"]`. Every parameter of `build_server`, and every parameter of `register_memory_tools` after `server`, is keyword-only |
+| 3.1 | `wenchang.mcp` | import | `__all__` is exactly `["PROMPT_RESOURCE_URI", "ToolCallRecord", "build_server", "memory_instructions", "register_memory_tools"]`. Every parameter of `build_server`, and every parameter of `register_memory_tools` after `server`, is keyword-only |
 | 3.2 | the server with no `tool_prefix` | a client calls `list_tools()` | the tool names are exactly the set of `TOOL_NAMES` |
 | 3.3 | the server with `tool_prefix="mixpanel"` | `list_tools()` | the tool names are exactly `{"mixpanel_" + n for n in TOOL_NAMES}` |
 | 3.4 | the server with product `None` and with `"Mixpanel"`, each with and without a prefix | `list_tools()` | each tool's `description` equals `tool_descriptions(product)[n]`, where `n` is the unprefixed name |
@@ -86,8 +86,13 @@ These terms are used throughout:
 | 3.13 | a `python -OO` subprocess (`subprocess.run`, explicit timeout, script path from `Path(__file__)`) | build the server with `REFERENCE_SLOTS` | exits non-zero; stderr contains the US3.11 message |
 | 3.14 | one bad argument at a time | `build_server(...)` | raises before any server is created. See the table after US3 |
 | 3.15 | an adopter-built `MCPServer("host", instructions=prompt)` that already has an adopter tool `ping`, where `prompt = build_memory_prompt(REFERENCE_SLOTS)` | `register_memory_tools(server, prompt=prompt, ...)`, then connect a client | `list_tools()` has `ping` plus the seven memory tools, with descriptions as in US3.4. The resource serves `prompt`. `client.instructions == prompt`. The function returns `None` |
-| 3.16 | `register_memory_tools` with `prompt` not a `str`, or empty or whitespace-only | call | raises `TypeError("prompt must be a str, not <type>")` or `ValueError("prompt must be non-empty")`. The server gains no tools |
-| 3.17 | `register_memory_tools` given any bad argument from US3.8 to US3.14 | call | raises the same exception as `build_server`, and the server gains no tools or resources |
+| 3.16 | `register_memory_tools` with `prompt` not a `str`, or empty or whitespace-only | call | raises `TypeError("prompt must be a str, not <type>")` or `ValueError("prompt must be non-empty")`. The server gains nothing (see "Server gains nothing" below) |
+| 3.17 | `register_memory_tools` given any bad argument from US3.8 to US3.14, or a `server` that is not an `MCPServer` | call | raises the same exception as `build_server`, or `TypeError("server must be an MCPServer, not <type>")` for a bad `server`. The server gains nothing |
+| 3.18 | an adopter server that already has a tool `read_file`; separately, one with `mixpanel_read_file` and `tool_prefix="mixpanel"`; separately, `register_memory_tools` called twice on one server | call | raises `ValueError` whose message names every colliding tool name and, for the second call, `PROMPT_RESOURCE_URI`. The message form is in plan.md. Nothing is registered: the server's tools and resources are exactly what they were before the failing call |
+| 3.19 | an adopter server built with `instructions=None`, and one built with instructions that do not contain `prompt` | `register_memory_tools(server, prompt=prompt, ...)` | succeeds and logs one `WARNING` on `wenchang.mcp`. A server whose instructions contain `prompt` logs no warning |
+| 3.20 | `REFERENCE_SLOTS` | `memory_instructions(REFERENCE_SLOTS)` | equals `build_memory_prompt(REFERENCE_SLOTS)`. A server built with `build_server` has `instructions` equal to it |
+
+**Server gains nothing.** In US3.16 to US3.18, take `await server.list_tools()` and `await server.list_resources()` before and after the call, using `MCPServer`'s public async methods run through `anyio.run`. Assert the tool name sets are equal and the resource URI sets are equal.
 
 US3.14 cases. Each row changes one argument; the others are valid.
 
@@ -100,6 +105,7 @@ US3.14 cases. Each row changes one argument; the others are valid.
 | `resolver` | `object()` | `TypeError("resolver must satisfy IdentityResolver")` |
 | `credentials_from_context` | `"x"` | `TypeError("credentials_from_context must be callable")` |
 | `on_call` | `"x"` | `TypeError("on_call must be callable or None")` |
+| `server` (`register_memory_tools` only) | `object()` | `TypeError("server must be an MCPServer, not object")` |
 
 The first four messages are exactly what `MemoryTools` raises.
 
@@ -130,29 +136,34 @@ The first four messages are exactly what `MemoryTools` raises.
 | 5.10 | `source="mcp-smoke"` | `write_file` through the server | the file's `sources` contain `"mcp-smoke"` |
 | 5.11 | `tool_prefix="mixpanel"` | call `mixpanel_read_file` | forwards to `read_file` like the unprefixed server |
 | 5.12 | the server | call `read_file` with `scope=5`, and separately with `name` omitted | `is_error` is true and `structured_content is None`. The text content names the argument (`scope`, `name`). This is the MCP schema-validation path, which bypasses `render_error` (ADR 0027) |
-| 5.13 | alice has files in `user/notes` and `user/people` | `list_prefix(scope="user", area="null")` | lists both areas, as if `area` were omitted. MCP pre-parses `"null"` to `None` (ADR 0027) |
-| 5.14 | alice's file with description `"d1"` | `append_line(..., description="null")` | succeeds, and the stored description is still `"d1"` |
+| 5.13 | alice has files in `user/notes` and `user/people` | `list_prefix(scope="user", area="null")` | lists both areas, as if `area` were omitted. MCP pre-parses `"null"` to `None` (ADR 0027). The test docstring says it pins an mcp quirk and is expected to fail when mcp fixes pre-parsing |
+| 5.14 | alice's file with description `"d1"` | `append_line(..., description="null")` | succeeds, and the stored description is still `"d1"`. Same docstring note as 5.13 |
 | 5.15 | `list_prefix(scope="user", area="[1]")` | call | `is_error` is true, `structured_content is None`, and the text names `area` |
 
 ### US6: Concurrency
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 6.1 | an `InMemoryStorage` and 8 threads behind a barrier | each calls `put_if_version(key, ..., expected=None)` | exactly one succeeds; the other 7 raise `PreconditionFailedError` |
-| 6.2 | an `InMemoryStorage` and 8 threads × 50 `put` calls to distinct keys | run | all 400 returned tokens are distinct |
-| 6.3 | an `InMemoryStorage` holding a key at version `v`, and 8 threads behind a barrier | each calls `put_if_version(key, ..., expected=v)` | exactly one succeeds, and the stored version is the one it returned |
+| 6.1 | an `InMemoryStorage` whose `_objects` is replaced by a dict subclass whose `get` sleeps 5 ms, and 8 threads behind a barrier | each calls `put_if_version(key, ..., expected=None)` | exactly one succeeds; the other 7 raise `PreconditionFailedError` |
+| 6.2 | an `InMemoryStorage` and a fixture that sets `sys.setswitchinterval(1e-6)` and restores it afterward | 20 rounds of 8 threads × 50 `put` calls to distinct keys | in every round, all 400 returned tokens are distinct |
+| 6.3 | an `InMemoryStorage` holding a key at version `v`, the same sleeping `_objects` as in 6.1, and 8 threads behind a barrier | each calls `put_if_version(key, ..., expected=v)` | exactly one succeeds, and the stored version is the one it returned |
 | 6.4 | alice's file at version `v` | 8 concurrent `write_file` calls at `expected_version=v`, through one client in an `anyio` task group | exactly one has `is_error` false. The other 7 are `error == "VersionConflictError"` with `category == "recoverable"`, and their `version` equals the winner's. The winner's version differs from `v` |
 | 6.5 | 8 concurrent `write_file` calls creating 8 different files (`expected_version=None`) | through the client | all succeed, and the 8 versions are distinct |
+
+US6.1 to US6.3 make the race deterministic. Run against the unlocked
+`InMemoryStorage`, they must fail before the lock is added. US6.4 and US6.5
+are end-to-end smoke checks of the concurrent MCP path, not proof of the
+lock.
 
 ### US7: The `on_call` observer
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 7.1 | `ToolCallRecord` | inspect | it is a frozen dataclass with fields `tool: str`, `arguments: Mapping[str, object]`, `result: Mapping[str, object]`, and `is_error: bool` |
+| 7.1 | `ToolCallRecord` | inspect | it is a frozen dataclass with fields `tool: str`, `arguments: Mapping[str, object]`, `result: Mapping[str, object]`, and `is_error: bool`. Mutating a nested list inside a record's `result`, such as `result["aliases"]`, does not change the client's `structured_content`, and the reverse also holds |
 | 7.2 | `on_call` appending to a list, and `tool_prefix="mixpanel"` | a successful `mixpanel_read_file(scope, area, name)` | one record. `tool == "mixpanel_read_file"`. `arguments == {"scope": ..., "area": ..., "name": ...}` (the arguments the wrapper received, `ctx` excluded). `result == structured_content`. `is_error is False` |
 | 7.3 | the same | a call failing with `NotFoundError`, and one failing in `credentials_from_context` | one record each, with `is_error is True` and `result` equal to that call's `structured_content` |
 | 7.4 | the same | a call rejected by MCP schema validation (US5.12) | no record. ADR 0027 says these never reach the wrapper |
-| 7.5 | `on_call` raising `RuntimeError` | a successful call | the client still gets the normal result. One record is logged on `wenchang.mcp` at `ERROR` |
+| 7.5 | `on_call` raising `RuntimeError("observer-secret")` | a successful call | the client still gets the normal result, and `observer-secret` appears nowhere in its content. One record is logged on `wenchang.mcp` at `ERROR` |
 | 7.6 | `on_call=None` (the default) | calls | they work as in US5 |
 
 ### US8: Stdio
@@ -169,8 +180,8 @@ The first four messages are exactly what `MemoryTools` raises.
 | 9.2 | ADR 0022 | read | dated notes point to ADR 0027. **Decision 2:** binding is per tool call through the MCP adapter, which supersedes "resolved once per session" and the rejection of per-use resolution. **Decision 12:** the server now exists. **Decision 13:** at the MCP surface, schema validation precedes it |
 | 9.3 | ADR 0026 | read | dated notes point to ADR 0027. **Decision 3:** a module-level `tool_descriptions(product)` now exists, which supersedes its rejection. **Decisions 5 and 6:** they point to `tool_descriptions` and `register_memory_tools` |
 | 9.4 | ADR 0003 | read | a dated note says `InMemoryStorage` is thread-safe, with a pointer to ADR 0027 |
-| 9.5 | ARCHITECTURE.md | read | it has: <br>• an `mcp` module entry, covering `register_memory_tools`, `build_server`, `ToolCallRecord`, and `on_call`; <br>• a diagram node and edges for `mcp`; <br>• `tool_descriptions` in the `tools` entry; <br>• a note on the optional extra; <br>• one sentence that `InMemoryStorage` is thread-safe; <br>• the thread-safety requirement on a `TransportClient` served by `mcp` |
-| 9.6 | README | read | a "Serving over MCP" section shows `build_server` and `register_memory_tools` with `credentials_from_context` and `tool_prefix`, and running over stdio. It says `credentials_from_context` returns the raw credential, the resolver verifies it, and `ctx.headers` and `_meta` are never an identity assertion. It notes the `"null"` pre-parse |
+| 9.5 | ARCHITECTURE.md | read | it has: <br>• an `mcp` module entry, covering `register_memory_tools`, `build_server`, `memory_instructions`, `ToolCallRecord`, and `on_call`, including that `on_call` runs on worker threads and must be thread-safe and fast; <br>• a diagram node and edges for `mcp`; <br>• `tool_descriptions` in the `tools` entry; <br>• a note on the optional extra; <br>• one sentence that `InMemoryStorage` is thread-safe; <br>• the thread-safety requirement on a `TransportClient` served by `mcp` |
+| 9.6 | README | read | a "Serving over MCP" section shows `build_server`, and `register_memory_tools` with `memory_instructions`, with `credentials_from_context` and `tool_prefix`, and running over stdio. It says `credentials_from_context` returns the raw credential, the resolver verifies it, and `ctx.headers` and `_meta` are never an identity assertion. It notes the `"null"` pre-parse |
 | 9.7 | `docs/product/glossary.md` | read | it has a "Host adapter" entry |
 
 US9.1: ADR 0027 records these decisions.

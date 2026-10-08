@@ -131,7 +131,10 @@ except ImportError as exc:  # optional dependency
         "wenchang.mcp requires the optional 'mcp' extra: pip install 'wenchang[mcp]'"
     ) from exc
 
-__all__ = ["PROMPT_RESOURCE_URI", "ToolCallRecord", "build_server", "register_memory_tools"]
+__all__ = [
+    "PROMPT_RESOURCE_URI", "ToolCallRecord", "build_server", "memory_instructions",
+    "register_memory_tools",
+]
 
 PROMPT_RESOURCE_URI: Final[str] = "wenchang://memory-prompt"
 
@@ -365,6 +368,84 @@ no new API.
 - `tests/mcp_stdio_server.py` is a test-only script used by US8.1.
 - AIE-1170 builds its own entry point the same way, or calls
   `register_memory_tools` on its own server.
+
+### Round 2 additions
+
+These additions take precedence over the text above where they differ.
+
+**`memory_instructions(slots: PromptSlots) -> str`** is public. It returns
+`build_memory_prompt(slots)`, the text to pass as a server's
+`instructions`. `build_server` calls it once, so US4.5's counter on
+`build_memory_prompt` still reads 1. An adopter builds its own server like
+this:
+
+```python
+prompt = memory_instructions(slots)
+server = MCPServer("host", instructions=prompt)
+register_memory_tools(server, prompt=prompt, ...)
+```
+
+**Validation order in `register_memory_tools`.**
+
+- **Step 0: the server.** `server` is checked before step 1. If
+  `issubclass(type(server), MCPServer)` is false, it raises
+  `TypeError(f"server must be an MCPServer, not {type_name}")`.
+- **Step 8: collisions.** This step runs after step 7.
+  - It computes the seven target names (prefixed) and `PROMPT_RESOURCE_URI`.
+  - It reads the existing tool names with
+    `server._tool_manager.get_tool(n) is not None`, and the existing
+    resource with the resource manager's `get_resource` or its `_resources`
+    mapping. The implementation checks which of the two is synchronous.
+  - Both are private `mcp` attributes. A comment cites the `mcp<3` pin.
+  - It does not use `MCPServer.list_tools()`, because that method is async
+    and `register_memory_tools` is sync. It may run before any event loop
+    exists, or inside one.
+  - If anything collides, it raises
+    `ValueError(f"cannot register memory tools: already registered on the server: {', '.join(sorted(collisions))}")`.
+    `collisions` holds tool names and, when the resource collides, the URI.
+  - Nothing is registered before this check passes.
+  - Rationale: `mcp` 2.3.0 `ToolManager.add_tool` and `ResourceManager`
+    only log a warning on a duplicate. A collision would otherwise silently
+    keep the adopter's tool and drop the memory tool, or the reverse.
+
+**Instructions warning.** After a successful registration, it logs at
+`WARNING` on `wenchang.mcp` when `server.instructions` is `None`, or does
+not contain `prompt` as a substring:
+
+```
+_log.warning("server instructions do not include the memory prompt; pass memory_instructions(slots) as instructions")
+```
+
+**The `on_call` observer.**
+
+- **Record contents.** `ToolCallRecord.result` is
+  `MappingProxyType(copy.deepcopy(payload))`, and `arguments` is
+  `MappingProxyType(copy.deepcopy(dict(arguments)))`. So nothing in a
+  record aliases the `structured_content` sent to the client, and nested
+  lists stay independent.
+- **Threading.** The docstrings of `register_memory_tools`, `build_server`,
+  and `ToolCallRecord` state the threading contract, and so does ADR 0027.
+  `on_call` runs on the tool call's worker thread, possibly concurrently
+  with other calls, and delays the response until it returns. It must
+  therefore be thread-safe and fast.
+- **Exceptions.** An exception from `on_call` is logged and never reaches
+  the client, as US7.5 requires.
+
+**Testing the race (US6.1 to US6.3).**
+
+- **US6.1 and US6.3.** These replace `storage._objects` with a
+  `_SlowDict(dict)` whose `get` calls `time.sleep(0.005)` before
+  delegating. They reach into the private attribute, which is deliberate
+  and noted in the test docstring. Without the lock, every thread passes
+  the version check during the sleep. With the lock, the threads serialize.
+- **US6.2.** A fixture saves `sys.getswitchinterval()`, sets `1e-6`, and
+  restores the saved value in `finally`. It runs 20 rounds.
+- **Proving the fix.** All three are run against the unlocked code first,
+  and their failures are recorded in the PR review. US6.4 and US6.5 are
+  end-to-end smoke checks only.
+- **Regression check.** T2 also runs `tests/test_core_append_line.py`,
+  whose `_CountingStorage` subclasses or wraps `InMemoryStorage`, to check
+  that the lock does not break it.
 
 ## Module boundaries
 

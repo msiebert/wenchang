@@ -21,7 +21,9 @@ Each task follows the same loop:
 ## T2: Thread-safe `InMemoryStorage`
 
 - **Covers:** US6.1 to US6.3.
-- **Tests:** `tests/test_storage_memory_threads.py`.
+- **Tests:** `tests/test_storage_memory_threads.py`. Run them against the
+  unlocked code and record the failures. After the lock, also run
+  `tests/test_core_append_line.py`.
 - **Implementation:** `src/wenchang/storage/memory.py`.
 
 ## T3: `mcp` optional dependency and import guard
@@ -35,7 +37,7 @@ Each task follows the same loop:
 
 ## T4: Registration, validation, and startup checks
 
-- **Covers:** US3.1 to US3.17.
+- **Covers:** US3.1 to US3.20.
 - **Depends on:** T1 and T3.
 - **Tests:** `tests/test_mcp_server.py`, registration, schema, and
   validation section.
