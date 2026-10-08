@@ -275,6 +275,23 @@ def test_build_blank_overview_keeps_memory_section_with_purpose(
     assert _heading_lines(out) == [_heading(i) for i in EXPECTED_SECTION_ORDER]
 
 
+def _generic_texts() -> dict[str, str]:
+    texts = {i: cast(str, _module(i).BODY) for i in BODY_IDS}
+    texts["systems_of_record"] = systems_of_record.PRINCIPLE
+    return texts
+
+
+@pytest.mark.parametrize("product", ["mixpanel", "acme"])
+def test_generic_text_names_no_product(product: str) -> None:
+    """AIE-1164, US2.6: no generic section BODY or PRINCIPLE names a product; product
+    names belong only in the purpose slot."""
+    texts = _generic_texts()
+
+    assert "overview" in texts
+    for section_id, text in texts.items():
+        assert product not in text.casefold(), section_id
+
+
 @pytest.mark.parametrize("sor", ["SoR.", None], ids=["with-sor", "without-sor"])
 def test_build_starts_with_purpose_then_overview(sor: str | None) -> None:
     """AIE-1164, US2.1: output starts with the Memory heading, the purpose, the stripped

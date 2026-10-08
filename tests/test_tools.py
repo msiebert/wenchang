@@ -606,8 +606,20 @@ def test_bind_tools_forwards_product() -> None:
     assert without_product.product is None
 
 
+class _StripLyingStr(str):
+    """A str subclass whose __str__ and strip return unrelated text."""
+
+    def __str__(self) -> str:
+        return "evil"
+
+    def strip(self, chars: str | None = None) -> str:
+        return "evil"
+
+
 @pytest.mark.parametrize(
-    "product", ["  Mixpanel \n", _LyingStr("  Mixpanel \n")], ids=["padded", "lying-subclass"]
+    "product",
+    ["  Mixpanel \n", _LyingStr("  Mixpanel \n"), _StripLyingStr("  Mixpanel \n")],
+    ids=["padded", "lying-subclass", "strip-lying-subclass"],
 )
 def test_product_is_stripped_to_exact_str(product: str) -> None:
     """A padded or lying str-subclass product is stored as the exact str
@@ -744,6 +756,31 @@ def test_source_error_precedes_product_error(
         )
 
     assert "product" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "resolver", [_FailingResolver(), _RaisingResolver()], ids=["failure", "raising"]
+)
+def test_bind_tools_resolver_error_precedes_product_error(
+    resolver: _FailingResolver | _RaisingResolver,
+) -> None:
+    """With a failing resolver and product=5, bind_tools raises
+    ResolverFailureError, not a product TypeError (AIE-1164, US4.11; ADR 0026).
+    """
+    log: list[_Call] = []
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        bind_tools(
+            _FakeClient(log),
+            resolver,
+            object(),
+            POLICY,
+            source=SOURCE,
+            product=cast(str, 5),
+        )
+
+    assert "product" not in str(excinfo.value)
+    assert log == []
 
 
 # --- US2: reads, listing, and index ---------------------------------------------

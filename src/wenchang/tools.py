@@ -1,14 +1,14 @@
 """Agent-facing memory tools over a transport client.
 
 A MemoryTools instance is one session: a resolved Identity, the adopter's
-ScopePolicy, a TransportClient, and the surface name stamped on writes.
-Its public methods are the tools; descriptions() gives the descriptions a
-host shows the agent: the docstrings, with the product named in each first
-line when one is set. Tools take a scope, area, and name and build the
-path under the caller's own entity in that scope. Mutating tools check the
-write against the identity and policy, then call the client.
-render_result and render_error produce the JSON-safe form a host shows the
-agent.
+ScopePolicy, a TransportClient, the surface name stamped on writes, and
+optionally the product named in each tool description. Its public methods
+are the tools; descriptions() gives the descriptions a host shows the
+agent: the docstrings, with the product in each first line when set. Tools
+take a scope, area, and name and build the path under the caller's own
+entity in that scope. Mutating tools check the write against the identity
+and policy, then call the client. render_result and render_error produce
+the JSON-safe form a host shows the agent.
 """
 
 import inspect
@@ -161,7 +161,10 @@ class MemoryTools:
         return MappingProxyType(methods)
 
     def descriptions(self) -> Mapping[str, str]:
-        """Each tool's description by name, in TOOL_NAMES order, with the product in line one."""
+        """Each tool's cleaned docstring by name, in TOOL_NAMES order.
+
+        When a product is set, each first line names it.
+        """
         out: dict[str, str] = {}
         for name in TOOL_NAMES:
             doc = inspect.cleandoc(cast(str, getattr(MemoryTools, name).__doc__))
