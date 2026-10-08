@@ -2,8 +2,8 @@
 
 Covers AIE-1044, US1 (construction and binding), US2 (reads, listing, index),
 US3 (checked writes), US4 (argument-error conversion), and US6 (module
-boundaries); and AIE-1151, US4 (aliases and description on append_line and
-replace_fact).
+boundaries); AIE-1151, US4 (aliases and description on append_line and
+replace_fact); and AIE-1164, US4 (the product constructor argument).
 """
 
 import ast
@@ -542,6 +542,245 @@ def test_bind_tools_does_not_retain_credentials() -> None:
 
     assert ref() is None
     assert tools.identity == IDENTITY
+
+
+# --- product ----------------------------------------------------------------------
+
+
+class _StrSpoof:
+    """Claims to be a str through __class__; its real type is not."""
+
+    @property
+    def __class__(self) -> type:  # pyright: ignore[reportIncompatibleVariableOverride, reportIncompatibleMethodOverride]
+        return str
+
+
+PRODUCT_LINE_BOUNDARIES = {
+    "lf": "\n",
+    "cr": "\r",
+    "crlf": "\r\n",
+    "vt": "\x0b",
+    "ff": "\x0c",
+    "fs": "\x1c",
+    "gs": "\x1d",
+    "rs": "\x1e",
+    "nel": "\x85",
+    "ls": chr(0x2028),
+    "ps": chr(0x2029),
+}
+
+
+def _with_product(product: object) -> MemoryTools:
+    return MemoryTools(_FakeClient([]), IDENTITY, POLICY, source=SOURCE, product=cast(str, product))
+
+
+def test_product_defaults_to_none() -> None:
+    """Without a product argument, MemoryTools.product is None (AIE-1164, US4.1)."""
+    tools = MemoryTools(_FakeClient([]), IDENTITY, POLICY, source=SOURCE)
+
+    assert tools.product is None
+
+
+def test_product_none_is_stored_as_none() -> None:
+    """An explicit product=None is stored as None (AIE-1164, US4.1)."""
+    assert _with_product(None).product is None
+
+
+def test_product_is_stored_from_constructor() -> None:
+    """product="Mixpanel" is exposed as tools.product (AIE-1164, US4.2)."""
+    assert _with_product("Mixpanel").product == "Mixpanel"
+
+
+def test_bind_tools_forwards_product() -> None:
+    """bind_tools forwards product to MemoryTools, and without product the
+    bound tools have product None (AIE-1164, US4.2).
+    """
+    resolver = SandboxResolver(IDENTITY)
+
+    with_product = bind_tools(
+        _FakeClient([]), resolver, object(), POLICY, source=SOURCE, product="Mixpanel"
+    )
+    without_product = bind_tools(_FakeClient([]), resolver, object(), POLICY, source=SOURCE)
+
+    assert with_product.product == "Mixpanel"
+    assert without_product.product is None
+
+
+class _StripLyingStr(str):
+    """A str subclass whose __str__ and strip return unrelated text."""
+
+    def __str__(self) -> str:
+        return "evil"
+
+    def strip(self, chars: str | None = None) -> str:
+        return "evil"
+
+
+@pytest.mark.parametrize(
+    "product",
+    ["  Mixpanel \n", _LyingStr("  Mixpanel \n"), _StripLyingStr("  Mixpanel \n")],
+    ids=["padded", "lying-subclass", "strip-lying-subclass"],
+)
+def test_product_is_stripped_to_exact_str(product: str) -> None:
+    """A padded or lying str-subclass product is stored as the exact str
+    "Mixpanel" (AIE-1164, US4.3).
+    """
+    stored = _with_product(product).product
+
+    assert type(stored) is str
+    assert str.__eq__(stored, "Mixpanel") is True
+
+
+@pytest.mark.parametrize(
+    ("product", "type_name"),
+    [(5, "int"), (b"Mixpanel", "bytes"), (_StrSpoof(), "_StrSpoof")],
+    ids=["int", "bytes", "spoofed-class"],
+)
+def test_non_str_product_raises_type_error(product: object, type_name: str) -> None:
+    """A product whose real type is neither str nor None raises TypeError
+    naming that type, even if its __class__ claims str (AIE-1164, US4.4).
+    """
+    with pytest.raises(TypeError) as excinfo:
+        _with_product(product)
+
+    assert type(excinfo.value) is TypeError
+    assert str(excinfo.value) == f"product must be a str or None, not {type_name}"
+
+
+@pytest.mark.parametrize("product", ["", "  ", "\n\t"], ids=["empty", "spaces", "newline-tab"])
+def test_blank_product_raises_value_error(product: str) -> None:
+    """An empty or whitespace-only product raises ValueError (AIE-1164, US4.5)."""
+    with pytest.raises(ValueError) as excinfo:
+        _with_product(product)
+
+    assert type(excinfo.value) is ValueError
+    assert str(excinfo.value) == "product must be non-empty"
+
+
+@pytest.mark.parametrize("boundary", PRODUCT_LINE_BOUNDARIES.values(), ids=PRODUCT_LINE_BOUNDARIES)
+def test_multiline_product_raises_value_error(boundary: str) -> None:
+    """A product with a str.splitlines boundary inside the stripped text
+    raises ValueError (AIE-1164, US4.6).
+    """
+    with pytest.raises(ValueError) as excinfo:
+        _with_product(f"Mix{boundary}panel")
+
+    assert type(excinfo.value) is ValueError
+    assert str(excinfo.value) == "product must be one line"
+
+
+def test_unencodable_product_raises_value_error() -> None:
+    """A product with a lone surrogate raises ValueError chained from the
+    UnicodeEncodeError (AIE-1164, US4.7).
+    """
+    with pytest.raises(ValueError) as excinfo:
+        _with_product("Mix\ud800panel")
+
+    assert type(excinfo.value) is ValueError
+    assert str(excinfo.value) == "product must be encodable as UTF-8"
+    assert isinstance(excinfo.value.__cause__, UnicodeEncodeError)
+
+
+def test_product_is_read_only() -> None:
+    """Assigning tools.product raises AttributeError (AIE-1164, US4.8)."""
+    tools = _with_product("Mixpanel")
+    attribute = "product"
+
+    with pytest.raises(AttributeError):
+        setattr(tools, attribute, "Other")
+    assert tools.product == "Mixpanel"
+
+
+def test_product_is_keyword_only_on_memory_tools() -> None:
+    """product cannot be passed positionally to MemoryTools, and is declared
+    keyword-only with default None (AIE-1164, US4.9).
+    """
+    parameter = inspect.signature(MemoryTools).parameters["product"]
+
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is None
+    construct = cast(Callable[..., object], MemoryTools)
+    with pytest.raises(TypeError):
+        construct(_FakeClient([]), IDENTITY, POLICY, "s", "X")
+
+
+def test_product_is_keyword_only_on_bind_tools() -> None:
+    """product cannot be passed positionally to bind_tools, and is declared
+    keyword-only with default None (AIE-1164, US4.9).
+    """
+    parameter = inspect.signature(bind_tools).parameters["product"]
+
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is None
+    bind = cast(Callable[..., object], bind_tools)
+    with pytest.raises(TypeError):
+        bind(_FakeClient([]), SandboxResolver(IDENTITY), object(), POLICY, "X")
+
+
+@pytest.mark.parametrize("tool", ALL_TOOLS)
+def test_tool_methods_take_no_product_parameter(tool: str) -> None:
+    """No tool method has a product parameter (AIE-1164, US4.10)."""
+    assert "product" not in inspect.signature(getattr(MemoryTools, tool)).parameters
+
+
+def test_tools_mapping_unchanged_with_product() -> None:
+    """With a product set, tools() still maps each tool name to the bound
+    method of that name (AIE-1164, US4.10).
+    """
+    tools = _with_product("Mixpanel")
+
+    mapping = tools.tools()
+
+    assert list(mapping) == list(wenchang.tools.TOOL_NAMES)
+    assert dict(mapping) == {name: getattr(tools, name) for name in wenchang.tools.TOOL_NAMES}
+
+
+@pytest.mark.parametrize(
+    ("source", "product", "expected"),
+    [("", 5, ValueError), (5, "", TypeError)],
+    ids=["empty-source-int-product", "int-source-empty-product"],
+)
+def test_source_error_precedes_product_error(
+    source: object, product: object, expected: type[Exception]
+) -> None:
+    """With both source and product invalid, the source error is raised
+    (AIE-1164, US4.11).
+    """
+    with pytest.raises(expected) as excinfo:
+        MemoryTools(
+            _FakeClient([]),
+            IDENTITY,
+            POLICY,
+            source=cast(str, source),
+            product=cast(str, product),
+        )
+
+    assert "product" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "resolver", [_FailingResolver(), _RaisingResolver()], ids=["failure", "raising"]
+)
+def test_bind_tools_resolver_error_precedes_product_error(
+    resolver: _FailingResolver | _RaisingResolver,
+) -> None:
+    """With a failing resolver and product=5, bind_tools raises
+    ResolverFailureError, not a product TypeError (AIE-1164, US4.11; ADR 0026).
+    """
+    log: list[_Call] = []
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        bind_tools(
+            _FakeClient(log),
+            resolver,
+            object(),
+            POLICY,
+            source=SOURCE,
+            product=cast(str, 5),
+        )
+
+    assert "product" not in str(excinfo.value)
+    assert log == []
 
 
 # --- US2: reads, listing, and index ---------------------------------------------

@@ -1,7 +1,8 @@
 """Tests for prompt section modules, SECTION_ORDER, and build_memory_prompt.
 
 Covers AIE-1055, US2.1 through US2.4, US3.1 through US3.11, and US6.1
-through US6.4 (the reference adopter fixture).
+through US6.4 (the reference adopter fixture); and AIE-1164, US2 (purpose
+opens the Memory section) and US3 (reference purpose).
 """
 
 import dataclasses
@@ -15,6 +16,7 @@ import pytest
 
 import wenchang.prompts
 from prompts_reference_adopter import (
+    REFERENCE_PURPOSE,
     REFERENCE_SCOPE_GUIDANCE,
     REFERENCE_SCOPE_PRIORITY,
     REFERENCE_SEED_AREAS,
@@ -50,8 +52,10 @@ EXPECTED_SECTION_ORDER = (
 SLOT_IDS = ("scope_guidance", "seed_areas")
 GENERIC_IDS = tuple(i for i in EXPECTED_SECTION_ORDER if i not in SLOT_IDS)
 BODY_IDS = tuple(i for i in GENERIC_IDS if i != "systems_of_record")
+OMITTABLE_BODY_IDS = tuple(i for i in BODY_IDS if i != "overview")
 
 SLOTS = PromptSlots(
+    purpose="You have Acme memory.\nUse it whenever you work with Acme.",
     scope_guidance="Scope guidance line one.\nLine two.",
     seed_areas="- user: notes\n- team: plans",
     systems_of_record="- The catalog holds events.",
@@ -155,18 +159,21 @@ def test_headings_distinct_and_owned_values_pinned() -> None:
 
 
 def test_build_returns_exact_str(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AIE-1055, US3.1: valid slots produce an exact str."""
+    """AIE-1055, US3.1; AIE-1164, US2.1: valid slots produce an exact str, with purpose
+    opening the Memory section."""
     for section_id in BODY_IDS:
         monkeypatch.setattr(_module(section_id), "BODY", "")
     monkeypatch.setattr(overview, "BODY", "Overview text.")
     monkeypatch.setattr(systems_of_record, "PRINCIPLE", "\nPrinciple text.\n")
-    slots = PromptSlots(scope_guidance="Guide.", seed_areas="Seeds.", systems_of_record="SoR.")
+    slots = PromptSlots(
+        purpose="Purpose.", scope_guidance="Guide.", seed_areas="Seeds.", systems_of_record="SoR."
+    )
 
     out = build_memory_prompt(slots)
 
     assert type(out) is str
     assert out == (
-        "## Memory\n\nOverview text.\n\n"
+        "## Memory\n\nPurpose.\n\nOverview text.\n\n"
         "## Scopes\n\nGuide.\n\n"
         "## Seed areas\n\nSeeds.\n\n"
         "## Systems of record\n\nPrinciple text.\n\nSoR.\n"
@@ -206,9 +213,11 @@ def test_build_slots_is_positional_only() -> None:
 
 
 def test_build_full_output_format(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AIE-1055, US3.5: with every body non-empty, output is each `## heading` plus
-    stripped body in SECTION_ORDER, joined by blank lines, ending in one newline."""
+    """AIE-1055, US3.5; AIE-1164, US2.5: with every body non-empty, output is each
+    `## heading` plus stripped body in SECTION_ORDER, joined by blank lines, ending in
+    one newline; the Memory body is purpose, a blank line, then the overview body."""
     bodies = _set_all_bodies(monkeypatch)
+    bodies["overview"] = SLOTS.purpose + "\n\n" + bodies["overview"]
     sor = cast(str, SLOTS.systems_of_record)
     bodies["scope_guidance"] = SLOTS.scope_guidance
     bodies["seed_areas"] = SLOTS.seed_areas
@@ -229,12 +238,12 @@ def test_build_full_output_format(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("blank", ["", "   \n\t "], ids=["empty", "whitespace"])
-@pytest.mark.parametrize("section_id", BODY_IDS)
+@pytest.mark.parametrize("section_id", OMITTABLE_BODY_IDS)
 def test_build_omits_blank_section(
     monkeypatch: pytest.MonkeyPatch, section_id: str, blank: str
 ) -> None:
-    """AIE-1055, US3.6: a section whose BODY is empty or whitespace-only is omitted
-    without leaving extra blank lines."""
+    """AIE-1055, US3.6; AIE-1164, US2.3: a section other than overview whose BODY is
+    empty or whitespace-only is omitted without leaving extra blank lines."""
     _set_all_bodies(monkeypatch)
     monkeypatch.setattr(_module(section_id), "BODY", blank)
     omitted = _heading(section_id)
@@ -247,6 +256,72 @@ def test_build_omits_blank_section(
     assert out.endswith("\n")
     assert not out.endswith("\n\n")
     assert _heading_lines(out) == [_heading(i) for i in EXPECTED_SECTION_ORDER if i != section_id]
+
+
+@pytest.mark.parametrize("blank", ["", "   \n\t "], ids=["empty", "whitespace"])
+def test_build_blank_overview_keeps_memory_section_with_purpose(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    """AIE-1164, US2.3: with overview.BODY blank, the Memory section stays, its body
+    exactly the purpose, with no extra blank lines."""
+    _set_all_bodies(monkeypatch)
+    monkeypatch.setattr(overview, "BODY", blank)
+
+    out = build_memory_prompt(SLOTS)
+
+    assert out.startswith("## Memory\n\n" + SLOTS.purpose + "\n\n## Scopes\n\n")
+    assert _sections(out)["Memory"] == SLOTS.purpose
+    assert "\n\n\n" not in out
+    assert _heading_lines(out) == [_heading(i) for i in EXPECTED_SECTION_ORDER]
+
+
+def _generic_texts() -> dict[str, str]:
+    texts = {i: cast(str, _module(i).BODY) for i in BODY_IDS}
+    texts["systems_of_record"] = systems_of_record.PRINCIPLE
+    return texts
+
+
+@pytest.mark.parametrize("product", ["mixpanel", "acme"])
+def test_generic_text_names_no_product(product: str) -> None:
+    """AIE-1164, US2.6: no generic section BODY or PRINCIPLE names a product; product
+    names belong only in the purpose slot."""
+    texts = _generic_texts()
+
+    assert "overview" in texts
+    for section_id, text in texts.items():
+        assert product not in text.casefold(), section_id
+
+
+@pytest.mark.parametrize("sor", ["SoR.", None], ids=["with-sor", "without-sor"])
+def test_build_starts_with_purpose_then_overview(sor: str | None) -> None:
+    """AIE-1164, US2.1: output starts with the Memory heading, the purpose, the stripped
+    overview body, then the Scopes heading."""
+    slots = dataclasses.replace(SLOTS, systems_of_record=sor)
+
+    out = build_memory_prompt(slots)
+
+    assert overview.BODY.strip() != ""
+    assert out.startswith(
+        "## Memory\n\n" + SLOTS.purpose + "\n\n" + overview.BODY.strip() + "\n\n## Scopes"
+    )
+
+
+def test_build_purpose_keeps_heading_order() -> None:
+    """AIE-1164, US2.2: heading order and SECTION_ORDER are unchanged and `## Memory`
+    appears once."""
+    out = build_memory_prompt(SLOTS)
+
+    assert SECTION_ORDER == EXPECTED_SECTION_ORDER
+    assert out.count("## Memory") == 1
+    expected = [
+        _heading(i)
+        for i in EXPECTED_SECTION_ORDER
+        if i == "overview"
+        or i in SLOT_IDS
+        or i == "systems_of_record"
+        or cast(str, _module(i).BODY).strip()
+    ]
+    assert _heading_lines(out) == expected
 
 
 def test_build_slot_text_under_headings() -> None:
@@ -273,7 +348,9 @@ def test_build_systems_of_record_body() -> None:
 def test_build_omits_systems_of_record_when_none() -> None:
     """AIE-1055, US3.9: with systems_of_record None, neither the SoR heading nor any
     sentence of PRINCIPLE appears."""
-    slots = PromptSlots(scope_guidance="Guide.", seed_areas="Seeds.", systems_of_record=None)
+    slots = PromptSlots(
+        purpose="Purpose.", scope_guidance="Guide.", seed_areas="Seeds.", systems_of_record=None
+    )
     sentences = _sentences(systems_of_record.PRINCIPLE)
 
     out = build_memory_prompt(slots)
@@ -289,7 +366,9 @@ def test_build_omits_systems_of_record_when_none() -> None:
 def test_build_starts_with_memory_and_ends_with_one_newline(sor: str | None) -> None:
     """AIE-1055, US3.10: output starts with `## Memory`, has no H1, and ends with
     exactly one newline."""
-    slots = PromptSlots(scope_guidance="Guide.", seed_areas="Seeds.", systems_of_record=sor)
+    slots = PromptSlots(
+        purpose="Purpose.", scope_guidance="Guide.", seed_areas="Seeds.", systems_of_record=sor
+    )
 
     out = build_memory_prompt(slots)
 
@@ -300,7 +379,8 @@ def test_build_starts_with_memory_and_ends_with_one_newline(sor: str | None) -> 
 
 
 def test_build_reads_bodies_at_call_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AIE-1055, US3.11: changing section bodies at runtime changes the output."""
+    """AIE-1055, US3.11; AIE-1164, US2.4: changing section bodies at runtime changes the
+    output; the Memory body is purpose plus the replacement overview body."""
     before = build_memory_prompt(SLOTS)
     monkeypatch.setattr(overview, "BODY", "Replacement overview.")
     forgetting = _module("forgetting")
@@ -311,7 +391,7 @@ def test_build_reads_bodies_at_call_time(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert after != before
     sections = _sections(after)
-    assert sections["Memory"] == "Replacement overview."
+    assert sections["Memory"] == SLOTS.purpose + "\n\nReplacement overview."
     assert sections[cast(str, forgetting.HEADING)] == "Forget carefully."
     assert sections["Systems of record"] == (
         "Replacement principle.\n\n" + cast(str, SLOTS.systems_of_record)
@@ -322,10 +402,16 @@ def test_build_reads_bodies_at_call_time(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_reference_slots_build_and_appear_under_headings() -> None:
-    """AIE-1055, US6.1: REFERENCE_SLOTS builds and each slot appears verbatim
-    directly under its heading."""
-    for blob in (REFERENCE_SCOPE_GUIDANCE, REFERENCE_SEED_AREAS, REFERENCE_SYSTEMS_OF_RECORD):
+    """AIE-1055, US6.1; AIE-1164, US3.2-US3.3: REFERENCE_SLOTS builds and each slot
+    appears verbatim directly under its heading, purpose opening the Memory section."""
+    for blob in (
+        REFERENCE_PURPOSE,
+        REFERENCE_SCOPE_GUIDANCE,
+        REFERENCE_SEED_AREAS,
+        REFERENCE_SYSTEMS_OF_RECORD,
+    ):
         assert blob == blob.strip()
+    assert REFERENCE_SLOTS.purpose == REFERENCE_PURPOSE
     assert REFERENCE_SLOTS.scope_guidance == REFERENCE_SCOPE_GUIDANCE
     assert REFERENCE_SLOTS.seed_areas == REFERENCE_SEED_AREAS
     assert REFERENCE_SLOTS.systems_of_record == REFERENCE_SYSTEMS_OF_RECORD
@@ -333,11 +419,30 @@ def test_reference_slots_build_and_appear_under_headings() -> None:
     out = build_memory_prompt(REFERENCE_SLOTS)
 
     sections = _sections(out)
+    assert sections["Memory"] == REFERENCE_PURPOSE + "\n\n" + overview.BODY.strip()
     assert sections["Scopes"] == REFERENCE_SCOPE_GUIDANCE
     assert sections["Seed areas"] == REFERENCE_SEED_AREAS
     assert sections["Systems of record"] == (
         systems_of_record.PRINCIPLE.strip() + "\n\n" + REFERENCE_SYSTEMS_OF_RECORD
     )
+
+
+def test_reference_memory_section_states_persistent_memory_once() -> None:
+    """AIE-1164: with REFERENCE_SLOTS, the Memory section says "You have persistent memory"
+    exactly once; the overview body does not repeat the purpose's opening."""
+    out = build_memory_prompt(REFERENCE_SLOTS)
+
+    memory = re.sub(r"\s+", " ", _sections(out)["Memory"])
+    assert memory.count("You have persistent memory") == 1
+
+
+def test_reference_purpose_shape() -> None:
+    """AIE-1164, US3.1: REFERENCE_PURPOSE is ASCII, every line at most 100 columns,
+    one or two sentences, and names Mixpanel."""
+    assert REFERENCE_PURPOSE.isascii()
+    assert all(len(line) <= 100 for line in REFERENCE_PURPOSE.split("\n"))
+    assert 1 <= len(_sentences(REFERENCE_PURPOSE)) <= 2
+    assert "Mixpanel" in REFERENCE_PURPOSE
 
 
 def test_reference_scope_guidance_rules() -> None:

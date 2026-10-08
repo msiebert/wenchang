@@ -119,6 +119,11 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
    Not every adopter has a system of record. When it is `None`, the whole
    section is omitted, principle and list together, so the agent never
    sees the principle without a list to apply it to.
+   - **Note (2026-10-08, AIE-1164).** The constructor is now
+     `PromptSlots(purpose, scope_guidance, seed_areas,
+     systems_of_record=None)`: `purpose` is a required first slot,
+     validated first, naming the product and when to use memory. See
+     [ADR 0026](0026-product-identity.md).
 4. **A fixed `SECTION_ORDER`, and generic sections the adopter cannot
    change.** The order is `("overview", "scope_guidance", "seed_areas",
    "systems_of_record", "applying_memory", "remembering", "privacy",
@@ -141,6 +146,11 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
      puts adjacent-line conflicts in the same tuple on every merge and lets
      merge order decide prompt order. The omit-empty rule also handles the
      optional systems-of-record slot.
+   - **Note (2026-10-08, AIE-1164).** `purpose` opens the overview
+     section: its body is `purpose`, a blank line, and `overview.BODY`. A
+     blank `overview.BODY` no longer omits section 1, which then holds
+     `purpose` alone. Adopters supply four slots. See
+     [ADR 0026](0026-product-identity.md).
 5. **Scope priority stays on `MemoryStore`.** Section 8.2 lists scope
    priority order among the slots but marks it "configuration, not prompt
    text", and it already exists as `MemoryStore(scope_priority=...)`, where

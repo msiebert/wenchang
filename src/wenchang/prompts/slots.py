@@ -17,11 +17,13 @@ class PromptSlots:
     """Adopter-specific text inserted into the generic memory prompt.
 
     The generic sections refer to scope shape only as "shared scope",
-    "private scope", and "the `system/` area"; these slots map that vocabulary
-    onto the adopter's deployment. Slots state only deployment facts; the
-    generic sections already say that areas are extensible, what the
-    `system/` area means, and that systems of record are never copied.
+    "private scope", and "the `system/` area"; the scope slots map that
+    vocabulary onto the adopter's deployment. Slots state only deployment
+    facts; the generic sections already say that areas are extensible, what
+    the `system/` area means, and that systems of record are never copied.
 
+    - ``purpose``: one or two sentences naming the product and when to use
+      memory.
     - ``scope_guidance``: which scopes exist, which are shared and which are
       private, who may write to each, and any ask-before-write,
       contradiction, containment, or scope-test rules, with examples.
@@ -35,12 +37,13 @@ class PromptSlots:
     Values are stored stripped as exact ``str``.
     """
 
+    purpose: str
     scope_guidance: str
     seed_areas: str
     systems_of_record: str | None = None
 
     def __post_init__(self) -> None:
-        for field in ("scope_guidance", "seed_areas"):
+        for field in ("purpose", "scope_guidance", "seed_areas"):
             v = cast(object, getattr(self, field))
             if not issubclass(type(v), str):
                 raise TypeError(f"{field} must be str, not {_type_name(type(v))}")
@@ -48,7 +51,7 @@ class PromptSlots:
         if sor is not None and not issubclass(type(sor), str):
             raise TypeError(f"systems_of_record must be str or None, not {_type_name(type(sor))}")
 
-        for field in ("scope_guidance", "seed_areas", "systems_of_record"):
+        for field in ("purpose", "scope_guidance", "seed_areas", "systems_of_record"):
             v = cast(str | None, getattr(self, field))
             if v is None:
                 continue

@@ -818,31 +818,47 @@ implemented; the remote half of `transport` is the one planned piece.
   [ADR 0023](docs/adr/0023-transport-conformance-cases.md), and
   [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
 - **tools** — the agent-facing tool layer: thin verbs over a
-  `TransportClient`, carrying no judgment, each described by its
-  docstring. The mechanics every tool shares (what `scope`, `area`, and
+  `TransportClient`, carrying no judgment. The description a host shows
+  the agent for each tool comes from `descriptions()` (below), built from
+  the tool's docstring. The mechanics every tool shares (what `scope`, `area`, and
   `name` mean, the `.md` exclusion, the slug rule, `system/` being
   read-only, capped paging) are stated once, in the `get_memory_index`
   docstring; each mutating tool's docstring keeps its own one-sentence
   version-conflict rule, since a host that loads tool schemas on demand
   may show it alone (see
   [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) decision
-  11). `MemoryTools(client, identity, policy, *, source)` is one
-  session: a resolved `Identity`, the adopter's `ScopePolicy`, the client,
-  and the calling surface's name, stamped as `source` on every write and
-  not settable by the agent. Constructor arguments are adopter-side: a
-  client failing `isinstance(..., TransportClient)`, an `identity` or
-  `policy` of the wrong real type, or a non-`str` `source` raises
-  `TypeError`, an empty `source` `ValueError`. All four are read-only
+  11). `MemoryTools(client, identity, policy, *, source, product=None)`
+  is one session: a resolved `Identity`, the adopter's `ScopePolicy`, the
+  client, the calling surface's name, stamped as `source` on every write
+  and not settable by the agent, and optionally the product the memory
+  serves. Constructor arguments are adopter-side, checked in argument
+  order: a client failing `isinstance(..., TransportClient)`, an
+  `identity` or `policy` of the wrong real type, a non-`str` `source`, or
+  a `product` that is neither `str` nor `None` raises `TypeError`; an
+  empty `source`, or a `product` that after `str.__str__` and `str.strip`
+  is empty, spans more than one line (any `str.splitlines` boundary), or
+  is not UTF-8 encodable, raises `ValueError`. All five are read-only
   properties. `bind_tools(client, resolver, credentials, policy, *,
-  source)` is the only function in the layer that takes credentials: it
-  passes them to `resolve_identity` and returns a `MemoryTools`, retaining
-  nothing; a resolution failure is the permanent `ResolverFailureError`. A
-  host serving many sessions binds one `MemoryTools` per session; the
+  source, product=None)` is the only function in the layer that takes
+  credentials: it passes them to `resolve_identity` and returns a
+  `MemoryTools`, retaining nothing; a resolution failure is the permanent
+  `ResolverFailureError`, raised before `source` or `product` is checked.
+  A host serving many sessions binds one `MemoryTools` per session; the
   client may be shared.
   The seven tools are methods. `TOOL_NAMES` is `("get_memory_index",
   "read_file", "list_prefix", "write_file", "append_line", "replace_fact",
   "delete_file")`, and `tools()` returns a fresh read-only mapping from
   each name to its bound method, in that order, for a host to decorate.
+  `descriptions()` returns a fresh read-only mapping from the same names,
+  in the same order, to each tool's description, and a host registers each
+  tool with `descriptions()[name]` rather than `__doc__`. With `product`
+  `None` a description is the `inspect.cleandoc`'d docstring. With a
+  product, only the first line changes: it comes from a fixed per-tool
+  template that is the docstring's first line with the product inserted
+  (plus "memory" for `list_prefix`), e.g. "Add one fact line to the end of
+  an existing Mixpanel memory file."; the remaining lines are the
+  docstring's. No tool method takes `product`, and the docstrings are
+  static (see [ADR 0026](docs/adr/0026-product-identity.md)).
   Tools are scope-relative: `read_file(scope, area, name)`,
   `write_file(scope, area, name, content, description, aliases,
   expected_version)`, `append_line(scope, area, name, line,
@@ -963,9 +979,10 @@ implemented; the remote half of `transport` is the one planned piece.
   only `core`, `errors`, `file_format`, `identity`, `paths`, `scope`,
   `transport`, and `version_token`, and none of `core`, `scope`,
   `identity`, or `transport` imports it. See
-  [ADR 0022](docs/adr/0022-tool-layer.md).
+  [ADR 0022](docs/adr/0022-tool-layer.md) and
+  [ADR 0026](docs/adr/0026-product-identity.md).
 - **prompts** — the instruction text layered over the tools: a subpackage
-  (`wenchang.prompts`) that turns library-owned section text plus three
+  (`wenchang.prompts`) that turns library-owned section text plus four
   adopter-supplied text slots into one markdown prompt. Its public names
   (`__all__`) are `PromptSlots`, `SECTION_ORDER`, and
   `build_memory_prompt(slots, /) -> str`; nothing is added to the top-level
@@ -984,10 +1001,12 @@ implemented; the remote half of `transport` is the one planned piece.
   "filing", "write_mechanics", "curated_content", "forgetting")`: the
   slots, which define the scope vocabulary, come right after the overview,
   and the generic rules follow in session order. Adopters cannot omit,
-  reorder, or override a generic section; only the three slots are theirs.
-  `PromptSlots(scope_guidance, seed_areas, systems_of_record=None)` is a
-  frozen dataclass validated in `__post_init__`, every type check before
-  any value check, in field order: a field whose real type
+  reorder, or override a generic section; only the four slots are theirs.
+  `PromptSlots(purpose, scope_guidance, seed_areas,
+  systems_of_record=None)` is a frozen dataclass; `purpose` (one or two
+  sentences naming the product and when to use memory), `scope_guidance`,
+  and `seed_areas` are required. It is validated in `__post_init__`, every
+  type check before any value check, in field order: a field whose real type
   (`issubclass(type(v), str)`, not the spoofable `__class__`) is not `str`
   raises `TypeError` (`systems_of_record` also accepts `None`); each `str`
   field is then normalized with `str.__str__` and `str.strip`, so a `str`
@@ -1001,7 +1020,11 @@ implemented; the remote half of `transport` is the one planned piece.
   `## {heading}\n\n{body}` with the body stripped, joins them with a blank
   line, and ends with a single newline. There is no H1, so a host can nest
   the prompt under its own heading. A section whose body is empty or
-  whitespace-only is omitted, heading included. The systems-of-record body
+  whitespace-only is omitted, heading included. The overview ("Memory")
+  body is `purpose`, a blank line, and the stripped `overview.BODY`, so the
+  product opens the prompt; `overview.BODY` names no product, and section
+  1 is never omitted (with a blank `overview.BODY` it holds `purpose`
+  alone). The systems-of-record body
   is `PRINCIPLE`, a blank line, and the slot text; when
   `systems_of_record` is `None` the whole section is omitted, so the agent
   never sees the principle without a list. Section bodies are read from
@@ -1022,7 +1045,8 @@ implemented; the remote half of `transport` is the one planned piece.
   priority is not prompt text: it is `MemoryStore(scope_priority=...)`,
   which orders only the capped startup index and defaults to one flat tier.
   `prompts` imports nothing from `wenchang` outside its own package. See
-  [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md).
+  [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) and
+  [ADR 0026](docs/adr/0026-product-identity.md).
 
 ```mermaid
 flowchart TB
