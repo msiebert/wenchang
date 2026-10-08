@@ -120,7 +120,7 @@ prompt, and the first line of every tool description when the host sets
 
 `PromptSlots` without `purpose` now fails with `TypeError`. This is a
 breaking change for adopters, accepted before 1.0. The reference adopter
-fixture (`tests/prompts_reference_adopter.py`) gains `REFERENCE_PURPOSE`.
+fixture (`tests/reference_adopter.py`) gains `REFERENCE_PURPOSE`.
 
 The docstrings remain the single source of the tool descriptions; the
 templates restate only their first lines, and an import-time guard keeps

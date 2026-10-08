@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from prompts_reference_adopter import REFERENCE_SLOTS
+from reference_adopter import REFERENCE_SLOTS
 from wenchang.prompts import build_memory_prompt, filing, write_mechanics
 from wenchang.tools import MemoryTools
 

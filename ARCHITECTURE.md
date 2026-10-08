@@ -1044,8 +1044,12 @@ implemented; the remote half of `transport` is the one planned piece.
   and parameter name it mentions against `tools` at test time. Scope
   priority is not prompt text: it is `MemoryStore(scope_priority=...)`,
   which orders only the capped startup index and defaults to one flat tier.
-  `prompts` imports nothing from `wenchang` outside its own package. See
-  [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) and
+  `prompts` imports nothing from `wenchang` outside its own package.
+  `tests/reference_adopter.py` is the Section 9 reference adopter fixture
+  (slots, scope priority, write policy, identities, seed areas and files),
+  and `tests/test_reference_adopter_end_to_end.py` is the tool-layer
+  lifecycle test over `InProcessClient` and a real `MemoryStore` built from
+  it. See [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) and
   [ADR 0026](docs/adr/0026-product-identity.md).
 
 ```mermaid
