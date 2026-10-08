@@ -8,7 +8,7 @@ the missing import or symbol, not on a syntax error.
 
 ## T1 — Reference adopter fixture and config tests (US1, US9.2)
 
-- Write `tests/test_reference_adopter_config.py` (US1.1–1.8, four
+- Write `tests/test_reference_adopter_config.py` (US1.1–1.9, four
   conformance subclasses). Run it; it fails on
   `ModuleNotFoundError: reference_adopter`.
 - `git mv tests/prompts_reference_adopter.py tests/reference_adopter.py`;

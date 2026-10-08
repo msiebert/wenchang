@@ -74,6 +74,7 @@ last_updated}`.
 | 1.6 | the `scope_guidance` slot text | compared with the fixture scopes | it names every scope, and its `- organization` bullet contains both `admin` and `owner` |
 | 1.7 | the seed files | they are read | there is exactly one `system/` file in every scope and at least one non-system file in a seed area of every scope; every seed file's area is `system` or a seed area of its scope; every seed file's content ends with `"\n"` |
 | 1.8 | `SandboxResolver(X)` for each of `M`, `A`, `T`, `P`, with the fixture policy | the `wenchang.testing.ResolverConformance` suite runs against each | every case passes |
+| 1.9 | `ticking_clock` | called with a naive `start`, or with a `step` that is not a positive whole number of seconds (`timedelta(milliseconds=1500)`, `timedelta(0)`, `timedelta(seconds=-1)`) | it raises `ValueError` |
 
 ### US2 — Session bootstrap via `get_memory_index`
 
@@ -117,8 +118,8 @@ for `user` and `project`, `A` for `organization`. The area is
 | - | ----- | ---- | ---- |
 | 5.1 | a seeded store; tools bound to `M` for `user`, to `A` for `project` and `organization` | each of `write_file`, `append_line`, `replace_fact`, `delete_file` targets that scope's seeded `system/` file, mutating calls passing the file's real current version | each raises `RestrictedScopeError`; rendered `category` is `"permanent"`, `reason` is `"system_read_only"`, `path` is the target path |
 | 5.2 | a seeded store, tools bound to `M` (`organization` role `member`) | each of the four mutating tools targets `organization/o-acme/system/fiscal-calendar` | each raises with rendered `reason` `"system_read_only"`, not `"role_required"`: the `system/` check precedes the role check |
-| 5.3 | the store after 5.1 and 5.2 | every `system/` file is read through the client | each is unchanged (content and version) and no new file exists |
-| 5.4 | the store after 5.3 | `client.write_file` on `project/p-checkout/system/event-catalog.md`, the path the tools just rejected, with its current version | it succeeds and the returned version differs from the prior one: the transport beneath the tools accepts `system/` writes (ADR 0019/0021) |
+| 5.3 | the end of every 5.1 and 5.2 case | every `system/` file is read through the client and the store's paths are listed | each is unchanged (content and version) and no new file exists |
+| 5.4 | a seeded store, tools bound to `A` | a tool write to `project/system/event-catalog` is rejected, then `client.write_file` on `project/p-checkout/system/event-catalog.md` with its current version (its own test) | the tool call raises `system_read_only`; the client write succeeds and the returned version differs from the prior one: the transport beneath the tools accepts `system/` writes (ADR 0019/0021) |
 
 ### US6 — Organization write restriction (role-gated)
 
@@ -126,7 +127,7 @@ for `user` and `project`, `A` for `organization`. The area is
 | - | ----- | ---- | ---- |
 | 6.1 | a seeded store, tools bound to `M` (`organization` role `member`) | each of `write_file`, `append_line`, `replace_fact`, `delete_file` targets the seeded `organization/vocabulary/terms` file with its real version | each raises `RestrictedScopeError`; rendered `category` is `"permanent"`, `reason` is `"role_required"`, `scope` is `"organization"`, `required_roles` is `["admin", "owner"]` |
 | 6.2 | as 6.1 | `read_file` on that file | it succeeds: the restriction is on writes only |
-| 6.3 | as 6.1 | the store is read after the 6.1 calls | the organization file is unchanged |
+| 6.3 | the end of every 6.1 case | the organization file is read through the client | it is unchanged (content and version) |
 
 ### US7 — Shared-scope version conflict is routine
 
@@ -146,7 +147,7 @@ sequence: seed, then `M` writes `project/metrics/budget-a`, then
 the sum of the sizes of every `system` entry, every `user` entry, and the
 `budget-b` entry, so the next entry does not fit. Byte sizes match across
 the two stores because `InMemoryStorage` version tokens are a counter and
-`last_updated` renders without microseconds on a whole-second clock.
+both stores run the same sequence on the same clock start and step.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |

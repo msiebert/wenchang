@@ -201,6 +201,13 @@ identical paths, versions, and timestamps, and therefore identical sizes.
   pass its real version. US5.2 and US6.1 are parametrized over the four
   mutating tools bound to `M`, also with real versions. So each rejection
   comes from the restriction, never a missing file or bad token.
+- Each parametrized case is independent: every 5.1 and 5.2 case ends with
+  the 5.3 check (all `system/` files unchanged in content and version, no
+  new path), and every 6.1 case ends with the 6.3 check (the organization
+  file unchanged). 5.4 is its own test: seed, a rejected tool write to
+  `project/system/event-catalog`, then `client.write_file` on that path,
+  asserting the version changed.
+- US1.9 lives in the config test module.
 - Docstrings cite `AIE-1059` and the criterion numbers.
 
 ## Design decisions
