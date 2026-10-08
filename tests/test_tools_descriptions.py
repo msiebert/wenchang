@@ -4,9 +4,11 @@ Covers AIE-1044, US5.1 through US5.8: TOOL_NAMES, MemoryTools.tools(), and
 the docstrings a host shows the agent as tool descriptions; and AIE-1151,
 US5.1: the aliases and description paragraph on append_line and replace_fact; and
 AIE-1165, US2 and US4: shared mechanics stated once in get_memory_index, with each
-write tool keeping its own expected_version and conflict guidance.
+write tool keeping its own expected_version and conflict guidance; and AIE-1164,
+US5: MemoryTools.descriptions(), with the product named in each first line.
 """
 
+import inspect
 import re
 import types
 from collections.abc import Mapping, Sequence
@@ -319,3 +321,106 @@ def test_get_memory_index_docstring_explains_entity_segment() -> None:
 def test_tools_module_cites_no_linear_ids() -> None:
     """src/wenchang/tools.py contains no AIE-\\d+ reference (AIE-1044, US5.7)."""
     assert re.findall(r"AIE-\d+", TOOLS_MODULE.read_text()) == []
+
+
+# --- descriptions() ---------------------------------------------------------------
+
+PINNED_FIRST_LINES = {
+    "get_memory_index": (
+        "Load the metadata index of every Mixpanel memory scope available in this session."
+    ),
+    "read_file": "Read one Mixpanel memory file: its content, metadata, and version.",
+    "list_prefix": (
+        "List the files in a Mixpanel memory scope or area, one page at a time, without content."
+    ),
+    "write_file": "Create a Mixpanel memory file or replace one whole.",
+    "append_line": "Add one fact line to the end of an existing Mixpanel memory file.",
+    "replace_fact": "Change one fact in a Mixpanel memory file by quoting the text to replace.",
+    "delete_file": "Delete a Mixpanel memory file.",
+}
+FIDELITY_PRODUCTS = ("Mixpanel", "Acme Analytics")
+
+
+def _product_tools(product: str | None) -> MemoryTools:
+    return MemoryTools(_NullClient(), IDENTITY, POLICY, source="test-surface", product=product)
+
+
+def _cleandoc(tool: str) -> str:
+    return inspect.cleandoc(_doc(tool))
+
+
+@pytest.mark.parametrize("product", [None, "Mixpanel"], ids=["no-product", "product"])
+def test_descriptions_is_fresh_read_only_mapping_in_tool_order(product: str | None) -> None:
+    """descriptions() returns a new read-only MappingProxyType on each call,
+    keyed by TOOL_NAMES in order (AIE-1164, US5.1).
+    """
+    tools = _product_tools(product)
+
+    first = tools.descriptions()
+    second = tools.descriptions()
+
+    assert first is not second
+    assert list(first) == list(TOOL_NAMES)
+    with pytest.raises(TypeError):
+        first["read_file"] = "x"  # pyright: ignore[reportIndexIssue]
+    assert type(first) is types.MappingProxyType
+
+
+def test_descriptions_without_product_are_cleandoc_docstrings(tools: MemoryTools) -> None:
+    """With no product, each description is the cleandoc'd tool docstring
+    (AIE-1164, US5.2).
+    """
+    descriptions = tools.descriptions()
+
+    assert dict(descriptions) == {name: _cleandoc(name) for name in EXPECTED_TOOL_NAMES}
+
+
+@pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)
+def test_descriptions_with_product_pin_first_line_only(tool: str) -> None:
+    """With product "Mixpanel", each first line is the pinned form and every
+    later line equals the cleandoc'd docstring's (AIE-1164, US5.3).
+    """
+    rendered = _product_tools("Mixpanel").descriptions()[tool]
+    first, sep, rest = rendered.partition("\n")
+    _, doc_sep, doc_rest = _cleandoc(tool).partition("\n")
+
+    assert first == PINNED_FIRST_LINES[tool]
+    assert (sep, rest) == (doc_sep, doc_rest)
+
+
+@pytest.mark.parametrize("product", FIDELITY_PRODUCTS)
+@pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)
+def test_descriptions_first_line_is_single_insertion(tool: str, product: str) -> None:
+    """Each rendered first line is the docstring's first line with exactly one
+    insertion at a word boundary: "P " for six tools, "P memory " for
+    list_prefix (AIE-1164, US5.4).
+    """
+    first = _cleandoc(tool).split("\n", 1)[0]
+    boundaries = {0} | {j + 1 for j, c in enumerate(first) if c == " "}
+    insertion = f"{product} memory " if tool == "list_prefix" else f"{product} "
+    candidates = {first[:i] + insertion + first[i:] for i in boundaries}
+
+    rendered = _product_tools(product).descriptions()[tool].split("\n", 1)[0]
+
+    assert rendered in candidates
+
+
+@pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)
+def test_descriptions_insert_product_verbatim(tool: str) -> None:
+    """A product containing braces appears verbatim, with no format
+    interpretation (AIE-1164, US5.5).
+    """
+    rendered = _product_tools("A{b}c").descriptions()[tool].split("\n", 1)[0]
+
+    assert rendered == PINNED_FIRST_LINES[tool].replace("Mixpanel", "A{b}c")
+
+
+@pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)
+def test_descriptions_first_line_is_one_sentence(tool: str) -> None:
+    """With product "Mixpanel", each first line is one sentence ending in "."
+    (AIE-1164, US5.6).
+    """
+    first_line = _product_tools("Mixpanel").descriptions()[tool].split("\n", 1)[0]
+
+    assert first_line.endswith(".")
+    assert ". " not in first_line

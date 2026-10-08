@@ -2,14 +2,16 @@
 
 A MemoryTools instance is one session: a resolved Identity, the adopter's
 ScopePolicy, a TransportClient, and the surface name stamped on writes.
-Its public methods are the tools; their docstrings are the descriptions a
-host shows the agent. Tools take a scope, area, and name and build the
+Its public methods are the tools; descriptions() gives the descriptions a
+host shows the agent: the docstrings, with the product named in each first
+line when one is set. Tools take a scope, area, and name and build the
 path under the caller's own entity in that scope. Mutating tools check the
 write against the identity and policy, then call the client.
 render_result and render_error produce the JSON-safe form a host shows the
 agent.
 """
 
+import inspect
 import re
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -65,6 +67,28 @@ _LINE_BOUNDARIES: Final[tuple[str, ...]] = (
     "\u2029",
 )
 
+# Each tool's description first line with the product named; "{product}" is replaced verbatim.
+_FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "get_memory_index": (
+            "Load the metadata index of every {product} memory scope available in this session."
+        ),
+        "read_file": "Read one {product} memory file: its content, metadata, and version.",
+        "list_prefix": (
+            "List the files in a {product} memory scope or area, one page at a time, "
+            "without content."
+        ),
+        "write_file": "Create a {product} memory file or replace one whole.",
+        "append_line": "Add one fact line to the end of an existing {product} memory file.",
+        "replace_fact": (
+            "Change one fact in a {product} memory file by quoting the text to replace."
+        ),
+        "delete_file": "Delete a {product} memory file.",
+    }
+)
+if tuple(_FIRST_LINE_TEMPLATES) != TOOL_NAMES:
+    raise RuntimeError("_FIRST_LINE_TEMPLATES keys must match TOOL_NAMES")
+
 _AREA_SLUG: Final = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 # Marks a field render_error omits because it has no JSON-safe form.
@@ -78,7 +102,13 @@ class MemoryTools:
     """The memory tools for one session."""
 
     def __init__(
-        self, client: TransportClient, identity: Identity, policy: ScopePolicy, *, source: str
+        self,
+        client: TransportClient,
+        identity: Identity,
+        policy: ScopePolicy,
+        *,
+        source: str,
+        product: str | None = None,
     ) -> None:
         if not isinstance(cast(object, client), TransportClient):
             raise TypeError("client must satisfy TransportClient")
@@ -96,6 +126,7 @@ class MemoryTools:
         self._identity = identity
         self._policy = policy
         self._source = source
+        self._product = _product(product)
 
     @property
     def client(self) -> TransportClient:
@@ -117,12 +148,30 @@ class MemoryTools:
         """The surface name stamped as a source on every write."""
         return self._source
 
+    @property
+    def product(self) -> str | None:
+        """The product named in each tool description's first line, or None."""
+        return self._product
+
     def tools(self) -> Mapping[str, Callable[..., object]]:
         """The seven tools by name, in TOOL_NAMES order, as bound methods."""
         methods: dict[str, Callable[..., object]] = {
             name: getattr(self, name) for name in TOOL_NAMES
         }
         return MappingProxyType(methods)
+
+    def descriptions(self) -> Mapping[str, str]:
+        """Each tool's description by name, in TOOL_NAMES order, with the product in line one."""
+        out: dict[str, str] = {}
+        for name in TOOL_NAMES:
+            doc = inspect.cleandoc(cast(str, getattr(MemoryTools, name).__doc__))
+            if self._product is None:
+                out[name] = doc
+            else:
+                _, sep, rest = doc.partition("\n")
+                first = _FIRST_LINE_TEMPLATES[name].replace("{product}", self._product)
+                out[name] = first + sep + rest
+        return MappingProxyType(out)
 
     def get_memory_index(self) -> MemoryIndex:
         """Load the metadata index of every memory scope available in this session.
@@ -344,6 +393,24 @@ def _type_name(t: type) -> str:
         return "<unnamed>"
 
 
+def _product(product: object) -> str | None:
+    """Return product stripped to an exact one-line UTF-8 str, or None."""
+    if product is None:
+        return None
+    if not issubclass(type(product), str):
+        raise TypeError(f"product must be a str or None, not {_type_name(type(product))}")
+    value = str.strip(str.__str__(cast(str, product)))
+    if value == "":
+        raise ValueError("product must be non-empty")
+    if len(value.splitlines()) != 1:
+        raise ValueError("product must be one line")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("product must be encodable as UTF-8") from exc
+    return value
+
+
 def _message(exc: BaseException) -> str:
     # An exception's __str__ may raise or return a str subclass.
     try:
@@ -436,9 +503,12 @@ def bind_tools[C](
     policy: ScopePolicy,
     *,
     source: str,
+    product: str | None = None,
 ) -> MemoryTools:
     """Resolve the caller's identity and return the session's tools."""
-    return MemoryTools(client, resolve_identity(resolver, credentials), policy, source=source)
+    return MemoryTools(
+        client, resolve_identity(resolver, credentials), policy, source=source, product=product
+    )
 
 
 def render_result(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str, object]:
