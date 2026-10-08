@@ -41,6 +41,11 @@ def _type_name(t: type) -> str:
         return "<unnamed>"
 
 
+def _overview(slots: PromptSlots) -> tuple[str, str]:
+    parts = [slots.purpose, overview.BODY.strip()]
+    return overview.HEADING, "\n\n".join(p for p in parts if p)
+
+
 def _systems_of_record(slots: PromptSlots) -> tuple[str, str]:
     if slots.systems_of_record is None:
         return systems_of_record.HEADING, ""
@@ -50,7 +55,7 @@ def _systems_of_record(slots: PromptSlots) -> tuple[str, str]:
 
 # Generic sections read HEADING and BODY at call time so module edits take effect.
 _SECTIONS: Final[Mapping[str, Callable[[PromptSlots], tuple[str, str]]]] = {
-    "overview": lambda _: (overview.HEADING, overview.BODY),
+    "overview": _overview,
     "scope_guidance": lambda s: (SCOPE_GUIDANCE_HEADING, s.scope_guidance),
     "seed_areas": lambda s: (SEED_AREAS_HEADING, s.seed_areas),
     "systems_of_record": _systems_of_record,

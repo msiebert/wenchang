@@ -1,6 +1,7 @@
 """Tests for the filing section prose.
 
-Covers AIE-1049, US1 through US4.
+Covers AIE-1049, US1 through US4. PromptSlots construction includes the
+purpose slot (AIE-1164, US1).
 """
 
 import re
@@ -34,7 +35,9 @@ def test_filing_body_length() -> None:
 def test_filing_section_in_assembled_prompt() -> None:
     """AIE-1049, US1.3: the assembled prompt contains the filing section."""
     assert filing.BODY.strip() != ""
-    slots = PromptSlots(scope_guidance="Scopes text.", seed_areas="Seed text.")
+    slots = PromptSlots(
+        purpose="Purpose text.", scope_guidance="Scopes text.", seed_areas="Seed text."
+    )
     assert "## Filing\n\n" + filing.BODY.strip() in build_memory_prompt(slots)
 
 

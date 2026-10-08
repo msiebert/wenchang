@@ -1,7 +1,8 @@
-"""PromptSlots validation tests (AIE-1055, US1)."""
+"""PromptSlots validation tests (AIE-1055, US1; AIE-1164, US1)."""
 
 import dataclasses
 import re
+from collections.abc import Callable
 from typing import cast
 
 import pytest
@@ -10,10 +11,11 @@ from wenchang.prompts.slots import PromptSlots
 
 pytestmark = pytest.mark.unit
 
-FIELDS = ("scope_guidance", "seed_areas", "systems_of_record")
-REQUIRED_FIELDS = ("scope_guidance", "seed_areas")
+FIELDS = ("purpose", "scope_guidance", "seed_areas", "systems_of_record")
+REQUIRED_FIELDS = ("purpose", "scope_guidance", "seed_areas")
 
 VALID: dict[str, object] = {
+    "purpose": "You have memory for Acme; use it whenever you work with Acme.",
     "scope_guidance": "Org scope is shared; user scope is private.",
     "seed_areas": "org: product, customers; system/: policies",
     "systems_of_record": "Jira holds tickets.",
@@ -39,11 +41,13 @@ class _LyingStr(str):
 
 
 def _make(
+    purpose: object,
     scope_guidance: object,
     seed_areas: object,
     systems_of_record: object = None,
 ) -> PromptSlots:
     return PromptSlots(
+        purpose=cast(str, purpose),
         scope_guidance=cast(str, scope_guidance),
         seed_areas=cast(str, seed_areas),
         systems_of_record=cast(str | None, systems_of_record),
@@ -52,30 +56,70 @@ def _make(
 
 def _make_with(**overrides: object) -> PromptSlots:
     values = {**VALID, **overrides}
-    return _make(values["scope_guidance"], values["seed_areas"], values["systems_of_record"])
+    return _make(
+        values["purpose"],
+        values["scope_guidance"],
+        values["seed_areas"],
+        values["systems_of_record"],
+    )
 
 
-def test_three_non_blank_strings_construct_stripped() -> None:
-    """Three non-blank str values construct, each stored .strip()ped (AIE-1055, US1.1)."""
+def test_non_blank_strings_construct_stripped() -> None:
+    """Non-blank str values construct, each stored .strip()ped as exact str (AIE-1055, US1.1;
+    AIE-1164, US1.1).
+    """
     slots = PromptSlots(
+        purpose="  text\n",
         scope_guidance="  shared org, private user \n",
         seed_areas="\tproduct, customers  ",
         systems_of_record=" Jira holds tickets.\n\n",
     )
+    assert slots.purpose == "text"
     assert slots.scope_guidance == "shared org, private user"
     assert slots.seed_areas == "product, customers"
     assert slots.systems_of_record == "Jira holds tickets."
+    for field in FIELDS:
+        assert type(getattr(slots, field)) is str
+
+
+def test_fields_in_order_and_only_systems_of_record_defaulted() -> None:
+    """Fields are purpose, scope_guidance, seed_areas, systems_of_record; only
+    systems_of_record has a default, None (AIE-1164, US1.2).
+    """
+    fields = dataclasses.fields(PromptSlots)
+    assert tuple(f.name for f in fields) == FIELDS
+    defaulted = {f.name: f.default for f in fields if f.default is not dataclasses.MISSING}
+    assert defaulted == {"systems_of_record": None}
+    assert all(f.default_factory is dataclasses.MISSING for f in fields)
+
+
+def test_positional_construction_starts_with_purpose() -> None:
+    """PromptSlots("p", "g", "s") binds purpose, scope_guidance, seed_areas in order
+    (AIE-1164, US1.3).
+    """
+    slots = PromptSlots("p", "g", "s")
+    assert slots.purpose == "p"
+    assert slots.scope_guidance == "g"
+    assert slots.seed_areas == "s"
+    assert slots.systems_of_record is None
+
+
+def test_purpose_omitted_raises_type_error() -> None:
+    """Omitting purpose raises TypeError for the missing argument (AIE-1164, US1.4)."""
+    make = cast(Callable[..., object], PromptSlots)
+    with pytest.raises(TypeError, match="purpose"):
+        make(scope_guidance="g", seed_areas="s")
 
 
 def test_systems_of_record_omitted_is_none() -> None:
     """Omitting systems_of_record leaves the field None (AIE-1055, US1.2)."""
-    slots = PromptSlots(scope_guidance="a", seed_areas="b")
+    slots = PromptSlots(purpose="p", scope_guidance="a", seed_areas="b")
     assert slots.systems_of_record is None
 
 
 def test_systems_of_record_none_is_none() -> None:
     """Passing systems_of_record=None leaves the field None (AIE-1055, US1.2)."""
-    slots = PromptSlots(scope_guidance="a", seed_areas="b", systems_of_record=None)
+    slots = PromptSlots(purpose="p", scope_guidance="a", seed_areas="b", systems_of_record=None)
     assert slots.systems_of_record is None
 
 
@@ -92,7 +136,9 @@ def test_systems_of_record_none_is_none() -> None:
 def test_required_field_wrong_type_raises_type_error(
     field: str, bad: object, type_name: str
 ) -> None:
-    """A required field whose real type is not str raises TypeError (AIE-1055, US1.3)."""
+    """A required field whose real type is not str raises TypeError (AIE-1055, US1.3;
+    AIE-1164, US1.5).
+    """
     with pytest.raises(TypeError, match=f"^{re.escape(f'{field} must be str, not {type_name}')}$"):
         _make_with(**{field: bad})
 
@@ -115,7 +161,7 @@ def test_systems_of_record_wrong_type_raises_type_error(bad: object, type_name: 
 @pytest.mark.parametrize("field", FIELDS)
 def test_str_subclass_normalized_to_exact_str(field: str) -> None:
     """A lying str subclass is stored as exact str via str.__str__ then str.strip
-    (AIE-1055, US1.5).
+    (AIE-1055, US1.5; AIE-1164, US1.6).
     """
     slots = _make_with(**{field: _LyingStr("  real text \n")})
     stored = getattr(slots, field)
@@ -125,7 +171,7 @@ def test_str_subclass_normalized_to_exact_str(field: str) -> None:
 
 @pytest.mark.parametrize("field", FIELDS)
 def test_surrounding_whitespace_is_stripped(field: str) -> None:
-    """'  text\\n' is stored as 'text' (AIE-1055, US1.6)."""
+    """'  text\\n' is stored as 'text' (AIE-1055, US1.6; AIE-1164, US1.1)."""
     slots = _make_with(**{field: "  text\n"})
     assert getattr(slots, field) == "text"
 
@@ -133,7 +179,7 @@ def test_surrounding_whitespace_is_stripped(field: str) -> None:
 @pytest.mark.parametrize("field", FIELDS)
 @pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
 def test_blank_field_raises_value_error(field: str, blank: str) -> None:
-    """Empty or whitespace-only text raises ValueError (AIE-1055, US1.7)."""
+    """Empty or whitespace-only text raises ValueError (AIE-1055, US1.7; AIE-1164, US1.7)."""
     expected = f"{field} must not be empty or whitespace-only"
     with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
         _make_with(**{field: blank})
@@ -141,7 +187,9 @@ def test_blank_field_raises_value_error(field: str, blank: str) -> None:
 
 @pytest.mark.parametrize("field", FIELDS)
 def test_lone_surrogate_raises_value_error_from_unicode_error(field: str) -> None:
-    """A lone surrogate raises ValueError caused by UnicodeEncodeError (AIE-1055, US1.8)."""
+    """A lone surrogate raises ValueError caused by UnicodeEncodeError (AIE-1055, US1.8;
+    AIE-1164, US1.8).
+    """
     expected = f"{field} must be encodable as UTF-8"
     with pytest.raises(ValueError, match=f"^{re.escape(expected)}$") as exc_info:
         _make_with(**{field: "a\ud800b"})
@@ -151,6 +199,15 @@ def test_lone_surrogate_raises_value_error_from_unicode_error(field: str) -> Non
 @pytest.mark.parametrize(
     ("overrides", "expected"),
     [
+        ({"purpose": "  ", "seed_areas": 42}, "seed_areas must be str, not int"),
+        (
+            {"purpose": "a\ud800b", "scope_guidance": None},
+            "scope_guidance must be str, not NoneType",
+        ),
+        (
+            {"purpose": "", "systems_of_record": 5},
+            "systems_of_record must be str or None, not int",
+        ),
         ({"scope_guidance": "   ", "seed_areas": 42}, "seed_areas must be str, not int"),
         (
             {"scope_guidance": "", "systems_of_record": b"x"},
@@ -163,7 +220,7 @@ def test_lone_surrogate_raises_value_error_from_unicode_error(field: str) -> Non
     ],
 )
 def test_type_checks_run_before_value_checks(overrides: dict[str, object], expected: str) -> None:
-    """A later wrong type wins over an earlier bad value (AIE-1055, US1.9)."""
+    """A later wrong type wins over an earlier bad value (AIE-1055, US1.9; AIE-1164, US1.9)."""
     with pytest.raises(TypeError, match=f"^{re.escape(expected)}$"):
         _make_with(**overrides)
 
@@ -171,6 +228,41 @@ def test_type_checks_run_before_value_checks(overrides: dict[str, object], expec
 @pytest.mark.parametrize(
     ("overrides", "error", "expected"),
     [
+        (
+            {"purpose": 1, "scope_guidance": None},
+            TypeError,
+            "purpose must be str, not int",
+        ),
+        (
+            {"purpose": b"x", "seed_areas": 2},
+            TypeError,
+            "purpose must be str, not bytes",
+        ),
+        (
+            {"purpose": None, "systems_of_record": 3},
+            TypeError,
+            "purpose must be str, not NoneType",
+        ),
+        (
+            {"purpose": " ", "scope_guidance": ""},
+            ValueError,
+            "purpose must not be empty or whitespace-only",
+        ),
+        (
+            {"purpose": "\n", "systems_of_record": "\t"},
+            ValueError,
+            "purpose must not be empty or whitespace-only",
+        ),
+        (
+            {"purpose": "a\ud800b", "scope_guidance": "b\udfffc"},
+            ValueError,
+            "purpose must be encodable as UTF-8",
+        ),
+        (
+            {"purpose": "a\ud800b", "seed_areas": " "},
+            ValueError,
+            "purpose must be encodable as UTF-8",
+        ),
         (
             {"scope_guidance": 1, "seed_areas": None},
             TypeError,
@@ -212,7 +304,7 @@ def test_first_bad_field_in_order_is_reported(
     overrides: dict[str, object], error: type[Exception], expected: str
 ) -> None:
     """With two bad fields of the same kind, the first in field order is named
-    (AIE-1055, US1.10).
+    (AIE-1055, US1.10; AIE-1164, US1.10).
     """
     with pytest.raises(error, match=f"^{re.escape(expected)}$"):
         _make_with(**overrides)
@@ -220,7 +312,7 @@ def test_first_bad_field_in_order_is_reported(
 
 @pytest.mark.parametrize("field", FIELDS)
 def test_assignment_raises_frozen_instance_error(field: str) -> None:
-    """Assigning to any field raises FrozenInstanceError (AIE-1055, US1.11)."""
+    """Assigning to any field raises FrozenInstanceError (AIE-1055, US1.11; AIE-1164, US1.11)."""
     slots = _make_with()
     with pytest.raises(dataclasses.FrozenInstanceError):
         setattr(slots, field, "changed")
@@ -228,8 +320,12 @@ def test_assignment_raises_frozen_instance_error(field: str) -> None:
 
 def test_equal_post_strip_text_is_equal_with_equal_hashes() -> None:
     """Slots built from equal post-strip text are equal and hash equal (AIE-1055, US1.12)."""
-    a = PromptSlots(scope_guidance="  guide ", seed_areas="areas\n", systems_of_record="sor")
-    b = PromptSlots(scope_guidance="guide", seed_areas="\tareas", systems_of_record=" sor ")
+    a = PromptSlots(
+        purpose="purpose", scope_guidance="  guide ", seed_areas="areas\n", systems_of_record="sor"
+    )
+    b = PromptSlots(
+        purpose="purpose", scope_guidance="guide", seed_areas="\tareas", systems_of_record=" sor "
+    )
     assert a == b
     assert hash(a) == hash(b)
 
@@ -238,10 +334,29 @@ def test_equal_text_without_systems_of_record_is_equal_with_equal_hashes() -> No
     """Slots with equal text and no systems_of_record are equal and hash equal
     (AIE-1055, US1.12).
     """
-    a = PromptSlots(scope_guidance="guide", seed_areas="areas")
-    b = PromptSlots(scope_guidance=" guide", seed_areas="areas ", systems_of_record=None)
+    a = PromptSlots(purpose="purpose", scope_guidance="guide", seed_areas="areas")
+    b = PromptSlots(
+        purpose="purpose", scope_guidance=" guide", seed_areas="areas ", systems_of_record=None
+    )
     assert a == b
     assert hash(a) == hash(b)
+
+
+def test_purpose_whitespace_only_difference_is_equal_with_equal_hashes() -> None:
+    """Slots differing only by whitespace around purpose are equal and hash equal
+    (AIE-1164, US1.12).
+    """
+    a = PromptSlots(purpose="  Use Acme memory.\n", scope_guidance="guide", seed_areas="areas")
+    b = PromptSlots(purpose="Use Acme memory.", scope_guidance="guide", seed_areas="areas")
+    assert a == b
+    assert hash(a) == hash(b)
+
+
+def test_different_purpose_is_not_equal() -> None:
+    """Slots differing in purpose text are not equal (AIE-1164, US1.12)."""
+    a = PromptSlots(purpose="Use Acme memory.", scope_guidance="guide", seed_areas="areas")
+    b = PromptSlots(purpose="Use Beta memory.", scope_guidance="guide", seed_areas="areas")
+    assert a != b
 
 
 @pytest.mark.parametrize("term", ["shared", "private", "system/"])
@@ -257,3 +372,17 @@ def test_docstring_says_slots_state_only_deployment_facts() -> None:
     """
     assert PromptSlots.__doc__ is not None
     assert "Slots state only deployment facts" in re.sub(r"\s+", " ", PromptSlots.__doc__)
+
+
+def test_docstring_has_purpose_bullet_before_scope_guidance() -> None:
+    """The class docstring has a ``purpose`` bullet naming the product and when to use
+    memory, listed before the ``scope_guidance`` bullet (AIE-1164, US1.13).
+    """
+    assert PromptSlots.__doc__ is not None
+    doc = re.sub(r"\s+", " ", PromptSlots.__doc__)
+    purpose_at = doc.find("``purpose``")
+    scope_at = doc.find("``scope_guidance``")
+    assert purpose_at != -1
+    assert scope_at != -1
+    assert purpose_at < scope_at
+    assert "naming the product and when to use memory" in doc[purpose_at:scope_at]

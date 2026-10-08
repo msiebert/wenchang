@@ -1,12 +1,16 @@
-"""Reference adopter configuration for prompt tests (AIE-1055).
+"""Reference adopter configuration for prompt tests (AIE-1055, AIE-1164).
 
-Notion spec section 9 rendered as the three PromptSlots blobs plus a scope
+Notion spec section 9 rendered as the four PromptSlots blobs plus a scope
 priority order. This is illustrative adopter configuration, not library code.
 """
 
 from typing import Final
 
 from wenchang.prompts import PromptSlots
+
+REFERENCE_PURPOSE: Final[str] = """\
+You have persistent memory of your work in Mixpanel: reference it and save to it with these
+tools whenever you work with Mixpanel."""
 
 REFERENCE_SCOPE_GUIDANCE: Final[str] = """\
 There are three scopes: user, project, and organization. An organization contains projects, and
@@ -43,6 +47,7 @@ REFERENCE_SYSTEMS_OF_RECORD: Final[str] = """\
   used for and what people have said about it."""
 
 REFERENCE_SLOTS: Final[PromptSlots] = PromptSlots(
+    purpose=REFERENCE_PURPOSE,
     scope_guidance=REFERENCE_SCOPE_GUIDANCE,
     seed_areas=REFERENCE_SEED_AREAS,
     systems_of_record=REFERENCE_SYSTEMS_OF_RECORD,

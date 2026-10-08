@@ -1,6 +1,7 @@
 """Tests for the forgetting section prose.
 
-Covers AIE-1053, US1-US6.
+Covers AIE-1053, US1-US6. PromptSlots construction includes the purpose slot
+(AIE-1164, US1).
 """
 
 import re
@@ -28,7 +29,9 @@ def test_forgetting_heading() -> None:
 
 def test_build_memory_prompt_ends_with_forgetting_section() -> None:
     """AIE-1053, US1.3: the rendered prompt ends with the forgetting section."""
-    slots = PromptSlots(scope_guidance="Scope guidance.", seed_areas="Seed areas.")
+    slots = PromptSlots(
+        purpose="Purpose text.", scope_guidance="Scope guidance.", seed_areas="Seed areas."
+    )
     body = forgetting.BODY.strip()
     assert body != ""
     assert build_memory_prompt(slots).endswith("## Forgetting\n\n" + body + "\n")

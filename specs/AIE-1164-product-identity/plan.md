@@ -87,15 +87,23 @@ So with a non-blank BODY, section 1 is
 
 ```python
 class MemoryTools:
-    def __init__(self, client: TransportClient, identity: Identity,
-                 policy: ScopePolicy, *, source: str,
-                 product: str | None = None) -> None: ...
+    def __init__(
+        self,
+        client: TransportClient,
+        identity: Identity,
+        policy: ScopePolicy,
+        *,
+        source: str,
+        product: str | None = None,
+    ) -> None: ...
     @property
-    def product(self) -> str | None: ...       # read-only
+    def product(self) -> str | None: ...  # read-only
     def descriptions(self) -> Mapping[str, str]: ...
 
-def bind_tools[C](client, resolver, credentials, policy, *, source: str,
-                  product: str | None = None) -> MemoryTools: ...
+
+def bind_tools[C](
+    client, resolver, credentials, policy, *, source: str, product: str | None = None
+) -> MemoryTools: ...
 ```
 
 Constructor check order (argument order; existing checks unchanged): client,
@@ -131,20 +139,22 @@ Every source line stays ≤100 columns (ruff E501); the two long templates use
 implicit string concatenation:
 
 ```python
-_FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType({
-    "get_memory_index": (
-        "Load the metadata index of every {product} memory scope available in this session."
-    ),
-    "read_file": "Read one {product} memory file: its content, metadata, and version.",
-    "list_prefix": (
-        "List the files in a {product} memory scope or area, "
-        "one page at a time, without content."
-    ),
-    "write_file": "Create a {product} memory file or replace one whole.",
-    "append_line": "Add one fact line to the end of an existing {product} memory file.",
-    "replace_fact": "Change one fact in a {product} memory file by quoting the text to replace.",
-    "delete_file": "Delete a {product} memory file.",
-})
+_FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "get_memory_index": (
+            "Load the metadata index of every {product} memory scope available in this session."
+        ),
+        "read_file": "Read one {product} memory file: its content, metadata, and version.",
+        "list_prefix": (
+            "List the files in a {product} memory scope or area, "
+            "one page at a time, without content."
+        ),
+        "write_file": "Create a {product} memory file or replace one whole.",
+        "append_line": "Add one fact line to the end of an existing {product} memory file.",
+        "replace_fact": "Change one fact in a {product} memory file by quoting the text to replace.",
+        "delete_file": "Delete a {product} memory file.",
+    }
+)
 ```
 
 An import-time guard (like `assemble._SECTIONS`) raises `RuntimeError` if
