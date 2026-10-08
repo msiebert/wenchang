@@ -76,7 +76,7 @@ Paths are under `tests/`; line numbers are the `def` line.
 | US2.6 `overview.BODY` names no product; invariants unchanged | `test_prompts_assembly.py:285` `test_generic_text_names_no_product` (every generic BODY and the systems-of-record principle; "mixpanel", "acme"); `test_prompts_invariants.py` unchanged and passing |
 | US3.1 `REFERENCE_PURPOSE` shape | `test_prompts_assembly.py:430` `test_reference_purpose_shape` |
 | US3.2 `REFERENCE_SLOTS.purpose == REFERENCE_PURPOSE` | `test_prompts_assembly.py:404` `test_reference_slots_build_and_appear_under_headings` |
-| US3.3 reference section 1 body | `test_prompts_assembly.py:387` (same test) |
+| US3.3 reference section 1 body | `test_prompts_assembly.py:404` (same test) |
 | US4.1 `product` defaults to `None` | `test_tools.py:577` `test_product_defaults_to_none`; `:584` `test_product_none_is_stored_as_none` |
 | US4.2 `product` stored; `bind_tools` forwards it | `test_tools.py:589` `test_product_is_stored_from_constructor`; `:594` `test_bind_tools_forwards_product` |
 | US4.3 padded / lying-subclass (incl. one overriding `strip`) `product` → `"Mixpanel"` | `test_tools.py:624` `test_product_is_stripped_to_exact_str` |
@@ -159,3 +159,8 @@ Code review round 1:
   the optional product. NIT left: README wording "cleaned docstring" and
   hoisting `descriptions()` out of the example loop (README edit declined by
   the doc-updater as outside its configured scope; cosmetic).
+
+Code review round 2: Reviewer B PASS (one NIT: a stale line number in this
+table, fixed). Final `spec-reviewer` gate: PASS on all 41 criteria;
+non-blocking notes: the fixed article "a", template drift guarded only by the
+US5.4 test, and the README loop calling `descriptions()` per iteration.
