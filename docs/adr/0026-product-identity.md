@@ -73,6 +73,12 @@ live in a docstring.
      Docstrings are static and are public contract (ADR 0022 decision 8);
      mutating them would make one adopter's product leak into every
      instance in the process.
+   - **Note (2026-10-08, AIE-1060).** The first rejection is partly
+     superseded. A server registers its tools once at startup, before any
+     session exists, so `wenchang.tools.tool_descriptions(product=None)` now
+     renders the descriptions without a session. `product` stays a session
+     setting, and `MemoryTools.descriptions()` delegates to the function.
+     See [ADR 0027](0027-mcp-host-adapter.md) decision 2.
 4. **`descriptions()` templates only the first line.** `descriptions()`
    returns a fresh read-only mapping from each name in `TOOL_NAMES`, in
    order, to that tool's description. With `product` `None`, each value is
@@ -106,10 +112,19 @@ live in a docstring.
    each tool from `tools()` with `descriptions()[name]` as its
    description, rather than the method's `__doc__`. `tools()` is
    unchanged.
+   - **Note (2026-10-08, AIE-1060).** A host that registers before any
+     session exists uses `tool_descriptions(product)[name]`, which gives the
+     same text. See [ADR 0027](0027-mcp-host-adapter.md).
 6. **Relation to AIE-1060.** The MCP server that AIE-1060 builds registers
    each tool with `descriptions()[name]`. It may also pass the assembled
    prompt, or the `purpose` text, as the MCP server's `instructions`; that
    wiring belongs to AIE-1060.
+   - **Note (2026-10-08, AIE-1060).** `register_memory_tools` registers each
+     tool with `tool_descriptions(product)[name]`. `build_server` passes the
+     whole assembled prompt (`memory_instructions(slots)`) as
+     `instructions`, and serves the same text as the resource
+     `wenchang://memory-prompt`. See [ADR 0027](0027-mcp-host-adapter.md)
+     decisions 3, 4, and 9.
 
 ## Consequences
 

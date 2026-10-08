@@ -75,6 +75,73 @@ fact line to the end of an existing Mixpanel memory file."; without a
 product, each description is the tool's docstring. See
 [ADR 0026](docs/adr/0026-product-identity.md).
 
+## Serving over MCP
+
+`wenchang.mcp` serves the tools and the memory prompt from an MCP server. It
+needs the optional extra: `pip install 'wenchang[mcp]'`.
+
+```python
+from wenchang.mcp import build_server
+
+
+def credentials_from_context(ctx):
+    # Return the raw credential; the resolver verifies it. Headers and
+    # request _meta are client-supplied and are never an identity assertion.
+    return (ctx.headers or {}).get("authorization")
+
+
+server = build_server(
+    slots=slots,  # your PromptSlots
+    client=client,  # a thread-safe TransportClient
+    resolver=resolver,
+    policy=policy,
+    credentials_from_context=credentials_from_context,
+    source="my-surface",
+    product="Mixpanel",
+    tool_prefix="mixpanel",  # optional: tools become mixpanel_read_file, ...
+)
+server.run("stdio")  # or serve it over HTTP with mcp
+```
+
+The server's `instructions` are the assembled memory prompt, and the same
+text is served as the resource `wenchang://memory-prompt` for clients that
+drop `instructions`. To add the memory tools to a server you already run,
+with your own auth, middleware, and tools:
+
+```python
+from mcp.server.mcpserver import MCPServer
+from wenchang.mcp import memory_instructions, register_memory_tools
+
+prompt = memory_instructions(slots)
+server = MCPServer("my-host", instructions=prompt)
+register_memory_tools(
+    server,
+    prompt=prompt,
+    client=client,
+    resolver=resolver,
+    policy=policy,
+    credentials_from_context=credentials_from_context,
+    source="my-surface",
+)
+```
+
+Things to know:
+
+- **Identity is resolved on every call.** Each tool call reads credentials
+  with `credentials_from_context` and binds its own tools. The resolver runs
+  on every call, so cache inside it if resolution is expensive.
+- **Calls run concurrently on worker threads.** The `TransportClient`, and
+  the optional `on_call` observer, must be thread-safe. `on_call` receives a
+  `ToolCallRecord` after every call.
+- **MCP validates arguments first.** A wrong-type or missing argument
+  returns MCP's own error text, not a rendered wenchang error.
+- **MCP pre-parses JSON-like strings.** The string `"null"` arrives as
+  `None` for a nullable parameter. For example, `list_prefix(area="null")`
+  lists the whole scope, and `description="null"` on `append_line` changes
+  nothing.
+
+See [ADR 0027](docs/adr/0027-mcp-host-adapter.md).
+
 ## Docs
 
 - [AGENTS.md](AGENTS.md) — commands, workflow, rules

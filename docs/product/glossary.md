@@ -132,8 +132,9 @@ Terms as used throughout wenchang and its spec.
   `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`,
   `delete_file`), implemented as `tools.MemoryTools` over a transport
   client. Tools carry no judgment. The description the agent sees comes
-  from `MemoryTools.descriptions()`: the tool's docstring, with the
-  session's `product` named in the first line when one is set. Mutating
+  from `MemoryTools.descriptions()`, or from `tools.tool_descriptions(product)`
+  when no session exists yet: the tool's docstring, with the `product` named
+  in the first line when one is set. Mutating
   tools check the write (`system/` read-only, write restriction) before
   the transport sees it. Framework-agnostic: a host adapter mounts the
   tools and renders results and errors with `render_result` /
@@ -142,7 +143,15 @@ Terms as used throughout wenchang and its spec.
   start, with `tools.bind_tools`, which returns that session's
   `MemoryTools`. It is the only place credentials pass through the tool
   layer, and they are not retained. The identity and the calling surface's
-  `source` name are then fixed for the session.
+  `source` name are then fixed for the session. The MCP host adapter binds once per tool
+  call, because the MCP protocol has no session that outlasts a request.
+- **Host adapter** — the code that mounts the tool layer on an agent
+  framework's server: it registers each tool with its name and
+  description, binds the caller's `MemoryTools`, forwards the call, and
+  renders the result. `wenchang.mcp` is the MCP host adapter
+  (`register_memory_tools`, `build_server`), installed with the optional
+  `wenchang[mcp]` extra; it also serves the memory prompt as the server's
+  instructions and as a resource.
 - **Scope-relative address** — how the agent names a file to the tools:
   `(scope, area, name)`, with `name` excluding `.md`. The tool fills in the
   caller's own entity ID for that scope, so the agent never types an entity
