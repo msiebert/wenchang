@@ -427,6 +427,15 @@ def test_reference_slots_build_and_appear_under_headings() -> None:
     )
 
 
+def test_reference_memory_section_states_persistent_memory_once() -> None:
+    """AIE-1164: with REFERENCE_SLOTS, the Memory section says "You have persistent memory"
+    exactly once; the overview body does not repeat the purpose's opening."""
+    out = build_memory_prompt(REFERENCE_SLOTS)
+
+    memory = re.sub(r"\s+", " ", _sections(out)["Memory"])
+    assert memory.count("You have persistent memory") == 1
+
+
 def test_reference_purpose_shape() -> None:
     """AIE-1164, US3.1: REFERENCE_PURPOSE is ASCII, every line at most 100 columns,
     one or two sentences, and names Mixpanel."""

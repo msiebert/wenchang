@@ -2,12 +2,13 @@
 
 ## What changed & why
 
-Nothing in the assembled prompt or the tool descriptions said which product the memory serves, and an agent with many tools picks by each description's first line. The prompt gains a required `purpose` slot that opens section 1 ("Memory"); `MemoryTools` gains an optional session `product` and a `descriptions()` method that names the product in each tool description's first line. The docstrings stay static, so hosts register from `descriptions()` rather than `__doc__`. Generic section bodies, tool docstrings, and `SECTION_ORDER` are unchanged.
+Nothing in the assembled prompt or the tool descriptions said which product the memory serves, and an agent with many tools picks by each description's first line. The prompt gains a required `purpose` slot that opens section 1 ("Memory"); `MemoryTools` gains an optional session `product` and a `descriptions()` method that names the product in each tool description's first line. The docstrings stay static, so hosts register from `descriptions()` rather than `__doc__`. `overview.BODY` now opens "Memory is short markdown files ..." instead of "You have persistent memory: ...", so it no longer repeats the `purpose` opening. Other generic section bodies, tool docstrings, and `SECTION_ORDER` are unchanged.
 
 ## What changed per module
 
 - `src/wenchang/prompts/slots.py`: `purpose: str` added as the first, required field; it joins the existing type pass and value pass first in field order (same messages: `purpose must be str, not <type>`, `... must not be empty or whitespace-only`, `... must be encodable as UTF-8`). Docstring gains a ``purpose`` bullet.
 - `src/wenchang/prompts/assemble.py`: the `overview` entry of `_SECTIONS` is `_overview`, which joins the non-empty parts `[slots.purpose, overview.BODY.strip()]` with `"\n\n"`, reading `BODY` at call time. Section 1 is therefore never omitted.
+- `src/wenchang/prompts/overview.py`: `BODY` opens "Memory is short markdown files that outlast this conversation, ..." instead of "You have persistent memory: short markdown files ...", since `REFERENCE_PURPOSE` already opens "You have persistent memory of your work in Mixpanel". The rest of `BODY` is unchanged.
 - `src/wenchang/tools.py`: keyword-only `product: str | None = None` on `MemoryTools.__init__` and `bind_tools`, validated by `_product()` after `source`; read-only `product` property; `descriptions()`; private `_FIRST_LINE_TEMPLATES` with an import-time guard that its keys equal `TOOL_NAMES`; `inspect` import; module docstring says descriptions come from `descriptions()`.
 - `tests/prompts_reference_adopter.py`: `REFERENCE_PURPOSE` and `REFERENCE_SLOTS.purpose`.
 
@@ -41,10 +42,10 @@ Each is the docstring's first line with one insertion: `"Mixpanel "` for six too
 You have persistent memory of your work in Mixpanel: reference it and save to it with these
 tools whenever you work with Mixpanel.
 
-You have persistent memory: short markdown files that outlast this conversation, each addressed
-by a scope, an area in that scope, and a name. Call `get_memory_index()` at the start of every
-session, before you answer from memory or write to it. When a subject outgrows its file's size
-limit, split it into narrower files.
+Memory is short markdown files that outlast this conversation, each addressed by a scope, an
+area in that scope, and a name. Call `get_memory_index()` at the start of every session, before
+you answer from memory or write to it. When a subject outgrows its file's size limit, split it
+into narrower files.
 
 ## Scopes
 ```
@@ -74,7 +75,7 @@ Paths are under `tests/`; line numbers are the `def` line.
 | US2.4 `overview.BODY` read at call time | `test_prompts_assembly.py:381` `test_build_reads_bodies_at_call_time` |
 | US2.5 full output equals per-section join | `test_prompts_assembly.py:215` `test_build_full_output_format` |
 | US2.6 `overview.BODY` names no product; invariants unchanged | `test_prompts_assembly.py:285` `test_generic_text_names_no_product` (every generic BODY and the systems-of-record principle; "mixpanel", "acme"); `test_prompts_invariants.py` unchanged and passing |
-| US3.1 `REFERENCE_PURPOSE` shape | `test_prompts_assembly.py:430` `test_reference_purpose_shape` |
+| US3.1 `REFERENCE_PURPOSE` shape | `test_prompts_assembly.py:439` `test_reference_purpose_shape` |
 | US3.2 `REFERENCE_SLOTS.purpose == REFERENCE_PURPOSE` | `test_prompts_assembly.py:404` `test_reference_slots_build_and_appear_under_headings` |
 | US3.3 reference section 1 body | `test_prompts_assembly.py:404` (same test) |
 | US4.1 `product` defaults to `None` | `test_tools.py:577` `test_product_defaults_to_none`; `:584` `test_product_none_is_stored_as_none` |
@@ -103,7 +104,7 @@ Paths are under `tests/`; line numbers are the `def` line.
 
 ## `make check`
 
-Passes: ruff format (295 files already formatted), ruff lint (all checks passed), pyright (0 errors, 0 warnings), pytest 3644 passed, 6 skipped, 41 deselected (main: 3533 passed).
+Passes: ruff format (295 files already formatted), ruff lint (all checks passed), pyright (0 errors, 0 warnings), pytest 3646 passed, 6 skipped, 41 deselected (main: 3533 passed).
 
 ## Existing tests changed and why
 
@@ -119,14 +120,14 @@ Passes: ruff format (295 files already formatted), ruff lint (all checks passed)
 
 ## Architecture / ADR changes
 
-- New [ADR 0026](../../docs/adr/0026-product-identity.md) (Accepted): `purpose` as a required first slot (vs optional, vs its own section); `product` on `MemoryTools` (vs a module function, vs templated docstrings); first-line-only templating, which keeps the AIE-1165 docstring budget and pins; hosts register from `descriptions()`; how this relates to AIE-1060's MCP `instructions`; the breaking constructor.
+- New [ADR 0026](../../docs/adr/0026-product-identity.md) (Accepted): `purpose` as a required first slot (vs optional, vs its own section); `product` on `MemoryTools` (vs a module function, vs templated docstrings); first-line-only templating, which keeps the AIE-1165 docstring budget and pins; hosts register from `descriptions()`; how this relates to AIE-1060's MCP `instructions`; the breaking constructor. A dated note on decision 2 records the `overview.BODY` opening change.
 - [ADR 0022](../../docs/adr/0022-tool-layer.md) decisions 2 and 8, [ADR 0025](../../docs/adr/0025-prompt-layer-sections-and-slots.md) decisions 3 and 4: dated notes pointing to ADR 0026; the original text is unchanged.
 - `ARCHITECTURE.md`: in `tools`, the constructor and `bind_tools` signatures, the `product` checks, and `descriptions()`. In `prompts`, four slots, the `PromptSlots` signature, and the purpose splice.
 - `README.md`, `docs/product/glossary.md`: updated as listed for US6.3 and US6.4.
 
 ## Deviations from spec
 
-- None.
+- The spec put the generic section bodies out of scope. `overview.BODY`'s opening changed (user-approved) so section 1 does not say "You have persistent memory" twice; recorded in ADR 0026 decision 2. It still names no product (US2.6). Guarded by `test_prompts_overview.py:50` `test_overview_body_opens_without_restating_purpose` and `test_prompts_assembly.py:430` `test_reference_memory_section_states_persistent_memory_once`.
 
 ## Look closely at
 

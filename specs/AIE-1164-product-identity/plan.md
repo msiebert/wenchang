@@ -198,12 +198,13 @@ seed_areas=..., systems_of_record=...)`. The module docstring says four blobs.
 
 ## Files
 
-- `src/wenchang/prompts/slots.py`, `src/wenchang/prompts/assemble.py`
+- `src/wenchang/prompts/slots.py`, `src/wenchang/prompts/assemble.py`,
+  `src/wenchang/prompts/overview.py`
 - `src/wenchang/tools.py`
 - `tests/test_prompts_slots.py`, `tests/test_prompts_assembly.py`,
   `tests/prompts_reference_adopter.py`, `tests/test_prompts_filing.py`,
-  `tests/test_prompts_forgetting.py`, `tests/test_tools.py`,
-  `tests/test_tools_descriptions.py`
+  `tests/test_prompts_forgetting.py`, `tests/test_prompts_overview.py`,
+  `tests/test_tools.py`, `tests/test_tools_descriptions.py`
 - `docs/adr/0026-product-identity.md`, `docs/adr/0022-tool-layer.md`,
   `docs/adr/0025-prompt-layer-sections-and-slots.md`, `ARCHITECTURE.md`,
   `README.md`, `docs/product/glossary.md`

@@ -45,3 +45,15 @@ def test_overview_body_omits_tool_mechanics(phrase: str) -> None:
     """AIE-1165: overview.BODY leaves the slug rule and addressing to get_memory_index."""
     assert overview.BODY.strip() != ""
     assert phrase not in re.sub(r"\s+", " ", overview.BODY)
+
+
+def test_overview_body_opens_without_restating_purpose() -> None:
+    """AIE-1164: overview.BODY opens by defining memory and does not repeat the purpose
+    slot's "You have persistent memory" opening."""
+    body = re.sub(r"\s+", " ", overview.BODY).strip()
+
+    assert body.startswith(
+        "Memory is short markdown files that outlast this conversation, each addressed by "
+        "a scope, an area in that scope, and a name."
+    )
+    assert "You have persistent memory" not in body

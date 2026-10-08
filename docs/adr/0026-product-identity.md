@@ -46,6 +46,13 @@ live in a docstring.
    never blank, section 1 is never omitted: with a blank `overview.BODY`
    its body is `purpose` alone. `SECTION_ORDER`, the headings, and every
    other section are unchanged.
+   - **Note (2026-10-08).** `overview.BODY` opens "Memory is short markdown
+     files that outlast this conversation, ..." rather than "You have
+     persistent memory: short markdown files ...". A `purpose` such as
+     `REFERENCE_PURPOSE` already opens "You have persistent memory of your
+     work in Mixpanel", so the old opening repeated it. `purpose` carries
+     the "you have" framing; `overview.BODY` states the mechanism. The rest
+     of `overview.BODY` is unchanged.
 3. **`product` is a session setting on `MemoryTools`.**
    `MemoryTools(client, identity, policy, *, source, product=None)` and
    `bind_tools(client, resolver, credentials, policy, *, source,

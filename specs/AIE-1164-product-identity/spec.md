@@ -115,5 +115,8 @@ Pinned first lines with `product="Mixpanel"`:
 - A host adapter or MCP server (AIE-1060). This issue provides `descriptions()`;
   AIE-1060 consumes it, and may pass `purpose` text as MCP `instructions`.
 - Any change to the tool docstrings, the generic section bodies, or `SECTION_ORDER`.
+  Exception (2026-10-08): `overview.BODY` opens "Memory is short markdown
+  files ..." so it does not repeat the `purpose` opening; see ADR 0026
+  decision 2.
 - A/an article selection before the product name (templates use a fixed "a").
 - Putting the product into tool results, errors, paths, or the `source` stamp.
