@@ -25,12 +25,13 @@ from wenchang.storage.memory import InMemoryStorage
 
 prompt = build_memory_prompt(
     PromptSlots(
-        # Which scopes exist, which are shared vs private, and the
-        # ask-before-write, contradiction, and containment rules.
+        # Deployment facts only: which scopes exist, which are shared vs private,
+        # who may write, and the ask-before-write, contradiction, containment,
+        # and scope-test rules.
         scope_guidance="...",
-        # Starting areas per scope; which are curated system/ areas.
+        # Starting area names per scope.
         seed_areas="...",
-        # Optional; None omits the section.
+        # Optional; which systems hold canonical information. None omits the section.
         systems_of_record="...",
     )
 )
@@ -40,7 +41,10 @@ store = MemoryStore(InMemoryStorage(), scope_priority=("user", "project", "organ
 The prompt is markdown with `##` section headings and no H1, so a host can
 nest it inside its own system prompt. The generic sections refer only to
 "shared" and "private" scopes and the `system/` area, so `scope_guidance`
-must say which of your scopes are shared and which are private. Scope
+must say which of your scopes are shared and which are private. Slots
+state only deployment facts: the generic sections already say that areas
+are extensible, what the `system/` area means, and that systems of record
+are never copied into memory. Scope
 priority is store configuration, not prompt text: it orders only the capped
 startup index, and by default every scope ranks equally. Any `Storage`
 implementation works in place of `InMemoryStorage`. For a worked example,

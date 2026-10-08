@@ -18,15 +18,17 @@ class PromptSlots:
 
     The generic sections refer to scope shape only as "shared scope",
     "private scope", and "the `system/` area"; these slots map that vocabulary
-    onto the adopter's deployment.
+    onto the adopter's deployment. Slots state only deployment facts; the
+    generic sections already say that areas are extensible, what the
+    `system/` area means, and that systems of record are never copied.
 
-    - ``scope_guidance``: which of the adopter's scopes are shared and which
-      are private, plus any ask-before-write, contradiction, or containment
-      rules, with examples.
-    - ``seed_areas``: starting areas per scope as lowercase ASCII slugs,
-      marking the curated ``system/`` areas (read-only to the agent) apart
-      from agent-writable ones, presented as an extensible list.
-    - ``systems_of_record``: optional; None omits the whole
+    - ``scope_guidance``: which scopes exist, which are shared and which are
+      private, who may write to each, and any ask-before-write,
+      contradiction, containment, or scope-test rules, with examples.
+    - ``seed_areas``: starting area names per scope, as lowercase ASCII
+      slugs, and which scopes have a ``system/`` area.
+    - ``systems_of_record``: optional; which systems hold canonical
+      information and how to refer to their objects. None omits the whole
       systems-of-record section.
 
     Scope priority is not a slot; it is ``MemoryStore(scope_priority=...)``.

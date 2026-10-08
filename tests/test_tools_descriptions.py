@@ -2,7 +2,9 @@
 
 Covers AIE-1044, US5.1 through US5.8: TOOL_NAMES, MemoryTools.tools(), and
 the docstrings a host shows the agent as tool descriptions; and AIE-1151,
-US5.1: the aliases and description paragraph on append_line and replace_fact.
+US5.1: the aliases and description paragraph on append_line and replace_fact; and
+AIE-1165, US2 and US4: shared mechanics stated once in get_memory_index, with each
+write tool keeping its own expected_version and conflict guidance.
 """
 
 import re
@@ -33,8 +35,6 @@ EXPECTED_TOOL_NAMES = (
     "delete_file",
 )
 MUTATING_TOOLS = ("write_file", "append_line", "replace_fact", "delete_file")
-NAME_TOOLS = ("read_file", *MUTATING_TOOLS)
-AREA_TOOLS = ("read_file", "list_prefix", *MUTATING_TOOLS)
 
 IDENTITY = Identity({"user": ScopeGrant("u-1", "owner"), "org": ScopeGrant("o-9", "member")})
 POLICY = ScopePolicy({"org": frozenset({"admin", "owner"})})
@@ -45,30 +45,28 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "list_prefix",
         "read_file(scope, area, name)",
         "list_prefix(scope, area)",
+        "`scope`",
+        "`area`",
+        "`name`",
+        ".md",
+        "filled in",
+        "Areas are lowercase ASCII slugs.",
+        "The `system/` area is read-only.",
     ),
-    "read_file": ("scope", "area", "name", ".md"),
+    "read_file": ("Any area may be read, including `system/`.",),
     "list_prefix": ("scope", "area", "cursor", "next_cursor"),
     "write_file": (
-        "scope",
-        "area",
-        "name",
-        ".md",
+        "expected_version=None",
+        "the version you read",
         "routine",
-        "expected_version",
         "byte ceiling",
         "current size and the limit",
         "description",
         "aliases",
         "not merged",
         "replace the stored values",
-        "system/",
-        "read-only",
     ),
     "append_line": (
-        "scope",
-        "area",
-        "name",
-        ".md",
         "routine",
         "expected_version",
         "byte ceiling",
@@ -79,31 +77,20 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "[observed]",
         "[inferred]",
         "[system]",
-        "system/",
-        "read-only",
     ),
     "replace_fact": (
-        "scope",
-        "area",
-        "name",
-        ".md",
         "routine",
         "expected_version",
         "byte ceiling",
         "exactly once",
+        "quote a unique span",
         "applies to the result",
-        "system/",
-        "read-only",
     ),
     "delete_file": (
-        "scope",
-        "area",
-        "name",
-        ".md",
         "routine",
         "expected_version",
-        "system/",
-        "read-only",
+        "Pass the version you read as `expected_version`.",
+        "only if the file should still go",
     ),
 }
 PHRASE_CASES = [(tool, phrase) for tool, phrases in PHRASES.items() for phrase in phrases]
@@ -221,7 +208,7 @@ def test_docstring_first_line_is_one_sentence(tool: str) -> None:
 @pytest.mark.parametrize(("tool", "phrase"), PHRASE_CASES)
 def test_docstring_contains_pinned_phrase(tool: str, phrase: str) -> None:
     """Each tool docstring contains the phrases a host must not lose
-    (AIE-1044, US5.4, US5.5, US5.6, US5.8).
+    (AIE-1044, US5.4, US5.5, US5.6, US5.8; AIE-1165, US2.3, US2.4, US2.6).
     """
     assert phrase in _doc(tool)
 
@@ -247,32 +234,76 @@ def test_fact_docstring_explains_aliases_and_description(tool: str, phrase: str)
 
 @pytest.mark.parametrize("tool", MUTATING_TOOLS)
 def test_mutating_docstring_presents_conflict_as_merge_and_retry(tool: str) -> None:
-    """Each mutating docstring presents a version conflict as routine: merge
-    and retry (AIE-1044, US5.4).
+    """Each mutating docstring presents a version conflict as routine and says
+    to retry; delete_file has no merge step, it retries only if the file should
+    still go (AIE-1044, US5.4; AIE-1165, US2.4, US2.6).
     """
-    doc = _doc(tool)
+    doc = " ".join(_doc(tool).split())
 
-    assert "routine" in doc
-    assert "merge" in doc
+    assert "version conflict is routine" in doc
     assert "retry" in doc
 
 
-@pytest.mark.parametrize("tool", NAME_TOOLS)
-def test_name_docstring_says_name_excludes_md(tool: str) -> None:
-    """Every tool taking name says name excludes the .md extension
-    (AIE-1044, US5.8).
+@pytest.mark.parametrize("tool", ["write_file", "append_line", "replace_fact"])
+def test_merging_docstring_says_merge_and_retry(tool: str) -> None:
+    """Each write tool that changes content says to merge into the returned
+    content and retry with its version (AIE-1044, US5.4; AIE-1165, US2.5).
     """
-    doc = _doc(tool)
+    doc = " ".join(_doc(tool).split())
+
+    assert "merge your change into the content it returns and retry with its version" in doc
+
+
+@pytest.mark.parametrize("tool", ["append_line", "replace_fact"])
+def test_fact_docstring_says_pass_version_you_read(tool: str) -> None:
+    """The append_line and replace_fact docstrings say to pass the version you
+    read as expected_version; the sentence spans a line break, so it is matched
+    whitespace-collapsed (AIE-1044, US5.4; AIE-1165, US2.4).
+    """
+    assert "Pass the version you read as `expected_version`." in " ".join(_doc(tool).split())
+
+
+def test_name_docstring_says_name_excludes_md() -> None:
+    """The name rule (name excludes the .md extension) is stated once, in
+    get_memory_index (AIE-1044, US5.8; AIE-1165, US2.3).
+    """
+    doc = _doc("get_memory_index")
 
     assert re.search(r"\b(without|excludes?|excluding)\b[^.]{0,40}\.md", doc), (
-        f"{tool} must say name excludes .md"
+        "get_memory_index must say name excludes .md"
     )
 
 
-@pytest.mark.parametrize("tool", AREA_TOOLS)
-def test_area_docstring_states_slug_rule(tool: str) -> None:
-    """Every tool taking area says areas are lowercase ASCII slugs (AIE-1136, US4.4)."""
-    assert "Areas are lowercase ASCII slugs." in _doc(tool)
+def test_area_docstring_states_slug_rule() -> None:
+    """The area slug rule is stated once, in get_memory_index
+    (AIE-1136, US4.4; AIE-1165, US2.3).
+    """
+    assert "Areas are lowercase ASCII slugs." in _doc("get_memory_index")
+
+
+def test_shared_mechanics_stated_once() -> None:
+    """The slug rule, the .md rule, and the read-only rule appear in
+    get_memory_index and no other tool docstring, and no docstring repeats the
+    per-tool scope/area glossary (AIE-1165, US2.2).
+    """
+    holders = {
+        phrase: [tool for tool in EXPECTED_TOOL_NAMES if phrase in _doc(tool)]
+        for phrase in (
+            "Areas are lowercase ASCII slugs.",
+            ".md",
+            "is read-only",
+            "`scope` is one of the scopes",
+            "folder inside it",
+        )
+    }
+
+    assert holders == {
+        "Areas are lowercase ASCII slugs.": ["get_memory_index"],
+        ".md": ["get_memory_index"],
+        "is read-only": ["get_memory_index"],
+        "`scope` is one of the scopes": [],
+        "folder inside it": [],
+    }
 
 
 def test_get_memory_index_docstring_explains_entity_segment() -> None:

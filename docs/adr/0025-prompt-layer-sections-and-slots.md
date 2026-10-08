@@ -152,8 +152,14 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
 6. **Docstrings own per-call mechanics; the prompt owns judgment.** Tool
    docstrings cover argument meaning, error repair, conflicts as routine,
    the slug rule, the `.md` exclusion, the byte ceiling, and `system/`
-   rejecting writes. The prompt covers what to write, where, with which
-   tool, and when to ask. It refers to tools by name in tool terms
+   rejecting writes. The mechanics every tool shares (scope, area, and name
+   meaning, the `.md` exclusion, the entity segment, the slug rule,
+   `system/` being read-only, capped paging) are stated once, in the
+   `get_memory_index` docstring; each mutating tool's docstring states its
+   own conflict rule and `expected_version`, and, where it applies, the
+   byte ceiling and metadata behavior (decision 11). The prompt covers
+   what to write, where, with which tool, and when to ask. It refers to
+   tools by name in tool terms
    (`scope`, `area`, `name`) and does not restate argument contracts,
    except where judgment depends on one. Known contradiction risks between
    the two, and how each is handled:
@@ -172,8 +178,9 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
      is written after it lands.
    - **Dropping one fact.** Removing a line uses `replace_fact` with an
      empty `new_string`; the text must say to quote the line with its line
-     break, or a blank line is left behind. The write-mechanics and
-     forgetting sections must agree on this wording.
+     break, or a blank line is left behind. The write-mechanics section
+     owns this wording; the forgetting section says "drop" and defers to
+     it rather than restating the call.
    - **Capped index vs. deduplication.** Deduplication reads the loaded
      index. When the target area appears under `capped`, the text allows
      one `list_prefix(scope, area)` on that area only, never a listing of
@@ -212,6 +219,39 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
     blobs and the reference scope priority. Section 9 says it is not part
     of the library, so it is not in `src/`; it serves as the worked
     example for adopters.
+11. **Shared tool mechanics live in `get_memory_index`; conflict handling
+    stays per tool (2026-10-07, AIE-1165).** The mechanics every tool
+    shares are stated once, in the `get_memory_index` docstring: what
+    `scope`, `area`, and `name` mean (`name` without `.md`), that the
+    entity segment is filled in, the slug rule ("Areas are lowercase ASCII
+    slugs."), "The `system/` area is read-only.", and paging a `capped`
+    prefix with `list_prefix(scope, area)`. Each of the four mutating tools
+    keeps one self-contained version-conflict sentence ("A version conflict
+    is routine: ...") and says what to pass as `expected_version`.
+    `replace_fact` states its own `aliases` and `description` behavior, in
+    the same words as `append_line`, with no cross-reference. `read_file`
+    keeps its read-side exception that any area, `system/` included, may
+    be read. Some hosts load tool schemas on demand (Claude Code loads MCP
+    tool schemas through tool search), so a write tool's description can
+    be shown without `get_memory_index`'s; the conflict rule is the one
+    mechanic an agent needs at the moment a write fails.
+    - **Rejected: the overview section as the home.** The invariant tests
+      ban `.md` and "entity" in prompt text, and an adopter using
+      `MemoryTools.tools()` without `build_memory_prompt` would lose the
+      mechanics.
+    - **Rejected: fully self-contained docstrings.** Repeating every
+      shared mechanic in each docstring cuts only about 30% of their
+      length, below the 40% target.
+    - **Rejected: everything in `get_memory_index`, conflict rule
+      included.** A host with on-demand tool loading can show a write tool
+      alone, and the agent would not learn that a conflict is routine.
+    Slots state only deployment facts. The reference slots and the
+    `PromptSlots` docstring say so: the generic filing section presents
+    seed areas as extensible, and the generic curated-content section says
+    `system/` is read-only, so the seed-areas slot repeats neither, and the
+    systems-of-record slot does not repeat the principle's "never copy".
+    Section 8.2 asks that seed areas be "presented to the agent as
+    extensible"; the assembled prompt still does that, from generic text.
 
 AIE-1055 also writes the two pieces of prose it owns: the overview (what
 memory is, call `get_memory_index()` at session start, scope/area/name
@@ -244,6 +284,13 @@ shared or private silently weakens any guidance graded by scope.
 Prose can drift from tool docstrings as either changes. The tool and
 parameter name checks catch renamed tools and arguments, but not changed
 meaning.
+
+With shared mechanics only in `get_memory_index` (decision 11), a host
+that shows a write tool's description without it gives the agent that
+tool's conflict rule and `expected_version` guidance but not the slug or
+`system/` rules; the tools still enforce both and reject a violating call
+with an error. An adopter whose slots restate generic rules
+gets no error, only a longer prompt.
 
 `systems_of_record` being optional deviates from Section 8.2, which
 presents it as one of the blobs with no provision for its absence (decision

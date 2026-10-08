@@ -127,14 +127,12 @@ class MemoryTools:
     def get_memory_index(self) -> MemoryIndex:
         """Load the metadata index of every memory scope available in this session.
 
-        Call this first. Each entry lists a file's path, description, aliases,
-        sources, last-updated time, and version, without content. An entry
-        path has the form `scope/<entity>/area/name.md`; read it with
-        `read_file(scope, area, name)`. The entity segment is yours and is
-        filled in for you, so you never pass it. The index is size-limited:
-        when a prefix has more files than fit, it appears under `capped` with
-        the number omitted, and you page through it with
-        `list_prefix(scope, area)` (or `list_prefix(scope)` for a whole scope).
+        Call this first. Each entry gives a file's path, metadata, and version, without content.
+        A path has the form `scope/<entity>/area/name.md`; the other tools take `scope`, `area`,
+        and `name` (without `.md`), as in `read_file(scope, area, name)`, and the entity segment
+        is filled in for you. Areas are lowercase ASCII slugs. The `system/` area is read-only.
+        A prefix with more files than fit is listed under `capped` with the number omitted; page
+        it with `list_prefix(scope, area)`.
         """
         # Built from grants, never Identity.scope_map, which a subclass may override.
         scope_map = {scope: grant.entity_id for scope, grant in self._identity.grants.items()}
@@ -143,10 +141,7 @@ class MemoryTools:
     def read_file(self, scope: str, area: str, name: str) -> MemoryFile:
         """Read one memory file: its content, metadata, and version.
 
-        `scope` is one of the scopes available in this session, `area` is the
-        folder inside it, and `name` is the file name without `.md`. Any area
-        may be read, including `system/`. Keep the returned version: pass it
-        as `expected_version` when you change the file. Areas are lowercase ASCII slugs.
+        Any area may be read, including `system/`.
         """
         path = self._path(scope, area, name)
         return self._client.read_file(path)
@@ -156,11 +151,8 @@ class MemoryTools:
     ) -> ListPage:
         """List the files in a scope or area, one page at a time, without content.
 
-        `scope` is one of the scopes available in this session; `area`, if
-        given, narrows the listing to one folder. Each page returns entries
-        with metadata and version, and a `next_cursor`. When `next_cursor` is
-        not null, pass it back as `cursor` with the same `scope` and `area` to
-        get the next page. Areas are lowercase ASCII slugs.
+        Each page returns entries with metadata and version, and a `next_cursor`; until it is
+        null, pass it back as `cursor` with the same `scope` and `area` for the next page.
         """
         prefix = self._prefix(scope, area)
         if cursor is None:
@@ -183,18 +175,11 @@ class MemoryTools:
     ) -> MemoryFile:
         """Create a memory file or replace one whole.
 
-        `scope` is one of the scopes available in this session, `area` is the
-        folder inside it, and `name` is the file name without `.md`. Pass
-        `expected_version=None` to create a file that does not exist yet;
-        pass the version you read to replace one. `description` (one line)
-        and `aliases` replace the stored values; they are not merged with
-        what was there. A per-file byte ceiling applies: an oversize write is
-        rejected with the current size and the limit, so shorten the content
-        and retry. The `system/` area is read-only. Areas are lowercase ASCII slugs.
-
-        A version conflict is routine: someone else changed the file since
-        you read it. The error carries the current content and version;
-        merge your change into it and retry with that version.
+        Pass `expected_version=None` to create a file, or the version you read to replace one.
+        `description` (one line) and `aliases` replace the stored values; they are not merged.
+        Content over the per-file byte ceiling is rejected with the current size and the limit;
+        shorten it and retry. A version conflict is routine: merge your change into the content it
+        returns and retry with its version.
         """
         path = self._path(scope, area, name)
         check_write(path, self._identity, self._policy)
@@ -221,22 +206,13 @@ class MemoryTools:
     ) -> MemoryFile:
         """Add one fact line to the end of an existing memory file.
 
-        `scope` is one of the scopes available in this session, `area` is the
-        folder inside it, and `name` is the file name without `.md`. `line`
-        must be a single fact line with a leading bracketed label, one of
-        `[stated]`, `[observed]`, `[inferred]`, or `[system]`, for example
-        `- [stated] Prefers tea`. Pass the version you read as
-        `expected_version`. The per-file byte ceiling applies to the result.
-        The `system/` area is read-only. Areas are lowercase ASCII slugs.
-
-        Optional `aliases` are added to the file's existing aliases and
-        never removed; to drop an alias, use `write_file`, which replaces
-        the whole set. An optional one-line `description` replaces the
-        stored one.
-
-        A version conflict is routine: someone else changed the file since
-        you read it. The error carries the current content and version;
-        merge your change into it and retry with that version.
+        `line` is a single fact line with a leading bracketed label (`[stated]`, `[observed]`,
+        `[inferred]`, or `[system]`), as in `- [stated] Prefers tea`. Pass the version you
+        read as `expected_version`. The per-file byte ceiling applies to the result. Optional
+        `aliases` are added to the file's existing aliases and never removed (`write_file` replaces
+        the whole set); an optional one-line `description` replaces the stored one. A version
+        conflict is routine: merge your change into the content it returns and retry with its
+        version.
         """
         path = self._path(scope, area, name)
         check_write(path, self._identity, self._policy)
@@ -274,23 +250,13 @@ class MemoryTools:
     ) -> MemoryFile:
         """Change one fact in a memory file by quoting the text to replace.
 
-        `scope` is one of the scopes available in this session, `area` is the
-        folder inside it, and `name` is the file name without `.md`.
-        `old_string` must match the file's content exactly once; if it matches
-        zero or several times, the error carries the current content and
-        version so you can quote a longer, unique span. `new_string` replaces
-        it. Pass the version you read as `expected_version`. The per-file
-        byte ceiling applies to the result. The `system/` area is read-only.
-        Areas are lowercase ASCII slugs.
-
-        Optional `aliases` are added to the file's existing aliases and
-        never removed; to drop an alias, use `write_file`, which replaces
-        the whole set. An optional one-line `description` replaces the
-        stored one.
-
-        A version conflict is routine: someone else changed the file since
-        you read it. The error carries the current content and version;
-        merge your change into it and retry with that version.
+        `old_string` must match the content exactly once; otherwise the error carries the current
+        content and version, so quote a unique span. `new_string` replaces it. Pass the
+        version you read as `expected_version`. The per-file byte ceiling applies to the result.
+        Optional `aliases` are added to the file's existing aliases and never removed (`write_file`
+        replaces the whole set); an optional one-line `description` replaces the stored one. A
+        version conflict is routine: merge your change into the content it returns and retry with
+        its version.
         """
         path = self._path(scope, area, name)
         check_write(path, self._identity, self._policy)
@@ -316,15 +282,8 @@ class MemoryTools:
     def delete_file(self, scope: str, area: str, name: str, expected_version: VersionToken) -> None:
         """Delete a memory file.
 
-        `scope` is one of the scopes available in this session, `area` is the
-        folder inside it, and `name` is the file name without `.md`. Pass the
-        version you read as `expected_version`. The `system/` area is
-        read-only. Areas are lowercase ASCII slugs.
-
-        A version conflict is routine: someone else changed the file since
-        you read it. The error carries the current content and version;
-        merge that into your decision and retry with that version if the
-        file should still go.
+        Pass the version you read as `expected_version`. A version conflict is routine: retry with
+        the version it returns only if the file should still go.
         """
         path = self._path(scope, area, name)
         check_write(path, self._identity, self._policy)

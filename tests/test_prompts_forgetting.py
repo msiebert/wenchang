@@ -37,37 +37,46 @@ def test_build_memory_prompt_ends_with_forgetting_section() -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
-        pytest.param("two moves", id="US2.1-two-moves"),
-        pytest.param("`replace_fact`", id="US2.2-replace-fact"),
-        pytest.param("fact line", id="US2.2-fact-line"),
-        pytest.param("`delete_file`", id="US2.3-delete-file"),
+        pytest.param(
+            "Forgetting has two moves: drop one fact's line, or delete the whole file",
+            id="US2.1-US2.3-two-moves",
+        ),
         pytest.param("whole file", id="US2.3-whole-file"),
         pytest.param(
-            "write-tool section says how to take the line break",
-            id="US2.5-write-tool-section-line-break",
+            "Delete the file if the fact was the file's only fact", id="US2.6-files-only-fact"
         ),
-        pytest.param("the file's only fact", id="US2.6-files-only-fact"),
         pytest.param("Removal is total", id="US3.1-removal-is-total"),
+        pytest.param("leave no note that the fact was ever true", id="US3.2-leave-no-note"),
         pytest.param("solely", id="US3.3-solely"),
         pytest.param("`[inferred]`", id="US3.4-inferred"),
-        pytest.param("description or alias", id="US3.5-description-or-alias"),
-        pytest.param(
-            "exists only because of the removed fact",
-            id="US3.5-exists-only-because",
-        ),
-        pytest.param("ambiguous", id="US4.1-ambiguous"),
+        pytest.param("description text or aliases", id="US3.5-description-text-or-aliases"),
+        pytest.param("exist only because of it", id="US3.5-exist-only-because"),
+        pytest.param("ambiguous which they mean", id="US4.1-ambiguous"),
         pytest.param("end date", id="US5.1-end-date"),
         pytest.param("candidate", id="US5.1-candidate"),
-        pytest.param("not automatically", id="US5.2-not-automatically"),
+        pytest.param("not to be removed automatically", id="US5.2-not-automatically"),
         pytest.param("maintenance", id="US5.3-maintenance"),
         pytest.param("`system/`", id="US6.1-system"),
         pytest.param("curated-content section", id="US6.1-curated-content-section"),
         pytest.param("Never drop or delete", id="US6.2-never-drop-or-delete"),
+        pytest.param(
+            "Keep anything with support of its own", id="AIE-1165-keep-independent-support"
+        ),
+        pytest.param("drop it only if it no longer holds", id="AIE-1165-drop-only-if-stale"),
+        pytest.param("say you cannot", id="AIE-1165-say-you-cannot"),
     ],
 )
 def test_forgetting_body_contains_phrase(phrase: str) -> None:
-    """AIE-1053, US2-US6: forgetting.BODY contains each required phrase."""
+    """AIE-1053, US2-US6; AIE-1165: forgetting.BODY contains each required phrase."""
     assert phrase in _flat(forgetting.BODY)
+
+
+@pytest.mark.parametrize("phrase", ["line break", "`replace_fact`", "`delete_file`"])
+def test_forgetting_body_leaves_mechanics_to_write_section(phrase: str) -> None:
+    """AIE-1053, US2.5; AIE-1165: forgetting.BODY leaves write mechanics to the write section."""
+    flat = _flat(forgetting.BODY)
+    assert flat.strip() != ""
+    assert phrase not in flat
 
 
 def test_forgetting_body_says_ask() -> None:

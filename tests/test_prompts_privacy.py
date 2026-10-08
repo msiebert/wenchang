@@ -38,31 +38,41 @@ def test_privacy_body_format() -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
-        pytest.param("veto before", id="US2.1-veto-before"),
-        pytest.param("worth remembering", id="US2.1-worth-remembering"),
+        pytest.param(
+            "The refusals below override the previous section", id="US2.1-refusals-override"
+        ),
+        pytest.param("however useful a fact seems", id="US2.1-however-useful"),
+        pytest.param("Refuse outright to store", id="US3.2-refuse-outright"),
         pytest.param("financial account numbers", id="US3.1-financial"),
         pytest.param("health diagnoses", id="US3.1-health"),
         pytest.param("indicating the user is a minor", id="US3.1-minor"),
-        pytest.param("no matter how directly", id="US3.2-no-matter-how-directly"),
-        pytest.param("no scope", id="US3.3-no-scope"),
-        pytest.param("even when the user asks", id="US3.3-even-when-asked"),
+        pytest.param("even if the user states it directly", id="US3.2-even-if-stated-directly"),
+        pytest.param("not in any file or scope, private included", id="US3.3-no-file-or-scope"),
+        pytest.param(
+            "even if the user states it directly or asks you to remember it",
+            id="US3.3-even-when-asked",
+        ),
         pytest.param("Continue the task", id="US3.4-continue-task"),
         pytest.param("will not be kept", id="US3.4-will-not-be-kept"),
         pytest.param("shared scope", id="US4.1-shared-scope"),
         pytest.param("private scope", id="US4.1-private-scope"),
-        pytest.param("disclosure to a team", id="US4.2-disclosure"),
-        pytest.param("note to self", id="US4.2-note-to-self"),
-        pytest.param("version history", id="US4.2-version-history"),
         pytest.param(
-            "unsure whether a sensitive detail is safe", id="US4.3-unsure-sensitive-detail"
+            "disclosure to a team rather than a note to self", id="US4.2-disclosure-not-note"
         ),
+        pytest.param("version history", id="US4.2-version-history"),
+        pytest.param("unsure whether such a detail is safe", id="US4.3-unsure-detail"),
         pytest.param("non-sensitive part", id="US4.3-non-sensitive-part"),
-        pytest.param("judgment", id="US5.1-judgment"),
         pytest.param("No tool filter", id="US5.1-no-tool-filter"),
+        pytest.param("successful write does not mean it was safe", id="US5.1-success-not-safe"),
+        pytest.param(
+            "Be stricter with other sensitive personal detail in a shared scope than in a "
+            "private scope",
+            id="AIE-1165-stricter-in-shared",
+        ),
     ],
 )
 def test_privacy_body_contains_phrase(phrase: str) -> None:
-    """AIE-1054, US2.1-US5.1: privacy.BODY contains each required phrase."""
+    """AIE-1054, US2.1-US5.1; AIE-1165: privacy.BODY contains each required phrase."""
     assert phrase in _collapsed()
 
 

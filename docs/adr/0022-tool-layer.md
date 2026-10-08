@@ -170,6 +170,12 @@ imports it.
    `scope/<entity>/area/name.md` maps to `read_file(scope, area, name)` and
    how a capped prefix is paged with `list_prefix(scope, area)`. Tests pin
    the phrases a host must not lose, and the module cites no Linear IDs.
+   - **Note (2026-10-07, AIE-1165).** The shared mechanics listed above
+     (the `(scope, area, name)` arguments, `name` excluding `.md`, `system/`
+     being read-only), plus the slug rule, are now stated once, in the
+     `get_memory_index` docstring, rather than in every tool's; each
+     mutating tool keeps its own version-conflict sentence. See
+     [ADR 0025](0025-prompt-layer-sections-and-slots.md) decision 11.
 9. **Scope-relative tools, so the tool builds every path (human decision
    1c).** File tools take `scope`, `area`, and `name`; `list_prefix` takes
    `scope`, an optional `area`, and an optional `cursor`. The tool checks
