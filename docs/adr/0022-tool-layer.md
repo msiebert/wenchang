@@ -98,6 +98,9 @@ imports it.
      the agent must not control.
    - **Rejected: resolving lazily on first use**, which moves a permanent
      failure from session start to mid-conversation.
+   - **Note (2026-10-08, AIE-1164).** `MemoryTools` and `bind_tools` also
+     take a keyword-only `product=None`, validated as an adopter-side
+     argument after `source`. See [ADR 0026](0026-product-identity.md).
 3. **`check_write` runs on the built path before every mutating client
    call. Reads, listing, and the index are not checked.** ADRs 0016 and
    0017 put write enforcement here. The check runs before any client call,
@@ -176,6 +179,11 @@ imports it.
      `get_memory_index` docstring, rather than in every tool's; each
      mutating tool keeps its own version-conflict sentence. See
      [ADR 0025](0025-prompt-layer-sections-and-slots.md) decision 11.
+   - **Note (2026-10-08, AIE-1164).** A host takes the descriptions from
+     `MemoryTools.descriptions()` rather than `__doc__`: the docstrings
+     unchanged, or, when the session has a `product`, with the product
+     named in each first line. The docstrings stay static. See
+     [ADR 0026](0026-product-identity.md).
 9. **Scope-relative tools, so the tool builds every path (human decision
    1c).** File tools take `scope`, `area`, and `name`; `list_prefix` takes
    `scope`, an optional `area`, and an optional `cursor`. The tool checks

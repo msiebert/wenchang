@@ -131,11 +131,13 @@ Terms as used throughout wenchang and its spec.
 - **Tool layer** — the agent-facing verbs (`get_memory_index`,
   `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`,
   `delete_file`), implemented as `tools.MemoryTools` over a transport
-  client. Tools carry no judgment; each one's docstring is the description
-  the agent sees. Mutating tools check the write (`system/` read-only,
-  write restriction) before the transport sees it. Framework-agnostic: a
-  host adapter mounts the tools and renders results and errors with
-  `render_result` / `render_error`.
+  client. Tools carry no judgment. The description the agent sees comes
+  from `MemoryTools.descriptions()`: the tool's docstring, with the
+  session's `product` named in the first line when one is set. Mutating
+  tools check the write (`system/` read-only, write restriction) before
+  the transport sees it. Framework-agnostic: a host adapter mounts the
+  tools and renders results and errors with `render_result` /
+  `render_error`.
 - **Session binding** — resolving the caller's identity once, at session
   start, with `tools.bind_tools`, which returns that session's
   `MemoryTools`. It is the only place credentials pass through the tool
@@ -181,13 +183,18 @@ Terms as used throughout wenchang and its spec.
   interpretation and the corrections people give, and surfaces any
   discrepancy rather than letting memory diverge. Listed in the optional
   `systems_of_record` prompt slot.
-- **Prompt slots** — `prompts.PromptSlots`, the three adopter-supplied text
+- **Prompt slots** — `prompts.PromptSlots`, the four adopter-supplied text
   blobs that `build_memory_prompt` splices into the library's generic
-  memory prompt: `scope_guidance` (which scopes exist, which are shared and
-  which private, and when to ask before writing), `seed_areas`, and
-  `systems_of_record`. The first two are required; systems of record is
-  optional, and omitting it drops that whole section. Scope priority is not
-  a slot.
+  memory prompt: `purpose` (one or two sentences naming the product and
+  when to use memory, which opens the "Memory" section), `scope_guidance`
+  (which scopes exist, which are shared and which private, and when to ask
+  before writing), `seed_areas`, and `systems_of_record`. The first three
+  are required; systems of record is optional, and omitting it drops that
+  whole section. Scope priority is not a slot.
+- **Product** — the name of the adopter's product the memory serves (e.g.
+  Mixpanel), set per session as `product` on `tools.bind_tools` /
+  `MemoryTools`. It is named in the first line of each tool description
+  from `descriptions()`; the agent cannot set it.
 - **Sources** — a file-level metadata field recording which calling
   surfaces have written to the file; free-form strings, not an enum.
 - **Confidence label** — one of `stated`, `observed`, `inferred`, `system`,
