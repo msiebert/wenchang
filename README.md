@@ -52,8 +52,9 @@ priority is store configuration, not prompt text: it orders only the capped
 startup index, and by default every scope ranks equally. Any `Storage`
 implementation works in place of `InMemoryStorage`. For a worked example,
 see the reference adopter in
-[tests/prompts_reference_adopter.py](tests/prompts_reference_adopter.py),
-including a reference `purpose`; the design is in
+[tests/reference_adopter.py](tests/reference_adopter.py), which holds the
+prompt slots (including a reference `purpose`), scope priority, write
+policy, identities, and seed content; the design is in
 [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md).
 
 Bind one set of tools per session, naming the product so each tool
