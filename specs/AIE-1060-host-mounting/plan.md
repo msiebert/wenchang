@@ -80,9 +80,14 @@ spec reviewer's probes:
 
 ```python
 __all__ = [
-    "TOOL_NAMES", "MemoryTools", "bind_tools", "render_error", "render_result",
+    "TOOL_NAMES",
+    "MemoryTools",
+    "bind_tools",
+    "render_error",
+    "render_result",
     "tool_descriptions",
 ]
+
 
 def tool_descriptions(product: str | None = None) -> Mapping[str, str]:
     """Each tool's description by name, in TOOL_NAMES order.
@@ -132,7 +137,10 @@ except ImportError as exc:  # optional dependency
     ) from exc
 
 __all__ = [
-    "PROMPT_RESOURCE_URI", "ToolCallRecord", "build_server", "memory_instructions",
+    "PROMPT_RESOURCE_URI",
+    "ToolCallRecord",
+    "build_server",
+    "memory_instructions",
     "register_memory_tools",
 ]
 
@@ -144,14 +152,16 @@ TOOL_PREFIX_RULE: Final[str] = (
 )
 _TOOL_PREFIX: Final = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?")
 
+
 @dataclass(frozen=True)
 class ToolCallRecord:
     """One memory tool call as the MCP adapter handled it."""
 
-    tool: str                       # registered name, prefix included
-    arguments: Mapping[str, object] # what the wrapper received, ctx excluded
-    result: Mapping[str, object]    # the rendered payload sent as structured_content
+    tool: str  # registered name, prefix included
+    arguments: Mapping[str, object]  # what the wrapper received, ctx excluded
+    result: Mapping[str, object]  # the rendered payload sent as structured_content
     is_error: bool
+
 
 def register_memory_tools[C](
     server: MCPServer,
@@ -174,6 +184,7 @@ def register_memory_tools[C](
     returns render_result or render_error output. client is called from
     worker threads concurrently and must be thread-safe.
     """
+
 
 def build_server[C](
     *,
@@ -260,18 +271,33 @@ arguments.
 
 ```python
 def read_file(scope: str, area: str, name: str, *, ctx: Context[Any, Any]) -> CallToolResult:
-    return call("read_file", ctx, {"scope": scope, "area": area, "name": name},
-                lambda tools: tools.read_file(scope, area, name))
+    return call(
+        "read_file",
+        ctx,
+        {"scope": scope, "area": area, "name": name},
+        lambda tools: tools.read_file(scope, area, name),
+    )
+
 
 def list_prefix(
-    scope: str, area: str | None = None, cursor: ListCursor | None = None,
-    *, ctx: Context[Any, Any],
+    scope: str,
+    area: str | None = None,
+    cursor: ListCursor | None = None,
+    *,
+    ctx: Context[Any, Any],
 ) -> CallToolResult: ...
 
+
 def write_file(
-    scope: str, area: str, name: str, content: str, description: str,
-    aliases: Sequence[str], expected_version: VersionToken | None,
-    *, ctx: Context[Any, Any],
+    scope: str,
+    area: str,
+    name: str,
+    content: str,
+    description: str,
+    aliases: Sequence[str],
+    expected_version: VersionToken | None,
+    *,
+    ctx: Context[Any, Any],
 ) -> CallToolResult: ...
 ```
 
