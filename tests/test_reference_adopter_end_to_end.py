@@ -30,7 +30,7 @@ from reference_adopter import (
     seed_path,
     seed_reference_memory,
 )
-from wenchang.core import MemoryFile, MemoryIndex
+from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex, index_entry_bytes
 from wenchang.errors import NotFoundError, RestrictedScopeError, VersionConflictError
 from wenchang.file_format import FileMetadata
 from wenchang.identity import Identity
@@ -54,7 +54,7 @@ _ENTRY_KEYS = {
 }
 
 
-def _rendered(value: MemoryFile | MemoryIndex | None) -> dict[str, object]:
+def _rendered(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str, object]:
     out = render_result(value)
     assert json.loads(json.dumps(out)) == out
     return out
@@ -508,3 +508,97 @@ def test_us7_2_retry_with_the_returned_version_merges_both_lines() -> None:
     )
 
     assert retried["content"] == seed.content + "- [observed] LA fact.\n- [observed] LM fact.\n"
+
+
+def _run_budget_steps(client: InProcessClient) -> MemoryTools:
+    """Seed, then M writes project/metrics/budget-a and budget-b."""
+    seed_reference_memory(client)
+    tools = bind_reference_tools(client)
+    for name in ("budget-a", "budget-b"):
+        tools.write_file(PROJECT, "metrics", name, "- [stated] Budget.\n", "Budget", [], None)
+    return tools
+
+
+def _capped_budget_run() -> tuple[MemoryTools, MemoryIndex, MemoryIndex]:
+    """Return the capped store's tools, its index, and the uncapped store's index."""
+    uncapped_tools = _run_budget_steps(InProcessClient(reference_store()))
+    uncapped = uncapped_tools.get_memory_index()
+    budget_b = "project/p-checkout/metrics/budget-b.md"
+    first_project = next(
+        e
+        for e in uncapped.entries
+        if parse_path(e.path).scope == PROJECT and parse_path(e.path).area != "system"
+    )
+    assert first_project.path == budget_b
+    cap = sum(
+        index_entry_bytes(e)
+        for e in uncapped.entries
+        if parse_path(e.path).area == "system"
+        or parse_path(e.path).scope == USER
+        or e.path == budget_b
+    )
+    capped_tools = _run_budget_steps(InProcessClient(reference_store(index_max_bytes=cap)))
+    return capped_tools, capped_tools.get_memory_index(), uncapped
+
+
+def test_us8_1_capped_index_is_a_priority_prefix_of_the_uncapped_index() -> None:
+    """AIE-1059, US8.1: the cap keeps system, user, and exactly one project entry."""
+    _, capped, uncapped = _capped_budget_run()
+
+    capped_entries = _entries(_rendered(capped))
+    uncapped_entries = _entries(_rendered(uncapped))
+
+    assert capped_entries == uncapped_entries[: len(capped_entries)]
+    assert [_tier(e) for e in capped_entries] == ["system"] * 3 + [USER] * 2 + [PROJECT]
+    assert capped_entries[-1]["path"] == "project/p-checkout/metrics/budget-b.md"
+    assert not any(e["scope"] == ORGANIZATION and e["area"] != "system" for e in capped_entries)
+
+
+def test_us8_2_capped_rows_name_every_omitted_area() -> None:
+    """AIE-1059, US8.2: capped rows are exact, in prefix order."""
+    _, capped, _ = _capped_budget_run()
+
+    assert _rendered(capped)["capped"] == [
+        {
+            "prefix": "organization/o-acme/vocabulary/",
+            "scope": "organization",
+            "area": "vocabulary",
+            "omitted": 1,
+        },
+        {
+            "prefix": "project/p-checkout/entities/",
+            "scope": "project",
+            "area": "entities",
+            "omitted": 1,
+        },
+        {
+            "prefix": "project/p-checkout/metrics/",
+            "scope": "project",
+            "area": "metrics",
+            "omitted": 2,
+        },
+    ]
+
+
+def test_us8_3_list_prefix_recovers_the_omitted_files() -> None:
+    """AIE-1059, US8.3: paging each capped area lists every file omitted from the index."""
+    tools, capped, uncapped = _capped_budget_run()
+    rendered = _rendered(capped)
+    in_index = set(_paths(rendered))
+
+    for row in cast(list[dict[str, object]], rendered["capped"]):
+        prefix = _text(row, "prefix")
+        listed: list[str] = []
+        cursor: ListCursor | None = None
+        while True:
+            page = _rendered(tools.list_prefix(_text(row, "scope"), _text(row, "area"), cursor))
+            listed += _paths(page)
+            next_cursor = page["next_cursor"]
+            if next_cursor is None:
+                break
+            cursor = ListCursor(cast(str, next_cursor))
+        omitted = {
+            e.path for e in uncapped.entries if e.path.startswith(prefix) and e.path not in in_index
+        }
+        assert len(omitted) == row["omitted"]
+        assert omitted <= set(listed)
