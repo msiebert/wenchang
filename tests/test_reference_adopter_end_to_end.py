@@ -31,10 +31,10 @@ from reference_adopter import (
     seed_reference_memory,
 )
 from wenchang.core import MemoryFile, MemoryIndex
-from wenchang.errors import NotFoundError
+from wenchang.errors import NotFoundError, RestrictedScopeError, VersionConflictError
 from wenchang.file_format import FileMetadata
 from wenchang.identity import Identity
-from wenchang.paths import build_path
+from wenchang.paths import build_path, build_prefix, parse_path
 from wenchang.tools import MemoryTools, render_error, render_result
 from wenchang.transport import InProcessClient
 from wenchang.version_token import VersionToken
@@ -314,3 +314,197 @@ def test_us4_4_partial_member_reads_the_organization_scope() -> None:
     expected = {seed_path(s) for s in REFERENCE_SEED_FILES if s.scope == ORGANIZATION}
     assert set(_paths(rendered)) == expected | {project_file}
     assert not any(p.startswith(("project/p-checkout/", "user/u-ada/")) for p in _paths(rendered))
+
+
+_MUTATING_TOOLS = ("write_file", "append_line", "replace_fact", "delete_file")
+
+
+def _mutate(
+    tools: MemoryTools, tool: str, scope: str, area: str, seed: SeedFile, version: VersionToken
+) -> None:
+    """Call one mutating tool on the seed file's name with a real version."""
+    name = seed.name
+    fact = seed.content.splitlines()[0]
+    if tool == "write_file":
+        tools.write_file(scope, area, name, "- [stated] Replaced.\n", "New", [], version)
+    elif tool == "append_line":
+        tools.append_line(scope, area, name, "- [stated] Added.", version)
+    elif tool == "replace_fact":
+        tools.replace_fact(scope, area, name, fact, "- [stated] Changed.", version)
+    else:
+        tools.delete_file(scope, area, name, version)
+
+
+def _snapshot(client: InProcessClient) -> dict[str, tuple[str, VersionToken]]:
+    """Content and version of every file under every entity of the reference identities."""
+    entities = {
+        (scope, grant.entity_id)
+        for identity in (MEMBER_IDENTITY, ADMIN_IDENTITY)
+        for scope, grant in identity.grants.items()
+    }
+    found: dict[str, tuple[str, VersionToken]] = {}
+    for scope, entity_id in entities:
+        cursor = None
+        while True:
+            page = client.list_prefix(build_prefix(scope, entity_id), cursor)
+            for entry in page.entries:
+                file = client.read_file(entry.path)
+                found[file.path] = (file.content, file.version)
+            cursor = page.next_cursor
+            if cursor is None:
+                break
+    return found
+
+
+def _assert_system_untouched(
+    client: InProcessClient, before: dict[str, tuple[str, VersionToken]]
+) -> None:
+    after = _snapshot(client)
+    assert set(after) == set(before)
+    system = {path for path in before if parse_path(path).area == "system"}
+    assert len(system) == sum(1 for s in REFERENCE_SEED_FILES if s.area == "system")
+    assert {path: after[path] for path in system} == {path: before[path] for path in system}
+
+
+@pytest.mark.parametrize("tool", _MUTATING_TOOLS)
+@pytest.mark.parametrize(
+    ("scope", "identity"),
+    [(USER, MEMBER_IDENTITY), (PROJECT, ADMIN_IDENTITY), (ORGANIZATION, ADMIN_IDENTITY)],
+)
+def test_us5_1_system_area_is_read_only_through_tools(
+    tool: str, scope: str, identity: Identity
+) -> None:
+    """AIE-1059, US5.1 and US5.3: every mutating tool is rejected on system/, files unchanged."""
+    client, tools = _seeded(identity)
+    seed = _seed_of(scope, "system")
+    path = seed_path(seed, identity)
+    version = client.read_file(path).version
+    before = _snapshot(client)
+
+    with pytest.raises(RestrictedScopeError) as excinfo:
+        _mutate(tools, tool, scope, "system", seed, version)
+
+    error = _rendered_error(excinfo.value)
+    assert error["category"] == "permanent"
+    assert error["reason"] == "system_read_only"
+    assert error["path"] == path
+    _assert_system_untouched(client, before)
+
+
+@pytest.mark.parametrize("tool", _MUTATING_TOOLS)
+def test_us5_2_system_check_precedes_role_check(tool: str) -> None:
+    """AIE-1059, US5.2 and US5.3: a member writing organization system/ gets system_read_only."""
+    client, tools = _seeded(MEMBER_IDENTITY)
+    seed = _seed_of(ORGANIZATION, "system")
+    assert seed.name == "fiscal-calendar"
+    version = client.read_file(seed_path(seed)).version
+    before = _snapshot(client)
+
+    with pytest.raises(RestrictedScopeError) as excinfo:
+        _mutate(tools, tool, ORGANIZATION, "system", seed, version)
+
+    error = _rendered_error(excinfo.value)
+    assert error["reason"] == "system_read_only"
+    assert error["category"] == "permanent"
+    _assert_system_untouched(client, before)
+
+
+def test_us5_4_transport_accepts_the_system_write_the_tools_reject() -> None:
+    """AIE-1059, US5.4: the client writes project system/ where the tools raise."""
+    client, tools = _seeded(ADMIN_IDENTITY)
+    seed = _seed_of(PROJECT, "system")
+    path = seed_path(seed)
+    assert path == "project/p-checkout/system/event-catalog.md"
+    current = client.read_file(path)
+
+    with pytest.raises(RestrictedScopeError) as excinfo:
+        tools.write_file(
+            PROJECT, "system", seed.name, "- [system] Tool write.\n", "d", [], current.version
+        )
+    assert _rendered_error(excinfo.value)["reason"] == "system_read_only"
+
+    metadata = FileMetadata(seed.description, seed.aliases, frozenset(), REFERENCE_CLOCK_START)
+    written = client.write_file(
+        path, "- [system] Curated update.\n", metadata, current.version, source=SEED_SOURCE
+    )
+
+    assert written.version != current.version
+
+
+@pytest.mark.parametrize("tool", _MUTATING_TOOLS)
+def test_us6_1_organization_writes_require_admin_or_owner(tool: str) -> None:
+    """AIE-1059, US6.1 and US6.3: a member's mutating calls on organization are role-gated."""
+    client, tools = _seeded(MEMBER_IDENTITY)
+    seed = _seed_of(ORGANIZATION, "vocabulary")
+    path = seed_path(seed)
+    before = client.read_file(path)
+
+    with pytest.raises(RestrictedScopeError) as excinfo:
+        _mutate(tools, tool, ORGANIZATION, "vocabulary", seed, before.version)
+
+    error = _rendered_error(excinfo.value)
+    assert error["category"] == "permanent"
+    assert error["reason"] == "role_required"
+    assert error["scope"] == "organization"
+    assert error["required_roles"] == ["admin", "owner"]
+    after = client.read_file(path)
+    assert (after.content, after.version) == (before.content, before.version)
+
+
+def test_us6_2_members_can_read_the_restricted_scope() -> None:
+    """AIE-1059, US6.2: the organization restriction is on writes only."""
+    _, tools = _seeded(MEMBER_IDENTITY)
+    seed = _seed_of(ORGANIZATION, "vocabulary")
+
+    rendered = _rendered(tools.read_file(ORGANIZATION, "vocabulary", seed.name))
+
+    assert rendered["content"] == seed.content
+
+
+def _read_activation_as_both() -> tuple[MemoryTools, MemoryTools, SeedFile, VersionToken]:
+    client, member = _seeded()
+    admin = bind_reference_tools(client, ADMIN_IDENTITY)
+    seed = _seed_of(PROJECT, "metrics")
+    v0_member = _version(_rendered(member.read_file(PROJECT, "metrics", seed.name)))
+    v0_admin = _version(_rendered(admin.read_file(PROJECT, "metrics", seed.name)))
+    assert v0_member == v0_admin
+    return member, admin, seed, v0_member
+
+
+def test_us7_1_stale_append_conflicts_with_current_content() -> None:
+    """AIE-1059, US7.1: the second writer from the same version gets the current content."""
+    member, admin, seed, v0 = _read_activation_as_both()
+    appended = _rendered(
+        admin.append_line(PROJECT, "metrics", seed.name, "- [observed] LA fact.", v0)
+    )
+
+    with pytest.raises(VersionConflictError) as excinfo:
+        member.append_line(PROJECT, "metrics", seed.name, "- [observed] LM fact.", v0)
+
+    error = _rendered_error(excinfo.value)
+    assert error["category"] == "recoverable"
+    assert error["path"] == "project/p-checkout/metrics/activation.md"
+    assert error["content"] == seed.content + "- [observed] LA fact.\n"
+    assert error["version"] == appended["version"]
+    assert error["version"] != v0
+
+
+def test_us7_2_retry_with_the_returned_version_merges_both_lines() -> None:
+    """AIE-1059, US7.2: retrying with the conflict's version succeeds."""
+    member, admin, seed, v0 = _read_activation_as_both()
+    admin.append_line(PROJECT, "metrics", seed.name, "- [observed] LA fact.", v0)
+    with pytest.raises(VersionConflictError) as excinfo:
+        member.append_line(PROJECT, "metrics", seed.name, "- [observed] LM fact.", v0)
+    conflict = _rendered_error(excinfo.value)
+
+    retried = _rendered(
+        member.append_line(
+            PROJECT,
+            "metrics",
+            seed.name,
+            "- [observed] LM fact.",
+            VersionToken(_text(conflict, "version")),
+        )
+    )
+
+    assert retried["content"] == seed.content + "- [observed] LA fact.\n- [observed] LM fact.\n"
