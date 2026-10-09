@@ -14,8 +14,8 @@ names, schemas, and descriptions up "with no manual wiring", optionally
 under a namespace prefix. ADR 0022 decision 12 deferred that server to
 AIE-1060.
 
-AIE-1060 adds a FastMCP host adapter as an optional dependency, with seven
-thin wrappers. Each wrapper:
+AIE-1060 adds an MCP (`MCPServer`) host adapter as an optional dependency,
+with seven thin wrappers. The issue text calls it FastMCP. Each wrapper:
 
 1. takes the session's credentials from the request context;
 2. binds that session's `MemoryTools` with `bind_tools`;
@@ -54,7 +54,10 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
 1. **Dependency: the official `mcp>=2.2,<3`, using `MCPServer`.** The
    requirement sits in the `mcp` extra and in the `dev` group. Importing
    `wenchang.mcp` without it raises an `ImportError` naming
-   `wenchang[mcp]`. No other `wenchang` module imports `mcp`.
+   `wenchang[mcp]`. An installed `mcp` that lacks `mcp.server.mcpserver`
+   raises a different `ImportError`, saying the installed `mcp` is
+   incompatible with `mcp>=2.2,<3`. No other `wenchang` module imports
+   `mcp`.
    - **Rejected: `mcp<2`, which still names the class `FastMCP`.** It is the
      legacy protocol line.
    - **Rejected: the standalone `fastmcp` package.** It is a third-party
@@ -65,6 +68,10 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
    tools before any session exists, so it needs a session-independent
    source. A tool whose docstring is `None` gets `""`, so the startup check
    in decision 8 can report it.
+   - **Rejected: raising inside `tool_descriptions` when a docstring is
+     missing.** Returning `""` keeps the function total, so
+     `MemoryTools.descriptions()` never raises. The server's startup check
+     owns the error, and it names every affected tool at once.
 3. **Registration on the adopter's own server.**
    `register_memory_tools(server, *, prompt, client, resolver, policy,
    credentials_from_context, source, product=None, tool_prefix=None,
@@ -118,7 +125,10 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
    - **Extraction failures.** If `credentials_from_context` raises, the
      call renders a permanent
      `ResolverFailureError("Credentials could not be read from the request.")`.
-     The original exception is never rendered, logged, or chained.
+     One `WARNING` is logged on `wenchang.mcp` with the tool name and the
+     exception's type name only. The exception's message, arguments,
+     traceback, and chain are never rendered or logged, because they may
+     carry the credential.
    - **Rejected: a cache keyed by session id.** There is no stable id.
    - **Rejected: a cache keyed by credentials.** It would hold credentials
      in memory.
@@ -146,7 +156,9 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
    - **Argument types.** `client`, `policy`, `source`, and `product` reuse
      `MemoryTools`' exact errors. `resolver` must satisfy
      `IdentityResolver`, `credentials_from_context` must be callable, and
-     `on_call` must be callable or `None`. For `register_memory_tools`,
+     `on_call` must be callable or `None`. Neither may be an `async`
+     function, because the wrappers call them synchronously on worker
+     threads. For `register_memory_tools`,
      `server` must be an `MCPServer`, and `prompt` must be a non-empty
      `str`.
    - **Prefix.** `tool_prefix` is `None`, or 1 to 64 characters of
@@ -160,7 +172,8 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
      is load-bearing, because `add_tool(description="")` silently falls
      back to the wrapper's docstring.
    - **Collisions.** None of the seven target names, and not
-     `PROMPT_RESOURCE_URI`, may already be registered on the server.
+     `PROMPT_RESOURCE_URI`, may already be registered on the server. The
+     `ValueError` lists every collision in one sorted, comma-separated join.
      `MCPServer` only logs a duplicate, which would silently keep one
      registration and drop the other. The check reads `mcp`'s private tool
      and resource managers, which the `<3` pin keeps stable.
@@ -179,7 +192,13 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
     - `tool`: the registered name;
     - `arguments`: the arguments the wrapper received;
     - `result`: a deep copy of the payload sent as `structured_content`;
-    - `is_error`.
+    - `is_error`;
+    - `request_id`: the MCP request's id. Under parallel calls, records
+      arrive in completion order, so this is how a consumer correlates them;
+    - `duration_s`: the wrapper's wall time on a monotonic clock.
+
+    Records compare by value. They are unhashable, because `arguments` and
+    `result` are mappings.
 
     It runs on the call's worker thread, possibly concurrently with other
     calls, and the response waits for it. It must therefore be thread-safe

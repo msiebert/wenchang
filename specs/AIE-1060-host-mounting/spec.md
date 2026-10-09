@@ -66,6 +66,7 @@ These terms are used throughout:
 | 2.1 | `pyproject.toml` | parse with `tomllib` | `[project.optional-dependencies].mcp` is exactly one requirement on `mcp`, with bounds `>=2.2` and `<3`. `[project].dependencies` names no `mcp`. The `dev` dependency group includes `mcp` |
 | 2.2 | a fresh interpreter (`subprocess.run` with an explicit timeout) | import `wenchang` and every module that `pkgutil.walk_packages` finds under it, except `wenchang.mcp` | no `mcp` or `mcp.*` module is in `sys.modules` |
 | 2.3 | a fresh interpreter in which `import mcp` fails (`sys.modules["mcp"] = None` before the import) | `import wenchang.mcp` | raises `ImportError` whose message contains `wenchang[mcp]` |
+| 2.4 | a fresh interpreter in which `mcp` imports but `mcp.server.mcpserver` does not | `import wenchang.mcp` | raises `ImportError` whose message says the installed mcp is incompatible and names `mcp>=2.2,<3` |
 
 ### US3: Registration with no manual wiring, and startup checks
 
@@ -88,7 +89,7 @@ These terms are used throughout:
 | 3.15 | an adopter-built `MCPServer("host", instructions=prompt)` that already has an adopter tool `ping`, where `prompt = build_memory_prompt(REFERENCE_SLOTS)` | `register_memory_tools(server, prompt=prompt, ...)`, then connect a client | `list_tools()` has `ping` plus the seven memory tools, with descriptions as in US3.4. The resource serves `prompt`. `client.instructions == prompt`. The function returns `None` |
 | 3.16 | `register_memory_tools` with `prompt` not a `str`, or empty or whitespace-only | call | raises `TypeError("prompt must be a str, not <type>")` or `ValueError("prompt must be non-empty")`. The server gains nothing (see "Server gains nothing" below) |
 | 3.17 | `register_memory_tools` given any bad argument from US3.8 to US3.14, or a `server` that is not an `MCPServer` | call | raises the same exception as `build_server`, or `TypeError("server must be an MCPServer, not <type>")` for a bad `server`. The server gains nothing |
-| 3.18 | an adopter server that already has a tool `read_file`; separately, one with `mixpanel_read_file` and `tool_prefix="mixpanel"`; separately, `register_memory_tools` called twice on one server | call | raises `ValueError` whose message names every colliding tool name and, for the second call, `PROMPT_RESOURCE_URI`. The message form is in plan.md. Nothing is registered: the server's tools and resources are exactly what they were before the failing call |
+| 3.18 | an adopter server that already has a tool `read_file`; separately, one with `mixpanel_read_file` and `tool_prefix="mixpanel"`; separately, `register_memory_tools` called twice on one server | call | raises `ValueError` whose message names every colliding tool name and, for the second call, `PROMPT_RESOURCE_URI`. The message is `"cannot register memory tools: already registered on the server: "` followed by one sorted, comma-separated join of the tool names and the URI; the register-twice case asserts it exactly. Nothing is registered: the server's tools and resources are exactly what they were before the failing call |
 | 3.19 | an adopter server built with `instructions=None`, and one built with instructions that do not contain `prompt` | `register_memory_tools(server, prompt=prompt, ...)` | succeeds and logs one `WARNING` on `wenchang.mcp`. A server whose instructions contain `prompt` logs no warning |
 | 3.20 | `REFERENCE_SLOTS` | `memory_instructions(REFERENCE_SLOTS)` | equals `build_memory_prompt(REFERENCE_SLOTS)`. A server built with `build_server` has `instructions` equal to it |
 
@@ -105,6 +106,8 @@ US3.14 cases. Each row changes one argument; the others are valid.
 | `resolver` | `object()` | `TypeError("resolver must satisfy IdentityResolver")` |
 | `credentials_from_context` | `"x"` | `TypeError("credentials_from_context must be callable")` |
 | `on_call` | `"x"` | `TypeError("on_call must be callable or None")` |
+| `credentials_from_context` | an `async def` | `TypeError("credentials_from_context must be a plain function, not async")` |
+| `on_call` | an `async def` | `TypeError("on_call must be a plain function, not async")` |
 | `server` (`register_memory_tools` only) | `object()` | `TypeError("server must be an MCPServer, not object")` |
 
 The first four messages are exactly what `MemoryTools` raises.
@@ -130,7 +133,7 @@ The first four messages are exactly what `MemoryTools` raises.
 | 5.4 | `wenchang.mcp.bind_tools` wrapped with a recorder, plus a counting resolver | N tool calls, alternating alice and bob | `bind_tools` ran N times, each with that call's credentials. The N returned `MemoryTools` are distinct objects. The resolver ran N times |
 | 5.5 | the server | a write to the `system` area | `is_error` is true. `structured_content` equals `render_error` of the same `RestrictedScopeError`, with `category == "permanent"` |
 | 5.6 | the server | `read_file` of a missing file | `is_error` is true, `category == "recoverable"`, and `error == "NotFoundError"` |
-| 5.7 | `credentials_from_context` raises `RuntimeError("secret-token-123")`, with `caplog` at `DEBUG` | any tool call | `is_error` is true, `error == "ResolverFailureError"`, and `category == "permanent"`. `secret-token-123` appears nowhere in the result text, `structured_content`, or any captured log record's message or formatted `exc_info`. The resolver was not called |
+| 5.7 | `credentials_from_context` raises `RuntimeError("secret-token-123")`, with `caplog` at `DEBUG` | any tool call | `is_error` is true, `error == "ResolverFailureError"`, and `category == "permanent"`. `secret-token-123` appears nowhere in the result text, `structured_content`, or any captured log record's message or formatted `exc_info`. Exactly one record is logged on `wenchang.mcp`: a `WARNING` with `exc_info` None whose message names the tool and the exception's type (`RuntimeError`) only. The resolver was not called |
 | 5.8 | a resolver returning `ResolutionFailure("no such user")` | any tool call | `is_error` is true, `error == "ResolverFailureError"`, and the message contains `"no such user"` |
 | 5.9 | a transport client whose `read_file` raises `KeyError("internal-detail")` | `read_file` through the server | `is_error` is true, `category == "internal"`, and `message == "internal error"`. A record is logged on logger `wenchang.mcp` at `ERROR` with `exc_info` |
 | 5.10 | `source="mcp-smoke"` | `write_file` through the server | the file's `sources` contain `"mcp-smoke"` |
@@ -147,11 +150,13 @@ The first four messages are exactly what `MemoryTools` raises.
 | 6.1 | an `InMemoryStorage` whose `_objects` is replaced by a dict subclass whose `get` sleeps 5 ms, and 8 threads behind a barrier | each calls `put_if_version(key, ..., expected=None)` | exactly one succeeds; the other 7 raise `PreconditionFailedError` |
 | 6.2 | an `InMemoryStorage` and a fixture that sets `sys.setswitchinterval(1e-6)` and restores it afterward | 20 rounds of 8 threads × 50 `put` calls to distinct keys | in every round, all 400 returned tokens are distinct |
 | 6.3 | an `InMemoryStorage` holding a key at version `v`, the same sleeping `_objects` as in 6.1, and 8 threads behind a barrier | each calls `put_if_version(key, ..., expected=v)` | exactly one succeeds, and the stored version is the one it returned |
-| 6.4 | alice's file at version `v` | 8 concurrent `write_file` calls at `expected_version=v`, through one client in an `anyio` task group | exactly one has `is_error` false. The other 7 are `error == "VersionConflictError"` with `category == "recoverable"`, and their `version` equals the winner's. The winner's version differs from `v` |
+| 6.4 | alice's file at version `v` | 8 concurrent `write_file` calls at `expected_version=v`, through one client in an `anyio` task group | exactly one has `is_error` false. The other 7 are `error == "VersionConflictError"` with `category == "recoverable"`, and their `version` equals the winner's. The winner's version differs from `v`, which the test asserts |
 | 6.5 | 8 concurrent `write_file` calls creating 8 different files (`expected_version=None`) | through the client | all succeed, and the 8 versions are distinct |
+| 6.6 | an `InMemoryStorage` holding a key at version `v`, the sleeping `_objects`, and 8 threads behind a barrier | each calls `delete_if_version(key, v)` | exactly one returns; the other 7 raise `PreconditionFailedError`; the key is gone |
+| 6.7 | an `InMemoryStorage`, a tiny switch interval, one thread putting continuously | 4 threads each call `list_page` 300 times | no call raises |
 
-US6.1 to US6.3 make the race deterministic. Run against the unlocked
-`InMemoryStorage`, they must fail before the lock is added. US6.4 and US6.5
+US6.1 to US6.3, US6.6, and US6.7 make the race deterministic. Each fails
+against `InMemoryStorage` with the relevant lock removed. US6.4 and US6.5
 are end-to-end smoke checks of the concurrent MCP path, not proof of the
 lock.
 
@@ -159,12 +164,13 @@ lock.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 7.1 | `ToolCallRecord` | inspect | it is a frozen dataclass with fields `tool: str`, `arguments: Mapping[str, object]`, `result: Mapping[str, object]`, and `is_error: bool`. Mutating a nested list inside a record's `result`, such as `result["aliases"]`, does not change the client's `structured_content`, and the reverse also holds |
+| 7.1 | `ToolCallRecord` | inspect | it is a frozen dataclass with fields `tool: str`, `arguments: Mapping[str, object]`, `result: Mapping[str, object]`, `is_error: bool`, `request_id: str` (the MCP request id), and `duration_s: float` (monotonic wall time of the wrapper). An observer that mutates a nested list in `record.result` during `on_call` does not change the client's `structured_content` |
 | 7.2 | `on_call` appending to a list, and `tool_prefix="mixpanel"` | a successful `mixpanel_read_file(scope, area, name)` | one record. `tool == "mixpanel_read_file"`. `arguments == {"scope": ..., "area": ..., "name": ...}` (the arguments the wrapper received, `ctx` excluded). `result == structured_content`. `is_error is False` |
 | 7.3 | the same | a call failing with `NotFoundError`, and one failing in `credentials_from_context` | one record each, with `is_error is True` and `result` equal to that call's `structured_content` |
 | 7.4 | the same | a call rejected by MCP schema validation (US5.12) | no record. ADR 0027 says these never reach the wrapper |
 | 7.5 | `on_call` raising `RuntimeError("observer-secret")` | a successful call | the client still gets the normal result, and `observer-secret` appears nowhere in its content. One record is logged on `wenchang.mcp` at `ERROR` |
 | 7.6 | `on_call=None` (the default) | calls | they work as in US5 |
+| 7.7 | 4 parallel `read_file` calls | records arrive | each has a non-empty `request_id`, all distinct; `duration_s >= 0` |
 
 ### US8: Stdio
 

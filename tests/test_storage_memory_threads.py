@@ -1,4 +1,4 @@
-"""Thread-safety of InMemoryStorage (AIE-1060, US6.1 to US6.3).
+"""Thread-safety of InMemoryStorage (AIE-1060, US6.1 to US6.3, US6.6, US6.7).
 
 The MCP adapter runs tool calls concurrently on worker threads, so the
 in-memory fake must keep compare-and-swap and token uniqueness under
@@ -40,10 +40,13 @@ def _slow(storage: InMemoryStorage) -> None:
     storage._objects = slow  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
 
 
+_NOT_RUN: object = object()
+
+
 def _race(count: int, attempt: Callable[[int], object]) -> list[object]:
     """Run attempt(i) on count threads released together; return results or exceptions."""
-    barrier = threading.Barrier(count)
-    results: list[object] = [None] * count
+    barrier = threading.Barrier(count, timeout=30)
+    results: list[object] = [_NOT_RUN] * count
 
     def run(i: int) -> None:
         barrier.wait()
@@ -57,6 +60,8 @@ def _race(count: int, attempt: Callable[[int], object]) -> list[object]:
         t.start()
     for t in threads:
         t.join(timeout=30)
+    assert not any(t.is_alive() for t in threads)
+    assert _NOT_RUN not in results
     return results
 
 
@@ -120,3 +125,56 @@ def test_concurrent_update_has_one_winner() -> None:
     stored = storage.get(KEY)
     assert stored is not None
     assert stored.version == winners[0]
+
+
+def test_concurrent_delete_has_one_winner() -> None:
+    """Of concurrent delete_if_version(v) calls, exactly one deletes and the
+    rest raise PreconditionFailedError (AIE-1060, US6.6).
+    """
+    storage = InMemoryStorage()
+    v = storage.put(KEY, b"original", {})
+    _slow(storage)
+
+    results = _race(THREADS, lambda i: storage.delete_if_version(KEY, v))
+
+    winners = [r for r in results if r is None]
+    losers = [r for r in results if isinstance(r, PreconditionFailedError)]
+    assert len(winners) == 1, results
+    assert len(losers) == THREADS - 1, results
+    assert storage.get(KEY) is None
+
+
+@pytest.mark.usefixtures("tiny_switch_interval")
+def test_list_page_during_concurrent_puts_never_raises() -> None:
+    """list_page never fails while other threads put, over many listings at a
+    tiny switch interval (AIE-1060, US6.7).
+    """
+    storage = InMemoryStorage()
+    stop = threading.Event()
+    errors: list[BaseException] = []
+
+    def writer() -> None:
+        i = 0
+        while not stop.is_set():
+            storage.put(f"p/{i}", b"x", {})
+            i += 1
+
+    def lister() -> None:
+        try:
+            for _ in range(300):
+                storage.list_page("p/", None, 10_000)
+        except BaseException as exc:
+            errors.append(exc)
+
+    writer_thread = threading.Thread(target=writer)
+    writer_thread.start()
+    listers = [threading.Thread(target=lister) for _ in range(4)]
+    for t in listers:
+        t.start()
+    for t in listers:
+        t.join(timeout=30)
+    stop.set()
+    writer_thread.join(timeout=30)
+
+    assert not any(t.is_alive() for t in [writer_thread, *listers])
+    assert errors == []

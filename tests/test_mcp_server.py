@@ -28,7 +28,6 @@ from wenchang.core import MemoryStore
 from wenchang.identity import Identity, ResolutionFailure, ScopeGrant
 from wenchang.mcp import (
     PROMPT_RESOURCE_URI,
-    TOOL_PREFIX_RULE,
     ToolCallRecord,
     build_server,
     memory_instructions,
@@ -52,6 +51,10 @@ pytestmark = pytest.mark.unit
 TESTS_DIR = Path(__file__).resolve().parent
 TIMEOUT = 60
 META_KEY = "test/user"
+TOOL_PREFIX_RULE = (
+    "tool_prefix must be 1-64 characters of A-Z, a-z, 0-9, '_' or '-', "
+    "starting and ending with a letter or digit"
+)
 POLICY = ScopePolicy({})
 IDENTITIES = {
     "alice": Identity({"user": ScopeGrant("u-alice", "owner")}),
@@ -108,8 +111,9 @@ def _with_client[T](
     server: MCPServer, body: Callable[[Client], Awaitable[T]], mode: str = "auto"
 ) -> T:
     async def main() -> T:
-        async with Client(server, mode=mode) as client:
-            return await body(client)
+        with anyio.fail_after(30):
+            async with Client(server, mode=mode) as client:
+                return await body(client)
 
     return _run(main)
 
@@ -410,6 +414,14 @@ build_server(
     assert "python -OO" in result.stderr
 
 
+async def _async_credentials(ctx: Context[Any, Any]) -> object:
+    return None
+
+
+async def _async_observer(record: ToolCallRecord) -> None:
+    return None
+
+
 BAD_ARGUMENTS: list[tuple[str, object, type[Exception], str]] = [
     ("client", object(), TypeError, "client must satisfy TransportClient"),
     ("policy", {}, TypeError, "policy must be a ScopePolicy, not dict"),
@@ -418,6 +430,13 @@ BAD_ARGUMENTS: list[tuple[str, object, type[Exception], str]] = [
     ("resolver", object(), TypeError, "resolver must satisfy IdentityResolver"),
     ("credentials_from_context", "x", TypeError, "credentials_from_context must be callable"),
     ("on_call", "x", TypeError, "on_call must be callable or None"),
+    (
+        "credentials_from_context",
+        _async_credentials,
+        TypeError,
+        "credentials_from_context must be a plain function, not async",
+    ),
+    ("on_call", _async_observer, TypeError, "on_call must be a plain function, not async"),
 ]
 
 
@@ -578,10 +597,10 @@ def test_register_twice_is_rejected() -> None:
     with pytest.raises(ValueError) as caught:
         register_memory_tools(server, prompt="p", **_kwargs())
 
-    message = str(caught.value)
-    for name in TOOL_NAMES:
-        assert name in message
-    assert PROMPT_RESOURCE_URI in message
+    assert str(caught.value) == (
+        "cannot register memory tools: already registered on the server: "
+        + ", ".join(sorted([*TOOL_NAMES, PROMPT_RESOURCE_URI]))
+    )
     assert _snapshot(server) == before
 
 
@@ -808,7 +827,8 @@ def test_missing_file_is_rendered_recoverable() -> None:
 def test_credential_extraction_failure_leaks_nothing(caplog: pytest.LogCaptureFixture) -> None:
     """A raising credentials_from_context renders a permanent
     ResolverFailureError, and the exception text appears in neither the result
-    nor the logs; the resolver is not called (AIE-1060, US5.7).
+    nor the logs; one WARNING names the exception type only; the resolver is
+    not called (AIE-1060, US5.7).
     """
     caplog.set_level(logging.DEBUG)
     resolver = _UserResolver()
@@ -830,6 +850,12 @@ def test_credential_extraction_failure_leaks_nothing(caplog: pytest.LogCaptureFi
         assert "secret-token-123" not in record.getMessage()
         if record.exc_info is not None:
             assert "secret-token-123" not in logging.Formatter().formatException(record.exc_info)
+    warnings = [r for r in caplog.records if r.name == "wenchang.mcp"]
+    assert len(warnings) == 1
+    assert warnings[0].levelno == logging.WARNING
+    assert warnings[0].exc_info is None
+    assert "RuntimeError" in warnings[0].getMessage()
+    assert "read_file" in warnings[0].getMessage()
     assert resolver.calls == []
 
 
@@ -1013,8 +1039,12 @@ def test_concurrent_writes_at_one_version_have_one_winner() -> None:
     version (AIE-1060, US6.4).
     """
 
+    setup_version: list[str] = []
+
     async def setup(client: Client) -> dict[str, Any]:
-        return _payload(await _call(client, "write_file", "alice", **_write_args()))
+        state = _payload(await _call(client, "write_file", "alice", **_write_args()))
+        setup_version.append(state["version"])
+        return state
 
     results = _concurrently(
         _server(),
@@ -1032,6 +1062,7 @@ def test_concurrent_writes_at_one_version_have_one_winner() -> None:
         assert loser["error"] == "VersionConflictError"
         assert loser["category"] == "recoverable"
         assert loser["version"] == winners[0]["version"]
+    assert winners[0]["version"] != setup_version[0]
 
 
 def test_concurrent_creates_mint_distinct_versions() -> None:
@@ -1052,33 +1083,37 @@ def test_concurrent_creates_mint_distinct_versions() -> None:
 
 
 def test_tool_call_record_shape() -> None:
-    """ToolCallRecord is a frozen dataclass with tool, arguments, result, and
-    is_error (AIE-1060, US7.1).
+    """ToolCallRecord is a frozen dataclass with tool, arguments, result,
+    is_error, request_id, and duration_s (AIE-1060, US7.1).
     """
     assert is_dataclass(ToolCallRecord)
-    assert [f.name for f in fields(ToolCallRecord)] == ["tool", "arguments", "result", "is_error"]
-    record = ToolCallRecord("t", {}, {}, False)
+    assert [f.name for f in fields(ToolCallRecord)] == [
+        "tool",
+        "arguments",
+        "result",
+        "is_error",
+        "request_id",
+        "duration_s",
+    ]
+    record = ToolCallRecord("t", {}, {}, False, "1", 0.0)
     with pytest.raises(FrozenInstanceError):
         record.tool = "u"  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_record_result_does_not_alias_structured_content() -> None:
-    """Mutating a nested list in a record's result does not change the client's
-    structured content, nor the reverse (AIE-1060, US7.1).
+    """An observer mutating a nested list in the record's result while the call
+    is in flight does not change what the client receives (AIE-1060, US7.1).
     """
-    records: list[ToolCallRecord] = []
-    server = _server(on_call=records.append)
+
+    def observer(record: ToolCallRecord) -> None:
+        cast(list[str], record.result["aliases"]).append("from-observer")
 
     async def body(client: Client) -> CallToolResult:
         return await _call(client, "write_file", "alice", **_write_args())
 
-    result = _with_client(server, body)
-    # The in-memory transport may hand the client the server's own object.
-    record_aliases = cast(list[str], records[0].result["aliases"])
-    record_aliases.append("from-record")
-    assert "from-record" not in _payload(result)["aliases"]
-    cast(list[str], _payload(result)["aliases"]).append("from-client")
-    assert "from-client" not in record_aliases
+    result = _with_client(_server(on_call=observer), body)
+
+    assert _payload(result)["aliases"] == ["tea"]
 
 
 def test_record_for_successful_prefixed_call() -> None:
@@ -1100,6 +1135,31 @@ def test_record_for_successful_prefixed_call() -> None:
     assert dict(records[0].arguments) == FILE
     assert dict(records[0].result) == result.structured_content
     assert records[0].is_error is False
+    assert isinstance(records[0].duration_s, float)
+    assert records[0].duration_s >= 0
+
+
+def test_records_carry_distinct_request_ids() -> None:
+    """Each record carries its MCP request's id, so records arriving in
+    completion order can be correlated (AIE-1060, US7.7).
+    """
+    records: list[ToolCallRecord] = []
+    server = _server(on_call=records.append)
+
+    async def reads(client: Client) -> None:
+        async with anyio.create_task_group() as group:
+            for _ in range(4):
+                group.start_soon(_read, client)
+
+    _with_client(server, reads)
+
+    assert len(records) == 4
+    assert all(isinstance(r.request_id, str) and r.request_id for r in records)
+    assert len({r.request_id for r in records}) == 4
+
+
+async def _read(client: Client) -> None:
+    await _call(client, "read_file", "alice", **FILE)
 
 
 def test_records_for_failed_calls() -> None:

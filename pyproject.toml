@@ -22,6 +22,7 @@ dev = [
     "ruff>=0.8",
     "pyright>=1.1.390",
     "mcp>=2.2,<3",
+    "packaging>=24",
 ]
 
 [build-system]

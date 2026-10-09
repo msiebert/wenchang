@@ -85,8 +85,10 @@ from wenchang.mcp import build_server
 
 
 def credentials_from_context(ctx):
-    # Return the raw credential; the resolver verifies it. Headers and
-    # request _meta are client-supplied and are never an identity assertion.
+    # Over HTTP: return the raw credential; the resolver verifies it. Headers
+    # and request _meta are client-supplied and never an identity assertion.
+    # ctx.headers is None on stdio; a stdio server reads its credential from
+    # process config instead, e.g. os.environ["MEMORY_TOKEN"].
     return (ctx.headers or {}).get("authorization")
 
 
@@ -127,8 +129,14 @@ register_memory_tools(
 
 Things to know:
 
+- **Credentials depend on the transport.** `ctx.headers` exists only on
+  HTTP transports. A stdio server reads its credential from process
+  configuration, such as an environment variable.
 - **Identity is resolved on every call.** Each tool call reads credentials
-  with `credentials_from_context` and binds its own tools. The resolver runs
+  with `credentials_from_context` and binds its own tools. If
+  `credentials_from_context` raises, the call fails with a permanent
+  "memory unavailable" error. One warning is logged with the exception's
+  type only, never its message. The resolver runs
   on every call, so cache inside it if resolution is expensive.
 - **Calls run concurrently on worker threads.** The `TransportClient`, and
   the optional `on_call` observer, must be thread-safe. `on_call` receives a

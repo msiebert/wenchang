@@ -1059,7 +1059,8 @@ the one planned piece.
   [ADR 0026](docs/adr/0026-product-identity.md).
 - **mcp** — the MCP host adapter (`wenchang.mcp`), importable only with the
   optional `wenchang[mcp]` extra (`mcp>=2.2,<3`); without it, importing the
-  module raises an `ImportError` naming the extra. No other module imports
+  module raises an `ImportError` naming the extra, and an incompatible
+  installed `mcp` raises one saying so. No other module imports
   it or `mcp`.
   - **`register_memory_tools(server, *, prompt, client, resolver, policy,
     credentials_from_context, source, product=None, tool_prefix=None,
@@ -1085,10 +1086,13 @@ the one planned piece.
     4. A `CallToolResult` comes back with the `render_result` or
        `render_error` payload as `structured_content` and as JSON text, and
        `is_error` set on failure. An extraction failure renders a permanent
-       `ResolverFailureError` without the original exception. An `internal`
+       `ResolverFailureError` without the original exception, and logs one
+       `WARNING` naming the tool and the exception's type only. An `internal`
        error is logged on logger `wenchang.mcp`.
   - **`on_call`**, if given, receives a `ToolCallRecord(tool, arguments,
-    result, is_error)` with a deep-copied result after every wrapper call.
+    result, is_error, request_id, duration_s)` with a deep-copied result
+    after every wrapper call. `request_id` is the MCP request's id, for
+    correlating records that arrive in completion order.
   - **Startup checks.** Every argument, the prefix rule (1 to 64 of
     `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
     (which fail under `python -OO`), and name or URI collisions with what
@@ -1162,8 +1166,9 @@ code, and depends on `identity`, `paths`, `scope`, and `errors` (resolver
 suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
 (transport suite), with no module depending on it. `mcp` sits above the
 agent-facing layer: it registers `tools` on an MCP server, serves the text
-`prompts` assembles, and also imports `identity`, `scope`, `transport`,
-`errors`, and `core` types for its signatures; nothing depends on it.
+`prompts` assembles, and also imports the `wenchang` package root (for
+`__version__`), `identity`, `scope`, `transport`, `errors`, `version_token`,
+and `core` types for its signatures; nothing depends on it.
 
 ## Key invariants
 

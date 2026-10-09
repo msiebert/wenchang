@@ -1237,6 +1237,7 @@ testing = [
 [package.dev-dependencies]
 dev = [
     { name = "mcp" },
+    { name = "packaging" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1254,6 +1255,7 @@ provides-extras = ["testing", "mcp"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mcp", specifier = ">=2.2,<3" },
+    { name = "packaging", specifier = ">=24" },
     { name = "pyright", specifier = ">=1.1.390" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-cov", specifier = ">=6.0" },

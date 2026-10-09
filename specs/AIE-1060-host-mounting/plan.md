@@ -146,7 +146,7 @@ __all__ = [
 
 PROMPT_RESOURCE_URI: Final[str] = "wenchang://memory-prompt"
 
-TOOL_PREFIX_RULE: Final[str] = (
+_TOOL_PREFIX_RULE: Final[str] = (
     "tool_prefix must be 1-64 characters of A-Z, a-z, 0-9, '_' or '-', "
     "starting and ending with a letter or digit"
 )
@@ -202,8 +202,8 @@ def build_server[C](
     """Return an MCPServer with the memory prompt as instructions and the memory tools."""
 ```
 
-`TOOL_PREFIX_RULE` is not in `__all__`. Tests import it as a module constant
-to compare messages.
+`_TOOL_PREFIX_RULE` is private (code review). Tests pin the same text as
+their own literal.
 
 **`register_memory_tools` validates everything first, in this order.** The
 first failure raises, and `server` is left untouched.
@@ -222,7 +222,7 @@ first failure raises, and `server` is left untouched.
    - A non-`str` real type raises
      `TypeError(f"tool_prefix must be a str or None, not {type_name}")`.
    - A value that fails `_TOOL_PREFIX.fullmatch` raises
-     `ValueError(TOOL_PREFIX_RULE)`.
+     `ValueError(_TOOL_PREFIX_RULE)`.
    - The registered name is `f"{tool_prefix}_{name}"`. The longest possible
      name is 64 + 1 + 16 = 81 characters, which fits MCP's 128-character
      limit.

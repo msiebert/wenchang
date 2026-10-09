@@ -10,20 +10,27 @@ Requires the optional extra: pip install 'wenchang[mcp]'.
 """
 
 import copy
+import importlib.util
+import inspect
 import json
 import logging
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Final, cast
 
+# mcp is an optional dependency; tell a missing install from an incompatible one.
+if importlib.util.find_spec("mcp") is None:
+    raise ImportError("wenchang.mcp requires the optional 'mcp' extra: pip install 'wenchang[mcp]'")
 try:
     from mcp.server.mcpserver import Context, MCPServer
     from mcp.types import CallToolResult, TextContent
-except ImportError as exc:  # optional dependency
+except ImportError as exc:
     raise ImportError(
-        "wenchang.mcp requires the optional 'mcp' extra: pip install 'wenchang[mcp]'"
+        "wenchang.mcp requires mcp>=2.2,<3, and the installed mcp is incompatible: "
+        "pip install 'wenchang[mcp]'"
     ) from exc
 
 import wenchang
@@ -53,7 +60,7 @@ __all__ = [
 
 PROMPT_RESOURCE_URI: Final[str] = "wenchang://memory-prompt"
 
-TOOL_PREFIX_RULE: Final[str] = (
+_TOOL_PREFIX_RULE: Final[str] = (
     "tool_prefix must be 1-64 characters of A-Z, a-z, 0-9, '_' or '-', "
     "starting and ending with a letter or digit"
 )
@@ -72,14 +79,20 @@ class ToolCallRecord:
     """One memory tool call as the MCP adapter handled it.
 
     tool is the registered name, prefix included; arguments are what the
-    wrapper received; result is a copy of the payload sent to the client.
-    Calls MCP rejects during argument validation never produce a record.
+    wrapper received; result is a copy of the payload sent to the client;
+    request_id is the MCP request's id, for correlating records that arrive
+    in completion order; duration_s is the wrapper's wall time on a
+    monotonic clock. Calls MCP rejects during argument validation never
+    produce a record. Records compare by value and are unhashable, because
+    arguments and result are mappings.
     """
 
     tool: str
     arguments: Mapping[str, object]
     result: Mapping[str, object]
     is_error: bool
+    request_id: str
+    duration_s: float
 
 
 def memory_instructions(slots: PromptSlots) -> str:
@@ -113,8 +126,13 @@ def _validate[C](
         raise TypeError("resolver must satisfy IdentityResolver")
     if not callable(cast(object, credentials_from_context)):
         raise TypeError("credentials_from_context must be callable")
+    # Tools run on worker threads and call these synchronously.
+    if inspect.iscoroutinefunction(credentials_from_context):
+        raise TypeError("credentials_from_context must be a plain function, not async")
     if on_call is not None and not callable(cast(object, on_call)):
         raise TypeError("on_call must be callable or None")
+    if inspect.iscoroutinefunction(on_call):
+        raise TypeError("on_call must be a plain function, not async")
     if tool_prefix is not None:
         if not issubclass(type(cast(object, tool_prefix)), str):
             raise TypeError(
@@ -122,7 +140,7 @@ def _validate[C](
             )
         tool_prefix = str.__str__(tool_prefix)
         if _TOOL_PREFIX.fullmatch(tool_prefix) is None:
-            raise ValueError(TOOL_PREFIX_RULE)
+            raise ValueError(_TOOL_PREFIX_RULE)
     names = {name: name if tool_prefix is None else f"{tool_prefix}_{name}" for name in TOOL_NAMES}
     descriptions = tool_descriptions(product)
     missing = [
@@ -183,9 +201,9 @@ def register_memory_tools[C](
         str(resource.uri)
         for resource in server._resource_manager.list_resources()  # pyright: ignore[reportPrivateUsage]
     }
-    collisions = sorted(n for n in names.values() if n in existing_tools)
-    if PROMPT_RESOURCE_URI in existing_resources:
-        collisions.append(PROMPT_RESOURCE_URI)
+    tool_hits = [n for n in names.values() if n in existing_tools]
+    uri_hits = [PROMPT_RESOURCE_URI] if PROMPT_RESOURCE_URI in existing_resources else []
+    collisions = sorted([*tool_hits, *uri_hits])
     if collisions:
         raise ValueError(
             "cannot register memory tools: already registered on the server: "
@@ -210,7 +228,9 @@ def register_memory_tools[C](
         op: Callable[[MemoryTools], _Result],
     ) -> CallToolResult:
         tool = names[name]
+        started = time.monotonic()
         payload, is_error = _run(ctx, op, tool)
+        duration = time.monotonic() - started
         result = CallToolResult(
             content=[TextContent(type="text", text=json.dumps(payload))],
             structured_content=payload,
@@ -222,6 +242,8 @@ def register_memory_tools[C](
                 MappingProxyType(copy.deepcopy(dict(arguments))),
                 MappingProxyType(copy.deepcopy(payload)),
                 is_error,
+                ctx.request_id,
+                duration,
             )
             try:
                 on_call(record)
@@ -232,14 +254,17 @@ def register_memory_tools[C](
     def _run(
         ctx: Context[Any, Any], op: Callable[[MemoryTools], _Result], tool: str
     ) -> tuple[dict[str, object], bool]:
-        failure: ResolverFailureError | None = None
+        failed_type: str | None = None
         credentials: C | None = None
         try:
             credentials = credentials_from_context(ctx)
-        except Exception:
+        except Exception as exc:
+            failed_type = _type_name(type(exc))
+        # Handled outside the except block so the original exception is not kept as context;
+        # only its type is logged, since its message may carry the credential.
+        if failed_type is not None:
+            _log.warning("memory tool %s: credentials_from_context raised %s", tool, failed_type)
             failure = ResolverFailureError("Credentials could not be read from the request.")
-        # Rendered outside the except block so the original exception is not kept as context.
-        if failure is not None:
             return render_error(failure), True
         try:
             tools = bind_tools(

@@ -88,3 +88,29 @@ else:
     assert result.returncode == 0, result.stderr
     assert result.stdout.startswith("IMPORT-ERROR:")
     assert "wenchang[mcp]" in result.stdout
+
+
+def test_import_with_incompatible_mcp_says_so() -> None:
+    """With mcp installed but lacking the 2.x server module, import wenchang.mcp
+    raises an ImportError saying the installed mcp is incompatible
+    (AIE-1060, US2.4).
+    """
+    code = """
+import sys
+
+import mcp
+
+sys.modules["mcp.server.mcpserver"] = None
+try:
+    import wenchang.mcp
+except ImportError as exc:
+    print("IMPORT-ERROR:", exc)
+else:
+    print("IMPORTED")
+"""
+    result = _run(code)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("IMPORT-ERROR:")
+    assert "incompatible" in result.stdout
+    assert "mcp>=2.2,<3" in result.stdout

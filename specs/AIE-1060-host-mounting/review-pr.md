@@ -36,6 +36,7 @@ official package, whose FastMCP is now called `MCPServer`).
 | US2.1 `mcp` is an extra plus dev only | `test_mcp_packaging.py::test_mcp_is_an_optional_and_dev_dependency_only` |
 | US2.2 core never imports `mcp` | `::test_core_modules_do_not_import_mcp` |
 | US2.3 clear `ImportError` without the extra | `::test_import_without_extra_names_the_extra` |
+| US2.4 separate `ImportError` for an incompatible `mcp` | `::test_import_with_incompatible_mcp_says_so` |
 | US3.1 exports; keyword-only parameters | `server::test_module_exports_and_keyword_only_parameters` |
 | US3.2 seven names | `::test_lists_the_seven_tool_names` |
 | US3.3 prefix | `::test_prefix_applies_to_every_tool_name` |
@@ -49,7 +50,7 @@ official package, whose FastMCP is now called `MCPServer`).
 | US3.11 empty descriptions fail startup | `::test_empty_descriptions_fail_startup` |
 | US3.12 missing description fails startup | `::test_missing_description_fails_startup` |
 | US3.13 real `python -OO` fails startup | `::test_python_oo_fails_startup` |
-| US3.14 up-front validation, no server created | `::test_build_server_validates_up_front` (7 rows) |
+| US3.14 up-front validation, no server created | `::test_build_server_validates_up_front` (9 rows, including async callables) |
 | US3.15 register on an adopter server | `::test_register_on_adopter_server` |
 | US3.16 bad prompt; server gains nothing | `::test_register_rejects_bad_prompt` |
 | US3.17 register validates like `build_server`; server type | `::test_register_validates_like_build_server`, `::test_register_rejects_non_server` |
@@ -81,12 +82,15 @@ official package, whose FastMCP is now called `MCPServer`).
 | US6.3 concurrent update: one winner | `::test_concurrent_update_has_one_winner` |
 | US6.4 concurrent MCP writes: one winner, conflicts carry the winner's version | `server::test_concurrent_writes_at_one_version_have_one_winner` |
 | US6.5 concurrent MCP creates: distinct versions | `server::test_concurrent_creates_mint_distinct_versions` |
+| US6.6 concurrent delete: one winner | `test_storage_memory_threads.py::test_concurrent_delete_has_one_winner` |
+| US6.7 `list_page` during concurrent puts | `test_storage_memory_threads.py::test_list_page_during_concurrent_puts_never_raises` |
 | US7.1 `ToolCallRecord` shape; no aliasing | `::test_tool_call_record_shape`, `::test_record_result_does_not_alias_structured_content` |
 | US7.2 record for a successful prefixed call | `::test_record_for_successful_prefixed_call` |
 | US7.3 records for failures | `::test_records_for_failed_calls` |
 | US7.4 no record for schema-rejected calls | `::test_schema_rejected_call_produces_no_record` |
 | US7.5 failing observer | `::test_failing_observer_does_not_reach_client` |
 | US7.6 default `None` | `::test_no_observer_by_default` |
+| US7.7 distinct `request_id`s; `duration_s` | `::test_records_carry_distinct_request_ids`, `::test_record_for_successful_prefixed_call` |
 | US8.1 stdio | `test_mcp_stdio.py::test_stdio_server_serves_tools_instructions_and_calls` |
 | US9.1 to US9.7 docs | ADR 0027; notes in ADRs 0003, 0022, and 0026; ARCHITECTURE.md; README; glossary (reviewed by hand) |
 
@@ -124,7 +128,8 @@ official package, whose FastMCP is now called `MCPServer`).
 - **Wrapper annotations.** `ctx` must be annotated `Context[Any, Any]`
   directly. A `type` alias made `MCPServer` expose `ctx` in every schema, and
   the US3.6 test caught it.
-- **Race tests.** The lock is proven by US6.1 to US6.3. Before the lock,
+- **Race tests.** The lock is proven by US6.1 to US6.3, US6.6, and US6.7;
+  each fails with the relevant lock removed. Before the lock,
   8 of 8 concurrent creates and updates won, and 399 of 400 tokens were
   distinct. US6.4 and US6.5 are end-to-end smoke checks only.
 - **US5.13 and US5.14** pin an `mcp` quirk. They are expected to fail if
@@ -137,3 +142,32 @@ official package, whose FastMCP is now called `MCPServer`).
 - Verify `GcsStorage` and its `google-cloud-storage` client under concurrent
   MCP calls.
 - Revisit the collision check when lifting the `mcp<3` bound.
+
+## Code review
+
+Both reviews passed, with no blockers. Mutation testing caught 20 of 23
+mutations. All findings were applied:
+
+- **Tests.**
+  - The aliasing test now mutates `record.result` inside `on_call`, so it
+    fails when the deepcopy is dropped.
+  - New lock tests cover `delete_if_version` and `list_page`. Each fails
+    with its lock removed.
+  - Client calls in tests now have a 30-second timeout.
+- **Behavior.**
+  - The collision message is one sorted join, and the test asserts it
+    exactly.
+  - A credential-extraction failure now logs one `WARNING` naming the
+    exception type only.
+  - `credentials_from_context` and `on_call` reject `async` functions.
+- **`ToolCallRecord`.** It gains `request_id` and `duration_s`, and its
+  docstring states that it is unhashable.
+- **Packaging.**
+  - `_TOOL_PREFIX_RULE` is private.
+  - `packaging` is added to the dev group.
+  - The import guard tells a missing `mcp` from an incompatible one.
+- **Docs.**
+  - README: credentials on stdio, and the new warning.
+  - ADR 0027: the rejected "raise in `tool_descriptions`" alternative, the
+    logging change, and the record fields.
+  - ARCHITECTURE.md: the dependency list.
