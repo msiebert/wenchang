@@ -28,8 +28,11 @@ library-owned sections and adopter-supplied slots. Any remote transport is
 still planned. A twelfth, `testing`, is adopter-facing rather than part of
 the runtime: the executable conformance suites an adopter runs against
 their own identity resolver and their own transport client, installed with
-the optional `wenchang[testing]` extra. Every module in the map below is
-implemented; the remote half of `transport` is the one planned piece.
+the optional `wenchang[testing]` extra. A thirteenth, `mcp`, is the host
+adapter that serves the tools and prompt from an MCP server; it is installed
+with the optional `wenchang[mcp]` extra, and nothing else imports it. Every
+module in the map below is implemented; the remote half of `transport` is
+the one planned piece.
 
 ## Module map
 
@@ -127,7 +130,9 @@ implemented; the remote half of `transport` is the one planned piece.
   `put_if_version`, `delete_if_version`, `list_page`) and `StoredObject`
   (bytes, metadata map,
   `VersionToken`), with two implementations behind it, held identical by one
-  shared conformance suite. `InMemoryStorage` is the unit-test fake.
+  shared conformance suite. `InMemoryStorage` is the unit-test fake; it is
+  thread-safe, with one lock held across each method, because the MCP
+  adapter calls the transport from concurrent worker threads.
   `GcsStorage` is the only module that imports `google.cloud`; it maps
   client timeouts and server/connection unavailability to
   `BackendUnavailableError`, and pins each `get` to the generation
@@ -851,7 +856,11 @@ implemented; the remote half of `transport` is the one planned piece.
   each name to its bound method, in that order, for a host to decorate.
   `descriptions()` returns a fresh read-only mapping from the same names,
   in the same order, to each tool's description, and a host registers each
-  tool with `descriptions()[name]` rather than `__doc__`. With `product`
+  tool with `descriptions()[name]` rather than `__doc__`. The module-level
+  `tool_descriptions(product=None)` renders the same mapping without a
+  session, for a host that registers tools at startup, and `descriptions()`
+  delegates to it; a tool whose docstring is missing (as under
+  `python -OO`) gets `""`. With `product`
   `None` a description is the `inspect.cleandoc`'d docstring. With a
   product, only the first line changes: it comes from a fixed per-tool
   template that is the docstring's first line with the product inserted
@@ -975,7 +984,8 @@ implemented; the remote half of `transport` is the one planned piece.
   Type names and messages are read through guards (`"<unnamed>"`,
   `"<unreadable>"`). A host wraps each call in one `except Exception`.
   The layer is framework-agnostic and adds no runtime dependency; mounting
-  it on a host server is a host adapter's job. It imports from `wenchang`
+  it on a host server is a host adapter's job, done for MCP by `mcp`
+  below. It imports from `wenchang`
   only `core`, `errors`, `file_format`, `identity`, `paths`, `scope`,
   `transport`, and `version_token`, and none of `core`, `scope`,
   `identity`, or `transport` imports it. See
@@ -1047,9 +1057,57 @@ implemented; the remote half of `transport` is the one planned piece.
   `prompts` imports nothing from `wenchang` outside its own package. See
   [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) and
   [ADR 0026](docs/adr/0026-product-identity.md).
+- **mcp** — the MCP host adapter (`wenchang.mcp`), importable only with the
+  optional `wenchang[mcp]` extra (`mcp>=2.2,<3`); without it, importing the
+  module raises an `ImportError` naming the extra, and an incompatible
+  installed `mcp` raises one saying so. No other module imports
+  it or `mcp`.
+  - **`register_memory_tools(server, *, prompt, client, resolver, policy,
+    credentials_from_context, source, product=None, tool_prefix=None,
+    on_call=None)`** adds the seven tools and the prompt resource
+    `wenchang://memory-prompt` (`text/markdown`) to an adopter's
+    `MCPServer`.
+  - **`build_server(*, slots, ..., name="wenchang")`** constructs an
+    `MCPServer` whose `instructions` are `memory_instructions(slots)` (the
+    assembled prompt, built once) and registers onto it. The server runs
+    over stdio with `server.run("stdio")`.
+  - **Tool registration.** Each tool is a docstring-less wrapper whose
+    parameters mirror the `MemoryTools` method, plus an injected
+    keyword-only `ctx`. It is registered with an explicit name, prefixed
+    `f"{tool_prefix}_{name}"` when set, and with
+    `description=tool_descriptions(product)[name]`.
+  - **Per-call binding.** Every call runs four steps:
+    1. `credentials_from_context(ctx)` returns the raw credential, which the
+       resolver verifies; headers and `_meta` are never an identity
+       assertion.
+    2. `bind_tools` binds a fresh `MemoryTools` for that call. The MCP
+       protocol is stateless, so there is no session to cache on.
+    3. The call is forwarded to that `MemoryTools`.
+    4. A `CallToolResult` comes back with the `render_result` or
+       `render_error` payload as `structured_content` and as JSON text, and
+       `is_error` set on failure. An extraction failure renders a permanent
+       `ResolverFailureError` without the original exception, and logs one
+       `WARNING` naming the tool and the exception's type only. An `internal`
+       error is logged on logger `wenchang.mcp`.
+  - **`on_call`**, if given, receives a `ToolCallRecord(tool, arguments,
+    result, is_error, request_id, duration_s)` with a deep-copied result
+    after every wrapper call. `request_id` is the MCP request's id, for
+    correlating records that arrive in completion order.
+  - **Startup checks.** Every argument, the prefix rule (1 to 64 of
+    `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
+    (which fail under `python -OO`), and name or URI collisions with what
+    the server already has are all checked before anything is registered.
+  - **Threading.** Tool calls run concurrently on `mcp`'s worker threads, so
+    the `TransportClient` must be thread-safe. `on_call` runs on those
+    threads and must be thread-safe and fast.
+  - **Schema validation comes first.** `mcp` validates arguments before the
+    wrapper runs. A wrong-type or missing argument returns pydantic's text,
+    with no rendered payload. `mcp` also pre-parses `"null"` to `None` for
+    nullable parameters. See [ADR 0027](docs/adr/0027-mcp-host-adapter.md).
 
 ```mermaid
 flowchart TB
+    mcp[mcp: MCP host adapter\noptional extra]
     subgraph Agent-facing
         prompts[prompts: instruction text]
         tools[tools: read_file, write_file, append_line,\nreplace_fact, list_prefix, delete_file,\nget_memory_index]
@@ -1069,6 +1127,8 @@ flowchart TB
     end
 
     prompts -.guides.-> tools
+    mcp --> tools
+    mcp --> prompts
     tools --> scope
     tools --> transport
     transport --> core
@@ -1104,7 +1164,11 @@ layer's only route to memory. `testing` is omitted from the diagram:
 it is not part of the runtime layers, is imported only by adopters' test
 code, and depends on `identity`, `paths`, `scope`, and `errors` (resolver
 suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
-(transport suite), with no module depending on it.
+(transport suite), with no module depending on it. `mcp` sits above the
+agent-facing layer: it registers `tools` on an MCP server, serves the text
+`prompts` assembles, and also imports the `wenchang` package root (for
+`__version__`), `identity`, `scope`, `transport`, `errors`, `version_token`,
+and `core` types for its signatures; nothing depends on it.
 
 ## Key invariants
 

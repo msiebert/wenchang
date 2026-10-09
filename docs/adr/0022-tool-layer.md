@@ -101,6 +101,14 @@ imports it.
    - **Note (2026-10-08, AIE-1164).** `MemoryTools` and `bind_tools` also
      take a keyword-only `product=None`, validated as an adopter-side
      argument after `source`. See [ADR 0026](0026-product-identity.md).
+   - **Note (2026-10-08, AIE-1060).** Superseded at the MCP surface. The
+     2026-07-28 MCP protocol is stateless, with no session object that
+     lasts across requests, so the MCP adapter calls `bind_tools` on every
+     tool call, from that call's credentials. Identity is therefore
+     resolved per call, which this decision rejected as "resolving lazily
+     on first use", and a resolver failure can surface mid-conversation.
+     `bind_tools` itself is unchanged. See
+     [ADR 0027](0027-mcp-host-adapter.md) decision 5.
 3. **`check_write` runs on the built path before every mutating client
    call. Reads, listing, and the index are not checked.** ADRs 0016 and
    0017 put write enforcement here. The check runs before any client call,
@@ -285,6 +293,10 @@ imports it.
     applies, and the number reaches the agent through
     `OversizeWriteError.limit` (rendered by `render_error`) and adopter
     prompt text. `InvalidArgumentError` joins the taxonomy (decision 5).
+    - **Note (2026-10-08, AIE-1060).** The server object now exists:
+      `wenchang.mcp`, behind the optional `mcp` extra, so adopters who do
+      not use it carry no framework dependency. See
+      [ADR 0027](0027-mcp-host-adapter.md).
 13. **One wrong-type rule for agent arguments.** Any agent-supplied
     argument whose real type (`issubclass(type(x), str)`) is wrong raises
     `InvalidArgumentError` naming it before any client call, never
@@ -311,6 +323,12 @@ imports it.
     `TypeError` has no category, so the agent couldn't repair it.
     - **Rejected: treating `TypeError` as the host schema's concern**,
       which leaves the agent stuck when the host is loose.
+    - **Note (2026-10-08, AIE-1060).** At the MCP surface, `mcp`'s schema
+      validation runs first. A wrong-type or missing argument returns
+      pydantic's message, with no rendered payload. A `"null"` string
+      arrives as `None` for a nullable parameter. This decision still
+      applies to everything the schema admits. See
+      [ADR 0027](0027-mcp-host-adapter.md) decision 11.
 14. **`area` is an ASCII slug; `name` rejects invisible characters
     (human decision, 2026-10-02).** `scope` compares the area to `system`
     exactly (ADR 0016 decision 2), and `paths` accepts any segment without
