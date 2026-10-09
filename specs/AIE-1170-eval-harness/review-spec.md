@@ -25,12 +25,12 @@ Live runs stay out of `make check`. One live run is required before merge.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| US1 | eval server | list tools, reset, call, dump | Tools are `TOOL_NAMES` plus 3 harness tools, with descriptions equal to `tool_descriptions("Mixpanel")`. Trace records carry `request_id`, `duration_s`, and start and completion times. `eval_record_turn` tags the turn's calls. `trial_dir` must be under the runs root. Works over stdio |
-| US2 | agent, judge, `evals/mcp.json`, runner doc | parse | Tools are exactly the 7 `mcp__wenchang__*`, with `omitClaudeMd: true`. A drift test pins the body. The config uses `${CLAUDE_PROJECT_DIR:-.}`. There is no root `.mcp.json`. The doc has the launch command and preflight |
+| US1 | eval server | list tools, reset, call, dump | Tools are `TOOL_NAMES` plus 3 harness tools, with descriptions equal to `tool_descriptions("Mixpanel")`. Trace records carry `request_id`, `duration_s`, and start and completion times. `eval_record_turn` stamps a time boundary, and calls are tagged by time window. `trial_dir` must be under the runs root. Works over stdio |
+| US2 | agent, judge, `evals/mcp.json`, runner doc | parse | Tools are exactly the 7 `mcp__wenchang__*`, with `omitClaudeMd: true`. A drift test pins the body. The config uses `--directory .`, with no variable expansion. There is no root `.mcp.json`. The doc has the launch command and preflight |
 | US3 | scenario YAML | load | Typed `Scenario` reusing `SeedFile`. 16 rejection cases, including `min > max`. The corpus is exactly 8 scenarios |
-| US4 | 10 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Order is `(session, turn, started_ms, seq)`, never `request_id`, which restarts per connection. `index_read_first` is strict: a parallel batch with the index read fails. `no_content_matching` never scans `expected_version` or `old_string`. Graders never import `mcp` |
+| US4 | 10 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Order is `(session, turn, started_ms, seq)`, never `request_id`, which restarts per connection. `index_read_first` is strict: a parallel batch with the index read fails. `no_content_matching` never scans `expected_version`, `old_string`, or `delete_file` calls. Graders never import `mcp` |
 | US5 | CLI | `new-run`, `grade`, `report` | Model and ids are validated. Per-assertion pass counts over N. Judge verdicts are kept separate |
-| US6 | 8 scenarios | scripted correct and wrong drivers | Correct runs pass. Each wrong move fails its target assertion |
+| US6 | 8 scenarios | scripted correct and wrong drivers | Correct runs pass. Each wrong move fails exactly its listed assertions. Every scenario cites the prompt sentence it tests, and shared-scope writes get a confirmation turn |
 | US7 | packaging, fixture | inspect, rebase | `dev-mode-dirs`. The fixture is moved with importers rewritten (no shim), before and after #34 |
 | US8 | `make check`, docs, PR | run, read | No model calls. `src/` never imports `evals`. ADR 0028, ARCHITECTURE, README, glossary, AGENTS.md. "Do not merge before one live N=1 run" |
 
@@ -85,7 +85,8 @@ The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
 ## Follow-ups
 
 - **Human:** widen `scripts/hooks/guard-edits.sh` rule 4 for `evals/**`
-  and the eval `.claude/` files. The hook is protected.
+  and the eval `.claude/` files, and give doc-updater (rule 5) `AGENTS.md`
+  scope. The hook is protected.
 - Port the deferred scenarios, listed in spec.md's Assumptions, after the
   first live run.
 
@@ -105,7 +106,8 @@ The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
     notes it against ADR 0004. Widening the hook itself is a human
     follow-up.
   - **B2.** `omitClaudeMd: true` on both eval agents (2.1, 2.6).
-  - **B3.** `${CLAUDE_PROJECT_DIR:-.}` in `evals/mcp.json` (2.5).
+  - **B3.** `${CLAUDE_PROJECT_DIR:-.}` in `evals/mcp.json` (2.5),
+    superseded in round 2 by `--directory .`.
   - **B4.** `no_content_matching` scans a fixed argument set (4.4). New
     test 4.14 covers it.
 - **Should-fix:**
@@ -132,3 +134,40 @@ The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
   - The `called_before`, `max_tool_calls`, `file_exists`,
     `file_unchanged`, and `alias_absent` assertion kinds.
   - 9 of the 17 scenarios.
+
+**Ordering addendum** (after mcp 2.3.0 was checked: request ids restart per
+connection). Order is `(session, turn, started_ms, seq)`, and `request_id`
+is opaque. Strict index-first carries its rationale in 4.1. Criteria 4.15
+(shuffled trace) and 4.16 (timing-based ordering, request ids restarting
+across sessions) are added.
+
+**Round 2: FAIL** (3 blocking, 5 should-fix, 6 nits), all folded in. The
+build proceeds without a further review.
+
+- **Blocking:**
+  - **1.** `forgetting-whole-file` could not pass, because the correct
+    `delete_file` call's `name` matched `(?i)atlas`. `delete_file` calls are
+    no longer scanned (4.4), and a new 4.14 case covers it.
+  - **2.** `filing-new-acronym` penalized asking first in project scope.
+    It now has a turn-2 confirmation and asserts no project write in
+    turn 1.
+  - **3.** `recall-replace-fact` is now a personal user-scope fact. A rule
+    is added: every scenario cites the prompt sentence it tests, and
+    scripted drivers prove mechanics, not compliance.
+- **Should-fix:**
+  - **S1.** `evals/mcp.json` uses `--directory .` (2.5).
+  - **S2.** Turns are tagged by time window from `eval_record_turn`
+    boundaries (1.7, 1.9). The runner records each turn alone, with
+    foreground `Agent` calls (2.7).
+  - **S3.** The strict index-first limitation is stated (4.1, ADR 0028).
+  - **S4.** ADR 0028 covers the full driver contract.
+  - **S5.** The hook wording is corrected, and the doc-updater follow-up
+    is added.
+- **Nits:**
+  - `TESTS_DIR` is deleted.
+  - 6.2 asserts the exact set of failing ids.
+  - The duplicate CRX assertion is dropped, and `alias_present` is
+    case-insensitive.
+  - The preflight dir is `evals/runs/preflight/`.
+  - T6 runs after T5.
+  - `slots-ask-before-shared` has no reference seed.

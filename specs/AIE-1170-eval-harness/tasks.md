@@ -71,7 +71,7 @@ Each task follows the same loop:
 ## T6: Run planning, grading, report, CLI
 
 - **Covers:** US5.1 to US5.5.
-- **Depends on:** T3.
+- **Depends on:** T3, T5 (runs after T5, since both edit `evals/__main__.py`).
 - **Tests:** `tests/test_evals_report.py` with a fixed `now` and
   `runs_dir=tmp_path`; CLI exercised through `main(argv)`.
 - **Implementation:** `evals/report.py`; `new-run`, `grade`, `report`
@@ -85,7 +85,7 @@ Each task follows the same loop:
   `tests/test_evals_end_to_end.py` with one correct and one wrong scripted
   driver per scenario, through `Client(build_eval_server(...))` into
   `tmp_path`, then `grade_trial` and `build_report`.
-- **Deliverables:** the eight YAML files in plan.md's corpus table. A
+- **Deliverables:** the eight YAML files in plan.md's corpus section. A
   scenario whose correct driver cannot pass is fixed or dropped, never
   shipped unproven.
 
@@ -113,7 +113,7 @@ Each task follows the same loop:
 
 - Widen `scripts/hooks/guard-edits.sh` rule 4 so the implementer may edit
   `evals/**`, `.claude/agents/wenchang-eval*.md`,
-  `.claude/commands/run-evals.md`, and `.gitignore` (the hook file is
-  protected).
+  `.claude/commands/run-evals.md`, and `.gitignore`, and give doc-updater
+  (rule 5) `AGENTS.md` scope (the hook file is protected).
 - The live N=1 run of the four required scenarios before merge.
 - Port the deferred scenarios after the first live run calibrates them.
