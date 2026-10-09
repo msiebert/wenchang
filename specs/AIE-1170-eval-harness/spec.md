@@ -6,38 +6,39 @@
 
 **Created**: 2026-10-08
 
-**Status**: Draft
+**Status**: Draft, revised after adversarial spec review round 1
 
 **Input**: Linear AIE-1170; Notion spec Section 10.3 ("prompt behavior is
 evaluated, not unit-tested"); the behavioral-eval scenario lists in
-`specs/AIE-1049`, `-1050`, `-1051`, `-1052`, `-1053`, `-1054`, `-1055`,
-`-1165`; the MCP adapter from AIE-1060 (`wenchang.mcp`); the reference
-adopter fixture from AIE-1059 (PR #34).
+`specs/AIE-1049`, `-1050`, `-1051`, `-1053`, `-1054`, `-1055`, `-1165`; the
+MCP adapter from AIE-1060 (`wenchang.mcp`); the reference adopter fixture
+from AIE-1059 (PR #34).
 
 ## Summary
 
 A dev-only harness that runs a real agent against the wenchang memory tools
-and prompt, then grades what it did. Four parts, all outside the wheel:
+and prompt, then grades what it did. Everything lives outside the wheel:
 
-1. **Eval MCP server** (`evals/server.py`, stdio): the seven memory tools
-   over `InMemoryStorage`, mounted with `wenchang.mcp.register_memory_tools`
-   and a sandbox identity from the reference adopter, plus four harness
-   tools the runner uses to reset and seed the store, tag turns, record
-   replies, and dump state and the tool-call trace.
-2. **Eval agent** (`.claude/agents/wenchang-eval.md`): a Claude Code
-   subagent whose system prompt is a fixed two-sentence framing plus
-   `build_memory_prompt(REFERENCE_SLOTS)`, and whose tools are only the
-   seven `mcp__wenchang__*` memory tools.
+1. **Eval MCP server** (`evals/server.py`, stdio). It mounts the seven memory
+   tools over `InMemoryStorage` with `wenchang.mcp.register_memory_tools`
+   and a reference-adopter identity. Three harness tools let the runner
+   reset and seed the store, record each turn's user text and reply, and
+   dump the store and the tool-call trace.
+2. **Eval agent** (`.claude/agents/wenchang-eval.md`). A Claude Code
+   subagent with `omitClaudeMd: true`. Its system prompt is a two-sentence
+   framing preamble plus `build_memory_prompt(REFERENCE_SLOTS)`. Its tools
+   are only the seven `mcp__wenchang__*` memory tools.
 3. **Scenarios and graders** (`evals/scenario.py`, `evals/graders.py`,
-   `evals/scenarios/*.yaml`): a driver-independent YAML format and pure
+   `evals/scenarios/*.yaml`). A driver-independent YAML format and pure
    deterministic graders over a store dump and a trace. An optional
    LLM-judge rubric per scenario.
-4. **Runner** (`.claude/commands/run-evals.md` plus `python -m evals`): the
-   workflow the orchestrator follows, and a CLI that plans a run, grades
-   trials, and writes a per-run report.
+4. **Runner** (`.claude/commands/run-evals.md` plus `python -m evals`). The
+   workflow a human or orchestrator follows in a dedicated Claude Code
+   session launched with `evals/mcp.json`, and a CLI that plans a run,
+   grades trials, and writes a per-run report.
 
-Only the grader, scenario-loader, server, CLI, and scripted end-to-end
-tests run under `make check`. Live agent runs never do.
+`make check` runs the grader, scenario, server, CLI, and scripted
+end-to-end tests. It never runs a live agent.
 
 ## Glossary for this spec
 
@@ -47,9 +48,10 @@ tests run under `make check`. Live agent runs never do.
   grade. Directory `<run>/<scenario-id>/trial-<k>/`.
 - **Session**: one fresh eval subagent. Memory persists across sessions of a
   trial; conversation context does not.
-- **Turn**: one scripted user message within a session.
-- **Trace**: the ordered memory tool calls of a trial, each tagged with its
-  session and turn.
+- **Turn**: one scripted user message within a session, and the agent's
+  reply to it.
+- **Trace**: the memory tool calls of a trial, each with its session, turn,
+  start and completion times, and MCP request id.
 - **Store dump**: every file under the trial identity's entities after the
   last session, with content and metadata.
 
@@ -57,9 +59,9 @@ tests run under `make check`. Live agent runs never do.
 
 Notation: "the reference identities" are `member` (`MEMBER_IDENTITY`) and
 `admin` (`ADMIN_IDENTITY`) from the reference adopter. "Reference product"
-is `"Mixpanel"`. `HARNESS_TOOL_NAMES` is `("eval_reset", "eval_begin_turn",
+is `"Mixpanel"`. `HARNESS_TOOL_NAMES` is `("eval_reset",
 "eval_record_turn", "eval_dump")`. Assertion kinds are the closed set in
-US4.
+US4. `RUNS_DIR` is `evals/runs/`.
 
 ### US1 — Eval MCP server
 
@@ -68,36 +70,38 @@ US4.
 | 1.1 | `build_eval_server()` | tools are listed through an MCP client | the names are exactly `TOOL_NAMES` plus `HARNESS_TOOL_NAMES`; each memory tool's description equals `tool_descriptions("Mixpanel")[name]` and equals `bind_reference_tools(client).descriptions()[name]` |
 | 1.2 | as 1.1 | the server's `instructions` and the `wenchang://memory-prompt` resource are read | the instructions equal `EVAL_SERVER_INSTRUCTIONS` and do not contain the memory prompt; the resource text equals `build_memory_prompt(REFERENCE_SLOTS)` |
 | 1.3 | a scenario file with seed files and `identity: member` | `eval_reset(scenario_path, trial_dir)` then `get_memory_index` | the index entries are exactly the seed files' paths under the member's entities; each seed's `sources` is `["seed-job"]` |
-| 1.4 | a trial with writes and trace records | `eval_reset` is called again with another scenario | the store holds only the new scenario's seeds; the trace and transcript are empty; the trace `seq` restarts at 1 |
+| 1.4 | a trial with writes, trace records, and transcript entries | `eval_reset` is called again with another scenario | the store holds only the new scenario's seeds; the trace and transcript are empty; `seq` restarts at 1 |
 | 1.5 | `identity: admin` vs `identity: member` | each writes to `organization/vocabulary/x` | admin succeeds; member gets a rendered error with `reason` `"role_required"` |
-| 1.6 | after `eval_reset` | `eval_begin_turn(session=1, turn=2)`, then two memory calls | both trace records carry `session` 1, `turn` 2, consecutive `seq` (arrival order), the `ToolCallRecord`'s `request_id` and `duration_s`, the registered tool name, the arguments, the rendered result, and `is_error`; harness tool calls produce no trace records |
-| 1.7 | after `eval_reset` and before any `eval_begin_turn` | a memory call | its record carries `session` 0 and `turn` 0 |
-| 1.8 | after `eval_reset` | `eval_record_turn(session, turn, user, reply)` twice | the transcript holds both entries in order |
-| 1.9 | a trial after some calls | `eval_dump()` | `trial_dir/store.json`, `trace.json`, and `transcript.json` exist and parse with the US4 loaders; `store.json` lists every file under the identity's entities (seeded and agent-written) with path, scope, area, name, content, description, aliases, sources, version; deleted files are absent; the result reports the three paths and the file and call counts |
+| 1.6 | after `eval_reset` | two memory calls | each trace record carries `seq` (arrival order), the `ToolCallRecord`'s `request_id` and `duration_s`, `completed_ms` (milliseconds since the reset, on a monotonic clock, stamped when the record arrives), `started_ms` (`completed_ms` minus `duration_s` in ms), the registered tool name, the arguments, the rendered result, and `is_error`; harness tool calls produce no trace records |
+| 1.7 | after `eval_reset`, three memory calls, then `eval_record_turn(1, 1, user, reply)`, one more call, then `eval_record_turn(1, 2, user2, reply2)` | the trace is read | the first three records are tagged session 1 turn 1; the fourth is session 1 turn 2; earlier tags never change |
+| 1.8 | as 1.7 | the transcript is read | it holds both turns in order with `session`, `turn`, `user`, `reply`, and the optional `agent_id` when given |
+| 1.9 | a trial with calls after the last `eval_record_turn` | `eval_dump()` | those calls are tagged session 0 turn 0; `trial_dir/store.json`, `trace.json`, and `transcript.json` exist and parse with the US4 loaders; `store.json` lists every file under the identity's entities (seeded and agent-written) with path, scope, area, name, content, description, aliases, sources, version; deleted files are absent; the result reports the three paths and the file and call counts |
 | 1.10 | a fresh server, no `eval_reset` yet | `eval_dump()` | an error result says to call `eval_reset` first; memory tools work against an empty store under the member identity |
-| 1.11 | a valid trial in progress | `eval_reset` with a missing or invalid scenario | an error result names the file and the problem; the previous store, trace, and trial dir are unchanged |
-| 1.12 | after `eval_reset` | 20 memory calls run concurrently | the trace holds 20 records with distinct `seq` values 1..20 and 20 distinct `request_id`s, each the id of the MCP request that produced it |
-| 1.13 | the repo root | `python -m evals.server` is launched over stdio by a real MCP client (subprocess, any working directory) | the client sees 1.1's tool list and completes `eval_reset`, a `write_file`, and `eval_dump` |
+| 1.11 | a valid trial in progress | `eval_reset` with a missing scenario file, an invalid scenario, or a `trial_dir` that does not resolve to a path under the server's runs root | an error result names the file or path and the problem; the previous store, trace, and trial dir are unchanged |
+| 1.12 | after `eval_reset` | 20 memory calls run concurrently | the trace holds 20 records with distinct `seq` values 1..20 and 20 distinct `request_id`s |
+| 1.13 | the repo root | `python -m evals.server` is launched over stdio by a real MCP client from a subprocess whose working directory is a temp dir | the client sees 1.1's tool list and completes `eval_reset`, a `write_file`, and `eval_dump` |
 
-### US2 — Eval agent definition and server registration
+### US2 — Eval agent, launch config, and runner doc
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 2.1 | `.claude/agents/wenchang-eval.md` | its frontmatter is parsed | `name` is `wenchang-eval`; `tools` is exactly the seven `mcp__wenchang__<name>` for `name` in `TOOL_NAMES`, with no harness tool and no built-in tool; `model` is `inherit` |
-| 2.2 | as 2.1 | its body is read | it equals `render_agent_body()`, which is `EVAL_AGENT_PREAMBLE + "\n\n" + build_memory_prompt(REFERENCE_SLOTS)` |
-| 2.3 | the checked-in agent file | `python -m evals render-agent --check` runs | exit 0 when the file equals `render_agent_file()`; exit 1 with a message naming the file after any byte of it changes |
+| 2.1 | `.claude/agents/wenchang-eval.md` | its frontmatter is parsed | `name` is `wenchang-eval`; `tools` is exactly the seven `mcp__wenchang__<name>` for `name` in `TOOL_NAMES`, with no harness tool and no built-in tool; `model` is `inherit`; `omitClaudeMd` is `true` |
+| 2.2 | as 2.1 | the whole file is read | it equals `render_agent_file()`, whose body is `EVAL_AGENT_PREAMBLE + "\n\n" + build_memory_prompt(REFERENCE_SLOTS)` (drift fails `make check`) |
+| 2.3 | `python -m evals render-agent --out <tmp file>` | runs | the file equals `render_agent_file()`; without `--out` it writes `.claude/agents/wenchang-eval.md` |
 | 2.4 | the agent name | compared with the guard hook's routed agent types | it is none of `test-writer`, `implementer`, `doc-updater`, `explorer`, `spec-reviewer` |
-| 2.5 | `.mcp.json` at the repo root | parsed | it defines exactly one server, `wenchang`, a stdio command running `uv run --directory <repo> python -m evals.server` with `${CLAUDE_PROJECT_DIR}` as the directory |
+| 2.5 | `evals/mcp.json` | parsed | it defines exactly one server, `wenchang`, with command `uv` and args `["run", "--directory", "${CLAUDE_PROJECT_DIR:-.}", "python", "-m", "evals.server"]`; no `.mcp.json` exists at the repo root |
+| 2.6 | `.claude/agents/wenchang-eval-judge.md` | parsed | `tools` is exactly `Read, Write`; `omitClaudeMd` is `true`; the body names its inputs (`transcript.json`, `store.json`, the scenario's `judge` rubric) and its output (`judge.json`) |
+| 2.7 | `.claude/commands/run-evals.md` | read | it contains the launch command `claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang`; the preflight; every harness tool name; the `new-run`, `grade`, and `report` subcommands; the `wenchang-eval` subagent type; and the rule that each reply is passed to `eval_record_turn` verbatim |
 
 ### US3 — Scenario format
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 3.1 | a scenario YAML using every field | `load_scenario(path)` | it returns a `Scenario` with every field populated; omitted optional fields take their defaults (`identity` `member`, `reference_seed` false, `judge` empty, assertion `id` `<kind>-<index>`) |
-| 3.2 | a scenario with `reference_seed: true` and its own seeds | loaded | `seed_files` is `REFERENCE_SEED_FILES` then the scenario's seeds; a scenario seed whose path equals a reference seed path is rejected |
-| 3.3 | each malformed scenario: unknown top-level key; unknown assertion kind; unknown field for a kind; missing required field; regex that does not compile; scope not in the reference scopes; area or name rejected by `build_path`; no sessions; a session with no turns; duplicate assertion ids; duplicate seed paths; `session` or `turn` filter outside the scenario's sessions or turns; unknown identity; `id` not equal to the file stem; YAML that is not a mapping | loaded | `ScenarioError` is raised; its message names the file and the offending key or value |
-| 3.4 | every file in `evals/scenarios/` | loaded | each loads; ids are unique |
-| 3.5 | the corpus | categories are read | at least one scenario each for `privacy`, `filing`, `recall`, `forgetting`; every scenario's `source` names a file under `specs/` that exists (or `AIE-1170` for scenarios the issue itself specifies) |
+| 3.1 | a scenario YAML using every field | `load_scenario(path)` | it returns a `Scenario` with every field populated; omitted optional fields take their defaults (`identity` `member`, `reference_seed` false, `judge` empty, assertion `id` `<kind>-<index>`, `tool_called` `min` 1 and `max` unbounded) |
+| 3.2 | a scenario with `reference_seed: true` and its own seeds | loaded | `seed_files` is `REFERENCE_SEED_FILES` then the scenario's seeds, all `reference_adopter.SeedFile`; a scenario seed whose path equals a reference seed path is rejected |
+| 3.3 | each malformed scenario: unknown top-level key; unknown assertion kind; unknown field for a kind; missing required field; regex that does not compile; scope not in the reference scopes; area or name rejected by `build_path`; no sessions; a session with no turns; duplicate assertion ids; duplicate seed paths; `session` or `turn` filter outside the scenario's sessions or turns; unknown identity; `id` not equal to the file stem; YAML that is not a mapping; `tool_called` with `min` greater than `max` | loaded | `ScenarioError` is raised; its message names the file and the offending key or value |
+| 3.4 | every file in `evals/scenarios/` | `load_all()` | each loads; ids are unique; every assertion kind used is in `ASSERTION_KINDS` |
+| 3.5 | the corpus | read | it is exactly the eight scenarios in plan.md's corpus table; at least one scenario each for `privacy`, `filing`, `recall`, `forgetting`; every `source` names a file under `specs/` that exists, or `AIE-1170` |
 
 ### US4 — Deterministic graders
 
@@ -105,61 +109,62 @@ Each row is tested on canned `StoreDump` and trace fixtures with at least one
 passing and one failing case, and a failing result's `detail` names the
 offending file or call `seq`.
 
-**Call order.** `on_call` records arrive in completion order, so `seq` is
-only an arrival tag. Order-sensitive checks (4.1's "first call", 4.10) use
-issue order: ascending integer `request_id` when every record's
-`request_id` in the trace is a decimal integer (MCP clients, Claude Code
-included, number requests monotonically per connection), else `seq`. 4.16
-pins this.
+Rules shared by every kind:
 
-Lines are `content.splitlines()`. Regexes use `re.search`. A "write call" is
-any of `write_file`, `append_line`, `replace_fact`, `delete_file`. File
-filters (`scope`, `area`, `name`) are optional and AND together; omitted
-means any.
+- Lines are `content.splitlines()`. Regexes use `re.search` and are
+  case-sensitive as written; scenarios add `(?i)` where they need it.
+- A "write call" is any of `write_file`, `append_line`, `replace_fact`,
+  `delete_file`.
+- File filters (`scope`, `area`, `name`) are optional and AND together;
+  omitted means any.
+- `line_absent` and `no_duplicate_fact` pass when no file matches the
+  filter. A scenario that needs the file to survive pairs them with
+  `seed_lines_preserved` or `line_present`.
+- Order uses `started_ms` and `completed_ms`, never `seq` or `request_id`.
+  `request_id` is an opaque correlation key.
 
 | # | Assertion kind | Passes when |
 | - | -------------- | ----------- |
-| 4.1 | `index_read_first {session?}` | in every session that has turns (or only the given session), the first memory call is `get_memory_index`; a session with no memory calls fails |
-| 4.2 | `file_exists {scope, area, name}` / `file_absent {...}` | the dump has / lacks that file |
+| 4.1 | `index_read_first {session?}` | in every session of the scenario (or only the given session), some `get_memory_index` call completed before any other memory call of that session started; a session with no memory calls fails |
+| 4.2 | `file_absent {scope, area, name}` | the dump lacks that file |
 | 4.3 | `line_present {pattern, scope?, area?, name?}` / `line_absent {...}` | some line of some matching file matches / no line of any matching file matches |
-| 4.4 | `no_content_matching {pattern}` | no file's content, description, or alias matches, and no write call (succeeded or failed) has a string argument, or a string inside a list argument, that matches |
+| 4.4 | `no_content_matching {pattern}` | no file's content, description, or alias matches, and no write call (succeeded or failed) has a matching value in the arguments `content`, `line`, `new_string`, `description`, `aliases` (each string in the list), `area`, or `name`. `expected_version`, `old_string`, `cursor`, and `scope` are never scanned |
 | 4.5 | `no_duplicate_fact {pattern, scope?, area?, name?}` | at most one line across matching files matches |
 | 4.6 | `seed_lines_preserved {scope, area, name, except?}` | the file exists and every line of its seeded content that does not match `except` appears in the final content, in the same relative order |
-| 4.7 | `file_unchanged {scope, area, name}` | the file exists and its content, description, and aliases equal the seed's |
-| 4.8 | `tool_called {tool, args?, session?, turn?, succeeded?, min?, max?}` | the number of matching calls is within `[min, max]` (`min` defaults to 1, `max` to unbounded). `tool` is a name or a list of names. `args` maps an argument name to a matcher: a scalar or list (equality), `{matches: regex}` (`re.search` on a string value), or `{contains: s}` (substring of a string or member of a list). A missing argument never matches. `succeeded` filters on `is_error` |
-| 4.9 | `tool_not_called {tool, args?, session?, turn?, succeeded?}` | no call matches |
-| 4.10 | `called_before {first, then, session?}` | `first` and `then` are call matchers as in 4.8 (without counts); either no call matches `then`, or a call matching `first` precedes the earliest call matching `then` |
-| 4.11 | `max_tool_calls {max, tool?, session?, turn?}` | the number of matching calls is at most `max` |
-| 4.12 | `alias_present {scope, area, name, alias}` / `alias_absent {...}` | the file exists and has / the file is absent or lacks the alias |
-| 4.13 | `grade(scenario, store, trace)` | returns one `AssertionResult(id, kind, passed, detail)` per assertion, in scenario order; a filter that matches no file never raises |
-| 4.14 | `load_store_dump` / `load_trace` / `load_transcript` | parse 1.9's JSON into the US4 types; malformed input raises `GradeInputError` naming the file and field |
-| 4.15 | a fresh interpreter | `evals.scenario` and `evals.graders` are imported | neither `mcp` nor `evals.server` is in `sys.modules`: graders are driver-independent |
-| 4.16 | a trace whose completion order differs from its issue order (`read_file` with `request_id` "7", `seq` 1; `get_memory_index` with `request_id` "6", `seq` 2); and the same trace with a non-integer `request_id` | `index_read_first` and `called_before {first: get_memory_index, then: read_file}` are graded | the first trace is ordered by `request_id`, so both pass; the second falls back to `seq`, so both fail |
+| 4.7 | `tool_called {tool, args?, session?, turn?, succeeded?, min?, max?}` | the number of matching calls is within `[min, max]`. `tool` is a name or a list of names. `args` maps an argument name to a matcher: a scalar or list (equality), `{matches: regex}` (`re.search` on a string value), or `{contains: s}` (substring of a string or member of a list). A missing argument never matches. `succeeded` filters on `is_error` |
+| 4.8 | `tool_not_called {tool, args?, session?, turn?, succeeded?}` | no call matches |
+| 4.9 | `alias_present {scope, area, name, alias}` | the file exists and its aliases include `alias` |
+| 4.10 | `grade(scenario, store, trace)` | returns one `AssertionResult(id, kind, passed, detail)` per assertion, in scenario order; a filter that matches no file never raises; the trace may be passed in any order |
+| 4.11 | `load_store_dump` / `load_trace` / `load_transcript` | parse 1.9's JSON into the US4 types; malformed input raises `GradeInputError` naming the file and field |
+| 4.12 | a fresh interpreter | `evals.scenario` and `evals.graders` are imported | neither `mcp` nor `evals.server` is in `sys.modules`: graders are driver-independent |
+| 4.13 | `index_read_first` on three traces: index then `read_file` sequentially; the two overlapping (a parallel batch, `read_file` completing first); `read_file` with an earlier `seq` but a `started_ms` later than the index's `completed_ms` | graded | pass; fail; pass |
+| 4.14 | `no_content_matching {pattern: "\\b15\\b"}` on a trace where a write call's `expected_version` is `"15"` and a `replace_fact` call's `old_string` contains `15`, and no scanned argument or file matches | graded | it passes |
 
 ### US5 — Runner CLI, report, and judge
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 5.1 | the scenarios | `python -m evals new-run --model M --trials N [ids...]` | creates `evals/runs/<run-id>/run.json` (run id, created UTC, model, trials, scenario ids, git commit, sha256 of the agent file) and one `trial.json` per scenario per trial (scenario path, trial index); prints a JSON plan listing, per trial, the scenario path, trial dir, and sessions' turns; unknown ids exit 2 naming them; no ids means every scenario |
-| 5.2 | a trial dir with `store.json` and `trace.json` | `python -m evals grade <trial_dir>` | writes `grade.json` holding the US4 results; prints pass/fail per assertion; exit 0 whether or not assertions fail; exit 2 on missing or malformed inputs |
-| 5.3 | a run dir with graded, ungraded, and never-dumped trials | `python -m evals report <run_dir>` | grades ungraded dumped trials, then writes `report.md` and `report.json`: per scenario, each assertion's pass count over N, the scenario pass rate (a trial passes when all its assertions pass), never-dumped trials listed as not run; run metadata from `run.json` at the top |
-| 5.4 | a trial with `judge.json` | report | judge verdicts appear as separate columns; they never change deterministic pass counts; `judge.json` that does not match the schema (list of `{id, verdict: pass|fail, reason}` with ids from the scenario's `judge` list) is reported as invalid, not counted |
-| 5.5 | `.claude/commands/run-evals.md` | read | it names every harness tool, every CLI subcommand, the `wenchang-eval` subagent type, and the one-time setup (approve the `wenchang` server, restart) |
-| 5.6 | `.claude/agents/wenchang-eval-judge.md` | parsed | `tools` is exactly `Read, Write`; the body states the judge's inputs (`transcript.json`, `store.json`, the scenario's `judge` rubric) and output (`judge.json`) |
+| 5.1 | the scenarios | `python -m evals new-run --model M --trials N [ids...]` | creates `evals/runs/<run-id>/run.json` (run id, created UTC, model, trials, scenario ids, git commit, sha256 of the agent file) and one `trial.json` per scenario per trial (scenario path, trial index); prints a JSON plan listing, per trial, the scenario path, trial dir, and sessions' turns; no ids means every scenario |
+| 5.2 | `new-run` with an unknown scenario id, or a model that is not one of `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or a full id starting with `claude-` | runs | exit 2 naming the bad value; nothing is created |
+| 5.3 | a trial dir with `store.json` and `trace.json` | `python -m evals grade <trial_dir>` | writes `grade.json` holding the US4 results; prints pass/fail per assertion; exit 0 whether or not assertions fail; exit 2 on missing or malformed inputs |
+| 5.4 | a run dir with graded, ungraded, and never-dumped trials | `python -m evals report <run_dir>` | grades ungraded dumped trials, then writes `report.md` and `report.json`: per scenario, each assertion's pass count over N and the scenario pass rate (a trial passes when all its assertions pass); never-dumped trials listed as not run; run metadata from `run.json` at the top |
+| 5.5 | a trial with `judge.json` | report | judge verdicts appear as separate columns and never change deterministic pass counts; a `judge.json` that does not match the schema (`verdicts`: list of `{id, verdict: pass|fail, reason}` with ids from the scenario's `judge` list) is reported as invalid and not counted |
 
 ### US6 — End to end with a scripted driver
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 6.1 | each of the four required scenarios (one privacy, one filing, one recall across sessions, one forgetting) | a scripted driver makes the calls a correct agent would, through an MCP client on `build_eval_server()`, using the harness tools as the runner does, then `eval_dump`, `grade`, `report` | every assertion passes and the report shows 1/1 for the scenario |
-| 6.2 | the same scenarios | a scripted driver makes one wrong call each (writes the account number; appends a duplicate instead of filing to the aliased file; a second session that never reads memory; a softened past-tense line instead of removal) | the targeted assertion fails and the report shows 0/1 |
+| 6.1 | each of the eight shipped scenarios | a scripted driver makes the calls a correct agent would, through an MCP client on `build_eval_server()`, calling `eval_reset`, `eval_record_turn` after each turn, and `eval_dump` as the runner does, then `grade_trial` and `build_report` | every assertion passes and the report shows 1/1 for the scenario |
+| 6.2 | each of the eight shipped scenarios | a scripted driver makes the one wrong move named in plan.md's corpus table | the targeted assertion fails and the report shows 0/1 |
 
-### US7 — Reference adopter relocation (applies after PR #34 merges)
+### US7 — Packaging and reference adopter relocation
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 7.1 | the branch rebased onto a `main` that contains PR #34 | the repo is searched | `evals/reference_adopter.py` is the only reference adopter module; `tests/reference_adopter.py` and `tests/prompts_reference_adopter.py` do not exist; every importer uses `evals.reference_adopter`; no assertion in those tests changed |
-| 7.2 | `pyproject.toml` | inspected | the wheel's packages are exactly `["src/wenchang"]`; the editable install adds the repo root (`dev-mode-dirs`), so `import evals` works from any working directory in the dev venv; pyright `include` has `evals`; `pyyaml` and `types-pyyaml` are dev-group only |
+| 7.1 | `pyproject.toml` | inspected | the wheel's packages are exactly `["src/wenchang"]`; `[tool.hatch.build] dev-mode-dirs` is `[".", "src"]`; pyright `include` has `evals`; `pyyaml` and `types-pyyaml` are dev-group only |
+| 7.2 | the dev venv | `import evals.reference_adopter` runs in a subprocess whose cwd is a temp dir | it succeeds |
+| 7.3 | this branch before PR #34 merges | the repo is searched | `evals/reference_adopter.py` holds the reference adopter; `tests/prompts_reference_adopter.py` does not exist; every former importer imports `evals.reference_adopter`; no assertion changed |
+| 7.4 | the branch rebased onto a `main` containing PR #34 | the repo is searched | `evals/reference_adopter.py` is the only reference adopter module and matches `main`'s fixture content; `tests/reference_adopter.py` does not exist; PR #34's four test modules import `evals.reference_adopter`; no assertion changed |
 
 ### US8 — Gate and docs
 
@@ -167,34 +172,63 @@ means any.
 | - | ----- | ---- | ---- |
 | 8.1 | `make check` | runs | it runs US1 to US7 tests; no test spawns Claude Code or calls a model |
 | 8.2 | every module under `src/wenchang` | its imports are parsed with `ast` | none imports `evals` |
-| 8.3 | docs | read | ADR 0028 records the `evals/` boundary, the dev-only `mcp`/`pyyaml` dependencies, the driver-agnostic scenario and grader design, the eval server's neutral instructions, and the known Claude Code harness limitation; ARCHITECTURE.md has an `evals/` entry in the module map and the boundary rule; README has a "Behavioral evals" section; the glossary defines scenario, trial, and trace |
+| 8.3 | docs | read | ADR 0028 records the decisions in plan.md "Docs"; ARCHITECTURE.md has an `evals/` entry in the module map and the "`src/` never imports `evals`" invariant; README has a "Behavioral evals" section; the glossary defines scenario, trial, and trace; AGENTS.md's agent-team table gives implementer `evals/**`, `.claude/agents/wenchang-eval*.md`, `.claude/commands/run-evals.md`, and `.gitignore` |
+| 8.4 | `review-pr.md` and the PR body | read | both say "do not merge before one live N=1 run of the four required scenarios" with the exact launch and `/run-evals` commands, and record that run's report when done |
 
 ## Assumptions
 
-- **Live runs are manual.** The agent file and `.mcp.json` load only at
-  Claude Code session start, and the server needs one-time approval, so the
-  live end-to-end run is done by a human or orchestrator in a fresh session.
-  `make check` proves the pipeline with the scripted driver (US6). The PR
-  reports one live run of the four required scenarios if one was done.
+- **Live runs are manual and required before merge.** `make check` proves
+  the pipeline with the scripted driver (US6). A human or orchestrator then
+  launches a dedicated session with `claude --mcp-config evals/mcp.json
+  --strict-mcp-config --allowedTools mcp__wenchang` and runs `/run-evals
+  --model sonnet --trials 1 privacy-account-number filing-alias-append
+  recall-across-sessions forgetting-one-fact`. The MCP config is read only
+  at launch. Agent files in `.claude/agents/` are watched live and need no
+  restart.
+- **Dedicated launch, no root `.mcp.json`.** The eval server is never
+  offered to ordinary sessions. `--strict-mcp-config` keeps the eval
+  session's MCP surface to the `wenchang` server, so the seven tool schemas
+  load directly rather than behind tool search; the runner's preflight
+  confirms it. `--allowedTools mcp__wenchang` avoids a permission prompt
+  per call.
 - **Framing preamble.** The issue says the system prompt "is the output of
-  `build_memory_prompt`". A Claude Code subagent otherwise reads its input
-  as a task from a parent agent, so the body prepends a two-sentence
+  `build_memory_prompt`". A Claude Code subagent reads its input as a task
+  from a parent agent, so the body prepends a two-sentence
   `EVAL_AGENT_PREAMBLE` saying the messages come from the user it is
-  helping. The prompt text itself is byte-identical.
+  helping. The prompt text itself is byte-identical. ADR 0028 records it.
+- **Context leakage.** `omitClaudeMd: true` keeps CLAUDE.md, AGENTS.md, and
+  `~/.claude/CLAUDE.md` out of the eval agent. Claude Code still adds
+  environment details and a git status snapshot. Whether auto-memory
+  (`MEMORY.md`) reaches subagents is not documented and is not verified
+  here. ADR 0028 lists all of this under the known limitation.
+- **Tool surface.** The issue's criterion "tool surface matches
+  `TOOL_NAMES`" holds for the surface the model sees: the agent's
+  allowlist is exactly the seven memory tools. The server additionally
+  exposes three harness tools for the runner. ADR 0028 records this.
+- **Verbatim replies.** The runner passes each subagent reply to
+  `eval_record_turn` verbatim, by instruction. Reading Claude Code's
+  subagent transcript files instead was rejected, because their layout
+  under `~/.claude/projects/` is internal. The risk that the runner
+  paraphrases a reply affects only the judge. ADR 0028 records it.
 - **Neutral server instructions.** The server does not send the memory
-  prompt as MCP `instructions`, so the orchestrator's own session is not
-  told to act as a memory agent, and the eval agent does not get the prompt
-  twice. `register_memory_tools` logs its "instructions lack the prompt"
-  warning once at startup; that is expected.
-- **One trial at a time.** One server process holds one store, so trials
-  run serially.
+  prompt as MCP `instructions`, so the eval agent does not get it twice.
+  `register_memory_tools` logs its "instructions lack the prompt" warning
+  once at startup; that is expected.
+- **One trial at a time.** One server process holds one store. A reset
+  that races an in-flight call can split that call across stores. Trials
+  are serial, so this does not happen in practice.
 - **Schema-rejected calls are not traced** (an `on_call` property from
   AIE-1060). Graders see only calls that reached the wrapper.
-- **Real clock.** The store uses the wall clock; scenarios that depend on a
-  date use dates far from today.
+- **Real clock.** The store uses the wall clock. No shipped scenario
+  depends on the date.
 - **Notion §10.3** is cited through the issue; the Notion page was not
   re-fetched for this spec.
-- **Scenario scope.** Scenarios needing host features the harness lacks are
-  not ported: on-demand tool loading (AIE-1165 #1), a curated refresh
-  between sessions (AIE-1052 #3), `systems_of_record=None` slots
-  (AIE-1055 #5), and a near-size-limit file (AIE-1055 #4).
+- **Deferred scenarios.** The other ported candidates are a follow-up,
+  calibrated on the first live run: AIE-1054 #2 to #5, AIE-1049 #1, #3,
+  #4, AIE-1050 #1 to #5, AIE-1051 #1, #5, AIE-1052 #1, #2, #4, #5,
+  AIE-1053 E3 to E6, AIE-1055 #3, and AIE-1165 #2. AIE-1055 #1 (index
+  first) is asserted inside every shipped scenario rather than on its own.
+  Not portable without host
+  features: AIE-1165 #1 (on-demand tool loading), AIE-1052 #3 (curated
+  refresh between sessions), AIE-1055 #4 (near-full file) and #5
+  (`systems_of_record=None`).

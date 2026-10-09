@@ -11,21 +11,21 @@ Each task follows the same loop:
 5. Get `make check` green.
 6. Commit as `AIE-1170: <what>`.
 
-## T1: `evals/` package skeleton, config, and the reference adopter copy
+## T1: `evals/` package, config, and the reference adopter move
 
-- **Covers:** US7.2, US8.2; the pre-#34 half of the relocation (plan,
-  "Branch base and merge ordering").
+- **Covers:** US7.1 to US7.3, US8.2.
 - **Config:** `uv add --dev pyyaml types-pyyaml`; `dev-mode-dirs`; pyright
   `include`; ruff `src` and first-party; `.gitignore` `evals/runs/`.
 - **Tests:** `tests/test_evals_packaging.py`: wheel packages exactly
-  `["src/wenchang"]`; `import evals` and `import evals.reference_adopter`
-  succeed in a subprocess whose cwd is a temp dir; `pyyaml` and
-  `types-pyyaml` are in the dev group and nowhere else; no `src/wenchang`
-  module imports `evals` (`ast`).
+  `["src/wenchang"]`; `dev-mode-dirs`; `import evals.reference_adopter` in a
+  subprocess whose cwd is a temp dir; `pyyaml` and `types-pyyaml` in the dev
+  group only; no `src/wenchang` module imports `evals` (`ast`);
+  `tests/prompts_reference_adopter.py` is absent.
 - **Implementation:** `evals/__init__.py`; `evals/reference_adopter.py`
   from `git show AIE-1059-e2e-reference-adopter:tests/reference_adopter.py`;
-  `tests/prompts_reference_adopter.py` re-exports from it (existing prompt
-  tests unchanged and green).
+  delete `tests/prompts_reference_adopter.py`; rewrite the six import sites
+  listed in plan.md (including the `test_mcp_server.py` subprocess
+  snippet). Existing tests stay green with no assertion changes.
 
 ## T2: Scenario types and loader
 
@@ -37,84 +37,82 @@ Each task follows the same loop:
 
 ## T3: Graders and loaders
 
-- **Covers:** US4.1 to US4.16.
+- **Covers:** US4.1 to US4.14.
 - **Depends on:** T2.
 - **Tests:** `tests/test_evals_graders.py`, canned `StoreDump`/trace
-  fixtures built in the test module; pass and fail case per kind; the
-  import-isolation check (4.15) runs in a subprocess.
+  fixtures built in the test module; a pass and a fail case per kind; the
+  ordering cases (4.13) and the unscanned-argument case (4.14); the
+  import-isolation check (4.12) in a subprocess.
 - **Implementation:** `evals/graders.py`.
 
-## T4: Eval MCP server
+## T4: Eval MCP server, in memory and over stdio
 
-- **Covers:** US1.1 to US1.12.
+- **Covers:** US1.1 to US1.13.
 - **Depends on:** T2, T3.
 - **Tests:** `tests/test_evals_server.py` through an in-memory MCP
-  `Client(build_eval_server())`, scenario files in `tmp_path`.
+  `Client(build_eval_server(EvalState(runs_root=tmp_path)))`; the stdio
+  case launches `sys.executable -m evals.server --runs-root <tmp>` with
+  `cwd` a temp dir and a 30 s timeout.
 - **Implementation:** `evals/server.py`.
 
-## T5: Stdio
+## T5: Agent definitions, launch config, runner doc
 
-- **Covers:** US1.13.
-- **Depends on:** T4.
-- **Tests:** `tests/test_evals_server_stdio.py`: launches
-  `sys.executable -m evals.server` with `cwd=tmp_path`, 30 s timeout.
-
-## T6: Agent definitions and server registration
-
-- **Covers:** US2.1 to US2.5, US5.6.
+- **Covers:** US2.1 to US2.7.
 - **Depends on:** T1.
 - **Tests:** `tests/test_evals_agent.py` (frontmatter parsed with `yaml`;
-  `render-agent --check` exit codes via `main(argv)` against a temp copy).
+  `render-agent --out` via `main(argv)`; `evals/mcp.json`; no root
+  `.mcp.json`; the judge agent; the runner doc's required strings).
 - **Implementation:** `evals/agent.py`, the `render-agent` subcommand in
   `evals/__main__.py`, the generated `.claude/agents/wenchang-eval.md`,
-  hand-written `.claude/agents/wenchang-eval-judge.md`, `.mcp.json`.
+  `.claude/agents/wenchang-eval-judge.md`, `evals/mcp.json`,
+  `.claude/commands/run-evals.md`.
 
-## T7: Run planning, grading, report, CLI
+## T6: Run planning, grading, report, CLI
 
-- **Covers:** US5.1 to US5.4.
+- **Covers:** US5.1 to US5.5.
 - **Depends on:** T3.
 - **Tests:** `tests/test_evals_report.py` with a fixed `now` and
   `runs_dir=tmp_path`; CLI exercised through `main(argv)`.
-- **Implementation:** `evals/report.py`, `validate`, `new-run`, `grade`,
-  `report` subcommands.
+- **Implementation:** `evals/report.py`; `new-run`, `grade`, `report`
+  subcommands.
 
-## T8: Scenario corpus and runner doc
+## T7: Scenario corpus and scripted end to end
 
-- **Covers:** US3.4, US3.5, US5.5.
-- **Depends on:** T2, T6.
-- **Tests:** `tests/test_evals_corpus.py`: every scenario loads, ids
-  unique, categories covered, `source` files exist; the runner doc names
-  every harness tool, CLI subcommand, and `wenchang-eval`.
-- **Deliverables:** the 17 YAML files in plan.md's corpus table;
-  `.claude/commands/run-evals.md`.
+- **Covers:** US3.4, US3.5, US6.1, US6.2, US8.1.
+- **Depends on:** T4, T6.
+- **Tests:** corpus checks appended to `tests/test_evals_scenario.py`;
+  `tests/test_evals_end_to_end.py` with one correct and one wrong scripted
+  driver per scenario, through `Client(build_eval_server(...))` into
+  `tmp_path`, then `grade_trial` and `build_report`.
+- **Deliverables:** the eight YAML files in plan.md's corpus table. A
+  scenario whose correct driver cannot pass is fixed or dropped, never
+  shipped unproven.
 
-## T9: Scripted end to end
+## T8: Docs and review artifact
 
-- **Covers:** US6.1, US6.2, US8.1.
-- **Depends on:** T4, T7, T8.
-- **Tests:** `tests/test_evals_end_to_end.py`: for the four required
-  scenarios, a correct and a wrong scripted driver through
-  `Client(build_eval_server())` into `tmp_path`, then `grade_trial` and
-  `build_report`.
+- **Covers:** US8.3, US8.4.
+- **Deliverables:** ADR 0028; ARCHITECTURE.md; README "Behavioral evals";
+  glossary; AGENTS.md implementer row; `review-pr.md` with the
+  criteria-to-test table and the "do not merge before one live N=1 run"
+  block with the exact commands.
 
-## T10: Relocation after PR #34 merges
+## T9: Relocation after PR #34 merges
 
-- **Covers:** US7.1.
-- **Precondition:** PR #34 is on `main`. Rebase onto `main` (after AIE-1060
-  merges) or onto `AIE-1060-host-mounting` rebased on such a `main`, as the
-  orchestrator directs.
-- **Work:** delete `tests/reference_adopter.py` and
-  `tests/prompts_reference_adopter.py`; replace `evals/reference_adopter.py`
-  with `main`'s fixture if it changed; switch every importer to
-  `evals.reference_adopter`; no assertion changes. Extend
-  `tests/test_evals_packaging.py` with US7.1's checks.
-- If #34 has not merged by the end of the build phase, report T10 as
+- **Covers:** US7.4.
+- **Precondition:** PR #34 is on `main`. Rebase as the orchestrator
+  directs.
+- **Work:** delete `tests/reference_adopter.py`; replace
+  `evals/reference_adopter.py` with `main`'s fixture if it changed; rewrite
+  the four PR #34 importers listed in plan.md; no assertion changes. Extend
+  `tests/test_evals_packaging.py` with US7.4's checks.
+- If #34 has not merged by the end of the build phase, report T9 as
   pending.
 
-## T11: Docs and review artifact
+## Human follow-ups (outside this PR)
 
-- **Covers:** US8.3.
-- **Deliverables:** ADR 0028; ARCHITECTURE.md; README "Behavioral evals";
-  glossary; `review-pr.md` with the criteria-to-test table.
-- **Manual check:** if a fresh Claude Code session is available, one live
-  run of the four required scenarios with N=1, reported in review-pr.md.
+- Widen `scripts/hooks/guard-edits.sh` rule 4 so the implementer may edit
+  `evals/**`, `.claude/agents/wenchang-eval*.md`,
+  `.claude/commands/run-evals.md`, and `.gitignore` (the hook file is
+  protected).
+- The live N=1 run of the four required scenarios before merge.
+- Port the deferred scenarios after the first live run calibrates them.
