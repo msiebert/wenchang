@@ -4,7 +4,7 @@ Serves an in-memory store with the reference adopter's slots and a sandbox
 resolver. Run as a script: python tests/mcp_stdio_server.py
 """
 
-from prompts_reference_adopter import REFERENCE_SLOTS
+from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.core import MemoryStore
 from wenchang.identity import Identity, SandboxResolver, ScopeGrant
 from wenchang.mcp import build_server
