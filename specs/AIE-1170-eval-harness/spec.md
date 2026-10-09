@@ -70,13 +70,13 @@ US4.
 | 1.3 | a scenario file with seed files and `identity: member` | `eval_reset(scenario_path, trial_dir)` then `get_memory_index` | the index entries are exactly the seed files' paths under the member's entities; each seed's `sources` is `["seed-job"]` |
 | 1.4 | a trial with writes and trace records | `eval_reset` is called again with another scenario | the store holds only the new scenario's seeds; the trace and transcript are empty; the trace `seq` restarts at 1 |
 | 1.5 | `identity: admin` vs `identity: member` | each writes to `organization/vocabulary/x` | admin succeeds; member gets a rendered error with `reason` `"role_required"` |
-| 1.6 | after `eval_reset` | `eval_begin_turn(session=1, turn=2)`, then two memory calls | both trace records carry `session` 1, `turn` 2, consecutive `seq`, the registered tool name, the arguments, the rendered result, and `is_error`; harness tool calls produce no trace records |
+| 1.6 | after `eval_reset` | `eval_begin_turn(session=1, turn=2)`, then two memory calls | both trace records carry `session` 1, `turn` 2, consecutive `seq` (arrival order), the `ToolCallRecord`'s `request_id` and `duration_s`, the registered tool name, the arguments, the rendered result, and `is_error`; harness tool calls produce no trace records |
 | 1.7 | after `eval_reset` and before any `eval_begin_turn` | a memory call | its record carries `session` 0 and `turn` 0 |
 | 1.8 | after `eval_reset` | `eval_record_turn(session, turn, user, reply)` twice | the transcript holds both entries in order |
 | 1.9 | a trial after some calls | `eval_dump()` | `trial_dir/store.json`, `trace.json`, and `transcript.json` exist and parse with the US4 loaders; `store.json` lists every file under the identity's entities (seeded and agent-written) with path, scope, area, name, content, description, aliases, sources, version; deleted files are absent; the result reports the three paths and the file and call counts |
 | 1.10 | a fresh server, no `eval_reset` yet | `eval_dump()` | an error result says to call `eval_reset` first; memory tools work against an empty store under the member identity |
 | 1.11 | a valid trial in progress | `eval_reset` with a missing or invalid scenario | an error result names the file and the problem; the previous store, trace, and trial dir are unchanged |
-| 1.12 | after `eval_reset` | 20 memory calls run concurrently | the trace holds 20 records with distinct `seq` values 1..20 |
+| 1.12 | after `eval_reset` | 20 memory calls run concurrently | the trace holds 20 records with distinct `seq` values 1..20 and 20 distinct `request_id`s, each the id of the MCP request that produced it |
 | 1.13 | the repo root | `python -m evals.server` is launched over stdio by a real MCP client (subprocess, any working directory) | the client sees 1.1's tool list and completes `eval_reset`, a `write_file`, and `eval_dump` |
 
 ### US2 — Eval agent definition and server registration
@@ -105,6 +105,13 @@ Each row is tested on canned `StoreDump` and trace fixtures with at least one
 passing and one failing case, and a failing result's `detail` names the
 offending file or call `seq`.
 
+**Call order.** `on_call` records arrive in completion order, so `seq` is
+only an arrival tag. Order-sensitive checks (4.1's "first call", 4.10) use
+issue order: ascending integer `request_id` when every record's
+`request_id` in the trace is a decimal integer (MCP clients, Claude Code
+included, number requests monotonically per connection), else `seq`. 4.16
+pins this.
+
 Lines are `content.splitlines()`. Regexes use `re.search`. A "write call" is
 any of `write_file`, `append_line`, `replace_fact`, `delete_file`. File
 filters (`scope`, `area`, `name`) are optional and AND together; omitted
@@ -127,6 +134,7 @@ means any.
 | 4.13 | `grade(scenario, store, trace)` | returns one `AssertionResult(id, kind, passed, detail)` per assertion, in scenario order; a filter that matches no file never raises |
 | 4.14 | `load_store_dump` / `load_trace` / `load_transcript` | parse 1.9's JSON into the US4 types; malformed input raises `GradeInputError` naming the file and field |
 | 4.15 | a fresh interpreter | `evals.scenario` and `evals.graders` are imported | neither `mcp` nor `evals.server` is in `sys.modules`: graders are driver-independent |
+| 4.16 | a trace whose completion order differs from its issue order (`read_file` with `request_id` "7", `seq` 1; `get_memory_index` with `request_id` "6", `seq` 2); and the same trace with a non-integer `request_id` | `index_read_first` and `called_before {first: get_memory_index, then: read_file}` are graded | the first trace is ordered by `request_id`, so both pass; the second falls back to `seq`, so both fail |
 
 ### US5 — Runner CLI, report, and judge
 

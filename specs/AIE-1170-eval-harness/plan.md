@@ -214,7 +214,7 @@ class StoreDump:
 
 @dataclass(frozen=True)
 class TraceCall:
-    seq: int; session: int; turn: int; tool: str
+    seq: int; request_id: str; duration_s: float; session: int; turn: int; tool: str
     arguments: Mapping[str, object]; result: Mapping[str, object]; is_error: bool
 
 @dataclass(frozen=True)
@@ -226,7 +226,8 @@ class AssertionResult:
     id: str; kind: str; passed: bool; detail: str
 
 def load_store_dump(path: Path) -> StoreDump
-def load_trace(path: Path) -> tuple[TraceCall, ...]          # sorted by seq
+def load_trace(path: Path) -> tuple[TraceCall, ...]          # in issue order (below)
+def issue_order(trace: Sequence[TraceCall]) -> tuple[TraceCall, ...]
 def load_transcript(path: Path) -> tuple[TranscriptTurn, ...]
 def store_dump_to_json(dump: StoreDump) -> dict[str, object]  # used by the server
 def grade(scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> tuple[AssertionResult, ...]
@@ -235,13 +236,19 @@ def grade(scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> t
 Graders match tool names exactly; the eval server registers the memory
 tools without a prefix.
 
+`ToolCallRecord`s reach `on_call` in completion order, so the server's
+`seq` is an arrival tag only. `issue_order` sorts by `int(request_id)` when
+every `request_id` is a decimal integer, else by `seq`; `grade` applies it
+before any order-sensitive check, so callers may pass any order.
+`duration_s` is carried for the report and never graded.
+
 ### JSON files (the driver contract)
 
 - `store.json`: `{"files": [{"path", "scope", "area", "name", "content",
   "description", "aliases": [..], "sources": [..], "version"}]}`, sorted by
   path.
-- `trace.json`: `{"calls": [{"seq", "session", "turn", "tool", "arguments",
-  "result", "is_error"}]}`.
+- `trace.json`: `{"calls": [{"seq", "request_id", "duration_s", "session",
+  "turn", "tool", "arguments", "result", "is_error"}]}`, in arrival order.
 - `transcript.json`: `{"turns": [{"session", "turn", "user", "reply"}]}`.
 - `grade.json`: `{"scenario", "trial", "results": [{"id", "kind",
   "passed", "detail"}], "passed": bool}`.
@@ -275,6 +282,13 @@ def main() -> None                                          # run("stdio")
   client=_ActiveClient(state), resolver=_ActiveResolver(state),
   policy=REFERENCE_POLICY, credentials_from_context=lambda ctx: None,
   source=EVAL_SOURCE, product=REFERENCE_PRODUCT, on_call=state.record_call)`.
+  The extractor and `record_call` are plain functions, as `wenchang.mcp`
+  requires (it rejects async ones). The extractor never raises, so the
+  adapter's credential-failure WARNING never fires. `record_call` copies
+  `request_id` and `duration_s` from the record and assigns `seq` under the
+  state lock.
+- `wenchang.mcp` raises `ImportError` when `mcp` is missing or incompatible;
+  `evals.server` lets it propagate, since `mcp` is in the dev group.
 - `_ActiveClient` implements `TransportClient` by forwarding each of the
   seven methods to the state's current `InProcessClient`. `_ActiveResolver`
   returns the state's current identity. Both read under the state lock, so a

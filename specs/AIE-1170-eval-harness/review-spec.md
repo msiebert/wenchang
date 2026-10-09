@@ -24,16 +24,16 @@ Live runs stay out of `make check`.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| US1 | eval server | list tools, reset, call, dump | Tools are `TOOL_NAMES` plus 4 harness tools, with descriptions equal to `tool_descriptions("Mixpanel")`. Reset swaps the store, identity, and trace atomically. The trace is tagged by session and turn. Dump writes `store.json`, `trace.json`, and `transcript.json`. It works over stdio |
+| US1 | eval server | list tools, reset, call, dump | Tools are `TOOL_NAMES` plus 4 harness tools, with descriptions equal to `tool_descriptions("Mixpanel")`. Reset swaps the store, identity, and trace atomically. The trace is tagged by session and turn, and carries each record's MCP `request_id` and `duration_s`. Dump writes `store.json`, `trace.json`, and `transcript.json`. It works over stdio |
 | US2 | `.claude/agents/wenchang-eval.md`, `.mcp.json` | parse | Tools are exactly the 7 `mcp__wenchang__*`. The body is the preamble plus the prompt, and a drift check enforces it. The name is not guard-routed. Server name `wenchang` |
 | US3 | scenario YAML | load | Typed `Scenario`. 15 rejection cases raise `ScenarioError`. The corpus covers privacy, filing, recall, and forgetting |
-| US4 | 15 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Graders never import `mcp` |
+| US4 | 15 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Order-sensitive checks use issue order: integer `request_id`, with `seq` as the fallback. Graders never import `mcp` |
 | US5 | CLI | `new-run`, `grade`, `report` | Writes run and trial metadata, `grade.json`, and `report.md`/`report.json` with per-assertion pass counts over N. Judge verdicts are kept separate |
 | US6 | 4 required scenarios | scripted correct and wrong drivers | Correct runs get all passes. Each wrong run fails its target assertion |
 | US7 | after PR #34 | rebase | `evals/reference_adopter.py` is the only fixture, and imports are switched |
 | US8 | `make check`, docs | run, read | No model calls. `src/` never imports `evals`. ADR 0028, ARCHITECTURE, README, glossary |
 
-The full Given/When/Then for all 51 criteria is in [spec.md](spec.md).
+The full Given/When/Then for all 52 criteria is in [spec.md](spec.md).
 
 ## Key design decisions
 
