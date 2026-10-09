@@ -37,11 +37,12 @@ Each task follows the same loop:
 
 ## T3: Graders and loaders
 
-- **Covers:** US4.1 to US4.14.
+- **Covers:** US4.1 to US4.16.
 - **Depends on:** T2.
 - **Tests:** `tests/test_evals_graders.py`, canned `StoreDump`/trace
   fixtures built in the test module; a pass and a fail case per kind; the
-  ordering cases (4.13) and the unscanned-argument case (4.14); the
+  ordering cases (4.13, 4.15, 4.16) and the unscanned-argument case
+  (4.14); the
   import-isolation check (4.12) in a subprocess.
 - **Implementation:** `evals/graders.py`.
 

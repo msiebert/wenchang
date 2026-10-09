@@ -120,12 +120,15 @@ Rules shared by every kind:
 - `line_absent` and `no_duplicate_fact` pass when no file matches the
   filter. A scenario that needs the file to survive pairs them with
   `seed_lines_preserved` or `line_present`.
-- Order uses `started_ms` and `completed_ms`, never `seq` or `request_id`.
-  `request_id` is an opaque correlation key.
+- Calls are ordered by `(session, turn, started_ms, seq)`; `seq` only
+  breaks exact ties. `request_id` is an opaque correlation key and is never
+  parsed or sorted: JSON-RPC ids are monotonic per connection but restart
+  on every new connection (verified on mcp 2.3.0), so a global sort would
+  interleave sessions.
 
 | # | Assertion kind | Passes when |
 | - | -------------- | ----------- |
-| 4.1 | `index_read_first {session?}` | in every session of the scenario (or only the given session), some `get_memory_index` call completed before any other memory call of that session started; a session with no memory calls fails |
+| 4.1 | `index_read_first {session?}` | in every session of the scenario (or only the given session), some `get_memory_index` call completed before any other memory call of that session started; a session with no memory calls fails. Strict on purpose: a parallel batch of `[get_memory_index, read_file]` in one assistant message fails, because the prompt asks the agent to consult the index before acting, and a call issued alongside the index read was chosen without consulting it |
 | 4.2 | `file_absent {scope, area, name}` | the dump lacks that file |
 | 4.3 | `line_present {pattern, scope?, area?, name?}` / `line_absent {...}` | some line of some matching file matches / no line of any matching file matches |
 | 4.4 | `no_content_matching {pattern}` | no file's content, description, or alias matches, and no write call (succeeded or failed) has a matching value in the arguments `content`, `line`, `new_string`, `description`, `aliases` (each string in the list), `area`, or `name`. `expected_version`, `old_string`, `cursor`, and `scope` are never scanned |
@@ -139,6 +142,8 @@ Rules shared by every kind:
 | 4.12 | a fresh interpreter | `evals.scenario` and `evals.graders` are imported | neither `mcp` nor `evals.server` is in `sys.modules`: graders are driver-independent |
 | 4.13 | `index_read_first` on three traces: index then `read_file` sequentially; the two overlapping (a parallel batch, `read_file` completing first); `read_file` with an earlier `seq` but a `started_ms` later than the index's `completed_ms` | graded | pass; fail; pass |
 | 4.14 | `no_content_matching {pattern: "\\b15\\b"}` on a trace where a write call's `expected_version` is `"15"` and a `replace_fact` call's `old_string` contains `15`, and no scanned argument or file matches | graded | it passes |
+| 4.15 | a trace passed to `grade` shuffled | graded | results equal those for the trace in `(session, turn, started_ms, seq)` order |
+| 4.16 | (a) a trace whose completion order (`seq`) differs from its start order: `get_memory_index` starts first and completes before `read_file` starts, but `read_file` has the lower `seq`; (b) a two-session trace whose `request_id`s restart at `"1"` in session 2 (a new MCP connection), each session reading the index first, so session 2's `get_memory_index` has `request_id` `"1"` and session 1's `read_file` has `"2"` | `index_read_first` is graded | both pass: (a) is ordered by `started_ms`, not `seq`; (b) is ordered per session by timing, and the repeated `request_id`s neither interleave the sessions nor raise |
 
 ### US5 — Runner CLI, report, and judge
 

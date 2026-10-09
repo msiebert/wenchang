@@ -257,10 +257,16 @@ def grade(scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> t
 - Tool names match exactly; the eval server registers the memory tools
   without a prefix.
 - `ToolCallRecord`s reach `on_call` in completion order, so `seq` is an
-  arrival tag only. `index_read_first` compares `completed_ms` of
-  `get_memory_index` calls against `started_ms` of every other call in the
-  session. A parallel batch of the index and another call fails, matching
-  the prompt's "before". `request_id` is never parsed or ordered.
+  arrival tag only. `grade` sorts the trace by `(session, turn,
+  started_ms, seq)` before any check. `request_id` is never parsed or
+  sorted: JSON-RPC ids are monotonic per connection but restart on each new
+  connection (verified on mcp 2.3.0), so sorting by it would interleave
+  sessions.
+- `index_read_first` is strict: some `get_memory_index` call's
+  `completed_ms` precedes the `started_ms` of every other call in the
+  session. A parallel `[get_memory_index, read_file]` batch fails. The
+  prompt asks the agent to consult the index before acting, and a call
+  issued alongside the index read was chosen without consulting it.
 - `duration_s` is carried for the report and never graded.
 
 ### JSON files (the driver contract)
@@ -441,7 +447,7 @@ breaks are listed.
 | Harness tools on the same server, excluded from the agent's `tools:` | a second MCP server; control files on disk | One process holds the in-memory store; the agent allowlist is the boundary, and US2.1 pins it |
 | Three harness tools; `eval_record_turn` tags untagged calls | a separate `eval_begin_turn` | Calls of a turn complete before the subagent replies, so tagging at record time is exact and saves a runner step per turn |
 | Dump on an explicit `eval_dump` call | dump at shutdown; dump after every call | The server outlives trials; per-call dumps race with parallel calls |
-| Order from `started_ms`/`completed_ms` | `seq`; integer `request_id` | `seq` is completion order; `request_id` is an opaque per-connection string with no ordering guarantee |
+| Order by `(session, turn, started_ms, seq)`; strict `index_read_first` | `seq`; integer `request_id`; lenient index-first that accepts a parallel batch | `seq` is completion order; `request_id` restarts per connection; a call issued with the index read was not chosen from it |
 | `no_content_matching` scans a fixed argument set | every string argument | Version tokens are small integers and `old_string` legitimately quotes removed text |
 | Replies recorded through `eval_record_turn`, verbatim by instruction | reading `~/.claude/projects/.../subagents/*.jsonl` | That layout is internal; the main-session guard hook also forbids writing transcript files |
 | `evals/mcp.json` with `--mcp-config --strict-mcp-config --allowedTools` | root `.mcp.json` | No prompt or extra tools in ordinary sessions; strict config keeps tool schemas loaded directly; allowlist avoids per-call prompts |
@@ -463,6 +469,10 @@ breaks are listed.
   - `dev-mode-dirs` makes `evals` importable, with `tests`, `scripts`,
     `docs` becoming namespace packages as a side effect.
   - The driver contract is the scenario format plus the five JSON files.
+  - Trace order is `(session, turn, started_ms, seq)` from monotonic
+    stamps; `request_id` is opaque because ids restart per connection.
+    `index_read_first` is strict, so a parallel batch with the index read
+    fails, with the rationale above.
   - The eval server exposes three harness tools besides `TOOL_NAMES`; the
     agent's allowlist is the surface the model sees.
   - Neutral server instructions, the framing preamble, `omitClaudeMd`.

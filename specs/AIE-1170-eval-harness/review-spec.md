@@ -28,13 +28,13 @@ Live runs stay out of `make check`. One live run is required before merge.
 | US1 | eval server | list tools, reset, call, dump | Tools are `TOOL_NAMES` plus 3 harness tools, with descriptions equal to `tool_descriptions("Mixpanel")`. Trace records carry `request_id`, `duration_s`, and start and completion times. `eval_record_turn` tags the turn's calls. `trial_dir` must be under the runs root. Works over stdio |
 | US2 | agent, judge, `evals/mcp.json`, runner doc | parse | Tools are exactly the 7 `mcp__wenchang__*`, with `omitClaudeMd: true`. A drift test pins the body. The config uses `${CLAUDE_PROJECT_DIR:-.}`. There is no root `.mcp.json`. The doc has the launch command and preflight |
 | US3 | scenario YAML | load | Typed `Scenario` reusing `SeedFile`. 16 rejection cases, including `min > max`. The corpus is exactly 8 scenarios |
-| US4 | 10 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Order comes from timing, never `seq` or `request_id`. `no_content_matching` never scans `expected_version` or `old_string`. Graders never import `mcp` |
+| US4 | 10 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Order is `(session, turn, started_ms, seq)`, never `request_id`, which restarts per connection. `index_read_first` is strict: a parallel batch with the index read fails. `no_content_matching` never scans `expected_version` or `old_string`. Graders never import `mcp` |
 | US5 | CLI | `new-run`, `grade`, `report` | Model and ids are validated. Per-assertion pass counts over N. Judge verdicts are kept separate |
 | US6 | 8 scenarios | scripted correct and wrong drivers | Correct runs pass. Each wrong move fails its target assertion |
 | US7 | packaging, fixture | inspect, rebase | `dev-mode-dirs`. The fixture is moved with importers rewritten (no shim), before and after #34 |
 | US8 | `make check`, docs, PR | run, read | No model calls. `src/` never imports `evals`. ADR 0028, ARCHITECTURE, README, glossary, AGENTS.md. "Do not merge before one live N=1 run" |
 
-The full Given/When/Then for all 54 criteria is in [spec.md](spec.md).
+The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
 
 ## Key design decisions
 
@@ -42,7 +42,7 @@ The full Given/When/Then for all 54 criteria is in [spec.md](spec.md).
 | -------- | ---------------------- | --- |
 | Harness tools live on the same server, and the agent's `tools:` excludes them | Second server; control files | One process holds the store. The model-facing surface is the allowlist (deviation from "surface matches `TOOL_NAMES`", recorded in ADR 0028) |
 | `eval_record_turn` tags untagged calls; no `eval_begin_turn` | A begin-turn tool | A turn's calls complete before its reply, so tagging is exact |
-| Order from `started_ms`/`completed_ms` | `seq`; integer `request_id` | Records arrive in completion order. `request_id` is opaque |
+| Order by `(session, turn, started_ms, seq)`; strict `index_read_first` | `seq`; integer `request_id`; accepting a parallel index batch | Records arrive in completion order. `request_id` restarts per connection (mcp 2.3.0). A call issued alongside the index read was not chosen from it |
 | `evals/mcp.json` with `--mcp-config --strict-mcp-config --allowedTools mcp__wenchang` | Root `.mcp.json` | No prompt or extra tools in ordinary sessions. Schemas load directly. No per-call permission prompts |
 | `omitClaudeMd: true`, plus a 2-sentence framing preamble | Default loading; bare prompt | CLAUDE.md files would contaminate trials. Without framing, a subagent treats turns as delegated tasks |
 | Replies recorded verbatim by instruction | Reading Claude Code's transcript jsonl | That layout is internal |
