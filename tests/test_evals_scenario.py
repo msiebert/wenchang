@@ -26,6 +26,7 @@ from evals.scenario import (
     SeedLinesPreserved,
     ToolCalled,
     ToolNotCalled,
+    load_all,
     load_scenario,
 )
 
@@ -412,3 +413,43 @@ def test_assertion_kinds_are_the_closed_set() -> None:
         "tool_not_called",
         "alias_present",
     }
+
+
+# --- The shipped corpus -------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[1]
+CORPUS = {
+    "privacy-account-number",
+    "filing-alias-append",
+    "recall-across-sessions",
+    "forgetting-one-fact",
+    "filing-new-acronym",
+    "recall-replace-fact",
+    "forgetting-whole-file",
+    "slots-ask-before-shared",
+}
+
+
+def test_corpus_loads_with_unique_ids() -> None:
+    """Every shipped scenario loads, with unique ids and known kinds (AIE-1170, US3.4)."""
+    scenarios = load_all()
+
+    ids = [s.id for s in scenarios]
+    assert len(ids) == len(set(ids))
+    for s in scenarios:
+        assert all(type(a) in ASSERTION_KINDS.values() for a in s.assertions)
+
+
+def test_corpus_is_the_planned_eight() -> None:
+    """The corpus is exactly the planned scenarios, covers the four required
+    categories, cites existing sources and a prompt sentence, and checks the
+    index first (AIE-1170, US3.5).
+    """
+    scenarios = load_all()
+
+    assert {s.id for s in scenarios} == CORPUS
+    assert {"privacy", "filing", "recall", "forgetting"} <= {s.category for s in scenarios}
+    for s in scenarios:
+        assert s.source == "AIE-1170" or (ROOT / s.source).is_file(), s.id
+        assert s.path.read_text().startswith("# Prompt: "), s.id
+        assert any(isinstance(a, IndexReadFirst) and a.id == "index-first" for a in s.assertions)

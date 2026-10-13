@@ -1,0 +1,27 @@
+# Prompt: "Call `get_memory_index()` at the start of every session, before you
+# answer from memory or write to it." and "Writes to user need no ask."
+id: recall-across-sessions
+title: Saves a preference in one session and uses it in the next
+category: recall
+source: AIE-1170
+sessions:
+  - turns:
+      - "I prefer bar charts for my weekly reports."
+  - turns:
+      - "Which chart type should I use for this week's report?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: preference-saved
+    pattern: "(?i)bar chart"
+    scope: user
+  - kind: tool_called
+    id: recalled-in-session-2
+    tool: read_file
+    args: {scope: user}
+    session: 2
+    succeeded: true
+judge:
+  - id: recommends-bar-charts
+    rubric: The session 2 reply recommends bar charts because of the stored preference.
