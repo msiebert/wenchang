@@ -243,3 +243,12 @@ Terms as used throughout wenchang and its spec.
 - **Transient error** — an error category signaling a temporary condition
   where retrying is appropriate; a version-guarded retry safely degrades to
   a recoverable version conflict if the first attempt actually landed.
+- **Scenario** — a behavioral eval case in `evals/scenarios/`: seed memory
+  files, sessions of scripted user turns, deterministic assertions over the
+  final store and the tool-call trace, and an optional judge rubric.
+- **Trial** — one run of one scenario against a live or scripted agent:
+  reset the eval store, play every session, dump, grade. A run repeats each
+  scenario for N trials.
+- **Trace** — the memory tool calls of a trial, each tagged with its session
+  and turn and stamped with start and completion times; the graders' input
+  alongside the store dump.

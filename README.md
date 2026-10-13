@@ -150,6 +150,30 @@ Things to know:
 
 See [ADR 0027](docs/adr/0027-mcp-host-adapter.md).
 
+## Behavioral evals
+
+The memory prompt is evaluated against a real agent, not unit-tested. The
+dev-only `evals/` package runs scripted scenarios against a Claude Code
+subagent, `wenchang-eval`, whose only tools are the seven memory tools on a
+local eval MCP server. It then grades what the agent stored and which
+tools it called. Scenarios live in `evals/scenarios/*.yaml`.
+
+Launch a dedicated session from the repo root, then run the evals:
+
+```
+claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang
+/run-evals --model sonnet --trials 3
+```
+
+Each run writes `evals/runs/<run-id>/report.md`, with pass counts per
+assertion over N trials. That directory is gitignored. `make check` never
+runs a live agent. It runs scripted drivers through the same server,
+graders, and report.
+
+Claude Code's own harness prompt sits under the eval agent. Treat results
+as signal for prompt iteration, not as release gates. See
+[ADR 0028](docs/adr/0028-behavioral-eval-harness.md).
+
 ## Docs
 
 - [AGENTS.md](AGENTS.md) — commands, workflow, rules
