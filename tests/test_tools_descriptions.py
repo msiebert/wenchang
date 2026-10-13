@@ -5,22 +5,25 @@ the docstrings a host shows the agent as tool descriptions; and AIE-1151,
 US5.1: the aliases and description paragraph on append_line and replace_fact; and
 AIE-1165, US2 and US4: shared mechanics stated once in get_memory_index, with each
 write tool keeping its own expected_version and conflict guidance; and AIE-1164,
-US5: MemoryTools.descriptions(), with the product named in each first line.
+US5: MemoryTools.descriptions(), with the product named in each first line; and
+AIE-1060, US1: the module-level tool_descriptions() that descriptions() delegates to.
 """
 
 import inspect
 import re
 import types
+import typing
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
+import wenchang.tools as tools_module
 from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.file_format import FileMetadata
 from wenchang.identity import Identity, ScopeGrant
 from wenchang.scope import ScopePolicy
-from wenchang.tools import TOOL_NAMES, MemoryTools
+from wenchang.tools import TOOL_NAMES, MemoryTools, tool_descriptions
 from wenchang.version_token import VersionToken
 
 pytestmark = pytest.mark.unit
@@ -424,3 +427,118 @@ def test_descriptions_first_line_is_one_sentence(tool: str) -> None:
 
     assert first_line.endswith(".")
     assert ". " not in first_line
+
+
+# --- tool_descriptions() -----------------------------------------------------------
+
+BAD_PRODUCTS: list[object] = [
+    42,
+    b"Mixpanel",
+    "",
+    "   ",
+    "Mix\npanel",
+    "Mix\u2028panel",
+    "Mix\x85panel",
+    "Mix\ud800panel",
+]
+
+
+def test_tool_descriptions_is_exported_with_signature() -> None:
+    """tool_descriptions is public with signature (product: str | None = None)
+    -> Mapping[str, str] (AIE-1060, US1.1).
+    """
+    assert "tool_descriptions" in tools_module.__all__
+    sig = inspect.signature(tool_descriptions)
+    assert list(sig.parameters) == ["product"]
+    param = sig.parameters["product"]
+    assert param.default is None
+    assert param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    hints = typing.get_type_hints(tool_descriptions)
+    assert hints["product"] == str | None
+    assert hints["return"] == Mapping[str, str]
+
+
+def test_tool_descriptions_without_product_are_cleandoc_docstrings() -> None:
+    """With no product, tool_descriptions() is a fresh read-only mapping in
+    TOOL_NAMES order whose values are the cleandoc'd docstrings (AIE-1060, US1.2).
+    """
+    first = tool_descriptions()
+    second = tool_descriptions()
+
+    assert first is not second
+    assert list(first) == list(TOOL_NAMES)
+    assert dict(first) == {name: _cleandoc(name) for name in EXPECTED_TOOL_NAMES}
+    with pytest.raises(TypeError):
+        first["read_file"] = "x"  # pyright: ignore[reportIndexIssue]
+    assert type(first) is types.MappingProxyType
+
+
+@pytest.mark.parametrize("product", ["Mixpanel", "Acme Analytics", "A{b}c"])
+def test_tool_descriptions_with_product_match_independent_expectation(product: str) -> None:
+    """With a product, each description is the pinned first line with the
+    product substituted, followed by the docstring's later lines; computed
+    independently of descriptions() (AIE-1060, US1.3).
+    """
+    expected: dict[str, str] = {}
+    for name in EXPECTED_TOOL_NAMES:
+        _, sep, rest = _cleandoc(name).partition("\n")
+        expected[name] = PINNED_FIRST_LINES[name].replace("Mixpanel", product) + sep + rest
+
+    assert dict(tool_descriptions(product)) == expected
+
+
+@pytest.mark.parametrize("product", BAD_PRODUCTS)
+def test_tool_descriptions_rejects_products_like_memory_tools(product: object) -> None:
+    """A product MemoryTools rejects raises the same exception type and message
+    from tool_descriptions (AIE-1060, US1.4).
+    """
+    with pytest.raises((TypeError, ValueError)) as from_tools:
+        MemoryTools(
+            _NullClient(),
+            IDENTITY,
+            POLICY,
+            source="test-surface",
+            product=product,  # pyright: ignore[reportArgumentType]
+        )
+    with pytest.raises((TypeError, ValueError)) as from_function:
+        tool_descriptions(product)  # pyright: ignore[reportArgumentType]
+
+    assert type(from_function.value) is type(from_tools.value)
+    assert str(from_function.value) == str(from_tools.value)
+
+
+def test_descriptions_delegates_to_tool_descriptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MemoryTools.descriptions() calls the module-level tool_descriptions with
+    its product and returns the result unchanged (AIE-1060, US1.5).
+    """
+    sentinel: Mapping[str, str] = types.MappingProxyType({"x": "y"})
+    calls: list[str | None] = []
+
+    def stub(product: str | None = None) -> Mapping[str, str]:
+        calls.append(product)
+        return sentinel
+
+    monkeypatch.setattr(tools_module, "tool_descriptions", stub)
+
+    result = _product_tools("X").descriptions()
+
+    assert calls == ["X"]
+    assert result is sentinel
+
+
+@pytest.mark.parametrize("product", [None, "Mixpanel"], ids=["no-product", "product"])
+def test_tool_descriptions_missing_docstring_is_empty(
+    monkeypatch: pytest.MonkeyPatch, product: str | None
+) -> None:
+    """A tool whose docstring is None, as under python -OO, has an empty
+    description; the others are unchanged (AIE-1060, US1.6).
+    """
+    before = dict(tool_descriptions(product))
+    monkeypatch.setattr(MemoryTools.read_file, "__doc__", None)
+
+    after = tool_descriptions(product)
+
+    assert after["read_file"] == ""
+    assert {k: v for k, v in after.items() if k != "read_file"} == {
+        k: v for k, v in before.items() if k != "read_file"
+    }

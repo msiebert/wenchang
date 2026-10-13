@@ -4,7 +4,8 @@ A MemoryTools instance is one session: a resolved Identity, the adopter's
 ScopePolicy, a TransportClient, the surface name stamped on writes, and
 optionally the product named in each tool description. Its public methods
 are the tools; descriptions() gives the descriptions a host shows the
-agent: the docstrings, with the product in each first line when set. Tools
+agent: the docstrings, with the product in each first line when set.
+tool_descriptions(product) gives the same text without a session. Tools
 take a scope, area, and name and build the path under the caller's own
 entity in that scope. Mutating tools check the write against the identity
 and policy, then call the client. render_result and render_error produce
@@ -29,7 +30,14 @@ from wenchang.scope import ScopePolicy, check_write
 from wenchang.transport import TransportClient
 from wenchang.version_token import VersionToken
 
-__all__ = ["TOOL_NAMES", "MemoryTools", "bind_tools", "render_error", "render_result"]
+__all__ = [
+    "TOOL_NAMES",
+    "MemoryTools",
+    "bind_tools",
+    "render_error",
+    "render_result",
+    "tool_descriptions",
+]
 
 TOOL_NAMES: Final[tuple[str, ...]] = (
     "get_memory_index",
@@ -165,16 +173,7 @@ class MemoryTools:
 
         When a product is set, each first line names it.
         """
-        out: dict[str, str] = {}
-        for name in TOOL_NAMES:
-            doc = inspect.cleandoc(cast(str, getattr(MemoryTools, name).__doc__))
-            if self._product is None:
-                out[name] = doc
-            else:
-                _, sep, rest = doc.partition("\n")
-                first = _FIRST_LINE_TEMPLATES[name].replace("{product}", self._product)
-                out[name] = first + sep + rest
-        return MappingProxyType(out)
+        return tool_descriptions(self._product)
 
     def get_memory_index(self) -> MemoryIndex:
         """Load the metadata index of every memory scope available in this session.
@@ -497,6 +496,29 @@ def _reraise_argument(argument: str, exc: ValueError) -> NoReturn:
     if issubclass(type(exc), MetadataFormatError | UnicodeDecodeError):
         raise exc
     raise InvalidArgumentError(argument, _message(exc)) from exc
+
+
+def tool_descriptions(product: str | None = None) -> Mapping[str, str]:
+    """Each tool's description by name, in TOOL_NAMES order.
+
+    With a product, each first line names it. A tool whose docstring is
+    missing, as under python -OO, has an empty description.
+    """
+    product = _product(product)
+    out: dict[str, str] = {}
+    for name in TOOL_NAMES:
+        raw = cast(str | None, getattr(MemoryTools, name).__doc__)
+        if raw is None:
+            out[name] = ""
+            continue
+        doc = inspect.cleandoc(raw)
+        if product is None:
+            out[name] = doc
+        else:
+            _, sep, rest = doc.partition("\n")
+            first = _FIRST_LINE_TEMPLATES[name].replace("{product}", product)
+            out[name] = first + sep + rest
+    return MappingProxyType(out)
 
 
 def bind_tools[C](

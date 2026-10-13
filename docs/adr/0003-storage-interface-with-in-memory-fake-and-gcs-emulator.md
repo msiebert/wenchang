@@ -36,6 +36,12 @@ Both implementations must pass the same conformance test suite (see
 Section 10 of the spec), so the fake cannot silently diverge from real GCS
 behavior.
 
+**Note (2026-10-08, AIE-1060).** The in-memory fake is thread-safe: one lock
+covers each method, so concurrent conditional puts keep compare-and-swap and
+never mint a duplicate token, as GCS does. The MCP host adapter calls the
+transport from concurrent worker threads. See
+[ADR 0027](0027-mcp-host-adapter.md) decision 7.
+
 ## Consequences
 
 Unit tests run fast, with no network dependency, while still exercising
