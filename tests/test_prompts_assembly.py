@@ -15,7 +15,7 @@ from typing import cast
 import pytest
 
 import wenchang.prompts
-from prompts_reference_adopter import (
+from reference_adopter import (
     REFERENCE_PURPOSE,
     REFERENCE_SCOPE_GUIDANCE,
     REFERENCE_SCOPE_PRIORITY,
