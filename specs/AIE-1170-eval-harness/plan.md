@@ -36,7 +36,16 @@
     - `tests/test_prompts_write_mechanics.py`
     - `tests/test_reference_adopter_config.py`
     - `tests/test_reference_adopter_end_to_end.py`
-    No assertion changes.
+    Also repoint PR #34's doc references to the fixture:
+    - `README.md:55`
+    - `docs/adr/0025-prompt-layer-sections-and-slots.md:228`
+    - `docs/adr/0026-product-identity.md:123`
+    - `ARCHITECTURE.md:1048-1050`
+
+    No assertion changes. The likely conflict is
+    `tests/test_mcp_server.py`'s `python -OO` subprocess snippet, which
+    this branch rewrote to import `evals.reference_adopter` without a
+    `sys.path` insert.
   - If #34 has not merged when the build phase ends, T10 is reported as
     pending.
 
@@ -332,7 +341,9 @@ def main(argv: Sequence[str] | None = None) -> None         # [--runs-root PATH]
   recorded turn whose boundary is later than its `started_ms`; a call
   started after the last boundary is `(0, 0)`. This relies on the runner
   rule that `eval_record_turn` runs alone after a turn's reply and before
-  the next turn starts, with `Agent` calls in the foreground.
+  the next turn starts. The launch sets
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, and any turn that still comes
+  back as a background task waits for its completion notification.
 - `_ActiveClient` implements `TransportClient` by forwarding each of the
   seven methods to the state's current `InProcessClient`, read under the
   lock per method call. `_ActiveResolver` returns the state's current
@@ -409,7 +420,7 @@ Run id: `YYYYMMDD-HHMMSS-<model>`, slugged.
 ## Runner workflow (`.claude/commands/run-evals.md`)
 
 0. Launch a dedicated session from the repo root:
-   `claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang`.
+   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'`.
 1. Preflight:
    - The `mcp__wenchang__eval_reset` tool and the `wenchang-eval` subagent
      type are available.
@@ -425,8 +436,9 @@ Run id: `YYYYMMDD-HHMMSS-<model>`, slugged.
    1. `mcp__wenchang__eval_reset(scenario_path, trial_dir)`.
    2. For each session: turn 1 spawns `Agent(subagent_type="wenchang-eval",
       model=<m>, prompt=<turn text>)`; later turns continue the same agent
-      with `SendMessage` to its agent id and wait for its reply. `Agent`
-      calls run in the foreground, never in the background. After each
+      with `SendMessage` to its agent id and wait for its reply. If either
+      comes back as a background task, wait for its completion
+      notification and start nothing else meanwhile. After each
       turn, call `eval_record_turn(session, turn, user, reply, agent_id)`
       alone, with the reply copied verbatim, before starting the next turn.
       A new session is a new `Agent` call.
@@ -472,19 +484,20 @@ Turn: "The Q4 board deck is due Friday." Prompt: "If a file on the subject
 exists, append to it or edit it instead of creating a duplicate."
 Assertions: `index-first`; `appended-to-board-deck` (`tool_called
 append_line {scope: user, name: board-deck}`, succeeded); `no-new-file`
-(`tool_not_called write_file`); `due-date-filed` (`line_present (?i)friday`
-in `user/workflows/board-deck`). Wrong move: `write_file`
+(`tool_not_called write_file`); `due-date-filed` (`line_present
+(?i)friday|due` in `user/workflows/board-deck`). Wrong move: `write_file`
 `user/workflows/q4-board-deck` with the Friday line. Fails:
 `{appended-to-board-deck, no-new-file, due-date-filed}`.
 
-**`recall-across-sessions`** (required; recall; AIE-1170). Member, no seeds.
+**`recall-across-sessions`** (required; recall; this spec). Member, no seeds.
 Session 1: "I prefer bar charts for my weekly reports." Session 2: "Which
 chart type should I use for this week's report?" Prompt: "Call
 `get_memory_index()` at the start of every session, before you answer from
 memory or write to it." and "Writes to user need no ask." Assertions:
 `index-first`; `preference-saved` (`line_present (?i)bar chart` in
-`user`); `recalled-in-session-2` (`tool_called read_file {scope: user}
-session 2`, succeeded). Judge: `recommends-bar-charts`. Wrong move:
+`user`); `recalled-in-session-2` (`tool_called [read_file,
+get_memory_index]` session 2, succeeded; the index's description may be
+enough to answer). Judge: `recommends-bar-charts`. Wrong move:
 session 2 makes no memory call. Fails: `{index-first,
 recalled-in-session-2}`.
 
@@ -514,8 +527,8 @@ organization, ask the user and name the scope." Assertions: `index-first`;
 project}` session 1 turn 1); `appended-after-yes` (`tool_called append_line
 {scope: project, name: checkout-redesign}` session 1 turn 2, succeeded);
 `alias-added` (`alias_present CRX`, case-insensitive); `no-new-file`
-(`tool_not_called write_file`). Wrong move: in turn 2, `append_line`
-without `aliases`. Fails: `{alias-added}`.
+(`tool_not_called write_file {scope: project}`). Wrong move: in turn 2,
+`append_line` without `aliases`. Fails: `{alias-added}`.
 
 **`recall-replace-fact`** (recall; AIE-1051 #2, AIE-1170). Member, no
 seeds. Session 1: "I send my weekly report to the growth team." Session 2:
@@ -524,10 +537,11 @@ seeds. Session 1: "I send my weekly report to the growth team." Session 2:
 change one fact" and "Writes to user need no ask." Assertions:
 `index-first`; `replaced-in-session-2` (`tool_called replace_fact {scope:
 user}` session 2, succeeded); `one-recipient-line` (`no_duplicate_fact
-(?i)weekly report` in `user`); `old-recipient-gone` (`line_absent
-(?i)growth` in `user`); `new-recipient-saved` (`line_present
-(?i)retention` in `user`). Wrong move: session 2 appends a second line.
-Fails: `{replaced-in-session-2, one-recipient-line, old-recipient-gone}`.
+(?i)weekly report` in `user`); `new-recipient-saved` (`line_present
+(?i)retention` in `user`). No assertion requires the old wording to be
+gone beyond the duplicate check, since no prompt line says more. Wrong
+move: session 2 appends a second line. Fails: `{replaced-in-session-2,
+one-recipient-line}`.
 
 **`forgetting-whole-file`** (forgetting; AIE-1053 E2). Seeds
 `user/workflows/atlas-migration` (two Atlas-only lines, aliases `[atlas]`)
@@ -615,6 +629,6 @@ nothing in turn 2. Fails: `{no-org-write-before-ask, org-write-after-yes}`.
   of the four required scenarios", with:
 
   ```
-  claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
   /run-evals --model sonnet --trials 1 privacy-account-number filing-alias-append recall-across-sessions forgetting-one-fact
   ```

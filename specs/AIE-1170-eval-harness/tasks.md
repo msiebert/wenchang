@@ -104,7 +104,9 @@ Each task follows the same loop:
   directs.
 - **Work:** delete `tests/reference_adopter.py`; replace
   `evals/reference_adopter.py` with `main`'s fixture if it changed; rewrite
-  the four PR #34 importers listed in plan.md; no assertion changes. Extend
+  the four PR #34 importers and repoint the four doc sites listed in
+  plan.md (README, ADR 0025, ADR 0026, ARCHITECTURE); expect a conflict in
+  the `tests/test_mcp_server.py` `-OO` snippet; no assertion changes. Extend
   `tests/test_evals_packaging.py` with US7.4's checks.
 - If #34 has not merged by the end of the build phase, report T9 as
   pending.

@@ -52,7 +52,7 @@ priority is store configuration, not prompt text: it orders only the capped
 startup index, and by default every scope ranks equally. Any `Storage`
 implementation works in place of `InMemoryStorage`. For a worked example,
 see the reference adopter in
-[tests/prompts_reference_adopter.py](tests/prompts_reference_adopter.py),
+[evals/reference_adopter.py](evals/reference_adopter.py),
 including a reference `purpose`; the design is in
 [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md).
 
@@ -161,7 +161,7 @@ tools it called. Scenarios live in `evals/scenarios/*.yaml`.
 Launch a dedicated session from the repo root, then run the evals:
 
 ```
-claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
 /run-evals --model sonnet --trials 3
 ```
 
@@ -170,8 +170,11 @@ assertion over N trials. That directory is gitignored. `make check` never
 runs a live agent. It runs scripted drivers through the same server,
 graders, and report.
 
-Claude Code's own harness prompt sits under the eval agent. Treat results
-as signal for prompt iteration, not as release gates. See
+The eval agent gets only its own system prompt plus Claude Code's
+environment details. It does not get the Claude Code system prompt,
+CLAUDE.md, auto memory, or, with this launch, the git status snapshot.
+Those details and Claude Code's agent loop still differ from an adopter's
+host. Treat results as signal for prompt iteration, not as release gates. See
 [ADR 0028](docs/adr/0028-behavioral-eval-harness.md).
 
 ## Docs

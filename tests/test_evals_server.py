@@ -172,7 +172,8 @@ def test_instructions_are_neutral_and_prompt_is_a_resource(state: EvalState) -> 
 
     instructions, resource = _run(state, body)
 
-    assert instructions == EVAL_SERVER_INSTRUCTIONS
+    assert instructions == EVAL_SERVER_INSTRUCTIONS == "Memory tools for this workspace."
+    assert "eval" not in (instructions or "").lower()
     assert prompt not in (instructions or "")
     assert resource == prompt
 
@@ -505,3 +506,25 @@ def test_server_runs_over_stdio(tmp_path: Path) -> None:
     assert names == {*TOOL_NAMES, *HARNESS_TOOL_NAMES}
     assert (reset_error, write_error) == (False, False)
     assert load_store_dump(trial / "store.json").get("user", "notes", "x") is not None
+
+
+def test_reset_does_not_move_the_time_baseline(tmp_path: Path) -> None:
+    """Times are measured from server start; eval_reset never rebases them
+    (AIE-1170, US1.6).
+    """
+    now = [100.0]
+    state = EvalState(runs_root=tmp_path / "runs", clock=lambda: now[0])
+    scenario = load_scenario(_scenario(tmp_path, SEEDED, "seeded", identity="member"))
+
+    now[0] = 102.0
+    state.reset(scenario, state.runs_root / "t")
+    now[0] = 103.0
+    state.record_call(
+        ToolCallRecord(
+            "get_memory_index", MappingProxyType({}), MappingProxyType({}), False, "1", 0.5
+        )
+    )
+
+    (call,) = state.trace()
+    assert call.completed_ms == pytest.approx(3000.0)
+    assert call.started_ms == pytest.approx(2500.0)

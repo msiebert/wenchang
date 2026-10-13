@@ -62,10 +62,10 @@ __all__ = [
 ]
 
 EVAL_SOURCE: Final = AGENT_SOURCE
-EVAL_SERVER_INSTRUCTIONS: Final[str] = (
-    "Dev-only wenchang eval server. The memory tools act on an in-memory store "
-    "that the eval runner resets per trial; eval_* tools are for the runner only."
-)
+# Neutral on purpose: the memory prompt reaches the agent through its definition,
+# and nothing here should tell the agent it is being evaluated. register_memory_tools
+# therefore logs its "instructions lack the prompt" warning at every start.
+EVAL_SERVER_INSTRUCTIONS: Final[str] = "Memory tools for this workspace."
 HARNESS_TOOL_NAMES: Final[tuple[str, ...]] = ("eval_reset", "eval_record_turn", "eval_dump")
 
 
@@ -161,7 +161,12 @@ class EvalState:
             self._turns = []
 
     def record_call(self, record: ToolCallRecord) -> None:
-        """The on_call observer: stamp the record and append it to the trace."""
+        """The on_call observer: stamp the record and append it to the trace.
+
+        completed_ms is stamped when the record arrives, a little after the
+        wrapper finished, so started_ms (completed_ms minus duration_s) lags
+        the true start by the same small amount for every call.
+        """
         with self._lock:
             completed = self._now_ms()
             self._records.append(
@@ -181,77 +186,103 @@ class EvalState:
             self._boundaries.append(_Boundary(self._now_ms(), session, turn))
             self._turns.append(TranscriptTurn(session, turn, user, reply, agent_id))
 
-    def _tag(self, started_ms: float) -> tuple[int, int]:
-        for boundary in self._boundaries:
-            if started_ms < boundary.at_ms:
-                return boundary.session, boundary.turn
-        return 0, 0
+    def _snapshot(self) -> "_Snapshot":
+        with self._lock:
+            return _Snapshot(
+                client=self._client,
+                identity=self._identity,
+                trial_dir=self._trial_dir,
+                records=tuple(self._records),
+                boundaries=tuple(self._boundaries),
+                turns=tuple(self._turns),
+            )
 
     def trace(self) -> tuple[TraceCall, ...]:
-        with self._lock:
-            calls: list[TraceCall] = []
-            for r in self._records:
-                session, turn = self._tag(r.started_ms)
-                calls.append(
-                    TraceCall(
-                        seq=r.seq,
-                        request_id=r.record.request_id,
-                        duration_s=r.record.duration_s,
-                        started_ms=r.started_ms,
-                        completed_ms=r.completed_ms,
-                        session=session,
-                        turn=turn,
-                        tool=r.record.tool,
-                        arguments=r.record.arguments,
-                        result=r.record.result,
-                        is_error=r.record.is_error,
-                    )
-                )
-            return tuple(calls)
+        return self._snapshot().trace()
 
     def transcript(self) -> tuple[TranscriptTurn, ...]:
-        with self._lock:
-            return tuple(self._turns)
+        return self._snapshot().turns
 
     def store_dump(self) -> StoreDump:
         """Every file under the identity's entities, with content and metadata."""
-        client, identity = self.client, self.identity
-        files: list[StoredFile] = []
-        for scope, entity in sorted(identity.scope_map.items()):
-            cursor: ListCursor | None = None
-            while True:
-                page = client.list_prefix(build_prefix(scope, entity), cursor)
-                for entry in page.entries:
-                    files.append(_stored(client.read_file(entry.path)))
-                if page.next_cursor is None:
-                    break
-                cursor = page.next_cursor
-        return StoreDump(tuple(sorted(files, key=lambda f: f.path)))
+        return self._snapshot().store_dump()
 
     def dump(self) -> dict[str, object]:
         """Write store.json, trace.json, and transcript.json to the trial dir.
 
-        Raises RuntimeError if no trial has been started with reset.
+        All three come from one snapshot of the trial. Raises RuntimeError if
+        no trial has been started with reset.
         """
-        with self._lock:
-            trial_dir = self._trial_dir
-        if trial_dir is None:
+        snap = self._snapshot()
+        if snap.trial_dir is None:
             raise RuntimeError("no trial in progress: call eval_reset first")
-        store, trace, transcript = self.store_dump(), self.trace(), self.transcript()
-        trial_dir.mkdir(parents=True, exist_ok=True)
+        store, trace = snap.store_dump(), snap.trace()
+        snap.trial_dir.mkdir(parents=True, exist_ok=True)
         paths = {
-            "store": trial_dir / "store.json",
-            "trace": trial_dir / "trace.json",
-            "transcript": trial_dir / "transcript.json",
+            "store": snap.trial_dir / "store.json",
+            "trace": snap.trial_dir / "trace.json",
+            "transcript": snap.trial_dir / "transcript.json",
         }
         paths["store"].write_text(json.dumps(store_dump_to_json(store), indent=2))
         paths["trace"].write_text(json.dumps(trace_to_json(trace), indent=2))
-        paths["transcript"].write_text(json.dumps(transcript_to_json(transcript), indent=2))
+        paths["transcript"].write_text(json.dumps(transcript_to_json(snap.turns), indent=2))
         return {
             **{key: str(path) for key, path in paths.items()},
             "files": len(store.files),
             "calls": len(trace),
         }
+
+
+@dataclass(frozen=True)
+class _Snapshot:
+    """One consistent view of a trial, taken under the state lock."""
+
+    client: InProcessClient
+    identity: Identity
+    trial_dir: Path | None
+    records: tuple[_Record, ...]
+    boundaries: tuple[_Boundary, ...]
+    turns: tuple[TranscriptTurn, ...]
+
+    def _tag(self, started_ms: float) -> tuple[int, int]:
+        for boundary in self.boundaries:
+            if started_ms < boundary.at_ms:
+                return boundary.session, boundary.turn
+        return 0, 0
+
+    def trace(self) -> tuple[TraceCall, ...]:
+        calls: list[TraceCall] = []
+        for r in self.records:
+            session, turn = self._tag(r.started_ms)
+            calls.append(
+                TraceCall(
+                    seq=r.seq,
+                    request_id=r.record.request_id,
+                    duration_s=r.record.duration_s,
+                    started_ms=r.started_ms,
+                    completed_ms=r.completed_ms,
+                    session=session,
+                    turn=turn,
+                    tool=r.record.tool,
+                    arguments=r.record.arguments,
+                    result=r.record.result,
+                    is_error=r.record.is_error,
+                )
+            )
+        return tuple(calls)
+
+    def store_dump(self) -> StoreDump:
+        files: list[StoredFile] = []
+        for scope, entity in sorted(self.identity.scope_map.items()):
+            cursor: ListCursor | None = None
+            while True:
+                page = self.client.list_prefix(build_prefix(scope, entity), cursor)
+                for entry in page.entries:
+                    files.append(_stored(self.client.read_file(entry.path)))
+                if page.next_cursor is None:
+                    break
+                cursor = page.next_cursor
+        return StoreDump(tuple(sorted(files, key=lambda f: f.path)))
 
 
 def _stored(f: MemoryFile) -> StoredFile:

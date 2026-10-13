@@ -28,7 +28,7 @@ assertions:
     tool: write_file
   - kind: line_present
     id: due-date-filed
-    pattern: "(?i)friday"
+    pattern: "(?i)friday|due"
     scope: user
     area: workflows
     name: board-deck

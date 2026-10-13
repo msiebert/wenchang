@@ -69,7 +69,7 @@ The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
   The human or orchestrator then runs:
 
   ```
-  claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
   /run-evals --model sonnet --trials 1 privacy-account-number filing-alias-append recall-across-sessions forgetting-one-fact
   ```
 

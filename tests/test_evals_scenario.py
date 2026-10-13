@@ -355,6 +355,39 @@ MALFORMED: list[tuple[str, str, str]] = [
         ),
         "min",
     ),
+    (
+        "arg-not-a-parameter-of-every-tool",
+        _minimal(
+            assertions=(
+                "assertions:\n  - kind: tool_not_called\n    tool: [write_file, delete_file]\n"
+                "    args: {content: x}\n"
+            )
+        ),
+        "content",
+    ),
+    (
+        "unknown-scope-arg",
+        _minimal(
+            assertions=(
+                "assertions:\n  - kind: tool_not_called\n    tool: write_file\n"
+                "    args: {scope: team}\n"
+            )
+        ),
+        "team",
+    ),
+    ("non-string-identity", _minimal(identity="identity: [admin]\n"), "identity"),
+    ("non-string-kind", _minimal(assertions="assertions:\n  - kind: [index_read_first]\n"), "kind"),
+    (
+        "seed-lines-preserved-without-seed",
+        _minimal(
+            seed=_SEED,
+            assertions=(
+                "assertions:\n  - kind: seed_lines_preserved\n    scope: user\n"
+                "    area: notes\n    name: b\n"
+            ),
+        ),
+        "user/notes/b",
+    ),
 ]
 
 

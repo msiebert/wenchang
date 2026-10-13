@@ -8,9 +8,10 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final, cast
 
 import evals.agent
@@ -37,6 +38,9 @@ def check_model(model: str) -> None:
         )
 
 
+GIT_TIMEOUT_S: Final = 10
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
@@ -46,6 +50,7 @@ def _git_commit() -> str | None:
         ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
+        timeout=GIT_TIMEOUT_S,
         check=False,
     )
     return result.stdout.strip() if result.returncode == 0 else None
@@ -75,9 +80,17 @@ def new_run(
     if trials < 1:
         raise ValueError("trials must be at least 1")
     created = datetime.now(UTC) if now is None else now
-    run_id = f"{created.strftime('%Y%m%d-%H%M%S')}-{_slug(model)}"
+    base = f"{created.strftime('%Y%m%d-%H%M%S')}-{_slug(model)}"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    run_id, suffix = base, 1
+    while True:
+        try:
+            (runs_dir / run_id).mkdir()
+            break
+        except FileExistsError:
+            suffix += 1
+            run_id = f"{base}-{suffix}"
     run_dir = runs_dir / run_id
-    run_dir.mkdir(parents=True)
     _write_json(
         run_dir / "run.json",
         {
@@ -176,9 +189,66 @@ def _judge_verdicts(trial_dir: Path, scenario: Scenario) -> dict[str, bool] | No
     return found
 
 
+_RUN_FIELDS: Final[Mapping[str, type | tuple[type, ...]]] = MappingProxyType(
+    {
+        "run_id": str,
+        "created": str,
+        "model": str,
+        "trials": int,
+        "scenarios": list,
+        "git_commit": (str, type(None)),
+        "agent_sha256": (str, type(None)),
+    }
+)
+_GRADE_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
+    {"scenario": str, "trial": int, "passed": bool, "results": list}
+)
+_RESULT_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
+    {"id": str, "kind": str, "passed": bool, "detail": str}
+)
+
+
+def _checked(path: Path, value: object, fields: Mapping[str, Any], where: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise GradeInputError(f"{path}: {where} must be an object")
+    data = cast(dict[str, Any], value)
+    for key, kind in fields.items():
+        if key not in data:
+            raise GradeInputError(f"{path}: {where} is missing {key!r}")
+        if not isinstance(data[key], kind) or (kind is int and isinstance(data[key], bool)):
+            raise GradeInputError(f"{path}: {where} field {key!r} has the wrong type")
+    return data
+
+
+def _load_run(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / "run.json"
+    run = _checked(path, _read_json(path), _RUN_FIELDS, "run.json")
+    if run["trials"] < 1 or not all(isinstance(s, str) for s in run["scenarios"]):
+        raise GradeInputError(f"{path}: trials must be >= 1 and scenarios a list of ids")
+    return run
+
+
+def _load_grade(path: Path) -> dict[str, Any]:
+    graded = _checked(path, _read_json(path), _GRADE_FIELDS, "grade.json")
+    for i, result in enumerate(cast(list[object], graded["results"])):
+        _checked(path, result, _RESULT_FIELDS, f"results[{i}]")
+    return graded
+
+
+def _grade_is_current(trial_dir: Path) -> bool:
+    grade_path = trial_dir / "grade.json"
+    if not grade_path.exists():
+        return False
+    dumps = [trial_dir / "store.json", trial_dir / "trace.json"]
+    newest = max((p.stat().st_mtime for p in dumps if p.exists()), default=0.0)
+    return grade_path.stat().st_mtime >= newest
+
+
 def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
-    """Grade any ungraded dumped trials, then write report.md and report.json."""
-    run = cast(dict[str, Any], _read_json(run_dir / "run.json"))
+    """Grade dumped trials whose grade.json is missing or stale, then write
+    report.md and report.json. Raises GradeInputError on malformed inputs.
+    """
+    run = _load_run(run_dir)
     trials = int(run["trials"])
     scenario_reports: list[dict[str, object]] = []
     for ident in cast(list[str], run["scenarios"]):
@@ -190,9 +260,10 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
         for k in range(1, trials + 1):
             trial_dir = run_dir / ident / f"trial-{k}"
             scenario, _ = _trial_scenario(trial_dir)
-            if (trial_dir / "grade.json").exists():
-                graded.append(cast(dict[str, Any], _read_json(trial_dir / "grade.json")))
-            elif (trial_dir / "store.json").exists() and (trial_dir / "trace.json").exists():
+            dumped = (trial_dir / "store.json").exists() and (trial_dir / "trace.json").exists()
+            if _grade_is_current(trial_dir):
+                graded.append(_load_grade(trial_dir / "grade.json"))
+            elif dumped:
                 graded.append(grade_trial(trial_dir))
             else:
                 not_run.append(k)

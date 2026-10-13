@@ -59,7 +59,8 @@ slow and nondeterministic.
    - **Timing.** `completed_ms` is stamped when the `on_call` record
      arrives, in milliseconds on a monotonic clock. The baseline is server
      start, before the first reset, and resets never move it.
-     `started_ms` is `completed_ms - duration_s * 1000`.
+     `started_ms` is `completed_ms - duration_s * 1000`. Both lag the
+     true times by the same small stamping delay.
    - **Order.** Graders order calls by `(session, turn, started_ms, seq)`,
      and untagged session-0 calls sort last. `seq` is completion order
      only. `request_id` is an opaque correlation key, because JSON-RPC
@@ -67,7 +68,11 @@ slow and nondeterministic.
    - **Turn tagging.** Each `eval_record_turn` stamps a boundary. A call
      belongs to the first recorded turn whose boundary is later than its
      `started_ms`. A call started after the last boundary is session 0,
-     turn 0.
+     turn 0. This relies on each turn's subagent finishing before
+     `eval_record_turn` runs. Claude Code runs subagents in the background
+     by default, so the launch sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`.
+     The runner also waits for any background completion notification
+     before recording the turn.
    - **Strict `index_read_first`.** Some `get_memory_index` call must
      complete before any other memory call of the session starts, so a
      parallel batch with the index read fails. The prompt asks the agent
@@ -87,8 +92,12 @@ slow and nondeterministic.
      `eval_dump`. The issue says the tool surface matches `TOOL_NAMES`.
      That holds for the surface the model sees, because the eval agent's
      allowlist is exactly the seven memory tools.
-   - The server's MCP `instructions` are neutral. The memory prompt
-     reaches the agent through its definition, not twice.
+   - The server's MCP `instructions` are neutral: "Memory tools for this
+     workspace." They do not mention evaluation, and the memory prompt
+     reaches the agent through its definition, not twice. Because the
+     instructions lack the prompt, `register_memory_tools` logs its "server
+     instructions do not include the memory prompt" warning at every
+     start. That is by design.
    - A reset swaps the store and identity behind a forwarding client and
      resolver, since Claude Code cannot restart an MCP server mid-session.
    - Trials run serially. A reset racing an in-flight call could split
@@ -109,12 +118,18 @@ slow and nondeterministic.
    root `.mcp.json`. The command is:
 
    ```
-   claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang
+   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
    ```
 
    - Ordinary sessions never see the eval server.
+   - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` runs subagents in the
+     foreground, which turn tagging needs.
    - `--strict-mcp-config` keeps the tool schemas loaded directly rather
      than behind tool search, and the runner's preflight checks that.
+   - `--allowedTools` avoids a prompt on every memory call and every
+     `uv run python -m evals` command.
+   - `includeGitInstructions: false` keeps the git status snapshot out of
+     the eval agent's context.
    - The config uses `--directory .` without variable expansion, because
      expansion in `--mcp-config` files is unverified.
 
@@ -144,11 +159,13 @@ slow and nondeterministic.
 
 - Prompt changes can be checked against real agent behavior locally, with
   pass counts over N trials per assertion.
-- **Known limitation.** Claude Code's own harness prompt, environment
-  details, and a git status snapshot still reach the eval agent. Whether
-  auto-memory (`MEMORY.md`) reaches subagents is undocumented and
-  unverified. Results therefore guide prompt iteration and are not release
-  gates.
+- **Known limitation.** A subagent gets only its own system prompt plus
+  Claude Code's environment details. Unless disabled, it also gets a git
+  status snapshot, and the launch disables it. It does not get the Claude
+  Code system prompt or auto memory, and `omitClaudeMd` keeps CLAUDE.md
+  out. The environment details still differ from what an adopter's host
+  sends, and the model runs inside Claude Code's agent loop. Results
+  therefore guide prompt iteration and are not release gates.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,

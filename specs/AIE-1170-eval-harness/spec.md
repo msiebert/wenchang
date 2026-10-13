@@ -68,7 +68,7 @@ US4. `RUNS_DIR` is `evals/runs/`.
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 1.1 | `build_eval_server()` | tools are listed through an MCP client | the names are exactly `TOOL_NAMES` plus `HARNESS_TOOL_NAMES`; each memory tool's description equals `tool_descriptions("Mixpanel")[name]` and equals `bind_reference_tools(client).descriptions()[name]` |
-| 1.2 | as 1.1 | the server's `instructions` and the `wenchang://memory-prompt` resource are read | the instructions equal `EVAL_SERVER_INSTRUCTIONS` and do not contain the memory prompt; the resource text equals `build_memory_prompt(REFERENCE_SLOTS)` |
+| 1.2 | as 1.1 | the server's `instructions` and the `wenchang://memory-prompt` resource are read | the instructions equal `EVAL_SERVER_INSTRUCTIONS`, which is "Memory tools for this workspace.", do not mention evaluation, and do not contain the memory prompt; the resource text equals `build_memory_prompt(REFERENCE_SLOTS)` |
 | 1.3 | a scenario file with seed files and `identity: member` | `eval_reset(scenario_path, trial_dir)` then `get_memory_index` | the index entries are exactly the seed files' paths under the member's entities; each seed's `sources` is `["seed-job"]` |
 | 1.4 | a trial with writes, trace records, and transcript entries | `eval_reset` is called again with another scenario | the store holds only the new scenario's seeds; the trace and transcript are empty; `seq` restarts at 1 |
 | 1.5 | `identity: admin` vs `identity: member` | each writes to `organization/vocabulary/x` | admin succeeds; member gets a rendered error with `reason` `"role_required"` |
@@ -91,7 +91,7 @@ US4. `RUNS_DIR` is `evals/runs/`.
 | 2.4 | the agent name | compared with the guard hook's routed agent types | it is none of `test-writer`, `implementer`, `doc-updater`, `explorer`, `spec-reviewer` |
 | 2.5 | `evals/mcp.json` | parsed | it defines exactly one server, `wenchang`, with command `uv` and args `["run", "--directory", ".", "python", "-m", "evals.server"]` (no variable expansion; the session is launched from the repo root); no `.mcp.json` exists at the repo root |
 | 2.6 | `.claude/agents/wenchang-eval-judge.md` | parsed | `tools` is exactly `Read, Write`; `omitClaudeMd` is `true`; the body names its inputs (`transcript.json`, `store.json`, the scenario's `judge` rubric) and its output (`judge.json`) |
-| 2.7 | `.claude/commands/run-evals.md` | read | it contains the launch command `claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang`; the preflight; every harness tool name; the `new-run`, `grade`, and `report` subcommands; the `wenchang-eval` subagent type; the preflight scratch dir `evals/runs/preflight/`; and the rules that each reply is passed to `eval_record_turn` verbatim, that `eval_record_turn` runs alone before the next turn starts, and that `Agent` calls run in the foreground |
+| 2.7 | `.claude/commands/run-evals.md` | read | it contains the launch command `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'`; the preflight; every harness tool name; the `new-run`, `grade`, and `report` subcommands; the `wenchang-eval` subagent type; the preflight scratch dir `evals/runs/preflight/`; and the rules that each reply is passed to `eval_record_turn` verbatim, that `eval_record_turn` runs alone before the next turn starts, and that a turn whose `Agent` or `SendMessage` call comes back as a background task waits for its completion notification before anything else |
 
 ### US3 — Scenario format
 
@@ -99,7 +99,7 @@ US4. `RUNS_DIR` is `evals/runs/`.
 | - | ----- | ---- | ---- |
 | 3.1 | a scenario YAML using every field | `load_scenario(path)` | it returns a `Scenario` with every field populated; omitted optional fields take their defaults (`identity` `member`, `reference_seed` false, `judge` empty, assertion `id` `<kind>-<index>`, `tool_called` `min` 1 and `max` unbounded) |
 | 3.2 | a scenario with `reference_seed: true` and its own seeds | loaded | `seed_files` is `REFERENCE_SEED_FILES` then the scenario's seeds, all `reference_adopter.SeedFile`; a scenario seed whose path equals a reference seed path is rejected |
-| 3.3 | each malformed scenario: unknown top-level key; unknown assertion kind; unknown field for a kind; missing required field; regex that does not compile; scope not in the reference scopes; area or name rejected by `build_path`; no sessions; a session with no turns; duplicate assertion ids; duplicate seed paths; `session` or `turn` filter outside the scenario's sessions or turns; unknown identity; `id` not equal to the file stem; YAML that is not a mapping; `tool_called` with `min` greater than `max` | loaded | `ScenarioError` is raised; its message names the file and the offending key or value |
+| 3.3 | each malformed scenario: unknown top-level key; unknown assertion kind; unknown field for a kind; missing required field; regex that does not compile; scope not in the reference scopes; area or name rejected by `build_path`; no sessions; a session with no turns; duplicate assertion ids; duplicate seed paths; `session` or `turn` filter outside the scenario's sessions or turns; unknown identity; `id` not equal to the file stem; YAML that is not a mapping; `tool_called` with `min` greater than `max`; a call-matcher `args` key that is not a parameter of every listed tool; a `scope` arg naming an unknown scope; a non-string `identity` or `kind`; a `seed_lines_preserved` file that is not a seed of the scenario | loaded | `ScenarioError` is raised; its message names the file and the offending key or value |
 | 3.4 | every file in `evals/scenarios/` | `load_all()` | each loads; ids are unique; every assertion kind used is in `ASSERTION_KINDS` |
 | 3.5 | the corpus | read | it is exactly the eight scenarios in plan.md's corpus section; at least one scenario each for `privacy`, `filing`, `recall`, `forgetting`; every `source` names a file under `specs/` that exists, or `AIE-1170` |
 
@@ -152,10 +152,10 @@ Rules shared by every kind:
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 5.1 | the scenarios | `python -m evals new-run --model M --trials N [ids...]` | creates `evals/runs/<run-id>/run.json` (run id, created UTC, model, trials, scenario ids, git commit, sha256 of the agent file) and one `trial.json` per scenario per trial (scenario path, trial index); prints a JSON plan listing, per trial, the scenario path, trial dir, and sessions' turns; no ids means every scenario |
+| 5.1 | the scenarios | `python -m evals new-run --model M --trials N [ids...]` | creates `evals/runs/<run-id>/run.json` (a run id that already exists gets a `-2`, `-3`, ... suffix) (run id, created UTC, model, trials, scenario ids, git commit, sha256 of the agent file) and one `trial.json` per scenario per trial (scenario path, trial index); prints a JSON plan listing, per trial, the scenario path, trial dir, and sessions' turns; no ids means every scenario |
 | 5.2 | `new-run` with an unknown scenario id, or a model that is not one of `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or a full id starting with `claude-` | runs | exit 2 naming the bad value; nothing is created |
 | 5.3 | a trial dir with `store.json` and `trace.json` | `python -m evals grade <trial_dir>` | writes `grade.json` holding the US4 results; prints pass/fail per assertion; exit 0 whether or not assertions fail; exit 2 on missing or malformed inputs |
-| 5.4 | a run dir with graded, ungraded, and never-dumped trials | `python -m evals report <run_dir>` | grades ungraded dumped trials, then writes `report.md` and `report.json`: per scenario, each assertion's pass count over N and the scenario pass rate (a trial passes when all its assertions pass); never-dumped trials listed as not run; run metadata from `run.json` at the top |
+| 5.4 | a run dir with graded, ungraded, and never-dumped trials | `python -m evals report <run_dir>` | grades dumped trials whose `grade.json` is missing or older than `store.json` or `trace.json`; a malformed `run.json` or `grade.json` raises `GradeInputError` and the command exits 2; then writes `report.md` and `report.json`: per scenario, each assertion's pass count over N and the scenario pass rate (a trial passes when all its assertions pass); never-dumped trials listed as not run; run metadata from `run.json` at the top |
 | 5.5 | a trial with `judge.json` | report | judge verdicts appear as separate columns and never change deterministic pass counts; a `judge.json` that does not match the schema (`verdicts`: list of `{id, verdict: pass|fail, reason}` with ids from the scenario's `judge` list) is reported as invalid and not counted |
 
 ### US6 — End to end with a scripted driver
@@ -187,8 +187,10 @@ Rules shared by every kind:
 
 - **Live runs are manual and required before merge.** `make check` proves
   the pipeline with the scripted driver (US6). A human or orchestrator then
-  launches a dedicated session with `claude --mcp-config evals/mcp.json
-  --strict-mcp-config --allowedTools mcp__wenchang` and runs `/run-evals
+  launches a dedicated session with `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+  claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools
+  mcp__wenchang "Bash(uv run python -m evals *)" --settings
+  '{"includeGitInstructions": false}'` and runs `/run-evals
   --model sonnet --trials 1 privacy-account-number filing-alias-append
   recall-across-sessions forgetting-one-fact`. The MCP config is read only
   at launch. Agent files in `.claude/agents/` are watched live and need no
@@ -204,11 +206,18 @@ Rules shared by every kind:
   from a parent agent, so the body prepends a two-sentence
   `EVAL_AGENT_PREAMBLE` saying the messages come from the user it is
   helping. The prompt text itself is byte-identical. ADR 0028 records it.
-- **Context leakage.** `omitClaudeMd: true` keeps CLAUDE.md, AGENTS.md, and
-  `~/.claude/CLAUDE.md` out of the eval agent. Claude Code still adds
-  environment details and a git status snapshot. Whether auto-memory
-  (`MEMORY.md`) reaches subagents is not documented and is not verified
-  here. ADR 0028 lists all of this under the known limitation.
+- **Context.** A subagent gets only its own system prompt plus Claude
+  Code's environment details, and a git status snapshot unless disabled.
+  The launch disables the snapshot with `includeGitInstructions: false`.
+  It does not get the Claude Code system prompt or auto memory, and
+  `omitClaudeMd: true` keeps CLAUDE.md, AGENTS.md, and
+  `~/.claude/CLAUDE.md` out. ADR 0028 lists the remaining differences
+  under the known limitation.
+- **Background subagents.** Current Claude Code runs subagents in the
+  background by default, and turn tagging needs each turn to finish before
+  it is recorded. The launch sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`,
+  and the runner waits for any completion notification before recording a
+  turn.
 - **Tool surface.** The issue's criterion "tool surface matches
   `TOOL_NAMES`" holds for the surface the model sees: the agent's
   allowlist is exactly the seven memory tools. The server additionally
@@ -218,10 +227,11 @@ Rules shared by every kind:
   subagent transcript files instead was rejected, because their layout
   under `~/.claude/projects/` is internal. The risk that the runner
   paraphrases a reply affects only the judge. ADR 0028 records it.
-- **Neutral server instructions.** The server does not send the memory
-  prompt as MCP `instructions`, so the eval agent does not get it twice.
+- **Neutral server instructions.** The server's MCP `instructions` are
+  "Memory tools for this workspace.". They do not mention evaluation and
+  do not carry the memory prompt, so the eval agent does not get it twice.
   `register_memory_tools` logs its "instructions lack the prompt" warning
-  once at startup; that is expected.
+  at every start, by design.
 - **One trial at a time.** One server process holds one store. A reset
   that races an in-flight call can split that call across stores. Trials
   are serial, so this does not happen in practice.

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 import evals.agent
 from evals.__main__ import main
 from evals.graders import (
+    GradeInputError,
     StoredFile,
     StoreDump,
     TraceCall,
@@ -112,7 +114,11 @@ def test_new_run_writes_metadata_and_plan(tmp_path: Path) -> None:
     assert run_dir == tmp_path / "runs" / "20261009-123005-sonnet"
     meta = _json(run_dir / "run.json")
     head = subprocess.run(
-        ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
     ).stdout.strip()
     assert meta == {
         "run_id": "20261009-123005-sonnet",
@@ -295,3 +301,60 @@ def test_report_cli_prints_the_path(tmp_path: Path, capsys: pytest.CaptureFixtur
 
     assert main(["report", str(run_dir)]) == 0
     assert capsys.readouterr().out.strip() == str(run_dir / "report.md")
+
+
+@pytest.mark.parametrize(
+    ("target", "body"),
+    [
+        ("run.json", "not json"),
+        ("run.json", '{"run_id": "x"}'),
+        ("grade.json", "{}"),
+        ("grade.json", '{"scenario": "alpha", "trial": 1, "passed": true, "results": [{}]}'),
+    ],
+)
+def test_report_rejects_malformed_run_and_grade_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], target: str, body: str
+) -> None:
+    """A malformed run.json or grade.json raises GradeInputError, and the
+    report command exits 2 naming the file (AIE-1170, US5.4).
+    """
+    _, scenarios = _scenarios(tmp_path, "alpha")
+    run_dir, _ = new_run(scenarios, model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW)
+    trial = run_dir / "alpha" / "trial-1"
+    _dump(trial, leak=False)
+    path = run_dir / target if target == "run.json" else trial / target
+    path.write_text(body)
+
+    with pytest.raises(GradeInputError, match=target.replace(".", r"\.")):
+        build_report(run_dir)
+    assert main(["report", str(run_dir)]) == 2
+    assert target in capsys.readouterr().err
+
+
+def test_report_regrades_when_dumps_are_newer(tmp_path: Path) -> None:
+    """A grade.json older than store.json or trace.json is regraded (AIE-1170, US5.4)."""
+    _, scenarios = _scenarios(tmp_path, "alpha")
+    run_dir, _ = new_run(scenarios, model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW)
+    trial = run_dir / "alpha" / "trial-1"
+    _dump(trial, leak=False)
+    grade_trial(trial)
+    _dump(trial, leak=True)
+    stale = (trial / "grade.json").stat().st_mtime - 10
+    os.utime(trial / "grade.json", (stale, stale))
+
+    _, report = build_report(run_dir)
+
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+    assert _json(trial / "grade.json")["passed"] is False
+
+
+def test_run_ids_do_not_collide(tmp_path: Path) -> None:
+    """Two runs created in the same second get distinct directories (AIE-1170, US5.1)."""
+    _, scenarios = _scenarios(tmp_path, "alpha")
+    first, _ = new_run(scenarios, model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW)
+    second, _ = new_run(scenarios, model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW)
+
+    assert first != second
+    assert second.name == "20261009-123005-sonnet-2"
+    assert _json(second / "run.json")["run_id"] == second.name

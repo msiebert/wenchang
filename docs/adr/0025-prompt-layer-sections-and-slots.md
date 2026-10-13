@@ -225,7 +225,8 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
    the same on every host. Each text is at most 2500 characters, a
    test-local constant, which keeps the whole prompt near 7k tokens.
 10. **The Section 9 reference configuration is a test fixture.**
-    `tests/prompts_reference_adopter.py` holds Section 9 as three slot
+    `tests/prompts_reference_adopter.py` (now `evals/reference_adopter.py`;
+    see [ADR 0028](0028-behavioral-eval-harness.md)) holds Section 9 as three slot
     blobs and the reference scope priority. Section 9 says it is not part
     of the library, so it is not in `src/`; it serves as the worked
     example for adopters.

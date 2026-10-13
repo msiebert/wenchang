@@ -5,6 +5,7 @@ deterministic assertions and optional judge rubric that grade a trial. The
 format is independent of the driver that runs the agent.
 """
 
+import inspect
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -24,7 +25,7 @@ from evals.reference_adopter import (
 )
 from wenchang.identity import Identity
 from wenchang.paths import is_valid_segment
-from wenchang.tools import TOOL_NAMES
+from wenchang.tools import TOOL_NAMES, MemoryTools
 
 __all__ = [
     "ASSERTION_KINDS",
@@ -255,6 +256,14 @@ def assertion_kind(assertion: Assertion) -> str:
     return _KIND_OF[type(assertion)]
 
 
+# Each memory tool's parameter names, for validating call-matcher args.
+_TOOL_PARAMETERS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
+    {
+        name: frozenset(inspect.signature(getattr(MemoryTools, name)).parameters) - {"self"}
+        for name in TOOL_NAMES
+    }
+)
+
 _FILE_KEYS: Final = frozenset({"scope", "area", "name"})
 _CALL_KEYS: Final = frozenset({"tool", "args", "session", "turn", "succeeded"})
 # Allowed and required keys per kind, besides "kind" and the optional "id".
@@ -411,7 +420,15 @@ class _Loader:
         if "args" in data:
             raw_args = self.mapping(data["args"], f"{where}.args")
             for key, value in raw_args.items():
-                args[key] = self.arg_matcher(value, f"{where}.args.{key}")
+                lacking = sorted(t for t in tools if key not in _TOOL_PARAMETERS[t])
+                if lacking:
+                    raise self.fail(
+                        f"{where}.args: {key!r} is not a parameter of {', '.join(lacking)}"
+                    )
+                matcher = self.arg_matcher(value, f"{where}.args.{key}")
+                if key == "scope" and matcher.matches is None and matcher.contains is None:
+                    self.scope(matcher.equals, f"{where}.args.scope")
+                args[key] = matcher
         session, turn = self.session_turn(data, where, sessions)
         succeeded: bool | None = None
         if "succeeded" in data:
@@ -443,9 +460,8 @@ class _Loader:
         where = f"assertions[{index}]"
         data = self.mapping(raw, where)
         kind = data.get("kind")
-        if kind not in ASSERTION_KINDS:
+        if not isinstance(kind, str) or kind not in ASSERTION_KINDS:
             raise self.fail(f"{where}: unknown assertion kind {kind!r}")
-        kind = cast(str, kind)
         where = f"{where} ({kind})"
         allowed, required = _KIND_KEYS[kind]
         self.keys(data, allowed | {"kind", "id"}, required | {"kind"}, where)
@@ -556,7 +572,7 @@ class _Loader:
         if category not in CATEGORIES:
             raise self.fail(f"unknown category {category!r}")
         identity_name = data.get("identity", "member")
-        if identity_name not in IDENTITIES:
+        if not isinstance(identity_name, str) or identity_name not in IDENTITIES:
             raise self.fail(f"unknown identity {identity_name!r}; expected member or admin")
         identity = IDENTITIES[identity_name]
         reference_seed = data.get("reference_seed", False)
@@ -578,6 +594,14 @@ class _Loader:
         assertions = tuple(
             self.assertion(a, i, sessions) for i, a in enumerate(cast(list[object], raw_assertions))
         )
+        seeded = {(s.scope, s.area, s.name) for s in seeds}
+        for a in assertions:
+            if isinstance(a, SeedLinesPreserved):
+                ref = (a.file.scope, a.file.area, a.file.name)
+                if ref not in seeded:
+                    raise self.fail(
+                        f"assertion {a.id!r}: {'/'.join(ref)} is not a seed file of this scenario"
+                    )
         ids = [a.id for a in assertions]
         duplicate_ids = sorted({i for i in ids if ids.count(i) > 1})
         if duplicate_ids:

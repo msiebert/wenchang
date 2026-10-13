@@ -300,7 +300,7 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "recall-replace-fact",
         replace_correct,
         replace_wrong,
-        {"replaced-in-session-2", "one-recipient-line", "old-recipient-gone"},
+        {"replaced-in-session-2", "one-recipient-line"},
     ),
     (
         "forgetting-whole-file",

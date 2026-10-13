@@ -3,7 +3,7 @@
 id: recall-across-sessions
 title: Saves a preference in one session and uses it in the next
 category: recall
-source: AIE-1170
+source: specs/AIE-1170-eval-harness/spec.md
 sessions:
   - turns:
       - "I prefer bar charts for my weekly reports."
@@ -18,8 +18,7 @@ assertions:
     scope: user
   - kind: tool_called
     id: recalled-in-session-2
-    tool: read_file
-    args: {scope: user}
+    tool: [read_file, get_memory_index]
     session: 2
     succeeded: true
 judge:

@@ -30,6 +30,11 @@ AGENTS = ROOT / ".claude" / "agents"
 EVAL_AGENT = AGENTS / "wenchang-eval.md"
 JUDGE_AGENT = AGENTS / "wenchang-eval-judge.md"
 RUNNER = ROOT / ".claude" / "commands" / "run-evals.md"
+LAUNCH = (
+    "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json "
+    '--strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" '
+    "--settings '{\"includeGitInstructions\": false}'"
+)
 GUARDED_AGENT_TYPES = {"test-writer", "implementer", "doc-updater", "explorer", "spec-reviewer"}
 
 
@@ -130,7 +135,7 @@ def test_runner_doc_names_everything_the_runner_needs() -> None:
     doc = RUNNER.read_text()
 
     required = [
-        "claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang",
+        LAUNCH,
         "Preflight",
         "evals/runs/preflight/",
         *HARNESS_TOOL_NAMES,
@@ -139,7 +144,10 @@ def test_runner_doc_names_everything_the_runner_needs() -> None:
         "python -m evals report",
         'subagent_type="wenchang-eval"',
         "verbatim",
-        "foreground",
+        "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1",
+        "--settings '{\"includeGitInstructions\": false}'",
+        "background task",
+        "completion notification",
         "before the next turn",
     ]
     missing = [needle for needle in required if needle not in doc]

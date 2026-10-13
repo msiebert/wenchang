@@ -4,7 +4,7 @@
 > Run it in a fresh session from the repo root:
 >
 > ```
-> claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang
+> CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
 > /run-evals --model sonnet --trials 1 privacy-account-number filing-alias-append recall-across-sessions forgetting-one-fact
 > ```
 >
@@ -56,7 +56,7 @@ Test modules, abbreviated in the Test(s) column:
 | 1.3 reset seeds the identity's entities, sources `seed-job` | srv `test_reset_seeds_the_store` |
 | 1.4 second reset clears store, trace, transcript; seq restarts | srv `test_reset_replaces_store_trace_and_transcript` |
 | 1.5 admin writes organization; member gets `role_required` | srv `test_identity_comes_from_the_scenario` |
-| 1.6 trace fields incl. `request_id`, `duration_s`, timing; harness calls untraced | srv `test_trace_records_carry_timing_and_correlation` |
+| 1.6 trace fields incl. `request_id`, `duration_s`, timing; harness calls untraced; resets keep the time baseline | srv `test_trace_records_carry_timing_and_correlation`, `test_reset_does_not_move_the_time_baseline` |
 | 1.7, 1.8 time-window turn tagging; transcript | srv `test_turns_tag_calls_by_time_window` |
 | 1.9 dump files; deleted files absent; trailing calls 0/0 | srv `test_dump_writes_the_store_and_tags_trailing_calls` |
 | 1.10 dump before reset errors; empty member store works | srv `test_dump_before_reset_is_an_error` |
@@ -72,7 +72,7 @@ Test modules, abbreviated in the Test(s) column:
 | 2.7 runner doc contents | agt `test_runner_doc_names_everything_the_runner_needs` |
 | 3.1 every field; defaults | scn `test_full_scenario_parses_every_field`, `test_defaults_apply` |
 | 3.2 reference seeds first; collision rejected | scn `test_reference_seed_comes_first`, `test_seed_colliding_with_reference_seed_is_rejected` |
-| 3.3 16 malformed cases (plus unknown tool, missing file) | scn `test_malformed_scenarios_are_rejected[*]`, `test_non_mapping_yaml_is_rejected`, `test_unknown_tool_name_is_rejected`, `test_missing_file_is_rejected` |
+| 3.3 21 malformed cases, incl. args not on every listed tool, unknown scope arg, non-string identity or kind, `seed_lines_preserved` on a non-seed (plus unknown tool, missing file) | scn `test_malformed_scenarios_are_rejected[*]`, `test_non_mapping_yaml_is_rejected`, `test_unknown_tool_name_is_rejected`, `test_missing_file_is_rejected` |
 | 3.4 corpus loads; unique ids; closed kinds | scn `test_corpus_loads_with_unique_ids`, `test_assertion_kinds_are_the_closed_set` |
 | 3.5 corpus is the planned eight; categories; sources; prompt cite | scn `test_corpus_is_the_planned_eight` |
 | 4.1 `index_read_first` | grd `test_index_read_first_*` (5 tests) |
@@ -92,14 +92,14 @@ Test modules, abbreviated in the Test(s) column:
 | 4.15 shuffled trace grades the same | grd `test_grade_ignores_trace_order` |
 | 4.16 (a), (b) timing order; restarting request ids; 0/0 last | grd `test_ordering_uses_start_time_not_seq_or_request_id`, `test_order_key_puts_untagged_calls_last` |
 | 4.16 (c) late record tagged by start time | srv `test_late_record_is_tagged_by_start_time` |
-| 5.1 `new-run` metadata and plan | rpt `test_new_run_writes_metadata_and_plan`, `test_new_run_cli_prints_the_plan` |
+| 5.1 `new-run` metadata and plan; run-id collision suffix | rpt `test_new_run_writes_metadata_and_plan`, `test_new_run_cli_prints_the_plan`, `test_run_ids_do_not_collide` |
 | 5.2 unknown id or model exits 2, creates nothing | rpt `test_new_run_rejects_unknown_ids_and_models[*]` |
 | 5.3 `grade` | rpt `test_grade_writes_results`, `test_grade_rejects_missing_inputs` |
-| 5.4 `report` counts; not-run trials | rpt `test_report_counts_passes_and_lists_unrun_trials`, `test_report_cli_prints_the_path` |
+| 5.4 `report` counts; not-run trials; stale grades regraded; malformed `run.json` / `grade.json` exit 2 | rpt `test_report_counts_passes_and_lists_unrun_trials`, `test_report_cli_prints_the_path`, `test_report_regrades_when_dumps_are_newer`, `test_report_rejects_malformed_run_and_grade_files[*]` |
 | 5.5 judge verdicts separate; invalid flagged | rpt `test_report_keeps_judge_verdicts_separate` |
 | 6.1 correct drivers pass, 1/1 | e2e `test_correct_driver_passes_every_assertion[*8]`, `test_every_shipped_scenario_has_scripted_drivers` |
 | 6.2 wrong drivers fail exactly the listed ids, 0/1 | e2e `test_wrong_driver_fails_exactly_the_listed_assertions[*8]` |
-| 7.1 wheel, `dev-mode-dirs`, pyright, yaml dev-only | pkg `test_wheel_ships_only_the_library`, `test_editable_install_adds_repo_root`, `test_pyright_covers_evals`, `test_yaml_is_a_dev_dependency_only` |
+| 7.1 wheel, `dev-mode-dirs`, pyright, yaml dev-only | pkg `test_wheel_ships_only_the_library`, `test_built_wheel_contains_only_the_library`, `test_editable_install_adds_repo_root`, `test_pyright_covers_evals`, `test_yaml_is_a_dev_dependency_only` |
 | 7.2 import from any cwd | pkg `test_evals_imports_from_any_working_directory` |
 | 7.3 fixture moved; importers rewritten | pkg `test_tests_fixture_module_is_gone`, `test_no_test_imports_the_old_fixture_module`; existing prompt and MCP tests unchanged and green |
 | 7.4 post-#34 relocation | **Pending (T9)**: PR #34 is not merged |
@@ -140,9 +140,11 @@ Test modules, abbreviated in the Test(s) column:
 
 ## Look closely at
 
-- **Turn tagging** (`EvalState._tag`) relies on the runner rule that
-  `eval_record_turn` runs alone after each reply, with foreground `Agent`
-  calls. The runner doc states the rule, and a test cannot enforce it.
+- **Turn tagging** (`_Snapshot._tag`) relies on each turn finishing before
+  `eval_record_turn` runs. Claude Code runs subagents in the background by
+  default, so the launch sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`. The
+  runner also waits for any completion notification before recording a
+  turn. A test cannot enforce this rule. The live run is its first check.
 - **Strict `index_read_first`** fails a parallel batch of the index read
   and another call. That is intended, and the rationale is in spec 4.1 and
   ADR 0028.
@@ -154,10 +156,17 @@ Test modules, abbreviated in the Test(s) column:
 
 ## Follow-ups
 
-- **T9 (pending):** after PR #34 merges and this branch is rebased, rewrite
-  #34's four importers to `evals.reference_adopter`. Then delete
-  `tests/reference_adopter.py`, replace `evals/reference_adopter.py` with
-  `main`'s copy if it changed, and extend `tests/test_evals_packaging.py`.
+- **T9 (pending):** after PR #34 merges and this branch is rebased, do the
+  following:
+  - Rewrite #34's four importers to `evals.reference_adopter`.
+  - Repoint #34's doc sites: `README.md:55`, ADR 0025:228, ADR 0026:123,
+    and `ARCHITECTURE.md:1048-1050`.
+  - Delete `tests/reference_adopter.py`.
+  - Replace `evals/reference_adopter.py` with `main`'s copy if it changed.
+  - Extend `tests/test_evals_packaging.py`.
+
+  Expect a conflict in `tests/test_mcp_server.py`'s `-OO` subprocess
+  snippet.
 - **Human:** widen `scripts/hooks/guard-edits.sh` rule 4 for `evals/**`,
   `.claude/agents/wenchang-eval*.md`, `.claude/commands/run-evals.md`, and
   `.gitignore`. Also give doc-updater (rule 5) `AGENTS.md`.
@@ -165,6 +174,46 @@ Test modules, abbreviated in the Test(s) column:
 - Port the deferred scenarios after the first live run calibrates them.
   The list is in spec.md's Assumptions.
 - An Anthropic SDK driver that writes the same three JSON files.
+
+## Code review
+
+Correctness review: **PASS.** There were 55 mutants, and every grader
+mutant was caught. A dry run of the runner procedure against the real
+stdio server also passed.
+
+Harness review: **FAIL**, then fixed:
+
+- **Background subagents (blocker).** Subagents run in the background by
+  default, which breaks turn tagging. The launch now sets
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, plus `--allowedTools ...
+  "Bash(uv run python -m evals *)"` and `--settings
+  '{"includeGitInstructions": false}'`. The runner also waits on any
+  background completion notification. The runner-doc test pins this.
+- **Limitation text.** It now reads: own system prompt plus environment
+  details. There is no Claude Code system prompt and no auto memory, and
+  the git status snapshot is disabled.
+- **Neutral instructions.** They are now "Memory tools for this
+  workspace.", and the startup warning is noted as by design.
+- **Links and T9.** The broken fixture links in README, ADR 0025, and ADR
+  0026 are fixed, and the T9 doc sites are listed.
+- **Loader.** It now rejects args that are not parameters of every listed
+  tool, unknown scope args, a non-string identity or kind, and
+  `seed_lines_preserved` on a non-seed file.
+- **Scenarios loosened to match the prompt.** `recall-across-sessions`
+  accepts `read_file` or `get_memory_index`. `recall-replace-fact` drops
+  `old-recipient-gone`. `filing-new-acronym` scopes `no-new-file` to
+  project. `filing-alias-append` accepts `friday|due`.
+- **Report.** It validates `run.json` and `grade.json` and regrades stale
+  grades.
+- **Nits.** These are all applied:
+  - The stamp-lag docstring.
+  - A single-lock snapshot for dumps.
+  - A baseline pin test.
+  - Run-id collision suffixes.
+  - Git timeouts.
+  - A spec-path `source:` for `recall-across-sessions`.
+  - `description` in the runner's `Agent` examples.
+  - A real wheel-build test.
 
 ## Live run
 

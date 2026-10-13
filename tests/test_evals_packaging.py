@@ -1,9 +1,11 @@
 """The evals package stays dev-only and importable from anywhere (AIE-1170, US7, US8.2)."""
 
 import ast
+import shutil
 import subprocess
 import sys
 import tomllib
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,26 @@ def test_wheel_ships_only_the_library() -> None:
     pyproject = _pyproject()
     tool = pyproject["tool"]
     assert tool["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/wenchang"]
+
+
+def test_built_wheel_contains_only_the_library(tmp_path: Path) -> None:
+    """A wheel built from the repo holds wenchang and its metadata, and no
+    evals or tests module (AIE-1170, US7.1).
+    """
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is not on PATH")
+    result = subprocess.run(
+        [uv, "build", "--wheel", "--out-dir", str(tmp_path), str(ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    (wheel,) = tmp_path.glob("*.whl")
+    tops = {name.split("/", 1)[0] for name in zipfile.ZipFile(wheel).namelist()}
+    assert {t for t in tops if not t.endswith(".dist-info")} == {"wenchang"}
 
 
 def test_editable_install_adds_repo_root() -> None:

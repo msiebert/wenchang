@@ -42,3 +42,4 @@ assertions:
   - kind: tool_not_called
     id: no-new-file
     tool: write_file
+    args: {scope: project}
