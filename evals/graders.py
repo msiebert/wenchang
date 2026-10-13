@@ -28,6 +28,7 @@ from evals.scenario import (
     SeedLinesPreserved,
     ToolCalled,
     ToolNotCalled,
+    assertion_kind,
 )
 
 __all__ = [
@@ -464,22 +465,6 @@ def _alias_present(a: AliasPresent, store: StoreDump) -> str | None:
     return f"{found.path} aliases {list(found.aliases)} lack {a.alias!r}"
 
 
-_KIND_NAMES: Final[Mapping[type[object], str]] = MappingProxyType(
-    {
-        IndexReadFirst: "index_read_first",
-        FileAbsent: "file_absent",
-        LinePresent: "line_present",
-        LineAbsent: "line_absent",
-        NoContentMatching: "no_content_matching",
-        NoDuplicateFact: "no_duplicate_fact",
-        SeedLinesPreserved: "seed_lines_preserved",
-        ToolCalled: "tool_called",
-        ToolNotCalled: "tool_not_called",
-        AliasPresent: "alias_present",
-    }
-)
-
-
 def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> str | None:
     checks: Mapping[type[object], Callable[[], str | None]] = {
         IndexReadFirst: lambda: _index_read_first(cast(IndexReadFirst, a), s, trace),
@@ -504,7 +489,5 @@ def grade(
     results: list[AssertionResult] = []
     for a in scenario.assertions:
         failure = _check(a, scenario, store, ordered)
-        results.append(
-            AssertionResult(a.id, _KIND_NAMES[type(a)], failure is None, failure or "ok")
-        )
+        results.append(AssertionResult(a.id, assertion_kind(a), failure is None, failure or "ok"))
     return tuple(results)

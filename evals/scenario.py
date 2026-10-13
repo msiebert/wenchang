@@ -52,6 +52,7 @@ __all__ = [
     "Session",
     "ToolCalled",
     "ToolNotCalled",
+    "assertion_kind",
     "load_all",
     "load_scenario",
 ]
@@ -243,6 +244,16 @@ ASSERTION_KINDS: Final[Mapping[str, type[Assertion]]] = MappingProxyType(
         "alias_present": AliasPresent,
     }
 )
+
+_KIND_OF: Final[Mapping[type[object], str]] = MappingProxyType(
+    {cls: kind for kind, cls in ASSERTION_KINDS.items()}
+)
+
+
+def assertion_kind(assertion: Assertion) -> str:
+    """The YAML kind name of an assertion."""
+    return _KIND_OF[type(assertion)]
+
 
 _FILE_KEYS: Final = frozenset({"scope", "area", "name"})
 _CALL_KEYS: Final = frozenset({"tool", "args", "session", "turn", "succeeded"})
