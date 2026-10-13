@@ -30,6 +30,7 @@ __all__ = [
     "ASSERTION_KINDS",
     "CATEGORIES",
     "IDENTITIES",
+    "RUNS_DIR",
     "SCENARIO_DIR",
     "WRITE_TOOLS",
     "AliasPresent",
@@ -71,6 +72,7 @@ IDENTITIES: Final[Mapping[str, Identity]] = MappingProxyType(
     {"member": MEMBER_IDENTITY, "admin": ADMIN_IDENTITY}
 )
 SCENARIO_DIR: Final[Path] = Path(__file__).resolve().parent / "scenarios"
+RUNS_DIR: Final[Path] = Path(__file__).resolve().parent / "runs"
 WRITE_TOOLS: Final[frozenset[str]] = frozenset(
     {"write_file", "append_line", "replace_fact", "delete_file"}
 )
