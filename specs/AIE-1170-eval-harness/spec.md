@@ -121,7 +121,9 @@ Rules shared by every kind:
   filter. A scenario that needs the file to survive pairs them with
   `seed_lines_preserved` or `line_present`.
 - Calls are ordered by `(session, turn, started_ms, seq)`; `seq` only
-  breaks exact ties. `request_id` is an opaque correlation key and is never
+  breaks exact ties. Untagged calls (session 0, turn 0: started after the
+  last turn boundary) sort last, after every tagged call, and belong to no
+  scenario session, so `index_read_first` ignores them. `request_id` is an opaque correlation key and is never
   parsed or sorted: JSON-RPC ids are monotonic per connection but restart
   on every new connection (verified on mcp 2.3.0), so a global sort would
   interleave sessions.
@@ -144,6 +146,7 @@ Rules shared by every kind:
 | 4.14 | `no_content_matching {pattern: "\\b15\\b"}` on a trace where a write call's `expected_version` is `"15"` and a `replace_fact` call's `old_string` contains `15`, and no scanned argument or file matches; and `no_content_matching {pattern: "(?i)atlas"}` on a trace with a successful `delete_file(name="atlas-migration")` and no remaining file mentioning Atlas | graded | both pass |
 | 4.15 | a trace passed to `grade` shuffled | graded | results equal those for the trace in `(session, turn, started_ms, seq)` order |
 | 4.16 | (a) a trace whose completion order (`seq`) differs from its start order: `get_memory_index` starts first and completes before `read_file` starts, but `read_file` has the lower `seq`; (b) a two-session trace whose `request_id`s restart at `"1"` in session 2 (a new MCP connection), each session reading the index first, so session 2's `get_memory_index` has `request_id` `"1"` and session 1's `read_file` has `"2"` | `index_read_first` is graded | both pass: (a) is ordered by `started_ms`, not `seq`; (b) is ordered per session by timing, and the repeated `request_id`s neither interleave the sessions nor raise |
+| 4.16(c) | an `EvalState` with a stubbed clock: turn 1's `read_file` starts before the turn-1 boundary but its record arrives (higher `seq`) after `eval_record_turn(1, 1, ...)`; turn 2 then starts with `get_memory_index`; plus one call started after the last boundary | the dumped trace is loaded and sorted by `grade`'s key | the late record is tagged session 1 turn 1 and sorts before every turn-2 call; the post-boundary call is tagged 0/0 and sorts last |
 
 ### US5 — Runner CLI, report, and judge
 

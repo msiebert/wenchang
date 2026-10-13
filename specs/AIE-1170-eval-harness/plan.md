@@ -261,8 +261,9 @@ def grade(scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> t
 - Tool names match exactly; the eval server registers the memory tools
   without a prefix.
 - `ToolCallRecord`s reach `on_call` in completion order, so `seq` is an
-  arrival tag only. `grade` sorts the trace by `(session, turn,
-  started_ms, seq)` before any check. `request_id` is never parsed or
+  arrival tag only. `grade` sorts the trace by `(session == 0, session,
+  turn, started_ms, seq)` before any check, so untagged 0/0 calls sort
+  last; they belong to no scenario session. `request_id` is never parsed or
   sorted: JSON-RPC ids are monotonic per connection but restart on each new
   connection (verified on mcp 2.3.0), so sorting by it would interleave
   sessions.

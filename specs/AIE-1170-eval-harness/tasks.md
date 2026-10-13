@@ -48,7 +48,7 @@ Each task follows the same loop:
 
 ## T4: Eval MCP server, in memory and over stdio
 
-- **Covers:** US1.1 to US1.13.
+- **Covers:** US1.1 to US1.13, US4.16(c) (it needs `EvalState`).
 - **Depends on:** T2, T3.
 - **Tests:** `tests/test_evals_server.py` through an in-memory MCP
   `Client(build_eval_server(EvalState(runs_root=tmp_path)))`; the stdio
