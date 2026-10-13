@@ -23,7 +23,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import CallToolResult, TextContent
 
 import wenchang.mcp as wmcp
-from prompts_reference_adopter import REFERENCE_SLOTS
+from reference_adopter import REFERENCE_SLOTS
 from wenchang.core import MemoryStore
 from wenchang.identity import Identity, ResolutionFailure, ScopeGrant
 from wenchang.mcp import (
@@ -385,7 +385,7 @@ def test_python_oo_fails_startup() -> None:
     code = f"""
 import sys
 sys.path.insert(0, {str(TESTS_DIR)!r})
-from prompts_reference_adopter import REFERENCE_SLOTS
+from reference_adopter import REFERENCE_SLOTS
 from wenchang.core import MemoryStore
 from wenchang.identity import SandboxResolver, Identity
 from wenchang.mcp import build_server
