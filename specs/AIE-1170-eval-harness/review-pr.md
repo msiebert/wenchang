@@ -102,7 +102,7 @@ Test modules, abbreviated in the Test(s) column:
 | 7.1 wheel, `dev-mode-dirs`, pyright, yaml dev-only | pkg `test_wheel_ships_only_the_library`, `test_built_wheel_contains_only_the_library`, `test_editable_install_adds_repo_root`, `test_pyright_covers_evals`, `test_yaml_is_a_dev_dependency_only` |
 | 7.2 import from any cwd | pkg `test_evals_imports_from_any_working_directory` |
 | 7.3 fixture moved; importers rewritten | pkg `test_tests_fixture_module_is_gone`, `test_no_test_imports_the_old_fixture_module`; existing prompt and MCP tests unchanged and green |
-| 7.4 post-#34 relocation | **Pending (T9)**: PR #34 is not merged |
+| 7.4 post-#34 relocation: tests copy deleted, #34's importers and doc sites point at `evals.reference_adopter` | pkg `test_evals_holds_the_only_reference_adopter`; #34's tests unchanged apart from the import line and green |
 | 8.1 `make check` runs all, no model calls | the full suite (`make check`) |
 | 8.2 `src/` never imports `evals` | pkg `test_library_never_imports_evals` |
 | 8.3 docs | ADR 0028, ARCHITECTURE.md, README.md, glossary, AGENTS.md (reviewed by hand) |
@@ -156,17 +156,11 @@ Test modules, abbreviated in the Test(s) column:
 
 ## Follow-ups
 
-- **T9 (pending):** after PR #34 merges and this branch is rebased, do the
-  following:
-  - Rewrite #34's four importers to `evals.reference_adopter`.
-  - Repoint #34's doc sites: `README.md:55`, ADR 0025:228, ADR 0026:123,
-    and `ARCHITECTURE.md:1048-1050`.
-  - Delete `tests/reference_adopter.py`.
-  - Replace `evals/reference_adopter.py` with `main`'s copy if it changed.
-  - Extend `tests/test_evals_packaging.py`.
-
-  Expect a conflict in `tests/test_mcp_server.py`'s `-OO` subprocess
-  snippet.
+- **T9: done.** `origin/main` was merged in after #34 and #35. Conflicts
+  were import lines and three doc passages, resolved toward
+  `evals.reference_adopter`. `tests/reference_adopter.py`, which was
+  byte-identical to the evals copy, is deleted. #34's two remaining
+  importers and `ARCHITECTURE.md` are repointed.
 - **Human:** widen `scripts/hooks/guard-edits.sh` rule 4 for `evals/**`,
   `.claude/agents/wenchang-eval*.md`, `.claude/commands/run-evals.md`, and
   `.gitignore`. Also give doc-updater (rule 5) `AGENTS.md`.

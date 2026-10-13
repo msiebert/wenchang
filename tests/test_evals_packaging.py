@@ -132,3 +132,16 @@ def test_library_never_imports_evals() -> None:
         if any(n == "evals" or n.startswith("evals.") for n in _imported_modules(path))
     )
     assert offenders == []
+
+
+def test_evals_holds_the_only_reference_adopter() -> None:
+    """After PR #34, the tests copy of the fixture is gone and no test imports
+    a bare reference_adopter module (AIE-1170, US7.4).
+    """
+    assert not (ROOT / "tests" / "reference_adopter.py").exists()
+    offenders = sorted(
+        path.name
+        for path in (ROOT / "tests").rglob("*.py")
+        if {"reference_adopter", "prompts_reference_adopter"} & _imported_modules(path)
+    )
+    assert offenders == []

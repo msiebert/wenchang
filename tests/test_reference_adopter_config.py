@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from reference_adopter import (
+from evals.reference_adopter import (
     ADMIN_IDENTITY,
     MEMBER_IDENTITY,
     ORGANIZATION,

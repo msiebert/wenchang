@@ -1055,7 +1055,7 @@ the one planned piece.
   priority is not prompt text: it is `MemoryStore(scope_priority=...)`,
   which orders only the capped startup index and defaults to one flat tier.
   `prompts` imports nothing from `wenchang` outside its own package.
-  `tests/reference_adopter.py` is the Section 9 reference adopter fixture
+  `evals/reference_adopter.py` is the Section 9 reference adopter fixture
   (slots, scope priority, write policy, identities, seed areas and files),
   and `tests/test_reference_adopter_end_to_end.py` is the tool-layer
   lifecycle test over `InProcessClient` and a real `MemoryStore` built from
