@@ -225,10 +225,10 @@ Add the subpackage `src/wenchang/prompts/`. No existing module changes.
    the same on every host. Each text is at most 2500 characters, a
    test-local constant, which keeps the whole prompt near 7k tokens.
 10. **The Section 9 reference configuration is a test fixture.**
-    `tests/prompts_reference_adopter.py` holds Section 9 as three slot
-    blobs and the reference scope priority. Section 9 says it is not part
-    of the library, so it is not in `src/`; it serves as the worked
-    example for adopters.
+    `tests/reference_adopter.py` holds Section 9 as the prompt slots, scope
+    priority, write policy, identities, seed areas, and seed files;
+    Section 9 says it is not part of the library, so it is not in `src/`;
+    it serves as the worked example for adopters.
 11. **Shared tool mechanics live in `get_memory_index`; conflict handling
     stays per tool (2026-10-07, AIE-1165).** The mechanics every tool
     shares are stated once, in the `get_memory_index` docstring: what
