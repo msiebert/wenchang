@@ -1,0 +1,510 @@
+"""Deterministic graders over a trial's store dump and tool-call trace.
+
+Pure functions of (scenario, store dump, trace). The JSON loaders and writers
+here define the driver contract: any driver that produces store.json,
+trace.json, and transcript.json can be graded.
+"""
+
+import json
+import re
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Final, cast
+
+from evals.scenario import (
+    AliasPresent,
+    Assertion,
+    CallMatcher,
+    FileAbsent,
+    FileFilter,
+    IndexReadFirst,
+    LineAbsent,
+    LinePresent,
+    NoContentMatching,
+    NoDuplicateFact,
+    Scenario,
+    SeedLinesPreserved,
+    ToolCalled,
+    ToolNotCalled,
+)
+
+__all__ = [
+    "SCANNED_ARGUMENTS",
+    "SCANNED_TOOLS",
+    "AssertionResult",
+    "GradeInputError",
+    "StoreDump",
+    "StoredFile",
+    "TraceCall",
+    "TranscriptTurn",
+    "grade",
+    "load_store_dump",
+    "load_trace",
+    "load_transcript",
+    "order_key",
+    "store_dump_to_json",
+    "trace_to_json",
+    "transcript_to_json",
+]
+
+# Arguments that carry text a write persists. Version tokens are small
+# integers and old_string quotes text being removed, so neither is scanned.
+SCANNED_ARGUMENTS: Final[frozenset[str]] = frozenset(
+    {"content", "line", "new_string", "description", "aliases", "area", "name"}
+)
+# delete_file persists no content, so its arguments are not scanned.
+SCANNED_TOOLS: Final[frozenset[str]] = frozenset({"write_file", "append_line", "replace_fact"})
+
+INDEX_TOOL: Final = "get_memory_index"
+
+
+class GradeInputError(ValueError):
+    """A store, trace, or transcript file is missing or malformed."""
+
+
+@dataclass(frozen=True)
+class StoredFile:
+    """One file of the final store, addressed both by path and scope-relatively."""
+
+    path: str
+    scope: str
+    area: str
+    name: str
+    content: str
+    description: str
+    aliases: tuple[str, ...]
+    sources: tuple[str, ...]
+    version: str
+
+
+@dataclass(frozen=True)
+class StoreDump:
+    """Every file under the trial identity's entities after the last session."""
+
+    files: tuple[StoredFile, ...]
+
+    def get(self, scope: str, area: str, name: str) -> StoredFile | None:
+        for f in self.files:
+            if (f.scope, f.area, f.name) == (scope, area, name):
+                return f
+        return None
+
+    def matching(self, where: FileFilter) -> tuple[StoredFile, ...]:
+        return tuple(
+            f
+            for f in self.files
+            if (where.scope is None or f.scope == where.scope)
+            and (where.area is None or f.area == where.area)
+            and (where.name is None or f.name == where.name)
+        )
+
+
+@dataclass(frozen=True)
+class TraceCall:
+    """One memory tool call.
+
+    seq is arrival (completion) order; started_ms and completed_ms are on the
+    server's monotonic clock; request_id is an opaque MCP correlation key;
+    session and turn are 0 for a call no recorded turn claimed.
+    """
+
+    seq: int
+    request_id: str
+    duration_s: float
+    started_ms: float
+    completed_ms: float
+    session: int
+    turn: int
+    tool: str
+    arguments: Mapping[str, object]
+    result: Mapping[str, object]
+    is_error: bool
+
+
+@dataclass(frozen=True)
+class TranscriptTurn:
+    """One user turn and the agent's reply to it."""
+
+    session: int
+    turn: int
+    user: str
+    reply: str
+    agent_id: str | None
+
+
+@dataclass(frozen=True)
+class AssertionResult:
+    id: str
+    kind: str
+    passed: bool
+    detail: str
+
+
+def order_key(call: TraceCall) -> tuple[bool, int, int, float, int]:
+    """Sort key: tagged calls by session, turn, and start time; untagged calls last."""
+    return (call.session == 0, call.session, call.turn, call.started_ms, call.seq)
+
+
+# --- JSON contract ------------------------------------------------------------
+
+
+def store_dump_to_json(dump: StoreDump) -> dict[str, object]:
+    return {
+        "files": [
+            {
+                "path": f.path,
+                "scope": f.scope,
+                "area": f.area,
+                "name": f.name,
+                "content": f.content,
+                "description": f.description,
+                "aliases": list(f.aliases),
+                "sources": list(f.sources),
+                "version": f.version,
+            }
+            for f in sorted(dump.files, key=lambda f: f.path)
+        ]
+    }
+
+
+def trace_to_json(calls: Sequence[TraceCall]) -> dict[str, object]:
+    return {
+        "calls": [
+            {
+                "seq": c.seq,
+                "request_id": c.request_id,
+                "duration_s": c.duration_s,
+                "started_ms": c.started_ms,
+                "completed_ms": c.completed_ms,
+                "session": c.session,
+                "turn": c.turn,
+                "tool": c.tool,
+                "arguments": dict(c.arguments),
+                "result": dict(c.result),
+                "is_error": c.is_error,
+            }
+            for c in calls
+        ]
+    }
+
+
+def transcript_to_json(turns: Sequence[TranscriptTurn]) -> dict[str, object]:
+    return {
+        "turns": [
+            {
+                "session": t.session,
+                "turn": t.turn,
+                "user": t.user,
+                "reply": t.reply,
+                "agent_id": t.agent_id,
+            }
+            for t in turns
+        ]
+    }
+
+
+class _Reader:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def fail(self, message: str) -> GradeInputError:
+        return GradeInputError(f"{self.path}: {message}")
+
+    def document(self, key: str) -> list[dict[str, Any]]:
+        try:
+            raw = json.loads(self.path.read_text())
+        except OSError as exc:
+            raise self.fail(f"cannot read: {exc.strerror}") from None
+        except json.JSONDecodeError as exc:
+            raise self.fail(f"invalid JSON: {exc}") from None
+        if not isinstance(raw, dict) or not isinstance(cast(dict[str, Any], raw).get(key), list):
+            raise self.fail(f"expected an object with a {key!r} list")
+        items = cast(list[object], cast(dict[str, Any], raw)[key])
+        for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise self.fail(f"{key}[{i}] must be an object")
+        return cast(list[dict[str, Any]], items)
+
+    def field[T](self, item: Mapping[str, Any], key: str, kind: type[T], where: str) -> T:
+        if key not in item:
+            raise self.fail(f"{where}: missing field {key!r}")
+        value: object = item[key]
+        ok = isinstance(value, kind) and not (kind is not bool and isinstance(value, bool))
+        if kind is float and isinstance(value, int) and not isinstance(value, bool):
+            return cast(T, float(value))
+        if not ok:
+            raise self.fail(f"{where}: field {key!r} must be {kind.__name__}")
+        return cast(T, value)
+
+    def strings(self, item: Mapping[str, Any], key: str, where: str) -> tuple[str, ...]:
+        values = cast(list[object], self.field(item, key, list, where))
+        if not all(isinstance(v, str) for v in values):
+            raise self.fail(f"{where}: field {key!r} must be a list of strings")
+        return tuple(cast(list[str], values))
+
+
+def load_store_dump(path: Path) -> StoreDump:
+    r = _Reader(path)
+    files: list[StoredFile] = []
+    for i, item in enumerate(r.document("files")):
+        where = f"files[{i}]"
+        files.append(
+            StoredFile(
+                path=r.field(item, "path", str, where),
+                scope=r.field(item, "scope", str, where),
+                area=r.field(item, "area", str, where),
+                name=r.field(item, "name", str, where),
+                content=r.field(item, "content", str, where),
+                description=r.field(item, "description", str, where),
+                aliases=r.strings(item, "aliases", where),
+                sources=r.strings(item, "sources", where),
+                version=r.field(item, "version", str, where),
+            )
+        )
+    return StoreDump(tuple(files))
+
+
+def load_trace(path: Path) -> tuple[TraceCall, ...]:
+    r = _Reader(path)
+    calls: list[TraceCall] = []
+    for i, item in enumerate(r.document("calls")):
+        where = f"calls[{i}]"
+        calls.append(
+            TraceCall(
+                seq=r.field(item, "seq", int, where),
+                request_id=r.field(item, "request_id", str, where),
+                duration_s=r.field(item, "duration_s", float, where),
+                started_ms=r.field(item, "started_ms", float, where),
+                completed_ms=r.field(item, "completed_ms", float, where),
+                session=r.field(item, "session", int, where),
+                turn=r.field(item, "turn", int, where),
+                tool=r.field(item, "tool", str, where),
+                arguments=MappingProxyType(
+                    cast(dict[str, object], r.field(item, "arguments", dict, where))
+                ),
+                result=MappingProxyType(
+                    cast(dict[str, object], r.field(item, "result", dict, where))
+                ),
+                is_error=r.field(item, "is_error", bool, where),
+            )
+        )
+    return tuple(calls)
+
+
+def load_transcript(path: Path) -> tuple[TranscriptTurn, ...]:
+    r = _Reader(path)
+    turns: list[TranscriptTurn] = []
+    for i, item in enumerate(r.document("turns")):
+        where = f"turns[{i}]"
+        agent_id: object = item.get("agent_id")
+        if agent_id is not None and not isinstance(agent_id, str):
+            raise r.fail(f"{where}: field 'agent_id' must be str or null")
+        turns.append(
+            TranscriptTurn(
+                session=r.field(item, "session", int, where),
+                turn=r.field(item, "turn", int, where),
+                user=r.field(item, "user", str, where),
+                reply=r.field(item, "reply", str, where),
+                agent_id=agent_id,
+            )
+        )
+    return tuple(turns)
+
+
+# --- grading ------------------------------------------------------------------
+
+
+def _calls_matching(trace: Sequence[TraceCall], matcher: CallMatcher) -> list[TraceCall]:
+    found: list[TraceCall] = []
+    for call in trace:
+        if call.tool not in matcher.tools:
+            continue
+        if matcher.session is not None and call.session != matcher.session:
+            continue
+        if matcher.turn is not None and call.turn != matcher.turn:
+            continue
+        if matcher.succeeded is not None and call.is_error == matcher.succeeded:
+            continue
+        if all(
+            key in call.arguments and arg.match(call.arguments[key])
+            for key, arg in matcher.args.items()
+        ):
+            found.append(call)
+    return found
+
+
+def _describe(call: TraceCall) -> str:
+    return f"seq {call.seq} {call.tool} (session {call.session}, turn {call.turn})"
+
+
+def _lines(files: Sequence[StoredFile]) -> Iterator[tuple[StoredFile, str]]:
+    for f in files:
+        for line in f.content.splitlines():
+            yield f, line
+
+
+def _index_read_first(a: IndexReadFirst, s: Scenario, trace: Sequence[TraceCall]) -> str | None:
+    sessions = [a.session] if a.session is not None else list(range(1, len(s.sessions) + 1))
+    for session in sessions:
+        calls = [c for c in trace if c.session == session]
+        if not calls:
+            return f"session {session} made no memory calls"
+        index_done = [c.completed_ms for c in calls if c.tool == INDEX_TOOL]
+        if not index_done:
+            return f"session {session} never called {INDEX_TOOL}"
+        first_done = min(index_done)
+        early = [c for c in calls if c.tool != INDEX_TOOL and c.started_ms < first_done]
+        if early:
+            return f"session {session}: {_describe(early[0])} started before {INDEX_TOOL} completed"
+    return None
+
+
+def _file_absent(a: FileAbsent, store: StoreDump) -> str | None:
+    found = store.get(a.file.scope, a.file.area, a.file.name)
+    return None if found is None else f"{found.path} still exists"
+
+
+def _line_present(a: LinePresent, store: StoreDump) -> str | None:
+    if any(re.search(a.pattern, line) for _, line in _lines(store.matching(a.where))):
+        return None
+    return f"no line matches {a.pattern!r}"
+
+
+def _line_absent(a: LineAbsent, store: StoreDump) -> str | None:
+    for f, line in _lines(store.matching(a.where)):
+        if re.search(a.pattern, line):
+            return f"{f.path} has a line matching {a.pattern!r}: {line!r}"
+    return None
+
+
+def _scanned_values(call: TraceCall) -> Iterator[tuple[str, str]]:
+    for key in sorted(SCANNED_ARGUMENTS & set(call.arguments)):
+        value = call.arguments[key]
+        if isinstance(value, str):
+            yield key, value
+        elif isinstance(value, (list, tuple)):
+            for item in cast(Sequence[object], value):
+                if isinstance(item, str):
+                    yield key, item
+
+
+def _no_content_matching(
+    a: NoContentMatching, store: StoreDump, trace: Sequence[TraceCall]
+) -> str | None:
+    for f in store.files:
+        for label, text in (
+            *(("content", line) for line in f.content.splitlines()),
+            ("description", f.description),
+            *(("alias", alias) for alias in f.aliases),
+        ):
+            if re.search(a.pattern, text):
+                return f"{f.path} {label} matches {a.pattern!r}"
+    for call in trace:
+        if call.tool not in SCANNED_TOOLS:
+            continue
+        for key, text in _scanned_values(call):
+            if re.search(a.pattern, text):
+                return f"{_describe(call)} argument {key!r} matches {a.pattern!r}"
+    return None
+
+
+def _no_duplicate_fact(a: NoDuplicateFact, store: StoreDump) -> str | None:
+    hits = [(f, line) for f, line in _lines(store.matching(a.where)) if re.search(a.pattern, line)]
+    if len(hits) <= 1:
+        return None
+    return f"{len(hits)} lines match {a.pattern!r}: " + "; ".join(
+        f"{f.path}: {line!r}" for f, line in hits
+    )
+
+
+def _seed_lines_preserved(a: SeedLinesPreserved, s: Scenario, store: StoreDump) -> str | None:
+    ref = a.file
+    seed = next(
+        (x for x in s.seed_files if (x.scope, x.area, x.name) == (ref.scope, ref.area, ref.name)),
+        None,
+    )
+    if seed is None:
+        return f"{ref.scope}/{ref.area}/{ref.name} is not a seed file"
+    found = store.get(ref.scope, ref.area, ref.name)
+    if found is None:
+        return f"{ref.scope}/{ref.area}/{ref.name} no longer exists"
+    wanted = [
+        line
+        for line in seed.content.splitlines()
+        if a.except_pattern is None or not re.search(a.except_pattern, line)
+    ]
+    remaining = iter(found.content.splitlines())
+    for line in wanted:
+        if not any(candidate == line for candidate in remaining):
+            return f"{found.path} lost or reordered seed line {line!r}"
+    return None
+
+
+def _tool_called(a: ToolCalled, trace: Sequence[TraceCall]) -> str | None:
+    count = len(_calls_matching(trace, a.call))
+    if count < a.min or (a.max is not None and count > a.max):
+        bound = f"[{a.min}, {'inf' if a.max is None else a.max}]"
+        return f"{count} matching calls to {sorted(a.call.tools)}, expected {bound}"
+    return None
+
+
+def _tool_not_called(a: ToolNotCalled, trace: Sequence[TraceCall]) -> str | None:
+    found = _calls_matching(trace, a.call)
+    return None if not found else f"unexpected call: {_describe(found[0])}"
+
+
+def _alias_present(a: AliasPresent, store: StoreDump) -> str | None:
+    found = store.get(a.file.scope, a.file.area, a.file.name)
+    if found is None:
+        return f"{a.file.scope}/{a.file.area}/{a.file.name} does not exist"
+    if any(alias.casefold() == a.alias.casefold() for alias in found.aliases):
+        return None
+    return f"{found.path} aliases {list(found.aliases)} lack {a.alias!r}"
+
+
+_KIND_NAMES: Final[Mapping[type[object], str]] = MappingProxyType(
+    {
+        IndexReadFirst: "index_read_first",
+        FileAbsent: "file_absent",
+        LinePresent: "line_present",
+        LineAbsent: "line_absent",
+        NoContentMatching: "no_content_matching",
+        NoDuplicateFact: "no_duplicate_fact",
+        SeedLinesPreserved: "seed_lines_preserved",
+        ToolCalled: "tool_called",
+        ToolNotCalled: "tool_not_called",
+        AliasPresent: "alias_present",
+    }
+)
+
+
+def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> str | None:
+    checks: Mapping[type[object], Callable[[], str | None]] = {
+        IndexReadFirst: lambda: _index_read_first(cast(IndexReadFirst, a), s, trace),
+        FileAbsent: lambda: _file_absent(cast(FileAbsent, a), store),
+        LinePresent: lambda: _line_present(cast(LinePresent, a), store),
+        LineAbsent: lambda: _line_absent(cast(LineAbsent, a), store),
+        NoContentMatching: lambda: _no_content_matching(cast(NoContentMatching, a), store, trace),
+        NoDuplicateFact: lambda: _no_duplicate_fact(cast(NoDuplicateFact, a), store),
+        SeedLinesPreserved: lambda: _seed_lines_preserved(cast(SeedLinesPreserved, a), s, store),
+        ToolCalled: lambda: _tool_called(cast(ToolCalled, a), trace),
+        ToolNotCalled: lambda: _tool_not_called(cast(ToolNotCalled, a), trace),
+        AliasPresent: lambda: _alias_present(cast(AliasPresent, a), store),
+    }
+    return checks[type(a)]()
+
+
+def grade(
+    scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]
+) -> tuple[AssertionResult, ...]:
+    """One result per scenario assertion, in order; the trace may be in any order."""
+    ordered = sorted(trace, key=order_key)
+    results: list[AssertionResult] = []
+    for a in scenario.assertions:
+        failure = _check(a, scenario, store, ordered)
+        results.append(
+            AssertionResult(a.id, _KIND_NAMES[type(a)], failure is None, failure or "ok")
+        )
+    return tuple(results)
