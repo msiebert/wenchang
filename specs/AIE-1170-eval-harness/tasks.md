@@ -115,7 +115,9 @@ Each task follows the same loop:
 
 - **Covers:** US4.17, US9.1, US9.2.
 - **Tests:** `tests/test_evals_graders.py` (canned traces: pass,
-  then-first, overlap, vacuous, per session, `args` and `succeeded`) and
+  then-first, overlap, vacuous, per session, `args`, and `succeeded` on
+  both `first` and `then`, including a failed `first` read that counts
+  when `first` sets no `succeeded`) and
   `tests/test_evals_scenario.py` (parse; `session` or `turn` inside
   `first`/`then` rejected; bad `args` key rejected).
 - **Implementation:** `evals/scenario.py`, `evals/graders.py`.
@@ -164,6 +166,7 @@ Each task follows the same loop:
   - `review-spec.md`: the counts and the corpus mention, currently lines
     30, 33, 50, 55, and 118. Also a "Corpus expansion" review summary.
   - ARCHITECTURE.md and README, if either states a scenario or kind count.
+  - plan.md: no remaining "eight" counts.
 
 ## Human follow-ups (outside this PR)
 

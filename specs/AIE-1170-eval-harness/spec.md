@@ -154,7 +154,7 @@ Rules shared by every kind:
 | 4.15 | a trace passed to `grade` shuffled | graded | results equal those for the trace in `(session, turn, started_ms, seq)` order |
 | 4.16 | (a) a trace whose completion order (`seq`) differs from its start order: `get_memory_index` starts first and completes before `read_file` starts, but `read_file` has the lower `seq`; (b) a two-session trace whose `request_id`s restart at `"1"` in session 2 (a new MCP connection), each session reading the index first, so session 2's `get_memory_index` has `request_id` `"1"` and session 1's `read_file` has `"2"` | `index_read_first` is graded | both pass: (a) is ordered by `started_ms`, not `seq`; (b) is ordered per session by timing, and the repeated `request_id`s neither interleave the sessions nor raise |
 | 4.16(c) | an `EvalState` with a stubbed clock: turn 1's `read_file` starts before the turn-1 boundary but its record arrives (higher `seq`) after `eval_record_turn(1, 1, ...)`; turn 2 then starts with `get_memory_index`; plus one call started after the last boundary | the dumped trace is loaded and sorted by `grade`'s key | the late record is tagged session 1 turn 1 and sorts before every turn-2 call; the post-boundary call is tagged 0/0 and sorts last |
-| 4.17 | `called_before {first, then, session?}` | `first` and `then` are call-matcher mappings that require `tool` and allow `args` and `succeeded`, but not `session` or `turn`. Only calls with `call.session == N` count for session N; session-0 (untagged) calls are ignored, as in 4.1. For each scenario session N (or only the given one) that has a call matching `then`, some call matching `first` has `completed_ms` strictly less than the earliest such `then` call's `started_ms`. A failed `then` call counts unless `then` sets `succeeded`. A session with no `then` call passes vacuously. The failure detail names the earliest `then` call's `seq` |
+| 4.17 | `called_before {first, then, session?}` | `first` and `then` are call-matcher mappings that require `tool` and allow `args` and `succeeded`, but not `session` or `turn`. Only calls with `call.session == N` count for session N; session-0 calls are ignored (untagged calls belong to no session). For each scenario session N (or only the given one) that has a call matching `then`, some call matching `first` has `completed_ms` strictly less than the earliest such `then` call's `started_ms`. A failed `then` call counts unless `then` sets `succeeded`, and likewise a failed `first` call counts unless `first` sets `succeeded`. A session with no `then` call passes vacuously. The failure detail names the earliest `then` call's `seq` |
 
 ### US5 — Runner CLI, report, and judge
 
@@ -200,7 +200,7 @@ judge items, wrong move, and exact fail set.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 9.1 | canned traces | `called_before` is graded | it passes when a `first` call completes strictly before the earliest `then` call starts. It fails when the `then` call starts first, when the two overlap, or when the times are equal. It passes vacuously with no `then` call. It is evaluated per session, with session-0 calls ignored. `first` and `then` honor `args` and `succeeded`, and a failed `then` call counts unless `succeeded` is set |
+| 9.1 | canned traces | `called_before` is graded | it passes when a `first` call completes strictly before the earliest `then` call starts. It fails when the `then` call starts first, when the two overlap, or when the times are equal. It passes vacuously with no `then` call. It is evaluated per session, with session-0 calls ignored. `first` and `then` honor `args` and `succeeded`, and a failed `then` or `first` call counts unless that matcher sets `succeeded` |
 | 9.2 | a scenario YAML with `called_before` | loaded | it parses into `CalledBefore`. These are rejected: a `session` or `turn` key inside `first` or `then`; a missing `tool`; an `args` key that is not a parameter of every listed tool (as in 3.3); a top-level `session` outside the scenario's sessions |
 | 9.3 | a scenario YAML with `index_max_bytes: N` | loaded | `Scenario.index_max_bytes` is `N`. A value that is not a positive integer, including a boolean, raises `ScenarioError`. Omitted, it is `None` |
 | 9.4 | `eval_reset` on a scenario with `index_max_bytes` | `get_memory_index` is called | the store uses that cap, so the index reports the seeded areas under `capped`. Without the field the store uses the library default |
@@ -277,6 +277,8 @@ judge items, wrong move, and exact fail set.
   - AIE-1053 E3, E4, E5 (forgetting a `system/` fact; `curated-correction`
     covers the read-only rule), and E6.
   - AIE-1165 #2. `curated-correction` covers it.
+  - AIE-1055 #3, the system-of-record variant: the user restates an event
+    definition that differs from the catalog.
 
   AIE-1055 #1 (index first) is asserted inside every shipped scenario
   rather than on its own.
