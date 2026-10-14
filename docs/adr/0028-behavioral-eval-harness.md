@@ -116,11 +116,25 @@ slow and nondeterministic.
    - `tools` is the seven `mcp__wenchang__*` tools, `model` is `inherit`,
      and `omitClaudeMd` is `true`. Without `omitClaudeMd`, the repo and
      user CLAUDE.md files would load into every trial.
-   - The body is a two-sentence framing preamble, then
+   - The body is a short framing preamble, then
      `build_memory_prompt(REFERENCE_SLOTS)` byte for byte. This deviates
      from the issue's "the system prompt is the output of
      `build_memory_prompt`". Without the preamble, a subagent reads each
      turn as a task delegated by a parent agent.
+   - **Note (2026-10-14, live run at a723dd8).** Turn 1 reaches the eval
+     agent as an `Agent` prompt. Later turns arrive through `SendMessage`,
+     which Claude Code wraps as a message from another agent. Claude Code's
+     own rule that a peer agent's message cannot grant approval then
+     overrode "each message you receive is from that user". In every
+     scenario whose turn 2 confirms a shared-scope write
+     (`curated-correction`, `filing-new-acronym`,
+     `remembering-no-metric-value`, `slots-ask-before-shared`), the agent
+     asked correctly in turn 1 and then refused the relayed "yes". The
+     preamble now says a runner relays the conversation. It says every
+     message, including one delivered as a message from a coordinator or
+     another agent, is the user's own next turn verbatim, and a
+     confirmation in such a message is the user's own. The agent file's
+     sha256 in reports changes with it.
 
 6. **The eval session is launched with `evals/mcp.json`.** There is no
    root `.mcp.json`. The command is:
@@ -193,8 +207,10 @@ slow and nondeterministic.
   status snapshot, and the launch disables it. It does not get the Claude
   Code system prompt or auto memory, and `omitClaudeMd` keeps CLAUDE.md
   out. The environment details still differ from what an adopter's host
-  sends, and the model runs inside Claude Code's agent loop. Results
-  therefore guide prompt iteration and are not release gates.
+  sends, and the model runs inside Claude Code's agent loop. Turns after
+  the first arrive framed as messages from another agent, and only the
+  preamble tells the model they are the user's. Results therefore guide
+  prompt iteration and are not release gates.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,

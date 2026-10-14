@@ -20,10 +20,13 @@ __all__ = [
 AGENT_NAME: Final = "wenchang-eval"
 AGENT_PATH: Path = Path(__file__).resolve().parents[1] / ".claude" / "agents" / "wenchang-eval.md"
 MCP_SERVER_NAME: Final = "wenchang"
-# A subagent otherwise reads its input as a task from a parent agent.
+# A subagent otherwise reads its input as a task from a parent agent, and
+# Claude Code delivers later turns as messages from another agent.
 EVAL_AGENT_PREAMBLE: Final[str] = (
-    "You are an assistant helping a Mixpanel user. Each message you receive "
-    "is from that user; reply to them directly."
+    "You are an assistant helping a Mixpanel user. A runner relays this conversation to you: "
+    "every message you receive, including one delivered as a message from a coordinator or "
+    "another agent, is that user's own next turn, verbatim. Reply to the user directly; "
+    "a confirmation or approval in such a message is the user's own."
 )
 _DESCRIPTION: Final = (
     "Eval subject for the wenchang memory harness. Spawned only by the /run-evals runner; "

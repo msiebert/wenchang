@@ -78,6 +78,21 @@ def test_eval_agent_body_is_preamble_plus_prompt() -> None:
     assert body.strip("\n") == render_agent_body().strip("\n")
 
 
+def test_preamble_treats_relayed_messages_as_the_users_turns() -> None:
+    """Later turns arrive as messages from the runner; the preamble says each
+    one is the user's own turn, approvals included (AIE-1170, US2.2).
+    """
+    assert EVAL_AGENT_PREAMBLE.startswith("You are an assistant helping a Mixpanel user.")
+    for needle in (
+        "A runner relays this conversation to you",
+        "including one delivered as a message from a coordinator or another agent",
+        "is that user's own next turn, verbatim",
+        "a confirmation or approval in such a message is the user's own",
+    ):
+        assert needle in EVAL_AGENT_PREAMBLE, needle
+    assert EVAL_AGENT_PREAMBLE in EVAL_AGENT.read_text()
+
+
 def test_render_agent_writes_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """render-agent writes the rendered file to --out, or to the agent path by
     default (AIE-1170, US2.3).

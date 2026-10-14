@@ -44,7 +44,7 @@ The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
 | `eval_record_turn` tags untagged calls; no `eval_begin_turn` | A begin-turn tool | A turn's calls complete before its reply, so tagging is exact |
 | Order by `(session, turn, started_ms, seq)`; strict `index_read_first` | `seq`; integer `request_id`; accepting a parallel index batch | Records arrive in completion order. `request_id` restarts per connection (mcp 2.3.0). A call issued alongside the index read was not chosen from it |
 | `evals/mcp.json` with `--mcp-config --strict-mcp-config --allowedTools mcp__wenchang` | Root `.mcp.json` | No prompt or extra tools in ordinary sessions. Schemas load directly. No per-call permission prompts |
-| `omitClaudeMd: true`, plus a 2-sentence framing preamble | Default loading; bare prompt | CLAUDE.md files would contaminate trials. Without framing, a subagent treats turns as delegated tasks |
+| `omitClaudeMd: true`, plus a short framing preamble | Default loading; bare prompt | CLAUDE.md files would contaminate trials. Without framing, a subagent treats turns as delegated tasks |
 | Replies recorded verbatim by instruction | Reading Claude Code's transcript jsonl | That layout is internal |
 | `dev-mode-dirs` makes `evals` importable | pytest `pythonpath` | Works for subprocesses, pyright, and pytest. Side effect: `tests`, `scripts`, and `docs` become namespace packages |
 | 23 scenarios, each with correct and wrong scripted drivers | porting every candidate unproven | Unproven assertions can ship unsatisfiable |

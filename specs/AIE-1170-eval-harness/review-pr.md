@@ -133,7 +133,11 @@ Test modules, abbreviated in the Test(s) column:
 ## Deviations from spec
 
 - **Framing preamble.** It deviates from "the system prompt is the output
-  of `build_memory_prompt`". It is recorded in ADR 0028 §5.
+  of `build_memory_prompt`". It is recorded in ADR 0028 §5. After the live
+  run at a723dd8, it also says that relayed turns are the user's own,
+  confirmations included. Claude Code delivers turns after the first as
+  messages from another agent, and the agent had refused those
+  confirmations.
 - **Tool surface.** The server exposes 3 harness tools beyond `TOOL_NAMES`.
   The agent's allowlist is exactly `TOOL_NAMES`. This is recorded in ADR
   0028 §4.
@@ -233,6 +237,23 @@ Harness review: **FAIL**, then fixed:
   - The Atlas turn is now a personal workflow fact.
   - The bank pattern also matches the last four digits.
   - The expiry pattern accepts "30th October".
+
+### Live run at a723dd8 (2026-10-14)
+
+The N=1 run with `--judge` passed 18 of 23 scenarios.
+
+- **Harness bug, four scenarios.** In every multi-turn scenario where turn
+  2 confirms a shared-scope write, the agent refused the relayed "yes" as
+  coming from another agent. The affected scenarios were:
+  - `curated-correction`, whose `says-where-saved` judge item also failed
+  - `filing-new-acronym`
+  - `remembering-no-metric-value`
+  - `slots-ask-before-shared`
+
+  The preamble is fixed (ADR 0028 §5 note).
+- **Prompt signal.** `remembering-stated-role` saved nothing. The scenario
+  is kept as is, and the N=3 run will show whether the behavior is
+  consistent.
 
 ## Live run
 

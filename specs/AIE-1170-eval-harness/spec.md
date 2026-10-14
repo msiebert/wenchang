@@ -32,7 +32,7 @@ and prompt, then grades what it did. Everything lives outside the wheel:
    reset and seed the store, record each turn's user text and reply, and
    dump the store and the tool-call trace.
 2. **Eval agent** (`.claude/agents/wenchang-eval.md`). A Claude Code
-   subagent with `omitClaudeMd: true`. Its system prompt is a two-sentence
+   subagent with `omitClaudeMd: true`. Its system prompt is a short
    framing preamble plus `build_memory_prompt(REFERENCE_SLOTS)`. Its tools
    are only the seven `mcp__wenchang__*` memory tools.
 3. **Scenarios and graders** (`evals/scenario.py`, `evals/graders.py`,
@@ -227,9 +227,13 @@ judge items, wrong move, and exact fail set.
   per call.
 - **Framing preamble.** The issue says the system prompt "is the output of
   `build_memory_prompt`". A Claude Code subagent reads its input as a task
-  from a parent agent, so the body prepends a two-sentence
-  `EVAL_AGENT_PREAMBLE` saying the messages come from the user it is
-  helping. The prompt text itself is byte-identical. ADR 0028 records it.
+  from a parent agent, so the body prepends a short `EVAL_AGENT_PREAMBLE`.
+  It says a runner relays the conversation, and that every message is the
+  user's own next turn verbatim, including one Claude Code delivers as a
+  message from a coordinator or another agent. A confirmation in such a
+  message is the user's own. This last point was added after the live run
+  at a723dd8, where relayed turn-2 confirmations were refused. The prompt
+  text itself is byte-identical. ADR 0028 records it.
 - **Context.** A subagent gets only its own system prompt plus Claude
   Code's environment details, and a git status snapshot unless disabled.
   The launch disables the snapshot with `includeGitInstructions: false`.
