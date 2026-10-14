@@ -126,7 +126,12 @@ def test_judge_agent() -> None:
     assert meta["omitClaudeMd"] is True
     for needle in ("transcript.json", "store.json", "judge", "judge.json"):
         assert needle in body
-    for needle in ("turn N", "session S turn N", "defaults to 1", "missing", "fail"):
+    for needle in (
+        "turn N",
+        "session S turn N",
+        "defaults to 1",
+        "If that reply is missing from the transcript, the verdict is `fail`.",
+    ):
         assert needle in body, needle
 
 

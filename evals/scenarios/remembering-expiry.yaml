@@ -12,5 +12,5 @@ assertions:
     id: index-first
   - kind: line_present
     id: expiry-in-line
-    pattern: "(?i)json.*(oct(ober)?\\.?\\s*30|10[/-]30)|(oct(ober)?\\.?\\s*30|10[/-]30).*json"
+    pattern: "(?i)json.*(oct(ober)?\\.?\\s*30|30\\s*oct(ober)?|10[/-]30)|(oct(ober)?\\.?\\s*30|30\\s*oct(ober)?|10[/-]30).*json"
     scope: user

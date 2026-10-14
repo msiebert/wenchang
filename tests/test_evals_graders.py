@@ -691,3 +691,45 @@ def test_called_before_counts_failed_calls_unless_succeeded_is_set() -> None:
     assert _one(_before(), trace=failed_read).passed
     succeeded_first = _match("read_file", succeeded=True)
     assert not _one(_before(first=succeeded_first), trace=failed_read).passed
+
+
+def test_called_before_names_the_earliest_then_call() -> None:
+    """The earliest then call by start time is the one checked and named; a
+    start-time tie names the lowest seq (AIE-1170, US4.17).
+    """
+    trace = [
+        _call(1, "read_file", started=0.0, completed=5.0),
+        _call(9, "append_line", started=6.0, completed=7.0),
+        _call(10, "append_line", started=3.0, completed=4.0),
+    ]
+    result = _one(_before(), trace=trace)
+    assert not result.passed
+    assert "seq 10" in result.detail
+
+    tied = [
+        _call(1, "read_file", started=0.0, completed=5.0),
+        _call(12, "append_line", started=3.0, completed=4.0),
+        _call(11, "write_file", started=3.0, completed=4.5),
+    ]
+    result = _one(_before(), trace=tied)
+    assert not result.passed
+    assert "seq 11" in result.detail
+
+
+def test_called_before_honors_then_args() -> None:
+    """Only writes matching then's args need a prior read (AIE-1170, US4.17)."""
+    then = _match(*WRITES, args={"name": ArgMatcher(matches="^atlas-")})
+    unrelated_first = [
+        _call(1, "append_line", name="charts", started=0.0, completed=1.0),
+        _call(2, "read_file", name="atlas-launch", started=2.0, completed=3.0),
+        _call(3, "append_line", name="atlas-launch", started=4.0, completed=5.0),
+    ]
+    assert _one(_before(then=then), trace=unrelated_first).passed
+
+    atlas_first = [
+        _call(1, "append_line", name="atlas-launch", started=0.0, completed=1.0),
+        _call(2, "read_file", name="atlas-launch", started=2.0, completed=3.0),
+    ]
+    result = _one(_before(then=then), trace=atlas_first)
+    assert not result.passed
+    assert "seq 1" in result.detail

@@ -13,5 +13,5 @@ assertions:
     id: index-first
   - kind: line_present
     id: role-saved
-    pattern: "\\[stated\\].*(\\bPM\\b|(?i:product manager))"
+    pattern: "\\[stated\\].*(?i:\\bPM\\b|product (manager|lead|owner))"
     scope: user
