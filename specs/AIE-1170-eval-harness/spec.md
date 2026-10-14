@@ -98,7 +98,7 @@ US4. `RUNS_DIR` is `evals/runs/`.
 | 2.4 | the agent name | compared with the guard hook's routed agent types | it is none of `test-writer`, `implementer`, `doc-updater`, `explorer`, `spec-reviewer` |
 | 2.5 | `evals/mcp.json` | parsed | it defines exactly one server, `wenchang`, with command `uv` and args `["run", "--directory", ".", "python", "-m", "evals.server"]` (no variable expansion; the session is launched from the repo root); no `.mcp.json` exists at the repo root |
 | 2.6 | `.claude/agents/wenchang-eval-judge.md` | parsed | `tools` is exactly `Read, Write`; `omitClaudeMd` is `true`; the body names its inputs (`transcript.json`, `store.json`, the scenario's `judge` rubric) and its output (`judge.json`) |
-| 2.7 | `.claude/commands/run-evals.md` | read | it contains the launch command `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'`; the preflight; every harness tool name; the `new-run`, `grade`, and `report` subcommands; the `wenchang-eval` subagent type; the preflight scratch dir `evals/runs/preflight/`; and the rules that each reply is passed to `eval_record_turn` verbatim, that `eval_record_turn` runs alone before the next turn starts, and that a turn whose `Agent` or `SendMessage` call comes back as a background task waits for its completion notification before anything else |
+| 2.7 | `.claude/commands/run-evals.md` | read | it contains the launch command `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'`; the preflight; every harness tool name; the `new-run`, `grade`, and `report` subcommands; the `wenchang-eval` subagent type; the preflight scratch dir `evals/runs/preflight/`; and the rules that each reply is passed to `eval_record_turn` verbatim, that `eval_record_turn` runs alone before the next turn starts, that every turn is a new `Agent` call whose prompt is printed by `uv run python -m evals turn-prompt`, with no `SendMessage`, that an `Agent` call that comes back as a background task waits for its completion notification before anything else, that trials are never stopped, paused, skipped, or reordered because of their results, and that nothing outside `evals/runs/` is edited |
 
 ### US3 — Scenario format
 
@@ -233,9 +233,20 @@ judge items, wrong move, and exact fail set.
   message from a coordinator or another agent. A confirmation in such a
   message is the user's own. This last point was added after the live run
   at a723dd8, where relayed turn-2 confirmations were refused. After the
-  rerun at 65f3baf, the preamble was tightened again: it says there is no
+  rerun at 65f3baf, the preamble was tightened again: it said there is no
   coordinator or other agent in the conversation, and that a yes in any
-  message is sufficient for any write, shared scopes included. The prompt
+  message is sufficient for any write, shared scopes included.
+- **Replayed turns (2026-10-14, N=3 attempt at 3910d91).** Preamble
+  wording could not reliably override Claude Code's framing of
+  `SendMessage` turns as messages from another agent. Every turn is now a
+  fresh `Agent` call whose prompt `turn-prompt` builds: the session's
+  earlier user turns and verbatim replies, then the new turn.
+  `eval_record_turn` rewrites `transcript.json` so the next prompt can be
+  built. The preamble is back to plain framing: each message is the
+  user's turn, and earlier turns may be included above the newest one.
+  Fidelity cost: a later turn's agent sees its earlier replies but not its
+  own earlier tool calls or results. It must re-read memory, which the
+  index-first rule asks of it anyway. The prompt
   text itself is byte-identical. ADR 0028 records it.
 - **Context.** A subagent gets only its own system prompt plus Claude
   Code's environment details, and a git status snapshot unless disabled.

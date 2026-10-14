@@ -17,10 +17,12 @@ from evals.graders import (
     StoredFile,
     StoreDump,
     TraceCall,
+    TranscriptTurn,
     store_dump_to_json,
     trace_to_json,
+    transcript_to_json,
 )
-from evals.report import build_report, grade_trial, new_run
+from evals.report import build_report, grade_trial, new_run, turn_prompt
 from evals.scenario import Scenario, load_scenario
 
 pytestmark = pytest.mark.unit
@@ -358,3 +360,87 @@ def test_run_ids_do_not_collide(tmp_path: Path) -> None:
     assert first != second
     assert second.name == "20261009-123005-sonnet-2"
     assert _json(second / "run.json")["run_id"] == second.name
+
+
+def _transcript(trial_dir: Path, *turns: TranscriptTurn) -> None:
+    (trial_dir / "transcript.json").write_text(json.dumps(transcript_to_json(turns)))
+
+
+def _trial(tmp_path: Path) -> Path:
+    _, scenarios = _scenarios(tmp_path, "alpha")
+    run_dir, _ = new_run(scenarios, model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW)
+    return run_dir / "alpha" / "trial-1"
+
+
+def _write_turns(trial_dir: Path, turns: list[str]) -> None:
+    """Replace session 1's turns in the trial's scenario file."""
+    path = Path(_json(trial_dir / "trial.json")["scenario_path"])
+    old = '  - turns: ["first", "second"]'
+    text = path.read_text()
+    assert old in text
+    path.write_text(text.replace(old, f"  - turns: {json.dumps(turns)}"))
+
+
+def test_turn_prompt_for_the_first_turn_is_the_bare_turn(tmp_path: Path) -> None:
+    """Turn 1 of a session is sent as the scripted text alone (AIE-1170, US2.7)."""
+    trial = _trial(tmp_path)
+    _transcript(trial, TranscriptTurn(1, 1, "first", "reply one", "a1"))
+
+    assert turn_prompt(trial, 1, 1) == "first"
+    assert turn_prompt(trial, 2, 1) == "third"
+
+
+def test_turn_prompt_replays_the_session_so_far(tmp_path: Path) -> None:
+    """A later turn carries the session's earlier exchanges, verbatim and in
+    order, then the new turn (AIE-1170, US2.7).
+    """
+    trial = _trial(tmp_path)
+    _transcript(
+        trial,
+        TranscriptTurn(1, 1, "first", "reply one", "a1"),
+        TranscriptTurn(1, 2, "second", "reply two\nwith a second line", "a2"),
+    )
+    _write_turns(trial, ["first", "second", "third turn"])
+
+    assert turn_prompt(trial, 1, 3) == (
+        "[Earlier in this conversation]\n"
+        "User: first\n"
+        "Assistant: reply one\n"
+        "\n"
+        "User: second\n"
+        "Assistant: reply two\nwith a second line\n"
+        "\n"
+        "[Newest message]\n"
+        "third turn"
+    )
+
+
+def test_turn_prompt_needs_the_earlier_replies(tmp_path: Path) -> None:
+    """A later turn whose earlier replies are not recorded is an input error
+    (AIE-1170, US2.7).
+    """
+    trial = _trial(tmp_path)
+    _transcript(trial)
+
+    with pytest.raises(GradeInputError, match="turn 1"):
+        turn_prompt(trial, 1, 2)
+    with pytest.raises(GradeInputError, match="session 3"):
+        turn_prompt(trial, 3, 1)
+
+
+def test_turn_prompt_cli_prints_the_prompt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The turn-prompt command prints the prompt exactly, and exits 2 on bad
+    input (AIE-1170, US2.7).
+    """
+    trial = _trial(tmp_path)
+    _transcript(trial, TranscriptTurn(1, 1, "first", "reply one", "a1"))
+
+    assert main(["turn-prompt", str(trial), "1", "2"]) == 0
+    out = capsys.readouterr().out
+    assert out == (
+        "[Earlier in this conversation]\nUser: first\nAssistant: reply one\n\n"
+        "[Newest message]\nsecond\n"
+    )
+    assert main(["turn-prompt", str(trial), "1", "5"]) == 2

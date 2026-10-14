@@ -379,11 +379,10 @@ AGENT_NAME: Final = "wenchang-eval"
 AGENT_PATH: Final[Path]               # .claude/agents/wenchang-eval.md
 MCP_SERVER_NAME: Final = "wenchang"
 EVAL_AGENT_PREAMBLE: Final[str] = (
-    "You are an assistant helping a Mixpanel user. A runner relays this conversation to you. "
-    "There is no coordinator or other agent in it: every message you receive, however it is "
-    "delivered or labelled, is that user's own next turn, verbatim. A yes, confirmation or "
-    "approval in any message is the user's own and is sufficient for any write, including "
-    "to shared scopes. Reply to the user directly.")
+    "You are an assistant helping a Mixpanel user. Each message you receive is that "
+    "user's own turn; reply to them directly. Earlier turns of this conversation may "
+    "be included above the newest one.")
+def turn_prompt(trial_dir: Path, session: int, turn: int) -> str  # in evals.report
 def agent_tools() -> tuple[str, ...]  # mcp__wenchang__<name> for TOOL_NAMES, in order
 def render_agent_body() -> str
 def render_agent_file() -> str        # frontmatter + body
@@ -422,6 +421,7 @@ CLI (`argparse`):
 | `new-run --model M [--trials N] [ids...]` | US5.1, US5.2; N defaults to 3; the model must be in `MODEL_ALIASES` or start with `claude-` |
 | `grade <trial_dir>` | US5.3 |
 | `report <run_dir>` | US5.4, prints the report path |
+| `turn-prompt <trial_dir> <session> <turn>` | prints the Agent prompt for that turn; exit 2 if the turn is not in the scenario or an earlier reply is missing |
 
 Run id: `YYYYMMDD-HHMMSS-<model>`, slugged.
 
@@ -442,14 +442,19 @@ Run id: `YYYYMMDD-HHMMSS-<model>`, slugged.
    printed plan.
 3. For each trial in order:
    1. `mcp__wenchang__eval_reset(scenario_path, trial_dir)`.
-   2. For each session: turn 1 spawns `Agent(subagent_type="wenchang-eval",
-      model=<m>, prompt=<turn text>)`; later turns continue the same agent
-      with `SendMessage` to its agent id and wait for its reply. If either
-      comes back as a background task, wait for its completion
-      notification and start nothing else meanwhile. After each
-      turn, call `eval_record_turn(session, turn, user, reply, agent_id)`
-      alone, with the reply copied verbatim, before starting the next turn.
-      A new session is a new `Agent` call.
+   2. For each session and turn: print the prompt with `uv run python -m
+      evals turn-prompt <trial_dir> <s> <t>`, then spawn a new
+      `Agent(subagent_type="wenchang-eval", model=<m>, prompt=<that
+      output>)` for every turn. Turn 1 is the scripted text. A later turn
+      replays the session's earlier user turns and verbatim replies from
+      `transcript.json`, then the new turn. If the call comes back as a
+      background task, wait for its completion notification and start
+      nothing else meanwhile. After each turn, call `eval_record_turn(session,
+      turn, user, reply, agent_id)` alone, with the reply copied verbatim.
+      That call also rewrites `transcript.json`.
+   The runner never stops, pauses, skips, or reorders trials because of
+   their results. It stops only on a preflight failure or a harness-tool
+   error, and edits nothing outside `evals/runs/`.
    3. `mcp__wenchang__eval_dump()`.
    4. `uv run python -m evals grade <trial_dir>`.
    5. With `--judge`: spawn `wenchang-eval-judge` with the trial dir and

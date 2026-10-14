@@ -74,24 +74,34 @@ list of turn texts.
 
 ## 3. Run each trial, in order, one at a time
 
+Never stop, pause, skip, or reorder trials because of their results. A
+failing trial is data, and the report is where it shows up. Stop only if
+the preflight fails, or if `eval_reset`, `eval_record_turn`, or `eval_dump`
+returns an error. Never edit any file outside `evals/runs/`.
+
 1. Call `mcp__wenchang__eval_reset(scenario_path, trial_dir)`.
 2. Run each session `s` (1-based), and each turn `t` (1-based) within it:
-   - **Turn 1 spawns a new subagent:**
+   - **Build the prompt.** Run `uv run python -m evals turn-prompt
+     <trial_dir> <s> <t>` and use its output exactly as the prompt. For
+     turn 1 it is the scripted text. For a later turn it replays the
+     session's earlier exchanges, then the new turn.
+   - **Every turn is a new subagent.** Call
      `Agent(subagent_type="wenchang-eval", description="eval <scenario>
-     s<s>", model=<model>, prompt=<turn text>)`. Later turns continue
-     that same subagent with `SendMessage` to its agent id.
+     s<s> t<t>", model=<model>, prompt=<that output>)`. Do not continue an
+     earlier subagent.
    - **Wait for the reply.** Agent calls run in the foreground under the
-     launch flags. If an `Agent` call or a `SendMessage` still comes back
-     as a background task, wait for its completion notification. Start
-     nothing else until then: no other tool call, turn, or trial.
+     launch flags. If an `Agent` call still comes back as a
+     background task, wait for its completion notification. Start nothing
+     else until then: no other tool call, turn, or trial.
    - **Record the turn.** Call `mcp__wenchang__eval_record_turn(session=s,
-     turn=t, user=<turn text>, reply=<the reply>, agent_id=<agent id>)`
-     alone, before the next turn starts. Pass the reply verbatim: copy it
-     exactly, and never summarize or trim it. Memory calls are assigned to
-     a turn by the timing of this call.
-   - **New session, new subagent.** A new session is always a new `Agent`
-     call, so it starts with no conversation context. Only memory carries
-     over.
+     turn=t, user=<the scripted turn text>, reply=<the reply>,
+     agent_id=<this subagent's id>)` alone, before the next turn starts.
+     Pass the reply verbatim: copy it exactly, and never summarize or trim
+     it. Memory calls are assigned to a turn by the timing of this call.
+     The call also updates `transcript.json`, which the next turn's prompt
+     is built from.
+   - **Sessions start fresh.** Turn 1 of a new session carries no earlier
+     exchanges. Only memory carries over between sessions.
 3. Call `mcp__wenchang__eval_dump()`.
 4. Run `uv run python -m evals grade <trial_dir>`.
 5. With `--judge`, spawn `Agent(subagent_type="wenchang-eval-judge",
@@ -100,7 +110,8 @@ list of turn texts.
    `<trial_dir>/judge.json`.
 
 Never answer on the eval agent's behalf. Never send it anything but the
-scripted turns. Never touch the store except through the harness tools.
+prompts `turn-prompt` prints. Never touch the store except through the
+harness tools.
 
 ## 4. Report
 

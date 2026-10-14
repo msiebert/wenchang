@@ -70,6 +70,7 @@ Test modules, abbreviated in the Test(s) column:
 | 2.5 `evals/mcp.json`; no root `.mcp.json` | agt `test_eval_mcp_config` |
 | 2.6 judge agent | agt `test_judge_agent` |
 | 2.7 runner doc contents | agt `test_runner_doc_names_everything_the_runner_needs` |
+| 2.7 turn prompts (every turn a fresh Agent prompt) | rpt `test_turn_prompt_for_the_first_turn_is_the_bare_turn`, `test_turn_prompt_replays_the_session_so_far`, `test_turn_prompt_needs_the_earlier_replies`, `test_turn_prompt_cli_prints_the_prompt`; srv `test_record_turn_writes_the_transcript` |
 | 3.1 every field; defaults | scn `test_full_scenario_parses_every_field`, `test_defaults_apply` |
 | 3.2 reference seeds first; collision rejected | scn `test_reference_seed_comes_first`, `test_seed_colliding_with_reference_seed_is_rejected` |
 | 3.3 21 malformed cases, incl. args not on every listed tool, unknown scope arg, non-string identity or kind, `seed_lines_preserved` on a non-seed (plus unknown tool, missing file) | scn `test_malformed_scenarios_are_rejected[*]`, `test_non_mapping_yaml_is_rejected`, `test_unknown_tool_name_is_rejected`, `test_missing_file_is_rejected` |
@@ -137,7 +138,9 @@ Test modules, abbreviated in the Test(s) column:
   run at a723dd8, it also says that relayed turns are the user's own,
   confirmations included. Claude Code delivers turns after the first as
   messages from another agent, and the agent had refused those
-  confirmations.
+  confirmations. That wording did not hold, so the harness now sends every
+  turn as a fresh `Agent` prompt that replays the session's earlier
+  exchanges. The preamble is back to plain framing.
 - **Tool surface.** The server exposes 3 harness tools beyond `TOOL_NAMES`.
   The agent's allowlist is exactly `TOOL_NAMES`. This is recorded in ADR
   0028 §4.
@@ -263,6 +266,16 @@ The N=1 run with `--judge` passed 18 of 23 scenarios.
 - `remembering-no-metric-value` still refused as "a coordinator's message".
   The preamble was tightened again (ADR 0028 §5, second note).
 - `remembering-stated-role` again saved nothing, two runs out of two.
+
+**N=3 attempt at 3910d91, aborted.** The run had two harness problems:
+
+- `curated-correction` trial 1 again refused the relayed turn-2 "yes".
+  Later turns are therefore no longer relayed. Every turn is now a fresh
+  `Agent` call with a replayed-transcript prompt from `turn-prompt`, and
+  the preamble is back to plain framing (ADR 0028 §5, third note).
+- The runner paused the run after one trial on its own. The runner doc
+  now forbids stopping, pausing, skipping, or reordering trials because of
+  their results.
 
 ## Live run
 

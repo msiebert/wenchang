@@ -579,3 +579,20 @@ def test_scenario_index_cap_reaches_the_store(tmp_path: Path, state: EvalState) 
     }
     assert len(second["entries"]) == 2
     assert second["capped"] == []
+
+
+def test_record_turn_writes_the_transcript(tmp_path: Path, state: EvalState) -> None:
+    """Each eval_record_turn rewrites transcript.json, so the next turn's prompt
+    can be built mid-trial (AIE-1170, US1.8).
+    """
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    trial = state.runs_root / "t"
+
+    async def body(client: Client) -> None:
+        await _reset(client, scenario, trial)
+        await _turn(client, 1, 1, reply="first reply")
+
+    _run(state, body)
+
+    turns = load_transcript(trial / "transcript.json")
+    assert [(t.session, t.turn, t.reply) for t in turns] == [(1, 1, "first reply")]

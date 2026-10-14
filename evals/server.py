@@ -187,10 +187,18 @@ class EvalState:
     def record_turn(
         self, session: int, turn: int, user: str, reply: str, agent_id: str | None = None
     ) -> None:
-        """Close the time window for (session, turn) and keep the exchange."""
+        """Close the time window for (session, turn), keep the exchange, and
+        rewrite transcript.json so the runner can build the next turn's prompt.
+        """
         with self._lock:
             self._boundaries.append(_Boundary(self._now_ms(), session, turn))
             self._turns.append(TranscriptTurn(session, turn, user, reply, agent_id))
+            trial_dir, turns = self._trial_dir, tuple(self._turns)
+        if trial_dir is not None:
+            trial_dir.mkdir(parents=True, exist_ok=True)
+            (trial_dir / "transcript.json").write_text(
+                json.dumps(transcript_to_json(turns), indent=2)
+            )
 
     def _snapshot(self) -> "_Snapshot":
         with self._lock:

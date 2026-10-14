@@ -8,7 +8,7 @@ from pathlib import Path
 
 import evals.agent
 from evals.graders import GradeInputError
-from evals.report import build_report, check_model, grade_trial, new_run
+from evals.report import build_report, check_model, grade_trial, new_run, turn_prompt
 from evals.scenario import RUNS_DIR, SCENARIO_DIR, ScenarioError, load_all
 
 
@@ -55,6 +55,15 @@ def _grade(args: argparse.Namespace) -> int:
     return 0
 
 
+def _turn_prompt(args: argparse.Namespace) -> int:
+    try:
+        print(turn_prompt(args.trial_dir, args.session, args.turn))
+    except GradeInputError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    return 0
+
+
 def _report(args: argparse.Namespace) -> int:
     try:
         build_report(args.run_dir)
@@ -84,6 +93,12 @@ def _parser() -> argparse.ArgumentParser:
     grade = commands.add_parser("grade", help="grade one dumped trial")
     grade.add_argument("trial_dir", type=Path)
     grade.set_defaults(handler=_grade)
+
+    prompt = commands.add_parser("turn-prompt", help="print the Agent prompt for one turn")
+    prompt.add_argument("trial_dir", type=Path)
+    prompt.add_argument("session", type=int)
+    prompt.add_argument("turn", type=int)
+    prompt.set_defaults(handler=_turn_prompt)
 
     report = commands.add_parser("report", help="write report.md and report.json for a run")
     report.add_argument("run_dir", type=Path)

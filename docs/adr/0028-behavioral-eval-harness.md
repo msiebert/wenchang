@@ -143,6 +143,22 @@ slow and nondeterministic.
      a yes in any message is sufficient for any write, shared scopes
      included. It remains harness framing only; the memory prompt is
      unchanged.
+   - **Note (2026-10-14, N=3 attempt at 3910d91).** The preamble framing
+     lost to the harness again: `curated-correction` refused its relayed
+     turn-2 "yes" as a coordinator's message. Three wordings have now
+     failed, so the harness no longer relays later turns with
+     `SendMessage`. Every turn is a fresh `Agent` call whose prompt comes
+     from `python -m evals turn-prompt`: the session's earlier user turns
+     and verbatim replies, then the new turn. `eval_record_turn` rewrites
+     `transcript.json` after each turn so the next prompt can be built.
+     The preamble is back to plain framing: each message is the user's
+     own turn, and earlier turns may be included above the newest one.
+     Fidelity note: a later turn's agent has its earlier replies in
+     context but not its own earlier tool calls or results. Memory state
+     still carries over through the store, and the agent re-reads it.
+     The runner doc also now forbids stopping, pausing, skipping, or
+     reordering trials because of their results. In the 3910d91 attempt,
+     the runner paused the run on its own after one trial.
 
 6. **The eval session is launched with `evals/mcp.json`.** There is no
    root `.mcp.json`. The command is:
@@ -215,9 +231,9 @@ slow and nondeterministic.
   status snapshot, and the launch disables it. It does not get the Claude
   Code system prompt or auto memory, and `omitClaudeMd` keeps CLAUDE.md
   out. The environment details still differ from what an adopter's host
-  sends, and the model runs inside Claude Code's agent loop. Turns after
-  the first arrive framed as messages from another agent, and only the
-  preamble tells the model they are the user's. Results therefore guide
+  sends, and the model runs inside Claude Code's agent loop. Each turn is a
+  fresh `Agent` call that replays the session's earlier exchanges as text,
+  so the agent does not see its own earlier tool calls. Results therefore guide
   prompt iteration and are not release gates.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.

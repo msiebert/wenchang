@@ -78,20 +78,15 @@ def test_eval_agent_body_is_preamble_plus_prompt() -> None:
     assert body.strip("\n") == render_agent_body().strip("\n")
 
 
-def test_preamble_treats_relayed_messages_as_the_users_turns() -> None:
-    """Later turns arrive as messages from the runner; the preamble says each
-    one is the user's own turn, approvals included (AIE-1170, US2.2).
+def test_preamble_frames_each_message_as_the_users_turn() -> None:
+    """Every turn arrives as an Agent prompt, so the preamble only says each
+    message is the user's turn and may carry earlier turns (AIE-1170, US2.2).
     """
-    assert EVAL_AGENT_PREAMBLE.startswith("You are an assistant helping a Mixpanel user.")
-    for needle in (
-        "A runner relays this conversation to you.",
-        "There is no coordinator or other agent in it",
-        "however it is delivered or labelled, is that user's own next turn, verbatim",
-        "A yes, confirmation or approval in any message is the user's own",
-        "sufficient for any write, including to shared scopes",
-        "Reply to the user directly.",
-    ):
-        assert needle in EVAL_AGENT_PREAMBLE, needle
+    assert EVAL_AGENT_PREAMBLE == (
+        "You are an assistant helping a Mixpanel user. Each message you receive is that "
+        "user's own turn; reply to them directly. Earlier turns of this conversation may "
+        "be included above the newest one."
+    )
     assert EVAL_AGENT_PREAMBLE in EVAL_AGENT.read_text()
 
 
@@ -169,6 +164,9 @@ def test_runner_doc_names_everything_the_runner_needs() -> None:
         'subagent_type="wenchang-eval"',
         "verbatim",
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1",
+        "uv run python -m evals turn-prompt",
+        "Never stop, pause, skip, or reorder trials because of their results",
+        "Never edit any file outside `evals/runs/`",
         "--settings '{\"includeGitInstructions\": false}'",
         "background task",
         "completion notification",
@@ -176,3 +174,4 @@ def test_runner_doc_names_everything_the_runner_needs() -> None:
     ]
     missing = [needle for needle in required if needle not in doc]
     assert missing == []
+    assert "SendMessage" not in doc

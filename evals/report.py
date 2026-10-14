@@ -15,7 +15,13 @@ from types import MappingProxyType
 from typing import Any, Final, cast
 
 import evals.agent
-from evals.graders import GradeInputError, grade, load_store_dump, load_trace
+from evals.graders import (
+    GradeInputError,
+    grade,
+    load_store_dump,
+    load_trace,
+    load_transcript,
+)
 from evals.scenario import RUNS_DIR, Scenario, ScenarioError, assertion_kind, load_scenario
 
 __all__ = [
@@ -25,6 +31,7 @@ __all__ = [
     "check_model",
     "grade_trial",
     "new_run",
+    "turn_prompt",
 ]
 
 MODEL_ALIASES: Final[frozenset[str]] = frozenset({"sonnet", "opus", "haiku", "fable", "inherit"})
@@ -143,6 +150,37 @@ def _trial_scenario(trial_dir: Path) -> tuple[Scenario, int]:
     except ScenarioError as exc:
         raise GradeInputError(str(exc)) from None
     return scenario, int(info["trial"])
+
+
+def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
+    """The Agent prompt for one turn of a trial.
+
+    Turn 1 of a session is the scripted text alone. A later turn replays the
+    session's earlier exchanges from transcript.json, user text and verbatim
+    reply in order, then gives the new turn. Raises GradeInputError if the
+    turn is not in the scenario or an earlier reply is not recorded.
+    """
+    scenario, _ = _trial_scenario(trial_dir)
+    if not 1 <= session <= len(scenario.sessions):
+        raise GradeInputError(f"{trial_dir}: scenario has no session {session}")
+    turns = scenario.sessions[session - 1].turns
+    if not 1 <= turn <= len(turns):
+        raise GradeInputError(f"{trial_dir}: session {session} has no turn {turn}")
+    if turn == 1:
+        return turns[0]
+    recorded = {(t.session, t.turn): t for t in load_transcript(trial_dir / "transcript.json")}
+    lines = ["[Earlier in this conversation]"]
+    for earlier in range(1, turn):
+        exchange = recorded.get((session, earlier))
+        if exchange is None:
+            raise GradeInputError(
+                f"{trial_dir}: transcript.json has no reply for session {session} turn {earlier}"
+            )
+        if earlier > 1:
+            lines.append("")
+        lines += [f"User: {exchange.user}", f"Assistant: {exchange.reply}"]
+    lines += ["", "[Newest message]", turns[turn - 1]]
+    return "\n".join(lines)
 
 
 def grade_trial(trial_dir: Path) -> dict[str, Any]:
