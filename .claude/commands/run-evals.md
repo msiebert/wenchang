@@ -93,6 +93,12 @@ returns an error. Never edit any file outside `evals/runs/`.
      `Agent(subagent_type="wenchang-eval", description="eval <scenario>
      s<s> t<t>", model=<model>, prompt=<that output>)`. Do not continue an
      earlier subagent.
+   - **Always pass the model.**
+     Every `Agent` call, including every later turn, passes `model=<model>`.
+     The agent definition says `model: inherit`, so a call without it runs
+     on the runner's own model.
+     A turn run on the wrong model invalidates the trial: call
+     `eval_reset` again and rerun the trial from session 1, turn 1.
    - **Wait for the reply.** Agent calls run in the foreground under the
      launch flags. If an `Agent` call still comes back as a
      background task, wait for its completion notification. Start nothing

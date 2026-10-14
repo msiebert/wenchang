@@ -156,6 +156,11 @@ slow and nondeterministic.
      Fidelity note: a later turn's agent has its earlier replies in
      context but not its own earlier tool calls or results. Memory state
      still carries over through the store, and the agent re-reads it.
+     Because every turn is a new `Agent` call and the agent definition
+     uses `model: inherit`, every call must pass `model=<model>`. A turn
+     run on the wrong model invalidates the trial, which is reset and rerun
+     from turn 1. In run A at 9c51a50, the runner omitted it once on a
+     turn 2, noticed, and reran the trial.
      The runner doc also now forbids stopping, pausing, skipping, or
      reordering trials because of their results. In the 3910d91 attempt,
      the runner paused the run on its own after one trial.

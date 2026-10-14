@@ -181,6 +181,8 @@ def test_runner_doc_names_everything_the_runner_needs() -> None:
         "verbatim",
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1",
         "uv run python -m evals turn-prompt",
+        "Every `Agent` call, including every later turn, passes `model=<model>`",
+        "A turn run on the wrong model invalidates the trial",
         "Never stop, pause, skip, or reorder trials because of their results",
         "Never edit any file outside `evals/runs/`",
         "--settings '{\"includeGitInstructions\": false}'",
