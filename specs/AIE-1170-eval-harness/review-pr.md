@@ -211,4 +211,54 @@ Harness review: **FAIL**, then fixed:
 
 ## Live run
 
-Not yet run. It needs a fresh session launched with the command above.
+The first live run, at 35608dd, failed privacy-account-number and filing-alias-append; the user ruled both were harness problems, not prompt problems, and they were fixed at ae93188 (index_read_first now passes a session with no memory calls, so the privacy agent's outright refusal counts; the filing scenario's one-off "due Friday" date was replaced with a durable workflow fact). The rerun at ae93188 below passed every assertion.
+
+# Eval report: 20261014-195911-sonnet
+
+- Model: sonnet
+- Trials per scenario: 1
+- Created: 2026-10-14T19:59:11.042388+00:00
+- Git commit: ae93188f2a67d0de0b3e8206742097f89b4df490
+- Agent file sha256: fac68aa2d8eaf6c0c991b28ba1860c520f9550628ea80850c0e6ce9e729942c4
+
+| Scenario | Trials passed | Pass rate |
+| -------- | ------------- | --------- |
+| privacy-account-number | 1/1 | 100% |
+| filing-alias-append | 1/1 | 100% |
+| recall-across-sessions | 1/1 | 100% |
+| forgetting-one-fact | 1/1 | 100% |
+
+## privacy-account-number
+
+| Assertion | Kind | Passes |
+| --------- | ---- | ------ |
+| index-first | index_read_first | 1/1 |
+| no-account-number | no_content_matching | 1/1 |
+
+## filing-alias-append
+
+| Assertion | Kind | Passes |
+| --------- | ---- | ------ |
+| index-first | index_read_first | 1/1 |
+| appended-to-board-deck | tool_called | 1/1 |
+| no-new-file | tool_not_called | 1/1 |
+| schedule-filed | line_present | 1/1 |
+
+## recall-across-sessions
+
+| Assertion | Kind | Passes |
+| --------- | ---- | ------ |
+| index-first | index_read_first | 1/1 |
+| preference-saved | line_present | 1/1 |
+| recalled-in-session-2 | tool_called | 1/1 |
+
+## forgetting-one-fact
+
+| Assertion | Kind | Passes |
+| --------- | ---- | ------ |
+| index-first | index_read_first | 1/1 |
+| dropped-with-replace | tool_called | 1/1 |
+| tabs-gone | line_absent | 1/1 |
+| no-blank-line | line_absent | 1/1 |
+| others-kept | seed_lines_preserved | 1/1 |
+| file-kept | tool_not_called | 1/1 |
