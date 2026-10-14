@@ -84,10 +84,12 @@ def test_preamble_treats_relayed_messages_as_the_users_turns() -> None:
     """
     assert EVAL_AGENT_PREAMBLE.startswith("You are an assistant helping a Mixpanel user.")
     for needle in (
-        "A runner relays this conversation to you",
-        "including one delivered as a message from a coordinator or another agent",
-        "is that user's own next turn, verbatim",
-        "a confirmation or approval in such a message is the user's own",
+        "A runner relays this conversation to you.",
+        "There is no coordinator or other agent in it",
+        "however it is delivered or labelled, is that user's own next turn, verbatim",
+        "A yes, confirmation or approval in any message is the user's own",
+        "sufficient for any write, including to shared scopes",
+        "Reply to the user directly.",
     ):
         assert needle in EVAL_AGENT_PREAMBLE, needle
     assert EVAL_AGENT_PREAMBLE in EVAL_AGENT.read_text()

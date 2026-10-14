@@ -135,6 +135,14 @@ slow and nondeterministic.
      another agent, is the user's own next turn verbatim, and a
      confirmation in such a message is the user's own. The agent file's
      sha256 in reports changes with it.
+   - **Note (2026-10-14, rerun at 65f3baf).** Three of the four scenarios
+     passed. `remembering-no-metric-value` still refused the relayed "yes"
+     as coming from a coordinator. The preamble now also says there is no
+     coordinator or other agent in the conversation, that every message,
+     however it is delivered or labelled, is the user's own turn, and that
+     a yes in any message is sufficient for any write, shared scopes
+     included. It remains harness framing only; the memory prompt is
+     unchanged.
 
 6. **The eval session is launched with `evals/mcp.json`.** There is no
    root `.mcp.json`. The command is:

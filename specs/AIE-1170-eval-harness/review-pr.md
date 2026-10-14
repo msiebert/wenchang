@@ -255,6 +255,15 @@ The N=1 run with `--judge` passed 18 of 23 scenarios.
   is kept as is, and the N=3 run will show whether the behavior is
   consistent.
 
+**Rerun at 65f3baf.** The four affected scenarios plus
+`remembering-stated-role` were rerun:
+
+- `curated-correction`, `filing-new-acronym`, and `slots-ask-before-shared`
+  now write after the relayed yes.
+- `remembering-no-metric-value` still refused as "a coordinator's message".
+  The preamble was tightened again (ADR 0028 §5, second note).
+- `remembering-stated-role` again saved nothing, two runs out of two.
+
 ## Live run
 
 The first live run, at 35608dd, failed privacy-account-number and filing-alias-append; the user ruled both were harness problems, not prompt problems, and they were fixed at ae93188 (index_read_first now passes a session with no memory calls, so the privacy agent's outright refusal counts; the filing scenario's one-off "due Friday" date was replaced with a durable workflow fact). The rerun at ae93188 below passed every assertion.

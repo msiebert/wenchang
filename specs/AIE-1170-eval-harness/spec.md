@@ -232,7 +232,10 @@ judge items, wrong move, and exact fail set.
   user's own next turn verbatim, including one Claude Code delivers as a
   message from a coordinator or another agent. A confirmation in such a
   message is the user's own. This last point was added after the live run
-  at a723dd8, where relayed turn-2 confirmations were refused. The prompt
+  at a723dd8, where relayed turn-2 confirmations were refused. After the
+  rerun at 65f3baf, the preamble was tightened again: it says there is no
+  coordinator or other agent in the conversation, and that a yes in any
+  message is sufficient for any write, shared scopes included. The prompt
   text itself is byte-identical. ADR 0028 records it.
 - **Context.** A subagent gets only its own system prompt plus Claude
   Code's environment details, and a git status snapshot unless disabled.
