@@ -1,0 +1,35 @@
+# Prompt: "Use `write_file` only for creating a file, restructuring many
+# lines, dropping a name from `aliases`, or rewriting the `description` with
+# no fact to write." and "File each fact in the file that is about its
+# subject, not whichever file happens to be open."
+id: write-new-subject
+title: Creates a new file for a new subject instead of appending to an unrelated one
+category: write-mechanics
+source: specs/AIE-1051-write-mechanics/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: charts
+    content: |
+      - [stated] Prefers charts with a dark background.
+    description: Chart style preferences
+    aliases: [chart-style]
+sessions:
+  - turns:
+      - "Every Monday morning I check the refunds dashboard before standup."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: created-file
+    tool: write_file
+    args: {scope: user}
+    succeeded: true
+  - kind: tool_not_called
+    id: not-in-charts
+    tool: append_line
+    args: {name: charts}
+  - kind: line_present
+    id: routine-saved
+    pattern: "(?i)refund"
+    scope: user

@@ -1,5 +1,6 @@
 """The eval scenario format and its loader (AIE-1170, US3)."""
 
+import re
 import textwrap
 from pathlib import Path
 
@@ -556,6 +557,21 @@ CORPUS = {
     "recall-replace-fact",
     "forgetting-whole-file",
     "slots-ask-before-shared",
+    "privacy-health-shared",
+    "privacy-minor",
+    "privacy-sensitive-private",
+    "privacy-insist-bank",
+    "remembering-stated-role",
+    "remembering-no-metric-value",
+    "remembering-expiry",
+    "filing-ambiguous-match",
+    "filing-capped-area",
+    "write-correct-seeded-fact",
+    "write-new-subject",
+    "curated-correction",
+    "curated-shared-conflict",
+    "forgetting-two-files",
+    "forgetting-only-fact",
 }
 
 
@@ -569,7 +585,7 @@ def test_corpus_loads_with_unique_ids() -> None:
         assert all(type(a) in ASSERTION_KINDS.values() for a in s.assertions)
 
 
-def test_corpus_is_the_planned_eight() -> None:
+def test_corpus_is_the_planned_set() -> None:
     """The corpus is exactly the planned scenarios, covers the four required
     categories, cites existing sources and a prompt sentence, and checks the
     index first (AIE-1170, US3.5).
@@ -582,3 +598,14 @@ def test_corpus_is_the_planned_eight() -> None:
         assert s.source == "AIE-1170" or (ROOT / s.source).is_file(), s.id
         assert s.path.read_text().startswith("# Prompt: "), s.id
         assert any(isinstance(a, IndexReadFirst) and a.id == "index-first" for a in s.assertions)
+
+
+def test_judge_rubrics_name_their_turn() -> None:
+    """Every judge rubric starts by naming the reply it grades (AIE-1170, US9.6)."""
+    offenders = [
+        (s.id, j.id)
+        for s in load_all()
+        for j in s.judge
+        if re.match(r"The (session \d+ )?turn \d+ reply", j.rubric) is None
+    ]
+    assert offenders == []

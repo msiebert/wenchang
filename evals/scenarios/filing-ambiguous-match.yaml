@@ -1,0 +1,39 @@
+# Prompt: "If a match is ambiguous, read the top one or two candidates with
+# `read_file`, never the whole store."
+id: filing-ambiguous-match
+title: Reads the ambiguous candidates before filing a fact about Atlas
+category: filing
+source: specs/AIE-1049-filing-dedup/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: atlas-migration
+    content: |
+      - [stated] Leads the Atlas warehouse migration.
+    description: Notes on Atlas, the warehouse migration
+    aliases: [atlas]
+  - scope: user
+    area: workflows
+    name: atlas-launch
+    content: |
+      - [stated] Owns the Atlas mobile app launch checklist.
+    description: Notes on Atlas, the mobile app launch
+    aliases: [atlas]
+sessions:
+  - turns:
+      - "For Atlas, every change now needs sign-off from the data platform team."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: called_before
+    id: read-before-write
+    first: {tool: read_file, args: {name: {matches: "^atlas-"}}}
+    then: {tool: [write_file, append_line, replace_fact]}
+  - kind: tool_called
+    id: at-most-two-reads
+    tool: read_file
+    min: 0
+    max: 2
+  - kind: tool_not_called
+    id: no-new-file
+    tool: write_file

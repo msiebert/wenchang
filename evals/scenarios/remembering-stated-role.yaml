@@ -1,0 +1,17 @@
+# Prompt: "`[stated]`: the user told you directly." and "Write facts as they
+# arise, before you ask a follow-up question, because the conversation may end
+# first." and "otherwise use user."
+id: remembering-stated-role
+title: Saves the user's stated role as a stated fact in the user scope
+category: remembering
+source: specs/AIE-1050-remembering/spec.md
+sessions:
+  - turns:
+      - "I'm the PM for checkout. What three metrics should I check every week?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: role-saved
+    pattern: "\\[stated\\].*(\\bPM\\b|(?i:product manager))"
+    scope: user

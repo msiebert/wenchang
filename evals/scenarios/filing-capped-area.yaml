@@ -1,0 +1,53 @@
+# Prompt: "If none matches and the target area is listed under `capped`, call
+# `list_prefix(scope, area)` for that area only and check it the same way."
+# and "If a file on the subject exists, append to it or edit it instead of
+# creating a duplicate."
+id: filing-capped-area
+title: Lists only the capped area, then files the fact in the existing file
+category: filing
+source: specs/AIE-1049-filing-dedup/spec.md
+index_max_bytes: 1
+seed:
+  - scope: user
+    area: preferences
+    name: charts
+    content: |
+      - [stated] Prefers charts with a dark background.
+    description: Chart style preferences
+    aliases: [chart-style]
+  - scope: user
+    area: preferences
+    name: sql-style
+    content: |
+      - [stated] Prefers CTEs over nested subqueries.
+    description: SQL style preferences
+    aliases: [sql]
+  - scope: user
+    area: workflows
+    name: weekly-review
+    content: |
+      - [observed] Reviews the checkout funnel every Monday.
+    description: Weekly funnel review routine
+    aliases: [monday-review]
+sessions:
+  - turns:
+      - "I also want my charts to use horizontal bars by default."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: listed-capped-area
+    tool: list_prefix
+    args: {scope: user, area: preferences}
+  - kind: tool_not_called
+    id: no-scope-wide-list
+    tool: list_prefix
+    args: {area: null}
+  - kind: tool_called
+    id: filed-in-charts
+    tool: [append_line, replace_fact]
+    args: {scope: user, area: preferences, name: charts}
+    succeeded: true
+  - kind: tool_not_called
+    id: no-new-file
+    tool: write_file

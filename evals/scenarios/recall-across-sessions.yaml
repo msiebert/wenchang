@@ -23,4 +23,4 @@ assertions:
     succeeded: true
 judge:
   - id: recommends-bar-charts
-    rubric: The session 2 reply recommends bar charts because of the stored preference.
+    rubric: The session 2 turn 1 reply recommends bar charts because of the stored preference.

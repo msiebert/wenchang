@@ -1,0 +1,41 @@
+# Prompt: "Delete the file if the fact was the file's only fact or the user
+# means the whole file"
+# Covers specs/AIE-1053-forgetting/spec.md E2, for a single-fact file.
+id: forgetting-only-fact
+title: Deletes a file whose only fact the user asks to forget
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: timezone
+    content: |
+      - [stated] Works in Pacific time.
+    description: User's time zone
+    aliases: [timezone]
+  - scope: user
+    area: preferences
+    name: charts
+    content: |
+      - [stated] Prefers dark backgrounds.
+    description: Chart preferences
+    aliases: [chart-style]
+sessions:
+  - turns:
+      - "Forget my time zone."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: file_absent
+    id: file-deleted
+    scope: user
+    area: preferences
+    name: timezone
+  - kind: tool_called
+    id: used-delete
+    tool: delete_file
+    args: {name: timezone}
+    succeeded: true
+  - kind: no_content_matching
+    id: no-pacific
+    pattern: "(?i)pacific"

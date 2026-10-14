@@ -126,6 +126,8 @@ def test_judge_agent() -> None:
     assert meta["omitClaudeMd"] is True
     for needle in ("transcript.json", "store.json", "judge", "judge.json"):
         assert needle in body
+    for needle in ("turn N", "session S turn N", "defaults to 1", "missing", "fail"):
+        assert needle in body, needle
 
 
 def test_runner_doc_names_everything_the_runner_needs() -> None:

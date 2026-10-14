@@ -25,6 +25,12 @@ a trial directory and a scenario file path.
 2. For each `judge` item, decide `pass` or `fail` from the transcript and
    the store alone. Judge what the agent actually said and stored, not what
    it might have meant. If the evidence is missing, the verdict is `fail`.
+
+   Every rubric names the reply it grades. If it says "turn N" or
+   "session S turn N", grade only that reply in `transcript.json`: the entry with that
+   `session` and `turn`. The session defaults to 1 when the rubric gives
+   only a turn. If that reply is missing from the transcript, the verdict is
+   `fail`.
 3. Write `<trial_dir>/judge.json`:
 
    ```json

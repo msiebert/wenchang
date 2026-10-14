@@ -1,0 +1,37 @@
+# Prompt: "Correct a curated fact only when the user explicitly says it is
+# wrong" and "If a new fact contradicts one stored in a shared scope, show the
+# stored fact, say what conflicts, and ask which to keep." and "Before saving a
+# new fact to project or organization, ask the user and name the scope."
+# Covers specs/AIE-1055-prompt-slots/spec.md #3 only as a shared-scope
+# conflict; the system-of-record variant is deferred.
+id: curated-shared-conflict
+title: Surfaces a conflict with a curated shared fact before writing
+category: curated
+source: specs/AIE-1055-prompt-slots/spec.md
+seed:
+  - scope: project
+    area: system
+    name: event-catalog
+    content: |
+      - [system] Signup fires when the user submits the registration form.
+    description: Curated notes on event definitions
+    aliases: [events, signup]
+sessions:
+  - turns:
+      - "For us, Signup means the user has verified their email, not just submitted the form."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: no-write-before-ask
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {scope: {matches: "^(project|organization)$"}}
+    session: 1
+    turn: 1
+  - kind: tool_not_called
+    id: no-system-write
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {area: system}
+judge:
+  - id: surfaces-discrepancy
+    rubric: The turn 1 reply shows the stored Signup definition, says it conflicts with the user's, and asks which to keep.
