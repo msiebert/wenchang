@@ -27,10 +27,10 @@ Live runs stay out of `make check`. One live run is required before merge.
 | - | ----- | ---- | ---- |
 | US1 | eval server | list tools, reset, call, dump | Tools are `TOOL_NAMES` plus 3 harness tools, with descriptions equal to `tool_descriptions("Mixpanel")`. Trace records carry `request_id`, `duration_s`, and start and completion times. `eval_record_turn` stamps a time boundary, and calls are tagged by time window. `trial_dir` must be under the runs root. Works over stdio |
 | US2 | agent, judge, `evals/mcp.json`, runner doc | parse | Tools are exactly the 7 `mcp__wenchang__*`, with `omitClaudeMd: true`. A drift test pins the body. The config uses `--directory .`, with no variable expansion. There is no root `.mcp.json`. The doc has the launch command and preflight |
-| US3 | scenario YAML | load | Typed `Scenario` reusing `SeedFile`. 16 rejection cases, including `min > max`. The corpus is exactly 8 scenarios |
-| US4 | 10 assertion kinds | grade canned dumps and traces | Pass and fail per kind. Order is `(session, turn, started_ms, seq)`, never `request_id`, which restarts per connection. `index_read_first` is strict: a parallel batch with the index read fails. `no_content_matching` never scans `expected_version`, `old_string`, or `delete_file` calls. Graders never import `mcp` |
+| US3 | scenario YAML | load | Typed `Scenario` reusing `SeedFile`. 16 rejection cases, including `min > max`. The corpus is exactly 23 scenarios (8, then 15 added in US9) |
+| US4 | 11 assertion kinds (`called_before` added in US9) | grade canned dumps and traces | Pass and fail per kind. Order is `(session, turn, started_ms, seq)`, never `request_id`, which restarts per connection. `index_read_first` is strict: a parallel batch with the index read fails. `no_content_matching` never scans `expected_version`, `old_string`, or `delete_file` calls. Graders never import `mcp` |
 | US5 | CLI | `new-run`, `grade`, `report` | Model and ids are validated. Per-assertion pass counts over N. Judge verdicts are kept separate |
-| US6 | 8 scenarios | scripted correct and wrong drivers | Correct runs pass. Each wrong move fails exactly its listed assertions. Every scenario cites the prompt sentence it tests, and shared-scope writes get a confirmation turn |
+| US6 | 23 scenarios | scripted correct and wrong drivers | Correct runs pass. Each wrong move fails exactly its listed assertions. Every scenario cites the prompt sentence it tests, and shared-scope writes get a confirmation turn |
 | US7 | packaging, fixture | inspect, rebase | `dev-mode-dirs`. The fixture is moved with importers rewritten (no shim), before and after #34 |
 | US8 | `make check`, docs, PR | run, read | No model calls. `src/` never imports `evals`. ADR 0028, ARCHITECTURE, README, glossary, AGENTS.md. "Do not merge before one live N=1 run" |
 
@@ -47,12 +47,12 @@ The full Given/When/Then for all 56 criteria is in [spec.md](spec.md).
 | `omitClaudeMd: true`, plus a 2-sentence framing preamble | Default loading; bare prompt | CLAUDE.md files would contaminate trials. Without framing, a subagent treats turns as delegated tasks |
 | Replies recorded verbatim by instruction | Reading Claude Code's transcript jsonl | That layout is internal |
 | `dev-mode-dirs` makes `evals` importable | pytest `pythonpath` | Works for subprocesses, pyright, and pytest. Side effect: `tests`, `scripts`, and `docs` become namespace packages |
-| 8 scenarios, each with correct and wrong scripted drivers | 17 unproven scenarios | Unproven assertions can ship unsatisfiable |
+| 23 scenarios, each with correct and wrong scripted drivers | porting every candidate unproven | Unproven assertions can ship unsatisfiable |
 
 ## Files/modules to be touched
 
 - New `evals/` modules: `scenario`, `graders`, `server`, `agent`, `report`,
-  `__main__`, and `reference_adopter`. Also `mcp.json` and 8 scenario
+  `__main__`, and `reference_adopter`. Also `mcp.json` and 23 scenario
   YAMLs.
 - New `.claude/` files: `agents/wenchang-eval.md` (generated),
   `agents/wenchang-eval-judge.md`, and `commands/run-evals.md`.
@@ -171,3 +171,42 @@ build proceeds without a further review.
   - The preflight dir is `evals/runs/preflight/`.
   - T6 runs after T5.
   - `slots-ask-before-shared` has no reference seed.
+
+## Corpus expansion (2026-10-14)
+
+The user asked for the corpus to grow from 8 to about 20 scenarios on this
+branch. It now has 23. The expansion added:
+
+- **15 scenarios:** 4 privacy, 3 remembering, 2 filing, 2 write
+  mechanics, 2 curated, and 2 forgetting.
+- **`called_before`:** an ordering kind for reading before writing.
+- **`index_max_bytes`:** a per-scenario index cap, for the capped-area
+  scenario.
+- **Turn-named judge rubrics:** every rubric names the reply it grades,
+  and the judge agent has a turn rule.
+
+**Spec review round 1: FAIL** (4 blocking, 8 should-fix), all folded in.
+
+- **Blocking:**
+  - The ambiguous-Atlas turn let an agent skip reading. The turn now fits
+    both seeds, and `first` must read an `atlas-*` file.
+  - The system-of-record scenario forbade user-scope writes. It is now
+    `curated-shared-conflict`, narrowed to shared scopes and `system/`.
+  - Stale counts in 6.1, 6.2, and the review files are fixed.
+  - Judge rubrics now name their turn, existing scenarios included.
+- **Should-fix:**
+  - `called_before` timing, session, and failed-call rules are now
+    precise.
+  - Regex false positives are tightened: minor, metric, expiry, and PM.
+  - The insist rubric is softened.
+  - The PNG line is identical in both seeds, and `no-png-left` covers
+    descriptions.
+  - E5 is deferred.
+  - The timezone seed is neutral.
+  - The judge has a turn rule.
+
+**Round 2: PASS.** Three should-fixes were folded in: stale "eight"
+counts in the plan, the AIE-1055 #3 system-of-record variant added to
+the deferred list, and failed `first` calls counting unless `succeeded`
+is set.
+

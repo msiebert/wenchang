@@ -24,7 +24,7 @@ several specs list scenarios that nothing ran. This adds a dev-only
 - **Eval agent.** `wenchang-eval` is a Claude Code subagent restricted to
   those seven tools, with `omitClaudeMd`. Its system prompt is a framing
   preamble plus the reference memory prompt.
-- **Scenarios and graders.** Scenarios are YAML, with eight shipped.
+- **Scenarios and graders.** Scenarios are YAML, with 23 shipped.
   Deterministic graders work over the store dump and a timed tool-call
   trace. An optional LLM-judge subagent is included.
 - **Runner and CLI.** `/run-evals` is the runner, and `python -m evals`
@@ -74,7 +74,7 @@ Test modules, abbreviated in the Test(s) column:
 | 3.2 reference seeds first; collision rejected | scn `test_reference_seed_comes_first`, `test_seed_colliding_with_reference_seed_is_rejected` |
 | 3.3 21 malformed cases, incl. args not on every listed tool, unknown scope arg, non-string identity or kind, `seed_lines_preserved` on a non-seed (plus unknown tool, missing file) | scn `test_malformed_scenarios_are_rejected[*]`, `test_non_mapping_yaml_is_rejected`, `test_unknown_tool_name_is_rejected`, `test_missing_file_is_rejected` |
 | 3.4 corpus loads; unique ids; closed kinds | scn `test_corpus_loads_with_unique_ids`, `test_assertion_kinds_are_the_closed_set` |
-| 3.5 corpus is the planned eight; categories; sources; prompt cite | scn `test_corpus_is_the_planned_eight` |
+| 3.5 corpus is the planned 23; categories; sources; prompt cite; rubrics name their turn | scn `test_corpus_is_the_planned_set`, `test_judge_rubrics_name_their_turn` |
 | 4.1 `index_read_first`; a session with no memory calls passes | grd `test_index_read_first_*` (6 tests) |
 | 4.2 `file_absent` | grd `test_file_absent` |
 | 4.3 `line_present` / `line_absent` | grd `test_line_present_and_absent_with_filters`, `test_line_patterns_are_case_sensitive_as_written`, `test_line_absent_is_vacuous_without_matching_files`, `test_blank_line_is_detected` |
@@ -92,17 +92,24 @@ Test modules, abbreviated in the Test(s) column:
 | 4.15 shuffled trace grades the same | grd `test_grade_ignores_trace_order` |
 | 4.16 (a), (b) timing order; restarting request ids; 0/0 last | grd `test_ordering_uses_start_time_not_seq_or_request_id`, `test_order_key_puts_untagged_calls_last` |
 | 4.16 (c) late record tagged by start time | srv `test_late_record_is_tagged_by_start_time` |
+| 4.17 `called_before` | grd `test_called_before_passes_when_first_completes_before_then_starts`, `test_called_before_fails_unless_strictly_before[*]`, `test_called_before_is_vacuous_without_a_then_call`, `test_called_before_is_per_session`, `test_called_before_honors_first_args`, `test_called_before_counts_failed_calls_unless_succeeded_is_set` |
 | 5.1 `new-run` metadata and plan; run-id collision suffix | rpt `test_new_run_writes_metadata_and_plan`, `test_new_run_cli_prints_the_plan`, `test_run_ids_do_not_collide` |
 | 5.2 unknown id or model exits 2, creates nothing | rpt `test_new_run_rejects_unknown_ids_and_models[*]` |
 | 5.3 `grade` | rpt `test_grade_writes_results`, `test_grade_rejects_missing_inputs` |
 | 5.4 `report` counts; not-run trials; stale grades regraded; malformed `run.json` / `grade.json` exit 2 | rpt `test_report_counts_passes_and_lists_unrun_trials`, `test_report_cli_prints_the_path`, `test_report_regrades_when_dumps_are_newer`, `test_report_rejects_malformed_run_and_grade_files[*]` |
 | 5.5 judge verdicts separate; invalid flagged | rpt `test_report_keeps_judge_verdicts_separate` |
-| 6.1 correct drivers pass, 1/1 | e2e `test_correct_driver_passes_every_assertion[*8]`, `test_every_shipped_scenario_has_scripted_drivers` |
-| 6.2 wrong drivers fail exactly the listed ids, 0/1 | e2e `test_wrong_driver_fails_exactly_the_listed_assertions[*8]` |
+| 6.1 correct drivers pass, 1/1 (all 23) | e2e `test_correct_driver_passes_every_assertion[*23]`, `test_every_shipped_scenario_has_scripted_drivers` |
+| 6.2 wrong drivers fail exactly the listed ids, 0/1 (all 23) | e2e `test_wrong_driver_fails_exactly_the_listed_assertions[*23]` |
 | 7.1 wheel, `dev-mode-dirs`, pyright, yaml dev-only | pkg `test_wheel_ships_only_the_library`, `test_built_wheel_contains_only_the_library`, `test_editable_install_adds_repo_root`, `test_pyright_covers_evals`, `test_yaml_is_a_dev_dependency_only` |
 | 7.2 import from any cwd | pkg `test_evals_imports_from_any_working_directory` |
 | 7.3 fixture moved; importers rewritten | pkg `test_tests_fixture_module_is_gone`, `test_no_test_imports_the_old_fixture_module`; existing prompt and MCP tests unchanged and green |
 | 7.4 post-#34 relocation: tests copy deleted, #34's importers and doc sites point at `evals.reference_adopter` | pkg `test_evals_holds_the_only_reference_adopter`; #34's tests unchanged apart from the import line and green |
+| 9.1 `called_before` grading | (see 4.17) |
+| 9.2 `called_before` parsing and rejection | scn `test_called_before_parses`, `test_malformed_called_before_is_rejected[*]` |
+| 9.3 `index_max_bytes` parsing | scn `test_index_max_bytes_parses`, `test_bad_index_max_bytes_is_rejected[*]` |
+| 9.4 the cap reaches the store | srv `test_scenario_index_cap_reaches_the_store` |
+| 9.5 23 scenarios proven | (see 6.1, 6.2) |
+| 9.6 rubrics name their turn; judge turn rule | scn `test_judge_rubrics_name_their_turn`; agt `test_judge_agent` |
 | 8.1 `make check` runs all, no model calls | the full suite (`make check`) |
 | 8.2 `src/` never imports `evals` | pkg `test_library_never_imports_evals` |
 | 8.3 docs | ADR 0028, ARCHITECTURE.md, README.md, glossary, AGENTS.md (reviewed by hand) |

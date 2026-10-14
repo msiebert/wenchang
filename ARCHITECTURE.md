@@ -1186,7 +1186,7 @@ imports it. The editable install makes it importable from any directory.
   It holds the prompt slots, scopes, policy, identities, and seed files,
   shared by the tests and the evals.
 - **evals.scenario**: the YAML scenario format and loader. A scenario has
-  seed files, sessions of scripted user turns, a closed set of ten
+  seed files, an optional per-scenario index cap, sessions of scripted user turns, a closed set of eleven
   assertion kinds, and an optional judge rubric.
 - **evals.graders**: pure deterministic graders over a store dump and a
   tool-call trace, plus the JSON loaders and writers that form the driver

@@ -163,6 +163,27 @@ slow and nondeterministic.
     so widening its rule 4 for the same paths, and giving doc-updater
     `AGENTS.md`, is a manual follow-up.
 
+11. **Corpus expansion (2026-10-14).** After the first passing live run,
+    the corpus grew from 8 to 23 scenarios. They cover privacy,
+    remembering, filing, write mechanics, curated content, shared-scope
+    asks, and forgetting. Each still cites its prompt sentence, has
+    index-first, and has a correct and a wrong scripted driver with an exact
+    fail set. The expansion added two harness features:
+    - **`called_before {first, then, session?}`** is an ordering kind. In
+      each session with a call matching `then`, a call matching `first`
+      must complete strictly before the earliest such `then` call starts.
+      Session-0 calls are ignored. A failed call counts unless its matcher
+      sets `succeeded`. `filing-ambiguous-match` uses it to require a
+      `read_file` before any write.
+    - **Per-scenario `index_max_bytes`** sets the store's index cap for
+      one scenario. `filing-capped-area` sets it to 1, so every seeded area
+      is listed under `capped` and the agent must list one area.
+
+    Every judge rubric now names the reply it grades ("The turn N reply"
+    or "The session S turn N reply"). The judge agent grades only that
+    reply, and a missing reply is a `fail`. The remaining deferred
+    scenarios are listed in the spec.
+
 ## Consequences
 
 - Prompt changes can be checked against real agent behavior locally, with
