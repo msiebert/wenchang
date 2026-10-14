@@ -528,3 +528,44 @@ def test_reset_does_not_move_the_time_baseline(tmp_path: Path) -> None:
     (call,) = state.trace()
     assert call.completed_ms == pytest.approx(3000.0)
     assert call.started_ms == pytest.approx(2500.0)
+
+
+CAPPED = """\
+id: capped
+title: Capped
+category: filing
+source: AIE-1170
+index_max_bytes: 1
+seed:
+  - {scope: user, area: preferences, name: charts, content: "- [stated] Dark.\\n", description: Charts, aliases: []}
+  - {scope: user, area: workflows, name: review, content: "- [stated] Mondays.\\n", description: Review, aliases: []}
+sessions:
+  - turns: [hi]
+assertions:
+  - kind: index_read_first
+"""
+
+
+def test_scenario_index_cap_reaches_the_store(tmp_path: Path, state: EvalState) -> None:
+    """A scenario's index_max_bytes caps the store's index, so the seeded areas
+    are listed under capped and no entry fits (AIE-1170, US9.4).
+    """
+    capped = _scenario(tmp_path, CAPPED, "capped")
+    plain = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+
+    async def body(client: Client) -> tuple[dict[str, Any], dict[str, Any]]:
+        await _reset(client, capped, state.runs_root / "t1")
+        first = _payload(await client.call_tool("get_memory_index", {}))
+        await _reset(client, plain, state.runs_root / "t2")
+        second = _payload(await client.call_tool("get_memory_index", {}))
+        return first, second
+
+    first, second = _run(state, body)
+
+    assert first["entries"] == []
+    assert {row["prefix"] for row in first["capped"]} == {
+        "user/u-ada/preferences/",
+        "user/u-ada/workflows/",
+    }
+    assert len(second["entries"]) == 2
+    assert second["capped"] == []

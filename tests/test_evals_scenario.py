@@ -525,6 +525,25 @@ def test_malformed_called_before_is_rejected(
     assert needle in str(info.value), case
 
 
+def test_index_max_bytes_parses(tmp_path: Path) -> None:
+    """index_max_bytes sets the scenario's store cap; omitted it is None
+    (AIE-1170, US9.3).
+    """
+    capped = load_scenario(_write(tmp_path, _minimal(extra="index_max_bytes: 1\n")))
+    plain = load_scenario(_write(tmp_path, _minimal(id="id: plain\n")))
+
+    assert capped.index_max_bytes == 1
+    assert plain.index_max_bytes is None
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "true", "'10'", "1.5"])
+def test_bad_index_max_bytes_is_rejected(tmp_path: Path, value: str) -> None:
+    """A non-positive, boolean, or non-integer cap is rejected (AIE-1170, US9.3)."""
+    path = _write(tmp_path, _minimal(extra=f"index_max_bytes: {value}\n"), stem="mini")
+    with pytest.raises(ScenarioError, match="index_max_bytes"):
+        load_scenario(path)
+
+
 # --- The shipped corpus -------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parents[1]

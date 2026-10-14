@@ -84,8 +84,14 @@ class _Boundary:
     turn: int
 
 
-def _new_store() -> MemoryStore:
-    return MemoryStore(InMemoryStorage(), scope_priority=REFERENCE_SCOPE_PRIORITY)
+def _new_store(index_max_bytes: int | None = None) -> MemoryStore:
+    if index_max_bytes is None:
+        return MemoryStore(InMemoryStorage(), scope_priority=REFERENCE_SCOPE_PRIORITY)
+    return MemoryStore(
+        InMemoryStorage(),
+        scope_priority=REFERENCE_SCOPE_PRIORITY,
+        index_max_bytes=index_max_bytes,
+    )
 
 
 class EvalState:
@@ -136,7 +142,7 @@ class EvalState:
         is outside runs_root.
         """
         resolved = self.resolve_trial_dir(trial_dir)
-        client = InProcessClient(_new_store())
+        client = InProcessClient(_new_store(scenario.index_max_bytes))
         now = datetime.now(UTC)
         for seed in scenario.seed_files:
             metadata = FileMetadata(

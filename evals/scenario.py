@@ -308,6 +308,7 @@ _TOP_KEYS: Final = frozenset(
         "sessions",
         "assertions",
         "judge",
+        "index_max_bytes",
     }
 )
 _TOP_REQUIRED: Final = frozenset({"id", "title", "category", "source", "sessions", "assertions"})
@@ -337,6 +338,7 @@ class Scenario:
     assertions: tuple[Assertion, ...]
     judge: tuple[JudgeItem, ...]
     path: Path
+    index_max_bytes: int | None = None
 
 
 class _Loader:
@@ -643,6 +645,11 @@ class _Loader:
             assertions=assertions,
             judge=self.judge(data.get("judge", [])),
             path=self.path,
+            index_max_bytes=(
+                self.integer(data["index_max_bytes"], "index_max_bytes", minimum=1)
+                if "index_max_bytes" in data
+                else None
+            ),
         )
 
 
