@@ -252,6 +252,13 @@ slow and nondeterministic.
   fresh `Agent` call that replays the session's earlier exchanges as text,
   so the agent does not see its own earlier tool calls. Results therefore guide
   prompt iteration and are not release gates.
+- **Note (2026-10-14, N=3 runs).** The eval agent is a Claude Code
+  subagent, whose output is framed as a report to a parent agent. In 3 of
+  138 trials across two N=3 runs, its turn 1 reply read as a third-person
+  report ("I asked the user whether...") instead of addressing the user.
+  The judge failed those replies even though every deterministic assertion
+  passed. Judge items on reply wording carry this noise. No change is
+  made.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,
