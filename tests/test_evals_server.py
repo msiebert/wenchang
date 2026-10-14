@@ -537,8 +537,18 @@ category: filing
 source: AIE-1170
 index_max_bytes: 1
 seed:
-  - {scope: user, area: preferences, name: charts, content: "- [stated] Dark.\\n", description: Charts, aliases: []}
-  - {scope: user, area: workflows, name: review, content: "- [stated] Mondays.\\n", description: Review, aliases: []}
+  - scope: user
+    area: preferences
+    name: charts
+    content: "- [stated] Dark.\\n"
+    description: Charts
+    aliases: []
+  - scope: user
+    area: workflows
+    name: review
+    content: "- [stated] Mondays.\\n"
+    description: Review
+    aliases: []
 sessions:
   - turns: [hi]
 assertions:
