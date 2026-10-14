@@ -31,6 +31,7 @@ from evals.scenario import (
     AliasPresent,
     ArgMatcher,
     Assertion,
+    CalledBefore,
     CallMatcher,
     FileAbsent,
     FileFilter,
@@ -591,3 +592,102 @@ def test_ordering_uses_start_time_not_seq_or_request_id() -> None:
         _call(4, "read_file", session=2, request_id="2", started=12.0, completed=13.0),
     ]
     assert _one(IndexReadFirst("i"), trace=restarted, sessions=2).passed
+
+
+# --- 4.17 called_before -------------------------------------------------------
+
+WRITES = ("write_file", "append_line", "replace_fact")
+
+
+def _before(
+    first: CallMatcher | None = None, then: CallMatcher | None = None, session: int | None = None
+) -> CalledBefore:
+    return CalledBefore(
+        "b",
+        first if first is not None else _match("read_file"),
+        then if then is not None else _match(*WRITES),
+        session,
+    )
+
+
+def test_called_before_passes_when_first_completes_before_then_starts() -> None:
+    """A read that completes before the earliest write starts passes (AIE-1170, US4.17)."""
+    trace = [
+        _call(1, "read_file", started=0.0, completed=5.0),
+        _call(2, "append_line", started=6.0, completed=7.0),
+    ]
+    assert _one(_before(), trace=trace).passed
+
+
+@pytest.mark.parametrize(
+    ("read_start", "read_end", "write_start"),
+    [(10.0, 12.0, 0.0), (0.0, 5.0, 3.0), (0.0, 5.0, 5.0)],
+    ids=["then-first", "overlap", "equal-times"],
+)
+def test_called_before_fails_unless_strictly_before(
+    read_start: float, read_end: float, write_start: float
+) -> None:
+    """The write starting first, overlapping, or at the same instant fails,
+    naming the write's seq (AIE-1170, US4.17).
+    """
+    trace = [
+        _call(1, "read_file", started=read_start, completed=read_end),
+        _call(7, "append_line", started=write_start, completed=write_start + 1.0),
+    ]
+    result = _one(_before(), trace=trace)
+    assert not result.passed
+    assert "seq 7" in result.detail
+
+
+def test_called_before_is_vacuous_without_a_then_call() -> None:
+    """No matching then call passes (AIE-1170, US4.17)."""
+    assert _one(_before(), trace=[_call(1, "read_file")]).passed
+    assert _one(_before(), trace=[]).passed
+
+
+def test_called_before_is_per_session() -> None:
+    """Each session needs its own first call; the session filter narrows it;
+    untagged calls are ignored (AIE-1170, US4.17).
+    """
+    trace = [
+        _call(1, "read_file", session=1, started=0.0, completed=1.0),
+        _call(2, "append_line", session=1, started=2.0, completed=3.0),
+        _call(3, "append_line", session=2, started=10.0, completed=11.0),
+    ]
+    result = _one(_before(), trace=trace, sessions=2)
+    assert not result.passed
+    assert "session 2" in result.detail
+    assert _one(_before(session=1), trace=trace, sessions=2).passed
+
+    untagged = [_call(1, "append_line", session=0, turn=0, started=0.0)]
+    assert _one(_before(), trace=untagged).passed
+
+
+def test_called_before_honors_first_args() -> None:
+    """A read of a file the first matcher excludes does not count (AIE-1170, US4.17)."""
+    first = _match("read_file", args={"name": ArgMatcher(matches="^atlas-")})
+    trace = [
+        _call(1, "read_file", name="charts", started=0.0, completed=1.0),
+        _call(2, "append_line", name="atlas-migration", started=2.0, completed=3.0),
+    ]
+    assert not _one(_before(first=first), trace=trace).passed
+    trace[0] = _call(1, "read_file", name="atlas-launch", started=0.0, completed=1.0)
+    assert _one(_before(first=first), trace=trace).passed
+
+
+def test_called_before_counts_failed_calls_unless_succeeded_is_set() -> None:
+    """Failed then and first calls count by default; succeeded narrows each
+    matcher (AIE-1170, US4.17).
+    """
+    failed_write = [_call(1, "append_line", is_error=True, started=0.0)]
+    assert not _one(_before(), trace=failed_write).passed
+    succeeded_then = _match(*WRITES, succeeded=True)
+    assert _one(_before(then=succeeded_then), trace=failed_write).passed
+
+    failed_read = [
+        _call(1, "read_file", is_error=True, started=0.0, completed=1.0),
+        _call(2, "append_line", started=2.0, completed=3.0),
+    ]
+    assert _one(_before(), trace=failed_read).passed
+    succeeded_first = _match("read_file", succeeded=True)
+    assert not _one(_before(first=succeeded_first), trace=failed_read).passed

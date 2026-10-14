@@ -15,6 +15,7 @@ from evals.scenario import (
     ASSERTION_KINDS,
     AliasPresent,
     ArgMatcher,
+    CalledBefore,
     FileAbsent,
     IndexReadFirst,
     LineAbsent,
@@ -433,8 +434,9 @@ def test_missing_file_is_rejected(tmp_path: Path) -> None:
 
 
 def test_assertion_kinds_are_the_closed_set() -> None:
-    """ASSERTION_KINDS is exactly the ten kinds US4 defines (AIE-1170, US3.4)."""
+    """ASSERTION_KINDS is exactly the eleven kinds US4 defines (AIE-1170, US3.4, US4.17)."""
     assert set(ASSERTION_KINDS) == {
+        "called_before",
         "index_read_first",
         "file_absent",
         "line_present",
@@ -446,6 +448,81 @@ def test_assertion_kinds_are_the_closed_set() -> None:
         "tool_not_called",
         "alias_present",
     }
+
+
+CALLED_BEFORE = (
+    "assertions:\n  - kind: called_before\n    id: ordered\n"
+    "    first: {tool: read_file, args: {name: {matches: '^atlas-'}}, succeeded: true}\n"
+    "    then: {tool: [write_file, append_line]}\n"
+    "    session: 1\n"
+)
+
+
+def test_called_before_parses(tmp_path: Path) -> None:
+    """called_before parses into CalledBefore with two call matchers
+    (AIE-1170, US9.2).
+    """
+    s = load_scenario(_write(tmp_path, _minimal(assertions=CALLED_BEFORE)))
+
+    (ordered,) = s.assertions
+    assert isinstance(ordered, CalledBefore)
+    assert ordered.id == "ordered"
+    assert ordered.session == 1
+    assert ordered.first.tools == frozenset({"read_file"})
+    assert ordered.first.args["name"] == ArgMatcher(matches="^atlas-")
+    assert ordered.first.succeeded is True
+    assert (ordered.first.session, ordered.first.turn) == (None, None)
+    assert ordered.then.tools == frozenset({"write_file", "append_line"})
+    assert ordered.then.succeeded is None
+
+
+@pytest.mark.parametrize(
+    ("case", "assertion", "needle"),
+    [
+        (
+            "session-in-first",
+            "first: {tool: read_file, session: 1}\n    then: {tool: write_file}\n",
+            "session",
+        ),
+        (
+            "turn-in-then",
+            "first: {tool: read_file}\n    then: {tool: write_file, turn: 1}\n",
+            "turn",
+        ),
+        ("missing-tool", "first: {args: {name: x}}\n    then: {tool: write_file}\n", "tool"),
+        (
+            "bad-args-key",
+            "first: {tool: read_file, args: {content: x}}\n    then: {tool: write_file}\n",
+            "content",
+        ),
+        (
+            "session-out-of-range",
+            "first: {tool: read_file}\n    then: {tool: write_file}\n    session: 2\n",
+            "session",
+        ),
+        ("first-not-a-mapping", "first: read_file\n    then: {tool: write_file}\n", "first"),
+    ],
+    ids=[
+        "session-in-first",
+        "turn-in-then",
+        "missing-tool",
+        "bad-args-key",
+        "session-out-of-range",
+        "first-not-a-mapping",
+    ],
+)
+def test_malformed_called_before_is_rejected(
+    tmp_path: Path, case: str, assertion: str, needle: str
+) -> None:
+    """Malformed called_before matchers raise ScenarioError naming the key
+    (AIE-1170, US9.2).
+    """
+    text = _minimal(assertions=f"assertions:\n  - kind: called_before\n    {assertion}")
+    path = _write(tmp_path, text, stem="mini")
+    with pytest.raises(ScenarioError) as info:
+        load_scenario(path)
+    assert str(path) in str(info.value)
+    assert needle in str(info.value), case
 
 
 # --- The shipped corpus -------------------------------------------------------

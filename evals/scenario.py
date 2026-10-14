@@ -38,6 +38,7 @@ __all__ = [
     "ArgMatcher",
     "Assertion",
     "CallMatcher",
+    "CalledBefore",
     "FileAbsent",
     "FileFilter",
     "FileRef",
@@ -218,6 +219,17 @@ class AliasPresent:
     alias: str
 
 
+@dataclass(frozen=True)
+class CalledBefore:
+    """In each session with a call matching then, a call matching first
+    completes strictly before the earliest such then call starts."""
+
+    id: str
+    first: CallMatcher
+    then: CallMatcher
+    session: int | None = None
+
+
 type Assertion = (
     IndexReadFirst
     | FileAbsent
@@ -229,6 +241,7 @@ type Assertion = (
     | ToolCalled
     | ToolNotCalled
     | AliasPresent
+    | CalledBefore
 )
 
 ASSERTION_KINDS: Final[Mapping[str, type[Assertion]]] = MappingProxyType(
@@ -243,6 +256,7 @@ ASSERTION_KINDS: Final[Mapping[str, type[Assertion]]] = MappingProxyType(
         "tool_called": ToolCalled,
         "tool_not_called": ToolNotCalled,
         "alias_present": AliasPresent,
+        "called_before": CalledBefore,
     }
 )
 
@@ -279,6 +293,7 @@ _KIND_KEYS: Final[Mapping[str, tuple[frozenset[str], frozenset[str]]]] = Mapping
         "tool_called": (_CALL_KEYS | {"min", "max"}, frozenset({"tool"})),
         "tool_not_called": (_CALL_KEYS, frozenset({"tool"})),
         "alias_present": (_FILE_KEYS | {"alias"}, _FILE_KEYS | {"alias"}),
+        "called_before": (frozenset({"first", "then", "session"}), frozenset({"first", "then"})),
     }
 )
 _TOP_KEYS: Final = frozenset(
@@ -456,6 +471,11 @@ class _Loader:
                 raise self.fail(f"{where}.turn {turn} is beyond the {limit} turns")
         return session, turn
 
+    def order_matcher(self, raw: object, where: str, sessions: Sequence[Session]) -> CallMatcher:
+        data = self.mapping(raw, where)
+        self.keys(data, frozenset({"tool", "args", "succeeded"}), frozenset({"tool"}), where)
+        return self.call_matcher(data, where, sessions)
+
     def assertion(self, raw: object, index: int, sessions: Sequence[Session]) -> Assertion:
         where = f"assertions[{index}]"
         data = self.mapping(raw, where)
@@ -499,6 +519,11 @@ class _Loader:
                 return ToolCalled(ident, call, low, high)
             case "tool_not_called":
                 return ToolNotCalled(ident, self.call_matcher(data, where, sessions))
+            case "called_before":
+                session, _ = self.session_turn(data, where, sessions)
+                first = self.order_matcher(data["first"], f"{where}.first", sessions)
+                then = self.order_matcher(data["then"], f"{where}.then", sessions)
+                return CalledBefore(ident, first, then, session)
             case _:
                 alias = self.text(data["alias"], f"{where}.alias")
                 return AliasPresent(ident, self.file_ref(data, where), alias)

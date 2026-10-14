@@ -16,6 +16,7 @@ from typing import Any, Final, cast
 from evals.scenario import (
     AliasPresent,
     Assertion,
+    CalledBefore,
     CallMatcher,
     FileAbsent,
     FileFilter,
@@ -466,6 +467,23 @@ def _alias_present(a: AliasPresent, store: StoreDump) -> str | None:
     return f"{found.path} aliases {list(found.aliases)} lack {a.alias!r}"
 
 
+def _called_before(a: CalledBefore, s: Scenario, trace: Sequence[TraceCall]) -> str | None:
+    sessions = [a.session] if a.session is not None else list(range(1, len(s.sessions) + 1))
+    for session in sessions:
+        calls = [c for c in trace if c.session == session]
+        thens = _calls_matching(calls, a.then)
+        if not thens:
+            continue
+        earliest = min(thens, key=lambda c: (c.started_ms, c.seq))
+        firsts = _calls_matching(calls, a.first)
+        if not any(f.completed_ms < earliest.started_ms for f in firsts):
+            return (
+                f"session {session}: {_describe(earliest)} started before any "
+                f"{sorted(a.first.tools)} call completed"
+            )
+    return None
+
+
 def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> str | None:
     checks: Mapping[type[object], Callable[[], str | None]] = {
         IndexReadFirst: lambda: _index_read_first(cast(IndexReadFirst, a), s, trace),
@@ -478,6 +496,7 @@ def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCal
         ToolCalled: lambda: _tool_called(cast(ToolCalled, a), trace),
         ToolNotCalled: lambda: _tool_not_called(cast(ToolNotCalled, a), trace),
         AliasPresent: lambda: _alias_present(cast(AliasPresent, a), store),
+        CalledBefore: lambda: _called_before(cast(CalledBefore, a), s, trace),
     }
     return checks[type(a)]()
 
