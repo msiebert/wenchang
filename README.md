@@ -167,7 +167,14 @@ CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --stri
 ```
 
 Each run writes `evals/runs/<run-id>/report.md`, with pass counts per
-assertion over N trials. That directory is gitignored. `make check` never
+assertion over N trials.
+
+To run faster, launch several sessions in parallel, each with `/run-evals
+--shard k/n`. Then combine them with `uv run python -m evals merge-runs`.
+Trials inside one session stay serial, because one eval server holds one
+store and turns are tagged by timing. Parallelism therefore comes from
+separate sessions, each with its own server. See
+`.claude/commands/run-evals.md`. That directory is gitignored. `make check` never
 runs a live agent. It runs scripted drivers through the same server,
 graders, and report.
 

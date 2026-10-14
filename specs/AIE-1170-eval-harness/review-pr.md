@@ -111,6 +111,12 @@ Test modules, abbreviated in the Test(s) column:
 | 9.4 the cap reaches the store | srv `test_scenario_index_cap_reaches_the_store` |
 | 9.5 23 scenarios proven | (see 6.1, 6.2) |
 | 9.6 rubrics name their turn; judge turn rule | scn `test_judge_rubrics_name_their_turn`; agt `test_judge_agent` |
+| 10.1 shards partition the scenarios | rpt `test_shards_partition_the_scenarios` |
+| 10.2 bad shards rejected | rpt `test_bad_shard_is_rejected[*]`, `test_new_run_cli_shards` |
+| 10.3 shard dir naming and run.json | rpt `test_shard_run_dir_is_named_and_recorded`, `test_new_run_cli_shards` |
+| 10.4 merged report covers every scenario | rpt `test_merge_runs_reports_every_scenario` |
+| 10.5 mismatched or overlapping runs rejected | rpt `test_merge_runs_rejects_mismatched_runs[*]`, `test_merge_runs_rejects_overlap_and_existing_output` |
+| 10.6 runner doc parallel shards | agt `test_runner_doc_describes_parallel_shards` |
 | 8.1 `make check` runs all, no model calls | the full suite (`make check`) |
 | 8.2 `src/` never imports `evals` | pkg `test_library_never_imports_evals` |
 | 8.3 docs | ADR 0028, ARCHITECTURE.md, README.md, glossary, AGENTS.md (reviewed by hand) |

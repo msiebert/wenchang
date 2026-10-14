@@ -147,6 +147,22 @@ def test_judge_agent() -> None:
         assert needle in body, needle
 
 
+def test_runner_doc_describes_parallel_shards() -> None:
+    """Parallelism is across sessions: one launch per shard, then a merge; the
+    runner stays serial inside a session (AIE-1170, parallel shards).
+    """
+    doc = RUNNER.read_text()
+    required = [
+        "## Parallel shards",
+        "--shard k/n",
+        "uv run python -m evals merge-runs",
+        "Trials inside one session stay serial",
+        "evals/runs/preflight-<k>of<n>/",
+    ]
+    missing = [needle for needle in required if needle not in doc]
+    assert missing == []
+
+
 def test_runner_doc_names_everything_the_runner_needs() -> None:
     """The runner doc has the launch command, the preflight, the harness tools,
     the CLI subcommands, the subagent type, and the turn rules (AIE-1170, US2.7).

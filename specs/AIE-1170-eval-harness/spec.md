@@ -207,6 +207,17 @@ judge items, wrong move, and exact fail set.
 | 9.5 | each of the 23 shipped scenarios, listed in plan.md's corpus section | its correct and wrong scripted drivers run (6.1, 6.2) | the correct driver passes every assertion. The wrong driver fails exactly the listed set |
 | 9.6 | every judge rubric in the corpus, existing scenarios included | loaded | each matches `^The (session \d+ )?turn \d+ reply`, so it names the reply it grades. The judge agent's body says that a rubric naming "turn N" (or "session S turn N") is graded only on that reply in `transcript.json`, with the session defaulting to 1, and that a missing reply means `fail` |
 
+### US10 — Parallel shards (2026-10-14)
+
+| # | Given | When | Then |
+| - | ----- | ---- | ---- |
+| 10.1 | scenarios and `k/n` | `shard_scenarios` | sorted by id, shard k keeps those with index % n == k - 1. Every scenario is in exactly one of the n shards |
+| 10.2 | `--shard` text | parsed | `k/n` with 1 <= k <= n is accepted. Anything else raises `ValueError`, and `new-run` exits 2 without creating anything. A shard that selects no scenarios also exits 2 |
+| 10.3 | `new-run --shard k/n` | runs | the run dir is `<timestamp>-<model>-shard<k>of<n>`, and `run.json` has `"shard": "k/n"`. Without `--shard`, `run.json` has no `shard` key and naming is unchanged |
+| 10.4 | shard run dirs | `merge-runs <out_dir> <run_dir>...` | trial dirs are copied into a new `out_dir`, a combined `run.json` lists the `sources`, and `report.md` and `report.json` cover every scenario |
+| 10.5 | shard runs differing in model, trials, git commit, or agent sha256; a scenario in two inputs; or an existing `out_dir` | merged | `GradeInputError` is raised, the CLI exits 2, and nothing is written |
+| 10.6 | `.claude/commands/run-evals.md` | read | it has a "Parallel shards" section: one launch per shard, `merge-runs` afterwards, and why trials inside one session stay serial. With a shard, the preflight dir is `evals/runs/preflight-<k>of<n>/` |
+
 ## Assumptions
 
 - **Live runs are manual and required before merge.** `make check` proves

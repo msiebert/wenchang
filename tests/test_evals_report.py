@@ -22,7 +22,15 @@ from evals.graders import (
     trace_to_json,
     transcript_to_json,
 )
-from evals.report import build_report, grade_trial, new_run, turn_prompt
+from evals.report import (
+    build_report,
+    grade_trial,
+    merge_runs,
+    new_run,
+    parse_shard,
+    shard_scenarios,
+    turn_prompt,
+)
 from evals.scenario import Scenario, load_scenario
 
 pytestmark = pytest.mark.unit
@@ -444,3 +452,143 @@ def test_turn_prompt_cli_prints_the_prompt(
         "[Newest message]\nsecond\n"
     )
     assert main(["turn-prompt", str(trial), "1", "5"]) == 2
+
+
+# --- Parallel shards ------------------------------------------------------------
+
+
+def test_shards_partition_the_scenarios(tmp_path: Path) -> None:
+    """Every scenario lands in exactly one of n shards, by sorted id
+    (AIE-1170, parallel shards).
+    """
+    _, scenarios = _scenarios(tmp_path, "e", "a", "d", "b", "c")
+
+    shards = [[x.id for x in shard_scenarios(scenarios, k, 3)] for k in (1, 2, 3)]
+
+    assert shards == [["a", "d"], ["b", "e"], ["c"]]
+    assert sorted(i for shard in shards for i in shard) == ["a", "b", "c", "d", "e"]
+
+
+@pytest.mark.parametrize("text", ["0/3", "4/3", "1/0", "x/3", "2", "-1/2", "1/2/3"])
+def test_bad_shard_is_rejected(text: str) -> None:
+    """A shard outside 1..n, or not in k/n form, is rejected (AIE-1170, parallel shards)."""
+    with pytest.raises(ValueError, match="shard"):
+        parse_shard(text)
+    assert parse_shard("2/3") == (2, 3)
+
+
+def test_shard_run_dir_is_named_and_recorded(tmp_path: Path) -> None:
+    """A shard's run dir ends in -shard<k>of<n>, sibling shards in the same
+    second do not collide, and run.json records the shard (AIE-1170, parallel shards).
+    """
+    _, scenarios = _scenarios(tmp_path, "alpha", "beta")
+    runs = tmp_path / "runs"
+
+    first, _ = new_run(
+        scenarios[:1], model="sonnet", trials=1, runs_dir=runs, now=NOW, shard=(1, 2)
+    )
+    second, _ = new_run(
+        scenarios[1:], model="sonnet", trials=1, runs_dir=runs, now=NOW, shard=(2, 2)
+    )
+    plain, _ = new_run(scenarios, model="sonnet", trials=1, runs_dir=runs, now=NOW)
+
+    assert first.name == "20261009-123005-sonnet-shard1of2"
+    assert second.name == "20261009-123005-sonnet-shard2of2"
+    assert _json(first / "run.json")["shard"] == "1/2"
+    assert "shard" not in _json(plain / "run.json")
+
+
+def test_new_run_cli_shards(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """new-run --shard keeps only that shard's scenarios; a bad shard exits 2
+    and creates nothing (AIE-1170, parallel shards).
+    """
+    directory, _ = _scenarios(tmp_path, "alpha", "beta", "gamma")
+    runs = tmp_path / "runs"
+    base = ["new-run", "--scenarios-dir", str(directory), "--runs-dir", str(runs)]
+
+    assert main([*base, "--shard", "2/2"]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert [t["scenario"] for t in plan["trials"]] == ["beta"] * 3
+    assert Path(plan["run_dir"]).name.endswith("-sonnet-shard2of2")
+
+    assert main([*base, "--shard", "3/2"]) == 2
+    assert "shard" in capsys.readouterr().err
+    assert main([*base, "--shard", "2/5", "alpha"]) == 2
+    assert "no scenarios" in capsys.readouterr().err
+    assert len(list(runs.iterdir())) == 1
+
+
+def _sharded_runs(tmp_path: Path) -> list[Path]:
+    _, scenarios = _scenarios(tmp_path, "alpha", "beta")
+    runs = tmp_path / "runs"
+    dirs: list[Path] = []
+    for k in (1, 2):
+        run_dir, _ = new_run(
+            shard_scenarios(scenarios, k, 2),
+            model="sonnet",
+            trials=2,
+            runs_dir=runs,
+            now=NOW,
+            shard=(k, 2),
+        )
+        for trial in sorted(run_dir.glob("*/trial-*")):
+            _dump(trial, leak=k == 2)
+        dirs.append(run_dir)
+    return dirs
+
+
+def test_merge_runs_reports_every_scenario(tmp_path: Path) -> None:
+    """Merging two shard runs copies their trials and writes one report with
+    every scenario (AIE-1170, parallel shards).
+    """
+    shard_dirs = _sharded_runs(tmp_path)
+    out = tmp_path / "merged"
+
+    markdown, report = merge_runs(out, shard_dirs)
+
+    meta = _json(out / "run.json")
+    assert meta["run_id"] == "merged"
+    assert meta["scenarios"] == ["alpha", "beta"]
+    assert meta["sources"] == [str(d) for d in shard_dirs]
+    assert (meta["model"], meta["trials"]) == ("sonnet", 2)
+    assert [s["id"] for s in report["scenarios"]] == ["alpha", "beta"]
+    by_id = {s["id"]: s for s in report["scenarios"]}
+    assert (by_id["alpha"]["passed_trials"], by_id["alpha"]["trials_run"]) == (2, 2)
+    assert (by_id["beta"]["passed_trials"], by_id["beta"]["trials_run"]) == (0, 2)
+    assert (out / "report.md").read_text() == markdown
+    assert (out / "alpha" / "trial-2" / "grade.json").exists()
+    for d in shard_dirs:
+        assert not (d / "report.md").exists()
+
+
+@pytest.mark.parametrize("field", ["git_commit", "agent_sha256", "model", "trials"])
+def test_merge_runs_rejects_mismatched_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], field: str
+) -> None:
+    """Runs from different commits, agent files, models, or trial counts do not
+    merge; the CLI exits 2 and writes nothing (AIE-1170, parallel shards).
+    """
+    shard_dirs = _sharded_runs(tmp_path)
+    meta = _json(shard_dirs[1] / "run.json")
+    meta[field] = 7 if field == "trials" else "different"
+    (shard_dirs[1] / "run.json").write_text(json.dumps(meta))
+    out = tmp_path / "merged"
+
+    with pytest.raises(GradeInputError, match=field):
+        merge_runs(out, shard_dirs)
+    assert main(["merge-runs", str(out), *map(str, shard_dirs)]) == 2
+    assert field in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_merge_runs_rejects_overlap_and_existing_output(tmp_path: Path) -> None:
+    """A scenario in two inputs, or an output dir that already exists, is an
+    error (AIE-1170, parallel shards).
+    """
+    shard_dirs = _sharded_runs(tmp_path)
+    with pytest.raises(GradeInputError, match="alpha"):
+        merge_runs(tmp_path / "dup", [shard_dirs[0], shard_dirs[0]])
+    existing = tmp_path / "exists"
+    existing.mkdir()
+    with pytest.raises(GradeInputError, match="exists"):
+        merge_runs(existing, shard_dirs)

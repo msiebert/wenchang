@@ -222,6 +222,23 @@ slow and nondeterministic.
     reply, and a missing reply is a `fail`. The remaining deferred
     scenarios are listed in the spec.
 
+12. **Parallel runs are sharded across sessions (2026-10-14).** Trials
+    inside one runner session stay serial. One eval server holds one
+    in-memory store, and `eval_record_turn` assigns memory calls to turns by
+    time window, so concurrent trials in one session would share a store
+    and interleave traces. Making the server multi-trial would need a trial
+    key on every memory call, which the agent never sends. Instead:
+    - `new-run --shard k/n` takes the scenarios, sorted by id, whose index
+      % n is k - 1. It names the run dir `<timestamp>-<model>-shard<k>of<n>`
+      and records the shard in `run.json`.
+    - Each shard runs in its own headless `claude -p` session, with its own
+      eval server and its own preflight dir.
+    - `merge-runs <out_dir> <run_dir>...` requires every shard to match on
+      model, trials, git commit, and agent sha256, and rejects a scenario
+      that appears in two shards. It copies the trial dirs, writes a
+      combined `run.json` listing the sources, and writes one report.
+      Grading is per trial, so merging is file-level.
+
 ## Consequences
 
 - Prompt changes can be checked against real agent behavior locally, with

@@ -8,7 +8,16 @@ from pathlib import Path
 
 import evals.agent
 from evals.graders import GradeInputError
-from evals.report import build_report, check_model, grade_trial, new_run, turn_prompt
+from evals.report import (
+    build_report,
+    check_model,
+    grade_trial,
+    merge_runs,
+    new_run,
+    parse_shard,
+    shard_scenarios,
+    turn_prompt,
+)
 from evals.scenario import RUNS_DIR, SCENARIO_DIR, ScenarioError, load_all
 
 
@@ -36,8 +45,20 @@ def _new_run(args: argparse.Namespace) -> int:
     if args.trials < 1:
         print("--trials must be at least 1", file=sys.stderr)
         return 2
+    selected = [by_id[i] for i in wanted]
+    shard: tuple[int, int] | None = None
+    if args.shard is not None:
+        try:
+            shard = parse_shard(args.shard)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        selected = shard_scenarios(selected, *shard)
+        if not selected:
+            print(f"shard {args.shard} selects no scenarios", file=sys.stderr)
+            return 2
     _, plan = new_run(
-        [by_id[i] for i in wanted], model=args.model, trials=args.trials, runs_dir=args.runs_dir
+        selected, model=args.model, trials=args.trials, runs_dir=args.runs_dir, shard=shard
     )
     print(json.dumps(plan, indent=2))
     return 0
@@ -64,6 +85,16 @@ def _turn_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _merge_runs(args: argparse.Namespace) -> int:
+    try:
+        merge_runs(args.out_dir, args.run_dirs)
+    except GradeInputError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    print(args.out_dir / "report.md")
+    return 0
+
+
 def _report(args: argparse.Namespace) -> int:
     try:
         build_report(args.run_dir)
@@ -87,6 +118,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--trials", type=int, default=3)
     plan.add_argument("--scenarios-dir", type=Path, default=SCENARIO_DIR)
     plan.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
+    plan.add_argument("--shard", default=None, help="k/n: run only shard k of n")
     plan.add_argument("ids", nargs="*")
     plan.set_defaults(handler=_new_run)
 
@@ -99,6 +131,11 @@ def _parser() -> argparse.ArgumentParser:
     prompt.add_argument("session", type=int)
     prompt.add_argument("turn", type=int)
     prompt.set_defaults(handler=_turn_prompt)
+
+    merge = commands.add_parser("merge-runs", help="merge shard runs into one report")
+    merge.add_argument("out_dir", type=Path)
+    merge.add_argument("run_dirs", type=Path, nargs="+")
+    merge.set_defaults(handler=_merge_runs)
 
     report = commands.add_parser("report", help="write report.md and report.json for a run")
     report.add_argument("run_dir", type=Path)

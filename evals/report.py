@@ -7,6 +7,7 @@ trial.json, the driver's dumps, grade.json, and optionally judge.json.
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -30,7 +31,10 @@ __all__ = [
     "build_report",
     "check_model",
     "grade_trial",
+    "merge_runs",
     "new_run",
+    "parse_shard",
+    "shard_scenarios",
     "turn_prompt",
 ]
 
@@ -74,6 +78,23 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def parse_shard(text: str) -> tuple[int, int]:
+    """Parse "k/n" with 1 <= k <= n; raises ValueError otherwise."""
+    parts = text.split("/")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"shard must be k/n, got {text!r}")
+    k, n = int(parts[0]), int(parts[1])
+    if n < 1 or not 1 <= k <= n:
+        raise ValueError(f"shard {text!r} is out of range: need 1 <= k <= n")
+    return k, n
+
+
+def shard_scenarios(scenarios: Sequence[Scenario], k: int, n: int) -> list[Scenario]:
+    """Shard k of n: the scenarios, sorted by id, whose index % n == k - 1."""
+    ordered = sorted(scenarios, key=lambda s: s.id)
+    return [s for i, s in enumerate(ordered) if i % n == k - 1]
+
+
 def new_run(
     scenarios: Sequence[Scenario],
     *,
@@ -81,13 +102,20 @@ def new_run(
     trials: int,
     runs_dir: Path = RUNS_DIR,
     now: datetime | None = None,
+    shard: tuple[int, int] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
-    """Create the run and trial dirs; return the run dir and the runner's plan."""
+    """Create the run and trial dirs; return the run dir and the runner's plan.
+
+    A shard run's dir ends in -shard<k>of<n>, so sibling shards started in the
+    same second do not collide, and its run.json records the shard.
+    """
     check_model(model)
     if trials < 1:
         raise ValueError("trials must be at least 1")
     created = datetime.now(UTC) if now is None else now
     base = f"{created.strftime('%Y%m%d-%H%M%S')}-{_slug(model)}"
+    if shard is not None:
+        base += f"-shard{shard[0]}of{shard[1]}"
     runs_dir.mkdir(parents=True, exist_ok=True)
     run_id, suffix = base, 1
     while True:
@@ -108,6 +136,7 @@ def new_run(
             "scenarios": [s.id for s in scenarios],
             "git_commit": _git_commit(),
             "agent_sha256": _agent_sha256(),
+            **({"shard": f"{shard[0]}/{shard[1]}"} if shard is not None else {}),
         },
     )
     planned: list[dict[str, object]] = []
@@ -353,6 +382,50 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
     (run_dir / "report.md").write_text(markdown)
     _write_json(run_dir / "report.json", report)
     return markdown, report
+
+
+_MATCHED_RUN_FIELDS: Final = ("model", "trials", "git_commit", "agent_sha256")
+
+
+def merge_runs(out_dir: Path, run_dirs: Sequence[Path]) -> tuple[str, dict[str, Any]]:
+    """Merge shard runs into out_dir and write its report.
+
+    Every input must share model, trials, git commit, and agent sha256, and no
+    scenario may appear in two inputs. Trial dirs are copied; out_dir must not
+    exist. Raises GradeInputError, leaving nothing behind, on any mismatch.
+    """
+    if not run_dirs:
+        raise GradeInputError("merge-runs needs at least one run dir")
+    if out_dir.exists():
+        raise GradeInputError(f"{out_dir}: output dir already exists")
+    runs = [_load_run(d) for d in run_dirs]
+    first = runs[0]
+    for run_dir, run in zip(run_dirs, runs, strict=True):
+        for key in _MATCHED_RUN_FIELDS:
+            if run[key] != first[key]:
+                raise GradeInputError(
+                    f"{run_dir}: {key} {run[key]!r} differs from {run_dirs[0]}'s {first[key]!r}"
+                )
+    seen: dict[str, Path] = {}
+    for run_dir, run in zip(run_dirs, runs, strict=True):
+        for ident in run["scenarios"]:
+            if ident in seen:
+                raise GradeInputError(f"scenario {ident!r} is in both {seen[ident]} and {run_dir}")
+            seen[ident] = run_dir
+    out_dir.mkdir(parents=True)
+    for ident, source in seen.items():
+        shutil.copytree(source / ident, out_dir / ident)
+    _write_json(
+        out_dir / "run.json",
+        {
+            "run_id": out_dir.name,
+            "created": datetime.now(UTC).isoformat(),
+            **{key: first[key] for key in _MATCHED_RUN_FIELDS},
+            "scenarios": sorted(seen),
+            "sources": [str(d) for d in run_dirs],
+        },
+    )
+    return build_report(out_dir)
 
 
 def _markdown(run: dict[str, Any], scenarios: Sequence[dict[str, object]]) -> str:

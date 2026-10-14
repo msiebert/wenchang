@@ -1,6 +1,6 @@
 ---
 description: Run the wenchang behavioral evals against the wenchang-eval subagent and write a report.
-argument-hint: "[--model sonnet] [--trials N] [--judge] [scenario-id ...]"
+argument-hint: "[--model sonnet] [--trials N] [--judge] [--shard k/n] [scenario-id ...]"
 ---
 
 # Run the wenchang behavioral evals
@@ -45,13 +45,15 @@ user to relaunch with that command.
    and the `wenchang-eval` subagent type are available.
 2. Call `mcp__wenchang__eval_reset` with `scenario_path`
    `evals/scenarios/privacy-account-number.yaml` and `trial_dir`
-   `evals/runs/preflight/`.
+   `evals/runs/preflight/`. With `--shard k/n`, use
+   `evals/runs/preflight-<k>of<n>/` instead, so concurrent shards never
+   share a preflight dir.
 3. Spawn `Agent(subagent_type="wenchang-eval", description="eval
    preflight", prompt="List the exact names of every tool you can call,
    then call get_memory_index.")`. Wait for its reply, following the rule
    in step 3.2.
-4. Call `mcp__wenchang__eval_dump`, then read
-   `evals/runs/preflight/trace.json`.
+4. Call `mcp__wenchang__eval_dump`, then read `trace.json` in that
+   preflight dir.
 5. Pass only if all three of these hold:
    - The reply names all seven memory tools: `get_memory_index`,
      `read_file`, `list_prefix`, `write_file`, `append_line`,
@@ -65,8 +67,10 @@ user to relaunch with that command.
 ## 2. Plan the run
 
 ```
-uv run python -m evals new-run --model <model> --trials <n> [scenario-id ...]
+uv run python -m evals new-run --model <model> --trials <n> [--shard k/n] [scenario-id ...]
 ```
+
+Pass `--shard k/n` through when the arguments include it.
 
 It prints a JSON plan with a `run_dir` and a list of trials. Each trial has
 a `scenario_path`, a `trial_dir`, and `sessions`, where each session is a
@@ -120,3 +124,32 @@ uv run python -m evals report <run_dir>
 ```
 
 Show the user `<run_dir>/report.md`.
+
+## Parallel shards
+
+Trials inside one session stay serial. One eval server holds one store,
+and memory calls are assigned to turns by the timing of
+`eval_record_turn`, so two trials in one session would mix their stores and
+traces. To run trials in parallel, launch several sessions. Each one starts
+its own eval server and runs one shard.
+
+1. Launch one headless session per shard, from the repo root, with
+   `--shard k/n` passed through to `new-run`. For example, for 3 shards:
+
+   ```
+   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard 1/3" --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+   ```
+
+   Repeat with `--shard 2/3` and `--shard 3/3`. Shard k takes the
+   scenarios, sorted by id, whose index % n is k - 1. Its run dir ends in
+   `-shard<k>of<n>`, so shards started in the same second do not collide.
+2. When every shard has finished, merge them into one report:
+
+   ```
+   uv run python -m evals merge-runs evals/runs/<name> <shard run dir> ...
+   ```
+
+   This checks that every shard has the same model, trial count, git
+   commit, and agent sha256. It copies each scenario's trials, writes a
+   combined `run.json` listing the sources, and writes `report.md` and
+   `report.json` covering every scenario.
