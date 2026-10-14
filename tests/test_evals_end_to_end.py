@@ -105,12 +105,17 @@ async def privacy_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+BOARD_DECK_SCHEDULE = (
+    "- [stated] The board deck always goes out the Friday before the board meeting."
+)
+
+
 # --- filing-alias-append ------------------------------------------------------
 
 
 async def alias_correct(d: Driver) -> None:
     await d.index()
-    await d.append("user", "workflows", "board-deck", "- [stated] The Q4 board deck is due Friday.")
+    await d.append("user", "workflows", "board-deck", BOARD_DECK_SCHEDULE)
     await d.turn(1, 1)
 
 
@@ -119,9 +124,9 @@ async def alias_wrong(d: Driver) -> None:
     await d.create(
         "user",
         "workflows",
-        "q4-board-deck",
-        "- [stated] The Q4 board deck is due Friday.\n",
-        "Q4 board deck",
+        "board-deck-schedule",
+        f"{BOARD_DECK_SCHEDULE}\n",
+        "When the board deck goes out",
     )
     await d.turn(1, 1)
 
@@ -281,13 +286,13 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "filing-alias-append",
         alias_correct,
         alias_wrong,
-        {"appended-to-board-deck", "no-new-file", "due-date-filed"},
+        {"appended-to-board-deck", "no-new-file", "schedule-filed"},
     ),
     (
         "recall-across-sessions",
         recall_correct,
         recall_wrong,
-        {"index-first", "recalled-in-session-2"},
+        {"recalled-in-session-2"},
     ),
     (
         "forgetting-one-fact",

@@ -167,9 +167,20 @@ def test_index_read_first_fails_when_another_call_comes_first() -> None:
     assert "seq 1" in result.detail
 
 
-def test_index_read_first_fails_for_a_session_without_calls() -> None:
-    """A scenario session with no memory calls fails (AIE-1170, US4.1)."""
-    trace = [_call(1, "get_memory_index", session=1)]
+def test_index_read_first_passes_for_a_session_without_calls() -> None:
+    """A session that makes no memory call passes vacuously, as when the agent
+    refuses outright (AIE-1170, US4.1).
+    """
+    one_quiet = [_call(1, "get_memory_index", session=1)]
+    assert _one(IndexReadFirst("i"), trace=one_quiet, sessions=2).passed
+    assert _one(IndexReadFirst("i"), trace=[], sessions=1).passed
+
+
+def test_index_read_first_still_fails_a_quiet_session_neighbour() -> None:
+    """A quiet session does not excuse another session whose first call is
+    not the index (AIE-1170, US4.1).
+    """
+    trace = [_call(1, "read_file", session=2)]
     result = _one(IndexReadFirst("i"), trace=trace, sessions=2)
     assert not result.passed
     assert "session 2" in result.detail

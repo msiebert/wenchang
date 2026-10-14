@@ -1,7 +1,8 @@
 # Prompt: "If a file on the subject exists, append to it or edit it instead of
-# creating a duplicate."
+# creating a duplicate." and "Save a fact only if it would let a future
+# session answer better, differently, or faster"
 id: filing-alias-append
-title: Files a new fact in the existing file whose alias matches the subject
+title: Files a durable workflow fact in the existing file whose alias matches the subject
 category: filing
 source: specs/AIE-1049-filing-dedup/spec.md
 seed:
@@ -14,7 +15,7 @@ seed:
     aliases: [board deck, q4-deck]
 sessions:
   - turns:
-      - "The Q4 board deck is due Friday."
+      - "From now on the board deck always goes out the Friday before the board meeting."
 assertions:
   - kind: index_read_first
     id: index-first
@@ -27,8 +28,8 @@ assertions:
     id: no-new-file
     tool: write_file
   - kind: line_present
-    id: due-date-filed
-    pattern: "(?i)friday|due"
+    id: schedule-filed
+    pattern: "(?i)friday"
     scope: user
     area: workflows
     name: board-deck

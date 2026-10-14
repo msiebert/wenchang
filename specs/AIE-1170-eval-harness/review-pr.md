@@ -75,7 +75,7 @@ Test modules, abbreviated in the Test(s) column:
 | 3.3 21 malformed cases, incl. args not on every listed tool, unknown scope arg, non-string identity or kind, `seed_lines_preserved` on a non-seed (plus unknown tool, missing file) | scn `test_malformed_scenarios_are_rejected[*]`, `test_non_mapping_yaml_is_rejected`, `test_unknown_tool_name_is_rejected`, `test_missing_file_is_rejected` |
 | 3.4 corpus loads; unique ids; closed kinds | scn `test_corpus_loads_with_unique_ids`, `test_assertion_kinds_are_the_closed_set` |
 | 3.5 corpus is the planned eight; categories; sources; prompt cite | scn `test_corpus_is_the_planned_eight` |
-| 4.1 `index_read_first` | grd `test_index_read_first_*` (5 tests) |
+| 4.1 `index_read_first`; a session with no memory calls passes | grd `test_index_read_first_*` (6 tests) |
 | 4.2 `file_absent` | grd `test_file_absent` |
 | 4.3 `line_present` / `line_absent` | grd `test_line_present_and_absent_with_filters`, `test_line_patterns_are_case_sensitive_as_written`, `test_line_absent_is_vacuous_without_matching_files`, `test_blank_line_is_detected` |
 | 4.4 `no_content_matching` | grd `test_no_content_matching_scans_files`, `test_no_content_matching_scans_write_arguments[*]`, `test_no_content_matching_scans_alias_lists`, `test_no_content_matching_ignores_reads` |

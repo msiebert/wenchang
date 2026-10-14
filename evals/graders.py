@@ -351,7 +351,8 @@ def _index_read_first(a: IndexReadFirst, s: Scenario, trace: Sequence[TraceCall]
     for session in sessions:
         calls = [c for c in trace if c.session == session]
         if not calls:
-            return f"session {session} made no memory calls"
+            # A session with no memory calls, such as an outright refusal, passes.
+            continue
         index_done = [c.completed_ms for c in calls if c.tool == INDEX_TOOL]
         if not index_done:
             return f"session {session} never called {INDEX_TOOL}"

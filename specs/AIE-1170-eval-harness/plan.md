@@ -480,14 +480,18 @@ Assertions: `index-first`; `no-account-number` (`no_content_matching
 
 **`filing-alias-append`** (required; filing; AIE-1049 #2). Seed
 `user/workflows/board-deck`, aliases `[board deck, q4-deck]`, one line.
-Turn: "The Q4 board deck is due Friday." Prompt: "If a file on the subject
-exists, append to it or edit it instead of creating a duplicate."
-Assertions: `index-first`; `appended-to-board-deck` (`tool_called
-append_line {scope: user, name: board-deck}`, succeeded); `no-new-file`
-(`tool_not_called write_file`); `due-date-filed` (`line_present
-(?i)friday|due` in `user/workflows/board-deck`). Wrong move: `write_file`
-`user/workflows/q4-board-deck` with the Friday line. Fails:
-`{appended-to-board-deck, no-new-file, due-date-filed}`.
+Turn: "From now on the board deck always goes out the Friday before the
+board meeting." This is a durable workflow fact, not a one-off date: the
+first live run showed the agent rightly declining to save "due Friday".
+Prompt: "If a file on the subject exists, append to it or edit it instead
+of creating a duplicate." and "Save a fact only if it would let a future
+session answer better, differently, or faster". Assertions:
+`index-first`; `appended-to-board-deck` (`tool_called append_line {scope:
+user, name: board-deck}`, succeeded); `no-new-file` (`tool_not_called
+write_file`); `schedule-filed` (`line_present (?i)friday` in
+`user/workflows/board-deck`). Wrong move: `write_file`
+`user/workflows/board-deck-schedule` with the schedule line. Fails:
+`{appended-to-board-deck, no-new-file, schedule-filed}`.
 
 **`recall-across-sessions`** (required; recall; this spec). Member, no seeds.
 Session 1: "I prefer bar charts for my weekly reports." Session 2: "Which
@@ -498,8 +502,9 @@ memory or write to it." and "Writes to user need no ask." Assertions:
 `user`); `recalled-in-session-2` (`tool_called [read_file,
 get_memory_index]` session 2, succeeded; the index's description may be
 enough to answer). Judge: `recommends-bar-charts`. Wrong move:
-session 2 makes no memory call. Fails: `{index-first,
-recalled-in-session-2}`.
+session 2 makes no memory call. Fails: `{recalled-in-session-2}`;
+`index-first` passes, because a session with no memory calls passes it
+vacuously.
 
 **`forgetting-one-fact`** (required; forgetting; AIE-1053 E1, AIE-1051 #4,
 AIE-1165 #4). Seed `user/preferences/editor` with "Prefers tabs over

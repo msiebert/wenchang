@@ -14,6 +14,13 @@ evaluated, not unit-tested"); the behavioral-eval scenario lists in
 MCP adapter from AIE-1060 (`wenchang.mcp`); the reference adopter fixture
 from AIE-1059 (PR #34).
 
+Allow-test-changes: `tests/test_evals_packaging.py`, a new file for US7.1,
+skips its wheel-build test with `pytest.skip("uv is not on PATH")` on
+machines without uv. No existing test is weakened. The repo's stop-gate
+hook flags any added skip until this branch merges. Separately, US4.1 now
+lets a session with no memory calls pass, so this issue's own
+`index_read_first` test was rewritten to the new rule.
+
 ## Summary
 
 A dev-only harness that runs a real agent against the wenchang memory tools
@@ -130,7 +137,7 @@ Rules shared by every kind:
 
 | # | Assertion kind | Passes when |
 | - | -------------- | ----------- |
-| 4.1 | `index_read_first {session?}` | in every session of the scenario (or only the given session), some `get_memory_index` call completed before any other memory call of that session started; a session with no memory calls fails. Strict on purpose: a parallel batch of `[get_memory_index, read_file]` in one assistant message fails, because the prompt asks the agent to consult the index before acting, and a call issued alongside the index read was chosen without consulting it. This grades execution order as the server saw it: a host that serialises a batched pair may let it pass (a known limitation, ADR 0028) |
+| 4.1 | `index_read_first {session?}` | in every session of the scenario (or only the given session), when the session makes any memory call, some `get_memory_index` call completed before any other memory call of that session started. A session with no memory calls passes vacuously: an agent that refuses outright and touches no memory has not skipped the index. Strict on purpose: a parallel batch of `[get_memory_index, read_file]` in one assistant message fails, because the prompt asks the agent to consult the index before acting, and a call issued alongside the index read was chosen without consulting it. This grades execution order as the server saw it: a host that serialises a batched pair may let it pass (a known limitation, ADR 0028) |
 | 4.2 | `file_absent {scope, area, name}` | the dump lacks that file |
 | 4.3 | `line_present {pattern, scope?, area?, name?}` / `line_absent {...}` | some line of some matching file matches / no line of any matching file matches |
 | 4.4 | `no_content_matching {pattern}` | no file's content, description, or alias matches, and no `write_file`, `append_line`, or `replace_fact` call (succeeded or failed) has a matching value in the arguments `content`, `line`, `new_string`, `description`, `aliases` (each string in the list), `area`, or `name`. `expected_version`, `old_string`, `cursor`, and `scope` are never scanned, and `delete_file` calls are never scanned, since a delete persists no content |
