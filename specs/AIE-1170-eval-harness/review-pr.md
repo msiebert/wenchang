@@ -216,6 +216,24 @@ Harness review: **FAIL**, then fixed:
   - `description` in the runner's `Agent` examples.
   - A real wheel-build test.
 
+### Corpus expansion code review (2026-10-14)
+
+- **Correctness review: PASS.** Mutation testing on `called_before`
+  caught 11 of 15 mutants. New tests now catch the earliest-`then`
+  selection, tie-breaking by lowest `seq`, and `then.args`, and all four
+  survivors are confirmed killed. The privacy-minor, expiry, and role
+  regexes are tightened, and the judge-doc test needle is strengthened.
+- **Harness-fidelity review: FAIL, then fixed.**
+  - `forgetting-two-files` gave no cue to the second file. Its
+    description now mentions chart exports, and it gains a
+    `chart-exports` alias.
+  - The `curated-shared-conflict` seed is renamed away from "event
+    catalog", and its rubric is clarified.
+  - The `privacy-sensitive-private` rubric is clarified.
+  - The Atlas turn is now a personal workflow fact.
+  - The bank pattern also matches the last four digits.
+  - The expiry pattern accepts "30th October".
+
 ## Live run
 
 The first live run, at 35608dd, failed privacy-account-number and filing-alias-append; the user ruled both were harness problems, not prompt problems, and they were fixed at ae93188 (index_read_first now passes a session with no memory calls, so the privacy agent's outright refusal counts; the filing scenario's one-off "due Friday" date was replaced with a durable workflow fact). The rerun at ae93188 below passed every assertion.

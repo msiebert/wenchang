@@ -21,7 +21,7 @@ seed:
     aliases: [atlas]
 sessions:
   - turns:
-      - "For Atlas, every change now needs sign-off from the data platform team."
+      - "For Atlas, I now check in with the data platform team before every change."
 assertions:
   - kind: index_read_first
     id: index-first

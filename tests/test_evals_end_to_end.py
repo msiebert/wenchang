@@ -406,7 +406,7 @@ async def expiry_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
-SIGN_OFF = "- [stated] Every Atlas change needs sign-off from the data platform team."
+SIGN_OFF = "- [stated] Checks in with the data platform team before every Atlas change."
 
 
 async def ambiguous_correct(d: Driver) -> None:
