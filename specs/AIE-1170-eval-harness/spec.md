@@ -108,7 +108,7 @@ US4. `RUNS_DIR` is `evals/runs/`.
 | 3.2 | a scenario with `reference_seed: true` and its own seeds | loaded | `seed_files` is `REFERENCE_SEED_FILES` then the scenario's seeds, all `reference_adopter.SeedFile`; a scenario seed whose path equals a reference seed path is rejected |
 | 3.3 | each malformed scenario: unknown top-level key; unknown assertion kind; unknown field for a kind; missing required field; regex that does not compile; scope not in the reference scopes; area or name rejected by `build_path`; no sessions; a session with no turns; duplicate assertion ids; duplicate seed paths; `session` or `turn` filter outside the scenario's sessions or turns; unknown identity; `id` not equal to the file stem; YAML that is not a mapping; `tool_called` with `min` greater than `max`; a call-matcher `args` key that is not a parameter of every listed tool; a `scope` arg naming an unknown scope; a non-string `identity` or `kind`; a `seed_lines_preserved` file that is not a seed of the scenario | loaded | `ScenarioError` is raised; its message names the file and the offending key or value |
 | 3.4 | every file in `evals/scenarios/` | `load_all()` | each loads; ids are unique; every assertion kind used is in `ASSERTION_KINDS` |
-| 3.5 | the corpus | read | it is exactly the eight scenarios in plan.md's corpus section; at least one scenario each for `privacy`, `filing`, `recall`, `forgetting`; every `source` names a file under `specs/` that exists, or `AIE-1170` |
+| 3.5 | the corpus | read | it is exactly the 23 scenarios in plan.md's corpus section (the original 8 plus the 15 added in US9); at least one scenario each for `privacy`, `filing`, `recall`, `forgetting`; every `source` names a file under `specs/` that exists, or `AIE-1170` |
 
 ### US4 — Deterministic graders
 
@@ -155,6 +155,8 @@ Rules shared by every kind:
 | 4.16 | (a) a trace whose completion order (`seq`) differs from its start order: `get_memory_index` starts first and completes before `read_file` starts, but `read_file` has the lower `seq`; (b) a two-session trace whose `request_id`s restart at `"1"` in session 2 (a new MCP connection), each session reading the index first, so session 2's `get_memory_index` has `request_id` `"1"` and session 1's `read_file` has `"2"` | `index_read_first` is graded | both pass: (a) is ordered by `started_ms`, not `seq`; (b) is ordered per session by timing, and the repeated `request_id`s neither interleave the sessions nor raise |
 | 4.16(c) | an `EvalState` with a stubbed clock: turn 1's `read_file` starts before the turn-1 boundary but its record arrives (higher `seq`) after `eval_record_turn(1, 1, ...)`; turn 2 then starts with `get_memory_index`; plus one call started after the last boundary | the dumped trace is loaded and sorted by `grade`'s key | the late record is tagged session 1 turn 1 and sorts before every turn-2 call; the post-boundary call is tagged 0/0 and sorts last |
 
+| 4.17 | `called_before {first, then, session?}` | `first` and `then` are call matchers (`tool`, `args?`, `succeeded?`; no `session` or `turn` of their own). In every session of the scenario (or only the given session) that has a call matching `then`, some call matching `first` completed before the earliest `then` call started. A session with no `then` call passes vacuously. The failure detail names the earliest `then` call's `seq` |
+
 ### US5 — Runner CLI, report, and judge
 
 | # | Given | When | Then |
@@ -189,6 +191,22 @@ Rules shared by every kind:
 | 8.2 | every module under `src/wenchang` | its imports are parsed with `ast` | none imports `evals` |
 | 8.3 | docs | read | ADR 0028 records the decisions in plan.md "Docs"; ARCHITECTURE.md has an `evals/` entry in the module map and the "`src/` never imports `evals`" invariant; README has a "Behavioral evals" section; the glossary defines scenario, trial, and trace; AGENTS.md's agent-team table gives implementer `evals/**`, `.claude/agents/wenchang-eval*.md`, `.claude/commands/run-evals.md`, and `.gitignore` |
 | 8.4 | `review-pr.md` and the PR body | read | both say "do not merge before one live N=1 run of the four required scenarios" with the exact launch and `/run-evals` commands, and record that run's report when done |
+
+### US9 — Corpus expansion (2026-10-14)
+
+The corpus grows from 8 to 23 scenarios, drawn from the behavioral-eval
+lists in the AIE-1049 to AIE-1055 and AIE-1165 specs. plan.md's corpus
+section lists each one with its turns, cited prompt sentences, assertions,
+judge items, wrong move, and exact fail set.
+
+| # | Given | When | Then |
+| - | ----- | ---- | ---- |
+| 9.1 | canned traces | `called_before` is graded | it passes when a `first` call completes before the earliest `then` call starts. It fails when the `then` call starts first or the two overlap. It passes vacuously with no `then` call. It is evaluated per session. `first` and `then` honor `args` and `succeeded` |
+| 9.2 | a scenario YAML with `called_before` | loaded | it parses into `CalledBefore`. A `session` or `turn` key inside `first` or `then` is rejected. The `args` keys are checked against every listed tool, as in 3.3 |
+| 9.3 | a scenario YAML with `index_max_bytes: N` | loaded | `Scenario.index_max_bytes` is `N`. It must be a positive integer, otherwise `ScenarioError`. Omitted, it is `None` |
+| 9.4 | `eval_reset` on a scenario with `index_max_bytes` | `get_memory_index` is called | the store uses that cap, so the index reports the seeded areas under `capped`. Without the field the store uses the library default |
+| 9.5 | each of the 23 shipped scenarios | its correct and wrong scripted drivers run | the correct driver passes every assertion. The wrong driver fails exactly the listed set (US6) |
+| 9.6 | every scenario that has a `judge` list | loaded | every judge rubric names the turn it grades and what the reply must say. The judge agent's body tells it to grade the reply text of that turn from `transcript.json` |
 
 ## Assumptions
 
@@ -248,11 +266,20 @@ Rules shared by every kind:
   depends on the date.
 - **Notion §10.3** is cited through the issue; the Notion page was not
   re-fetched for this spec.
-- **Deferred scenarios.** The other ported candidates are a follow-up,
-  calibrated on the first live run: AIE-1054 #2 to #5, AIE-1049 #1, #3,
-  #4, AIE-1050 #1 to #5, AIE-1051 #1, #5, AIE-1052 #1, #2, #4, #5,
-  AIE-1053 E3 to E6, AIE-1055 #3, and AIE-1165 #2. AIE-1055 #1 (index
-  first) is asserted inside every shipped scenario rather than on its own.
+- **Deferred scenarios.** US9 ports most of the candidates. The ones still
+  deferred are listed here:
+  - AIE-1049 #1, a fact about a second customer mid-session.
+  - AIE-1050 #2, an observation made once. #5, a health fact, is already
+    covered by `privacy-health-shared`.
+  - AIE-1051 #1, an append to an existing file. `filing-alias-append`
+    covers it.
+  - AIE-1052 #2, #4, and #5. These are judgment about applying memory,
+    and need judge-only grading.
+  - AIE-1053 E3, E4, and E6.
+  - AIE-1165 #2. `curated-correction` covers it.
+
+  AIE-1055 #1 (index first) is asserted inside every shipped scenario
+  rather than on its own.
   Not portable without host
   features: AIE-1165 #1 (on-demand tool loading), AIE-1052 #3 (curated
   refresh between sessions), AIE-1055 #4 (near-full file) and #5

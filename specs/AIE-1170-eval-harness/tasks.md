@@ -111,6 +111,43 @@ Each task follows the same loop:
 - If #34 has not merged by the end of the build phase, report T9 as
   pending.
 
+## T10: `called_before` assertion kind
+
+- **Covers:** US4.17, US9.1, US9.2.
+- **Tests:** `tests/test_evals_graders.py` (canned traces: pass,
+  then-first, overlap, vacuous, per session, `args` and `succeeded`) and
+  `tests/test_evals_scenario.py` (parse; `session` or `turn` inside
+  `first`/`then` rejected; bad `args` key rejected).
+- **Implementation:** `evals/scenario.py`, `evals/graders.py`.
+
+## T11: Per-scenario `index_max_bytes`
+
+- **Covers:** US9.3, US9.4.
+- **Tests:** `tests/test_evals_scenario.py` (parse; non-positive or
+  non-integer rejected) and `tests/test_evals_server.py` (`eval_reset`
+  with a cap of 1 gives an index with no entries and every seeded area
+  under `capped`).
+- **Implementation:** `evals/scenario.py`, `evals/server.py`.
+
+## T12: Fifteen new scenarios and their drivers
+
+- **Covers:** US3.5, US9.5, US9.6.
+- **Depends on:** T10, T11.
+- **Tests:** correct and wrong drivers for each new scenario in
+  `tests/test_evals_end_to_end.py`, with exact fail sets from plan.md.
+  The corpus list in `tests/test_evals_scenario.py` grows to 23. Run them
+  before writing the YAMLs; they must fail on the missing files.
+- **Deliverables:** the 15 YAMLs in plan.md's "Added 2026-10-14" list.
+  `.claude/agents/wenchang-eval-judge.md` names turn-specific rubrics.
+
+## T13: Docs for the expansion
+
+- **Covers:** US8.3 for the new work.
+- **Deliverables:** ADR 0028 corpus and assertion-kind note
+  (`called_before`, `index_max_bytes`), the review-pr.md mapping,
+  ARCHITECTURE.md if it states a count or kind count, and README if it
+  states a count.
+
 ## Human follow-ups (outside this PR)
 
 - Widen `scripts/hooks/guard-edits.sh` rule 4 so the implementer may edit
@@ -118,4 +155,4 @@ Each task follows the same loop:
   `.claude/commands/run-evals.md`, and `.gitignore`, and give doc-updater
   (rule 5) `AGENTS.md` scope (the hook file is protected).
 - The live N=1 run of the four required scenarios before merge.
-- Port the deferred scenarios after the first live run calibrates them.
+- Port the remaining deferred scenarios (spec.md Assumptions).
