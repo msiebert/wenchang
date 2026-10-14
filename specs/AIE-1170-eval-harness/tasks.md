@@ -131,22 +131,39 @@ Each task follows the same loop:
 
 ## T12: Fifteen new scenarios and their drivers
 
-- **Covers:** US3.5, US9.5, US9.6.
+- **Covers:** US3.5, US6.1, US6.2, US9.5, US9.6.
 - **Depends on:** T10, T11.
-- **Tests:** correct and wrong drivers for each new scenario in
-  `tests/test_evals_end_to_end.py`, with exact fail sets from plan.md.
-  The corpus list in `tests/test_evals_scenario.py` grows to 23. Run them
-  before writing the YAMLs; they must fail on the missing files.
-- **Deliverables:** the 15 YAMLs in plan.md's "Added 2026-10-14" list.
-  `.claude/agents/wenchang-eval-judge.md` names turn-specific rubrics.
+- **Tests, written first and run before the YAMLs exist:**
+  - In `tests/test_evals_end_to_end.py`, correct and wrong drivers for each
+    new scenario, with exact fail sets from plan.md.
+  - In `tests/test_evals_scenario.py`, the corpus test is renamed from
+    `test_corpus_is_the_planned_eight` to `test_corpus_is_the_planned_set`
+    and lists all 23.
+  - A new corpus test checks that every judge rubric matches
+    `^The (session \d+ )?turn \d+ reply`.
+  - `tests/test_evals_agent.py` checks that the judge agent body states
+    the turn rule.
+- **Deliverables:**
+  - The 15 YAMLs in plan.md's "Added 2026-10-14" list.
+  - The two existing rubrics (`privacy-account-number`,
+    `recall-across-sessions`) reworded to name their turn.
+  - The turn rule added to `.claude/agents/wenchang-eval-judge.md`: "If a
+    rubric names 'turn N' or 'session S turn N', grade only that reply in
+    transcript.json; the session defaults to 1. If that reply is missing,
+    the verdict is fail."
 
 ## T13: Docs for the expansion
 
 - **Covers:** US8.3 for the new work.
-- **Deliverables:** ADR 0028 corpus and assertion-kind note
-  (`called_before`, `index_max_bytes`), the review-pr.md mapping,
-  ARCHITECTURE.md if it states a count or kind count, and README if it
-  states a count.
+- **Deliverables:**
+  - The ADR 0028 corpus and assertion-kind note (`called_before`,
+    `index_max_bytes`, 23 scenarios).
+  - `review-pr.md`: the mapping rows for 3.5, 4.17, 6.1, 6.2, and 9.x, the
+    renamed corpus test name, and every remaining "eight" count. These are
+    currently lines 27, 77, and 100.
+  - `review-spec.md`: the counts and the corpus mention, currently lines
+    30, 33, 50, 55, and 118. Also a "Corpus expansion" review summary.
+  - ARCHITECTURE.md and README, if either states a scenario or kind count.
 
 ## Human follow-ups (outside this PR)
 
