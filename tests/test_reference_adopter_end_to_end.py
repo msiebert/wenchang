@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from reference_adopter import (
+from evals.reference_adopter import (
     ADMIN_IDENTITY,
     ADMIN_USER_ID,
     AGENT_SOURCE,

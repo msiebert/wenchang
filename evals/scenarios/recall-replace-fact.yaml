@@ -1,0 +1,28 @@
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact" and "Writes to user need no ask."
+id: recall-replace-fact
+title: Replaces a personal fact in a later session instead of appending a duplicate
+category: recall
+source: specs/AIE-1051-write-mechanics/spec.md
+sessions:
+  - turns:
+      - "I send my weekly report to the growth team."
+  - turns:
+      - "I now send my weekly report to the retention team instead."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-in-session-2
+    tool: replace_fact
+    args: {scope: user}
+    session: 2
+    succeeded: true
+  - kind: no_duplicate_fact
+    id: one-recipient-line
+    pattern: "(?i)weekly report"
+    scope: user
+  - kind: line_present
+    id: new-recipient-saved
+    pattern: "(?i)retention"
+    scope: user

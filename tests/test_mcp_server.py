@@ -13,7 +13,6 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import FrozenInstanceError, fields, is_dataclass
-from pathlib import Path
 from typing import Any, cast
 
 import anyio
@@ -23,7 +22,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import CallToolResult, TextContent
 
 import wenchang.mcp as wmcp
-from reference_adopter import REFERENCE_SLOTS
+from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.core import MemoryStore
 from wenchang.identity import Identity, ResolutionFailure, ScopeGrant
 from wenchang.mcp import (
@@ -48,7 +47,6 @@ from wenchang.transport import InProcessClient
 
 pytestmark = pytest.mark.unit
 
-TESTS_DIR = Path(__file__).resolve().parent
 TIMEOUT = 60
 META_KEY = "test/user"
 TOOL_PREFIX_RULE = (
@@ -382,10 +380,8 @@ def test_python_oo_fails_startup() -> None:
     """Under python -OO, building the server fails with the missing-description
     error (AIE-1060, US3.13).
     """
-    code = f"""
-import sys
-sys.path.insert(0, {str(TESTS_DIR)!r})
-from reference_adopter import REFERENCE_SLOTS
+    code = """
+from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.core import MemoryStore
 from wenchang.identity import SandboxResolver, Identity
 from wenchang.mcp import build_server
@@ -395,8 +391,8 @@ from wenchang.transport import InProcessClient
 build_server(
     slots=REFERENCE_SLOTS,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
-    resolver=SandboxResolver(Identity({{}})),
-    policy=ScopePolicy({{}}),
+    resolver=SandboxResolver(Identity({})),
+    policy=ScopePolicy({}),
     credentials_from_context=lambda ctx: None,
     source="oo",
 )

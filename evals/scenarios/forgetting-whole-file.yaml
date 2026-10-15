@@ -1,0 +1,41 @@
+# Prompt: "Delete the file if the fact was the file's only fact or the user
+# means the whole file" and "Use `delete_file` only when the whole file goes."
+id: forgetting-whole-file
+title: Deletes the whole file when the user asks to forget everything about its subject
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: atlas-migration
+    content: |
+      - [stated] Leads the Atlas migration.
+      - [stated] The Atlas migration cutover is planned for March.
+    description: The Atlas migration the user leads
+    aliases: [atlas]
+  - scope: user
+    area: preferences
+    name: charts
+    content: |
+      - [stated] Prefers charts with a dark background.
+    description: Chart style preferences
+    aliases: [chart-style]
+sessions:
+  - turns:
+      - "Forget everything about the Atlas migration."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: file_absent
+    id: file-deleted
+    scope: user
+    area: workflows
+    name: atlas-migration
+  - kind: tool_called
+    id: used-delete
+    tool: delete_file
+    args: {name: atlas-migration}
+    succeeded: true
+  - kind: no_content_matching
+    id: no-atlas-left
+    pattern: "(?i)atlas"

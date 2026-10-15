@@ -1,0 +1,16 @@
+# Prompt: "When the user's own framing makes a fact's end date explicit,
+# write the date into the fact line as prose"
+id: remembering-expiry
+title: Writes a stated end date into the fact line
+category: remembering
+source: specs/AIE-1050-remembering/spec.md
+sessions:
+  - turns:
+      - "For my exports, use JSON until the v3 migration finishes on October 30."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: expiry-in-line
+    pattern: "(?i)json.*(oct(ober)?\\.?\\s*30|30(th)?\\s*oct(ober)?|10[/-]30)|(oct(ober)?\\.?\\s*30|30(th)?\\s*oct(ober)?|10[/-]30).*json"
+    scope: user

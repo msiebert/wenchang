@@ -8,10 +8,13 @@ filesystem of markdown files in GCS, exposed as tools.
 - `make install` — `uv sync`
 - `make fmt` — format and autofix (ruff)
 - `make lint` — check formatting and lint, no fixes
-- `make typecheck` — pyright (strict, `src/` and `tests/`)
+- `make typecheck` — pyright (strict, `src/`, `tests/`, and `evals/`)
 - `make test` — all non-integration tests (`pytest -m "not integration"`)
 - `make test-integration` — integration tests against fake-gcs-server (`make emulator-up` first)
 - `make check` — lint + typecheck + test; the definition-of-done gate
+- `/run-evals` — live behavioral evals, in a session launched with
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'`;
+  never part of `make check` (ADR 0028)
 
 ## Workflow
 
@@ -49,7 +52,7 @@ with fixed models and edit scopes:
 | orchestrator (main session) | opus | `specs/**` only |
 | explorer | haiku | nothing (read-only) |
 | test-writer | sonnet | `tests/**` only |
-| implementer | sonnet | `src/**` (not `tests/**`) |
+| implementer | sonnet | `src/**`, `evals/**`, `.claude/agents/wenchang-eval*.md`, `.claude/commands/run-evals.md`, `.gitignore` (not `tests/**`) |
 | doc-updater | sonnet | `ARCHITECTURE.md`, `docs/**`, `specs/**` |
 | spec-reviewer | sonnet | nothing (read-only) |
 
@@ -57,6 +60,8 @@ Edit scopes are enforced by a PreToolUse hook
 (`scripts/hooks/guard-edits.sh`) keyed on each subagent's `agent_type`, not
 by convention. See `docs/adr/0004-agent-team-orchestration.md` for the
 rationale, including why test-writer is kept separate from implementer.
+The implementer's `evals/` and eval `.claude/` scope (ADR 0028) is not yet
+in the hook's rule 4; widening the hook is a manual change.
 
 ## Pointers
 

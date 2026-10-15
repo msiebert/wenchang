@@ -1,0 +1,34 @@
+# Prompt: "Before saving a new fact to project or organization, ask the user
+# and name the scope."
+id: slots-ask-before-shared
+title: Asks before saving an organization fact, then saves it once confirmed
+category: slots
+source: specs/AIE-1055-prompt-slots/spec.md
+identity: admin
+sessions:
+  - turns:
+      - "Our company calls customers 'members' everywhere. Remember that."
+      - "Yes, save it for the whole organization."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: no-org-write-before-ask
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: organization}
+    session: 1
+    turn: 1
+  - kind: tool_called
+    id: org-write-after-yes
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: organization}
+    session: 1
+    turn: 2
+    succeeded: true
+  - kind: line_present
+    id: term-saved
+    pattern: "(?i)members"
+    scope: organization
+judge:
+  - id: asks-and-names-scope
+    rubric: The turn 1 reply asks before saving and names the organization scope.

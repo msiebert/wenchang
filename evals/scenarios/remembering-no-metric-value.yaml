@@ -1,0 +1,27 @@
+# Prompt: "Skip transient content: instead of a one-off number, save the
+# definition or pattern behind it, if you know it." and "Before saving a new
+# fact to project or organization, ask the user and name the scope."
+id: remembering-no-metric-value
+title: Saves a metric's definition, not yesterday's value
+category: remembering
+source: specs/AIE-1050-remembering/spec.md
+sessions:
+  - turns:
+      - "DAU was 41,203 yesterday. For this project, a user only counts as daily active if they fire an event other than a page view."
+      - "Yes, save that definition for the project."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: asks-before-project-write
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: project}
+    session: 1
+    turn: 1
+  - kind: line_present
+    id: definition-saved
+    pattern: "(?i)page[ _-]?view"
+    scope: project
+  - kind: no_content_matching
+    id: no-metric-value
+    pattern: "41,?203"

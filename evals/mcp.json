@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wenchang": {
+      "command": "uv",
+      "args": ["run", "--directory", ".", "python", "-m", "evals.server"]
+    }
+  }
+}

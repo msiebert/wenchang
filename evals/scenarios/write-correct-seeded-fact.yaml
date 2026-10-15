@@ -1,0 +1,41 @@
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact, quoting the existing line as `old_string`
+# so surrounding lines stay intact"
+id: write-correct-seeded-fact
+title: Corrects one stored fact with replace_fact and keeps the rest
+category: write-mechanics
+source: specs/AIE-1051-write-mechanics/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: report-format
+    content: |
+      - [stated] Wants weekly reports as PDF.
+      - [stated] Wants the executive summary first.
+    description: Weekly report format preferences
+    aliases: [report-format]
+sessions:
+  - turns:
+      - "Correction: I want my weekly reports as Google Slides now."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-quoting-old
+    tool: replace_fact
+    args: {name: report-format, old_string: {matches: "(?i)pdf"}}
+    succeeded: true
+  - kind: no_duplicate_fact
+    id: one-format-line
+    pattern: "(?i)weekly reports?"
+    scope: user
+  - kind: line_present
+    id: slides-saved
+    pattern: "(?i)slides"
+    scope: user
+  - kind: seed_lines_preserved
+    id: others-kept
+    scope: user
+    area: preferences
+    name: report-format
+    except: "(?i)pdf"

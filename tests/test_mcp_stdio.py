@@ -9,7 +9,7 @@ import pytest
 from mcp import StdioServerParameters
 from mcp.client import Client
 
-from reference_adopter import REFERENCE_SLOTS
+from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.prompts import build_memory_prompt
 from wenchang.tools import TOOL_NAMES
 

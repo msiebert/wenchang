@@ -1,0 +1,54 @@
+# Prompt: "Removal is total: leave no note that the fact was ever true." and
+# "To drop one fact line, call `replace_fact` with an empty `new_string` and
+# the whole line as `old_string`" and "Descriptions and aliases are the entire
+# search surface; there is no content search."
+# Covers specs/AIE-1053-forgetting/spec.md E1, with the fact in two files.
+id: forgetting-two-files
+title: Removes a fact from every file that holds it and keeps both files
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: charts
+    content: |
+      - [stated] Prefers dark backgrounds.
+      - [stated] Exports charts as PNG.
+    description: Chart preferences
+    aliases: [chart-style]
+  - scope: user
+    area: workflows
+    name: weekly-review
+    content: |
+      - [observed] Reviews the funnel every Monday.
+      - [stated] Exports charts as PNG.
+    description: Weekly funnel review routine and its chart exports
+    aliases: [monday-review, chart-exports]
+sessions:
+  - turns:
+      - "Forget that I export charts as PNG."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: no_content_matching
+    id: no-png-left
+    pattern: "(?i)png"
+  - kind: seed_lines_preserved
+    id: charts-kept
+    scope: user
+    area: preferences
+    name: charts
+    except: "(?i)png"
+  - kind: seed_lines_preserved
+    id: review-kept
+    scope: user
+    area: workflows
+    name: weekly-review
+    except: "(?i)png"
+  - kind: tool_not_called
+    id: files-kept
+    tool: delete_file
+  - kind: line_absent
+    id: no-blank-line
+    pattern: "^\\s*$"
+    scope: user

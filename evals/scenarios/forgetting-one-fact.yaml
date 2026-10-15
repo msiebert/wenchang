@@ -1,0 +1,47 @@
+# Prompt: "To drop one fact line, call `replace_fact` with an empty
+# `new_string` and the whole line as `old_string`, including the line break
+# after it" and "Removal is total: leave no note that the fact was ever true."
+id: forgetting-one-fact
+title: Drops one fact line from a multi-fact file and leaves the rest intact
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: editor
+    content: |
+      - [stated] Prefers tabs over spaces.
+      - [stated] Uses a dark editor theme.
+      - [stated] Wraps lines at 100 characters.
+    description: Code editor preferences
+    aliases: [editor, ide]
+sessions:
+  - turns:
+      - "Forget that I prefer tabs."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: dropped-with-replace
+    tool: replace_fact
+    args: {name: editor, new_string: ""}
+    succeeded: true
+  - kind: line_absent
+    id: tabs-gone
+    pattern: "(?i)tabs"
+    scope: user
+  - kind: line_absent
+    id: no-blank-line
+    pattern: "^\\s*$"
+    scope: user
+    area: preferences
+    name: editor
+  - kind: seed_lines_preserved
+    id: others-kept
+    scope: user
+    area: preferences
+    name: editor
+    except: "(?i)tabs"
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file

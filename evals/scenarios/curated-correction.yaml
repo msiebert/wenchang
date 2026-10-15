@@ -1,0 +1,54 @@
+# Prompt: "It is read-only; never attempt to change it." and "Record the
+# correction as a new fact line, with its own label, in the topical file of a
+# writable area; in a shared scope, follow the Scopes section on asking first.
+# Then tell the user where you saved it."
+# Also covers specs/AIE-1055-prompt-slots/spec.md #2 (ask before a shared write).
+id: curated-correction
+title: Records a correction to a curated fact outside system/, after asking
+category: curated
+source: specs/AIE-1052-curated-applying/spec.md
+identity: admin
+seed:
+  - scope: organization
+    area: system
+    name: fiscal-calendar
+    content: |
+      - [system] The fiscal year starts in January.
+    description: Curated organization fiscal calendar
+    aliases: [fiscal-year]
+sessions:
+  - turns:
+      - "Your notes say our fiscal year starts in January. That's wrong: it starts in February."
+      - "Yes, save the correction for the whole organization."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: no-system-write
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {area: system}
+  - kind: tool_not_called
+    id: asks-before-org-write
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: organization}
+    session: 1
+    turn: 1
+  - kind: tool_called
+    id: correction-after-yes
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: organization}
+    session: 1
+    turn: 2
+    succeeded: true
+  - kind: line_present
+    id: correction-saved
+    pattern: "(?i)february"
+    scope: organization
+  - kind: seed_lines_preserved
+    id: curated-kept
+    scope: organization
+    area: system
+    name: fiscal-calendar
+judge:
+  - id: says-where-saved
+    rubric: The turn 2 reply says where the correction was saved.

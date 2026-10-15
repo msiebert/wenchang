@@ -52,7 +52,7 @@ priority is store configuration, not prompt text: it orders only the capped
 startup index, and by default every scope ranks equally. Any `Storage`
 implementation works in place of `InMemoryStorage`. For a worked example,
 see the reference adopter in
-[tests/reference_adopter.py](tests/reference_adopter.py), which holds the
+[evals/reference_adopter.py](evals/reference_adopter.py), which holds the
 prompt slots (including a reference `purpose`), scope priority, write
 policy, identities, and seed content; the design is in
 [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md).
@@ -150,6 +150,40 @@ Things to know:
   nothing.
 
 See [ADR 0027](docs/adr/0027-mcp-host-adapter.md).
+
+## Behavioral evals
+
+The memory prompt is evaluated against a real agent, not unit-tested. The
+dev-only `evals/` package runs scripted scenarios against a Claude Code
+subagent, `wenchang-eval`, whose only tools are the seven memory tools on a
+local eval MCP server. It then grades what the agent stored and which
+tools it called. Scenarios live in `evals/scenarios/*.yaml`.
+
+Launch a dedicated session from the repo root, then run the evals:
+
+```
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+/run-evals --model sonnet --trials 3
+```
+
+Each run writes `evals/runs/<run-id>/report.md`, with pass counts per
+assertion over N trials.
+
+To run faster, launch several sessions in parallel, each with `/run-evals
+--shard k/n`. Then combine them with `uv run python -m evals merge-runs`.
+Trials inside one session stay serial, because one eval server holds one
+store and turns are tagged by timing. Parallelism therefore comes from
+separate sessions, each with its own server. See
+`.claude/commands/run-evals.md`. That directory is gitignored. `make check` never
+runs a live agent. It runs scripted drivers through the same server,
+graders, and report.
+
+The eval agent gets only its own system prompt plus Claude Code's
+environment details. It does not get the Claude Code system prompt,
+CLAUDE.md, auto memory, or, with this launch, the git status snapshot.
+Those details and Claude Code's agent loop still differ from an adopter's
+host. Treat results as signal for prompt iteration, not as release gates. See
+[ADR 0028](docs/adr/0028-behavioral-eval-harness.md).
 
 ## Docs
 

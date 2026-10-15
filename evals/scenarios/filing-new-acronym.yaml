@@ -1,0 +1,45 @@
+# Prompt: "On the same write that records a fact, pass in `aliases` any new
+# names the subject will be looked up by" and "Before saving a new fact to
+# project or organization, ask the user and name the scope."
+id: filing-new-acronym
+title: Adds a new acronym as an alias on the same append, after asking for the shared scope
+category: filing
+source: specs/AIE-1049-filing-dedup/spec.md
+seed:
+  - scope: project
+    area: entities
+    name: checkout-redesign
+    content: |
+      - [stated] The checkout redesign ships a one-page checkout.
+    description: The checkout redesign project
+    aliases: [checkout-redesign]
+sessions:
+  - turns:
+      - "We've started calling the checkout redesign CRX. CRX launches on November 3."
+      - "Yes, save that to the project."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: asks-before-project-write
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: project}
+    session: 1
+    turn: 1
+  - kind: tool_called
+    id: appended-after-yes
+    tool: append_line
+    args: {scope: project, name: checkout-redesign}
+    session: 1
+    turn: 2
+    succeeded: true
+  - kind: alias_present
+    id: alias-added
+    scope: project
+    area: entities
+    name: checkout-redesign
+    alias: CRX
+  - kind: tool_not_called
+    id: no-new-file
+    tool: write_file
+    args: {scope: project}

@@ -1055,7 +1055,7 @@ the one planned piece.
   priority is not prompt text: it is `MemoryStore(scope_priority=...)`,
   which orders only the capped startup index and defaults to one flat tier.
   `prompts` imports nothing from `wenchang` outside its own package.
-  `tests/reference_adopter.py` is the Section 9 reference adopter fixture
+  `evals/reference_adopter.py` is the Section 9 reference adopter fixture
   (slots, scope priority, write policy, identities, seed areas and files),
   and `tests/test_reference_adopter_end_to_end.py` is the tool-layer
   lifecycle test over `InProcessClient` and a real `MemoryStore` built from
@@ -1173,6 +1173,37 @@ agent-facing layer: it registers `tools` on an MCP server, serves the text
 `prompts` assembles, and also imports the `wenchang` package root (for
 `__version__`), `identity`, `scope`, `transport`, `errors`, `version_token`,
 and `core` types for its signatures; nothing depends on it.
+
+### Outside the library: `evals/`
+
+`evals/` is a dev-only top-level package for behavioral evaluation of the
+tools and prompt (see
+[ADR 0028](docs/adr/0028-behavioral-eval-harness.md)). It is not in the
+wheel, imports only public `wenchang` modules, and nothing under `src/`
+imports it. The editable install makes it importable from any directory.
+
+- **evals.reference_adopter**: the spec's reference adopter configuration.
+  It holds the prompt slots, scopes, policy, identities, and seed files,
+  shared by the tests and the evals.
+- **evals.scenario**: the YAML scenario format and loader. A scenario has
+  seed files, an optional per-scenario index cap, sessions of scripted user turns, a closed set of eleven
+  assertion kinds, and an optional judge rubric.
+- **evals.graders**: pure deterministic graders over a store dump and a
+  tool-call trace, plus the JSON loaders and writers that form the driver
+  contract. They never import `mcp`.
+- **evals.server**: a stdio MCP server, `python -m evals.server`. It
+  mounts the seven memory tools with `wenchang.mcp.register_memory_tools`
+  over a resettable in-memory store, plus three harness tools:
+  `eval_reset`, `eval_record_turn`, and `eval_dump`.
+- **evals.agent**: renders `.claude/agents/wenchang-eval.md`, the Claude
+  Code eval subagent whose tools are only the seven memory tools.
+- **evals.report** and `python -m evals`: plan a run, grade trials, and
+  write the per-run report.
+
+The runner workflow is `.claude/commands/run-evals.md`. It runs in a
+session launched with `evals/mcp.json`. Live runs never run in
+`make check`. The scripted-driver tests in `make check` exercise the
+server, graders, and report end to end.
 
 ## Key invariants
 
@@ -1303,6 +1334,9 @@ and `core` types for its signatures; nothing depends on it.
 - **pytest stays optional.** Nothing outside `wenchang.testing` imports
   pytest or `wenchang.testing`; the library imports with pytest absent (see
   [ADR 0018](docs/adr/0018-resolver-conformance-suite.md)).
+- **`src/` never imports `evals`.** The eval harness is dev-only and outside
+  the wheel; an `ast` test pins that no module under `src/wenchang` imports
+  it (see [ADR 0028](docs/adr/0028-behavioral-eval-harness.md)).
 
 ## Cross-cutting: error taxonomy
 
