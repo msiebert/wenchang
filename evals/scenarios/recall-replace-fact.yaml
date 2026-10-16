@@ -1,9 +1,9 @@
 # Prompt: "Use `append_line` to add one fact to an existing file and
 # `replace_fact` to change one fact", "Changing one fact is still
 # `replace_fact` when it is the file's only line or when the change also
-# updates `description` or `aliases`", "When a fact changes, its old value is
-# gone too: rewrite the line to state only what is true now", and "Writes to
-# user need no ask."
+# replaces `description` or adds `aliases`", "When a fact in a file you can
+# write changes, its old value is gone too: rewrite the line with a fresh label
+# to state only what is true now", and "Writes to user need no ask."
 id: recall-replace-fact
 title: Replaces a personal fact in a later session instead of appending a duplicate
 category: recall

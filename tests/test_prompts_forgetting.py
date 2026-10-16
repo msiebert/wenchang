@@ -106,10 +106,13 @@ def test_forgetting_body_has_no_used_to_tombstones() -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
+        "a file you can write",
         "its old value is gone",
+        "fresh label",
         "state only what is true now",
         "recording the change",
         "keep a record",
+        "may name the curated fact it overrides",
     ],
 )
 def test_forgetting_body_supersedes_changed_facts(phrase: str) -> None:

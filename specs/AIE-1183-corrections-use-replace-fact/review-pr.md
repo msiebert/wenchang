@@ -11,7 +11,7 @@
 **Fix** (general, not scenario-specific):
 
 - One new Forgetting paragraph: a changed fact's old value is gone.
-- One new Write-mechanics sentence: changing one fact is still `replace_fact` for a one-line file or a metadata change.
+- Two Write-mechanics changes: the cited `replace_fact` sentence says to write the new line as the current truth, and a new sentence says changing one fact is still `replace_fact` for a one-line file or a metadata change.
 - The earlier branch text was rejected because it quoted the failing trials' phrasing. It is removed (`test_no_trial_phrasing`).
 - Stale aliases are out of scope.
 
@@ -19,19 +19,38 @@
 
 `src/wenchang/prompts/forgetting.py` (new paragraph):
 
-> When a fact changes, its old value is gone too: rewrite the line to state only what is true now, as though it had always read that way, with no note, date, or comparison recording the change. Keep an earlier value only if the user asks you to keep a record of it.
+> When a fact in a file you can write changes, its old value is gone too: rewrite the line with a fresh label to state only what is true now, as though it had always read that way, with no note, date, or comparison recording the change. Keep an earlier value only if the user asks you to keep a record of it. A correction to a curated fact may name the curated fact it overrides.
 
-`src/wenchang/prompts/write_mechanics.py` (new sentence):
+`src/wenchang/prompts/write_mechanics.py` (two changes):
 
-> Changing one fact is still `replace_fact` when it is the file's only line or when the change also updates `description` or `aliases`.
+1. The `replace_fact` clause is reworded:
 
-### Held-out evidence (commit d8d4c24, before the prompt commit)
+   > ... `replace_fact` to change one fact, writing the new line as the current truth and quoting the existing line as `old_string` so surrounding lines stay intact; ...
+
+2. New sentence:
+
+   > Changing one fact is still `replace_fact` when it is the file's only line or when the change also replaces `description` or adds `aliases`.
+
+The generality review refined Option A:
+
+- The paragraph is scoped to writable files.
+- It uses a fresh label.
+- Curated corrections may name what they override.
+- The aliases sentence is now accurate: `replace_fact` only adds aliases.
+- A write-time pointer is added to the cited sentence, and citations and pins are updated.
+
+### Held-out evidence (commits d8d4c24 and f31011d, before the prompt commit)
+
+All turns are in the first person.
 
 - `write-correct-seeded-fact`: new `line_absent` assertion `old-format-gone`. The append wrong driver fails exactly `{replaced-quoting-old, one-format-line, old-format-gone}`.
-- `write-superseded-tool`: one-line seeded Notion to Confluence switch. The append wrong driver fails exactly `{replaced-tool-line, old-tool-gone, one-notes-line}`.
+- `write-superseded-tool`: one-line seeded Notion to Confluence switch, plus `no-change-date` (`line_absent (?i)last week`). The append wrong driver fails exactly `{replaced-tool-line, old-tool-gone, one-notes-line}`.
 - `recall-superseded-definition`: 7-day to 14-day window across two sessions. The append wrong driver fails exactly `{replaced-in-session-2, one-window-line, old-window-gone}`.
 - `write-added-not-superseded` (guard): sales is added to design. A wrong driver that replaces the design line fails exactly `{design-kept}`.
-- `write-superseded-kept-on-request` (guard): the user asks to keep a record of Jenkins. A replace-only wrong driver fails exactly `{old-tool-recorded}`. Its header cites the new exception sentence only from the prompt commit, because its behavior depends on that sentence.
+- `write-superseded-kept-on-request` (guard): the user asks to keep a record of Jenkins. It has `old-line-changed`. A replace-only wrong driver fails exactly `{old-tool-recorded}`. An append-only driver fails exactly `{old-line-changed}` (`test_kept_on_request_flags_an_unchanged_old_line`).
+- `write-superseded-shared-fact` (guard): a contradicted project fact, and the user's turn asks which to keep. Turn 1 has no shared write, and there is a judge item (`asks-which-to-keep`). A replacing wrong driver fails exactly `{no-shared-write-before-ask, old-fact-kept}`. Its header cites the existing shared-contradiction sentence.
+
+Headers of `write-superseded-tool`, `recall-superseded-definition` and `write-correct-seeded-fact` add the Forgetting principle sentence in the prompt commit. `write-superseded-kept-on-request` cites the exception sentence there, because its behavior depends on it.
 
 ## Acceptance criteria → tests
 
@@ -40,13 +59,14 @@ Parametrized end-to-end cases are `test_correct_driver_passes_every_assertion[<i
 | Acceptance criterion (Given/When/Then) | Test(s) |
 | --------------------------------------- | ------- |
 | US1.1 `write-correct-seeded-fact` has `old-format-gone`; correct driver passes, append driver fails the 3 listed | end-to-end `[write-correct-seeded-fact]` (both) |
-| US1.2 `write-superseded-tool` correct passes, append fails exactly 3 | end-to-end `[write-superseded-tool]` (both) |
+| US1.2 `write-superseded-tool` (with `no-change-date`) correct passes, append fails exactly 3 | end-to-end `[write-superseded-tool]` (both) |
 | US1.3 `recall-superseded-definition` correct passes, append fails exactly 3 | end-to-end `[recall-superseded-definition]` (both) |
 | US1.4 `write-added-not-superseded` guard | end-to-end `[write-added-not-superseded]` (both) |
-| US1.5 `write-superseded-kept-on-request` guard | end-to-end `[write-superseded-kept-on-request]` (both) |
-| US1.6 corpus includes the 4 ids; every scenario has `index-first` and a `# Prompt:` header | `test_corpus_is_the_planned_set`, `test_corpus_loads_with_unique_ids`, `test_every_shipped_scenario_has_scripted_drivers` |
-| US2.1 `forgetting.BODY` has the 4 load-bearing terms; existing forgetting tests pass | `test_forgetting_body_supersedes_changed_facts`, `test_forgetting_body_omits_write_tools`, `test_forgetting_body_has_no_used_to_tombstones` |
-| US2.2 one "the file's only line" sentence names `replace_fact`, `description`, `aliases`; rejected phrases absent | `test_one_fact_change_stays_replace_fact`, `test_no_trial_phrasing` |
+| US1.5 `write-superseded-kept-on-request` guard, including the append-only driver | end-to-end `[write-superseded-kept-on-request]` (both), `test_kept_on_request_flags_an_unchanged_old_line` |
+| US1.6 corpus includes the 5 new ids; every scenario has `index-first` and a `# Prompt:` header | `test_corpus_is_the_planned_set`, `test_corpus_loads_with_unique_ids`, `test_every_shipped_scenario_has_scripted_drivers` |
+| US1.7 `write-superseded-shared-fact`: no-write driver passes, replacing driver fails exactly `{no-shared-write-before-ask, old-fact-kept}` | end-to-end `[write-superseded-shared-fact]` (both) |
+| US2.1 `forgetting.BODY` has the load-bearing phrases; existing forgetting tests pass | `test_forgetting_body_supersedes_changed_facts`, `test_forgetting_body_omits_write_tools`, `test_forgetting_body_has_no_used_to_tombstones` |
+| US2.2 "writing the new line as the current truth"; one "the file's only line" sentence names `replace_fact`, `description`, `aliases`; rejected phrases absent | `test_replace_fact_writes_current_truth`, `test_one_fact_change_stays_replace_fact`, `test_no_trial_phrasing` |
 | US2.3 existing write-mechanics and invariants tests pass unchanged | `tests/test_prompts_write_mechanics.py` (`test_us2_*` to `test_us5_*`) |
 | US2.4 `recall-replace-fact` header cites both new sentences | `test_recall_replace_fact_header_cites_the_supersession_sentences` |
 | US2.5 `.claude/agents/wenchang-eval.md` equals `render_agent_file()` | `test_eval_agent_body_is_preamble_plus_prompt`, `test_render_agent_writes_the_file` |
@@ -71,7 +91,7 @@ Parametrized end-to-end cases are `test_correct_driver_passes_every_assertion[<i
 
 This is the human's merge checkpoint and not a release gate (ADR 0028).
 
-**Identity.** Agent sha256 `52426257a4c7ecb20676573cc3fbb6d328b49f682824a0f9a988cfe9a02645ad`, commit = the PR head. Each `run.json` must match both. Ordering: after #39 merges, rebase this branch onto main, re-render the agent file, update the sha here and commit, then run.
+**Identity.** Agent sha256 `6b6b7e41a003a2270f597c459c0e3a17fe830429fcdc143454691d34600bf8a2`, commit = the PR head. Each `run.json` must match both. Ordering: after #39 merges, rebase this branch onto main, re-render the agent file, update the sha here and commit, then run.
 
 **Gate.** Full corpus at N=3, twice, each as 3 shards merged with `merge-runs`. From the worktree root, for k = 1..3:
 
@@ -79,11 +99,13 @@ This is the human's merge checkpoint and not a release gate (ADR 0028).
 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard k/3" --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
 ```
 
-Then merge, and repeat the whole procedure for the second run:
+Then merge the three shards of each run, and repeat the whole procedure for the second run:
 
 ```
 uv run python -m evals merge-runs evals/runs/<name> <shard dirs>
 ```
+
+**N=6 tally.** Sum `passed_trials` per scenario from the two merged `report.json` files. Never pass both runs to `merge-runs`.
 
 **Floors over the combined N=6:**
 
@@ -95,6 +117,7 @@ uv run python -m evals merge-runs evals/runs/<name> <shard dirs>
 | `recall-superseded-definition` | at least 5/6 |
 | `write-added-not-superseded` | 6/6 |
 | `write-superseded-kept-on-request` | 6/6 |
+| `write-superseded-shared-fact` (judge included) | 6/6 |
 | Every other scenario | its AIE-1170 rate |
 
 **Baseline at main for the held-outs.** Held-outs that pass at main do not demonstrate the fix. Use a throwaway worktree, never the primary checkout:
@@ -103,9 +126,11 @@ uv run python -m evals merge-runs evals/runs/<name> <shard dirs>
 git -C /Users/marksiebert/p/github/wenchang fetch origin
 git -C /Users/marksiebert/p/github/wenchang worktree add --detach /tmp/wenchang-baseline origin/main
 make -C /tmp/wenchang-baseline install
-git -C /tmp/wenchang-baseline checkout origin/AIE-1183-replace-fact-corrections -- evals/scenarios/write-superseded-tool.yaml evals/scenarios/recall-superseded-definition.yaml evals/scenarios/write-added-not-superseded.yaml evals/scenarios/write-superseded-kept-on-request.yaml evals/scenarios/write-correct-seeded-fact.yaml
+git -C /tmp/wenchang-baseline checkout origin/AIE-1183-replace-fact-corrections -- evals/scenarios/write-superseded-tool.yaml evals/scenarios/recall-superseded-definition.yaml evals/scenarios/write-added-not-superseded.yaml evals/scenarios/write-superseded-kept-on-request.yaml evals/scenarios/write-correct-seeded-fact.yaml evals/scenarios/write-superseded-shared-fact.yaml
 # launch the eval session from /tmp/wenchang-baseline and run:
-/run-evals --model sonnet --trials 3 --judge write-superseded-tool recall-superseded-definition write-added-not-superseded write-superseded-kept-on-request write-correct-seeded-fact
+/run-evals --model sonnet --trials 3 --judge write-superseded-tool recall-superseded-definition write-added-not-superseded write-superseded-kept-on-request write-correct-seeded-fact write-superseded-shared-fact
+# copy each run out before removing the worktree:
+cp -R /tmp/wenchang-baseline/evals/runs/<run> /Users/marksiebert/p/github/wenchang-AIE-1183/evals/runs/baseline-main-<run>
 git -C /Users/marksiebert/p/github/wenchang worktree remove --force /tmp/wenchang-baseline
 ```
 

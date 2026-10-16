@@ -1,6 +1,8 @@
 # Prompt: "Use `append_line` to add one fact to an existing file and
-# `replace_fact` to change one fact, quoting the existing line as `old_string`
-# so surrounding lines stay intact"
+# `replace_fact` to change one fact, writing the new line as the current truth
+# and quoting the existing line as `old_string` so surrounding lines stay
+# intact" and "When a fact in a file you can write changes, its old value is
+# gone too: rewrite the line with a fresh label to state only what is true now"
 id: write-correct-seeded-fact
 title: Corrects one stored fact with replace_fact and keeps the rest
 category: write-mechanics

@@ -655,11 +655,5 @@ def test_recall_replace_fact_header_cites_the_supersession_sentences() -> None:
         header.append(line[1:])
     text = re.sub(r"\s+", " ", " ".join(header))
 
-    assert (
-        "When a fact changes, its old value is gone too: rewrite the line to state only what"
-        " is true now"
-    ) in text
-    assert (
-        "Changing one fact is still `replace_fact` when it is the file's only line or when"
-        " the change also updates `description` or `aliases`"
-    ) in text
+    assert "When a fact in a file you can write changes, its old value is gone too" in text
+    assert "Changing one fact is still `replace_fact` when it is the file's only line" in text
