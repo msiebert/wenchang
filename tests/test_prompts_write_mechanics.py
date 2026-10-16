@@ -212,8 +212,13 @@ def test_one_fact_change_stays_replace_fact() -> None:
     """AIE-1183, US2.2: changing one fact stays replace_fact for a one-line file or a
     change that also updates description or aliases."""
     sentence = _only_sentence_containing("the file's only line")
-    for term in ("`replace_fact`", "`description`", "`aliases`"):
+    for term in ("`replace_fact`", "replaces `description`", "adds `aliases`"):
         assert term in sentence
+
+
+def test_replace_fact_writes_current_truth() -> None:
+    """AIE-1183, US2.2: replace_fact's new line is written as the current truth."""
+    assert "writing the new line as the current truth" in _body()
 
 
 @pytest.mark.parametrize(

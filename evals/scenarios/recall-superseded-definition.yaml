@@ -1,5 +1,7 @@
 # Prompt: "Use `append_line` to add one fact to an existing file and
-# `replace_fact` to change one fact" and "Writes to user need no ask."
+# `replace_fact` to change one fact", "When a fact in a file you can write
+# changes, its old value is gone too: rewrite the line with a fresh label to
+# state only what is true now", and "Writes to user need no ask."
 id: recall-superseded-definition
 title: Replaces an analysis definition the user changes in a later session
 category: recall
