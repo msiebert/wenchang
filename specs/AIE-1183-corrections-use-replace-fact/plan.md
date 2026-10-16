@@ -1,174 +1,318 @@
-# Implementation Plan: Corrections use replace_fact (AIE-1183)
+# Implementation Plan: A changed fact states only what is true now (AIE-1183)
 
 **Spec**: `specs/AIE-1183-corrections-use-replace-fact/spec.md`
 
-No public interface changes: no signatures, modules, docstrings, or
-storage behavior. The changes are prompt text, one scenario, its scripted
-drivers, and the rendered eval agent file.
+This change touches no public interface, docstring, grader, or assertion
+kind. It ships as two commits.
 
-## 1. `src/wenchang/prompts/write_mechanics.py`
+## Commit 1: held-out evidence (before any prompt edit)
 
-Two sentences go in after the "mechanically impossible" sentence. Every
-existing sentence stays word for word; only the line wrapping after the
-insertion changes. I checked the new `BODY` against every existing
-write-mechanics and invariants test: 1005 characters, longest line 99.
-Replace `BODY` with exactly:
+### 1.1 `evals/scenarios/write-correct-seeded-fact.yaml`
 
-```
-Match the write to the change. Use `append_line` to add one fact to an existing file and
-`replace_fact` to change one fact, quoting the existing line as `old_string` so surrounding lines
-stay intact; this makes it mechanically impossible to disturb lines you were not editing. To change
-or correct a fact stored in a file you can write, use `replace_fact` even when you have read the
-whole file; never rewrite the file with `write_file` to change a fact. The `new_string` of a
-changed fact states only the current fact, with no "previously" or "instead of" clause, and leaves
-no note of the old value. Use `write_file` only for creating a file, restructuring many lines,
-dropping a name from `aliases`, or rewriting the `description` with no fact to write. To drop one
-fact line, call `replace_fact` with an empty `new_string` and the whole line as `old_string`,
-including the line break after it (or before it, if none follows), so no blank line remains. Use
-`delete_file` only when the whole file goes.
-```
-
-The first sentence says "change or correct" because session 2's user states
-an update ("I now send ... instead"), not a mistake. With "correct" alone an
-agent could decide the history ban did not apply.
-
-Why each sentence is there:
-
-- **"you can write"** keeps the sentence out of curated content. A
-  `system/` correction is still a new line in a writable area
-  (curated_content.py).
-- **"even when you have read the whole file ... never rewrite"** targets
-  the read-then-overwrite path seen in the live runs.
-- **"states only the current fact ... no note of the old value"** targets
-  the "(previously sent to the growth team)" line. "of a changed fact"
-  covers an update the user states, not only a mistake.
-
-Rejected alternatives:
-
-- Rewording "Use `write_file` only for creating a file, ...". The
-  `write-new-subject` scenario and the AIE-1051 tests cite it verbatim.
-- A `write_file` docstring sentence. ADR 0025 decision 6 gives tool choice
-  to the prompt.
-- An alias/description sentence. It would route agents back to
-  `write_file`, restate filing.py, and nothing would test it.
-- A "pass an updated description on the same call" clause (reviewer
-  suggestion). filing.py owns that rule, and the AIE-1051 US3.2 test bans
-  "same call" and "same write" in this body.
-
-## 2. `evals/scenarios/recall-replace-fact.yaml`
-
-Replace the header comment with:
-
-```
-# Prompt: "Use `append_line` to add one fact to an existing file and
-# `replace_fact` to change one fact", "To change or correct a fact stored in a
-# file you can write, use `replace_fact` even when you have read the whole
-# file; never rewrite the file with `write_file` to change a fact", "The
-# `new_string` of a changed fact states only the current fact, with no
-# "previously" or "instead of" clause, and leaves no note of the old value",
-# and "Writes to user need no ask."
-```
-
-Then append this assertion:
+Append:
 
 ```yaml
   - kind: line_absent
-    id: old-recipient-gone
-    pattern: "(?i)growth"
+    id: old-format-gone
+    pattern: "(?i)pdf"
+    scope: user
+    area: preferences
+    name: report-format
+```
+
+In `tests/test_evals_end_to_end.py`, the `CASES` fail set becomes
+`{"replaced-quoting-old", "one-format-line", "old-format-gone"}`.
+
+### 1.2 `evals/scenarios/write-superseded-tool.yaml`
+
+```yaml
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact, quoting the existing line as `old_string`
+# so surrounding lines stay intact" and "Writes to user need no ask."
+id: write-superseded-tool
+title: Replaces a one-line fact when the user switches tools, keeping only the current tool
+category: write-mechanics
+source: specs/AIE-1051-write-mechanics/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: standup-notes
+    content: |
+      - [stated] Keeps standup notes in Notion.
+    description: Where the user keeps standup notes
+    aliases: [standup-notes]
+sessions:
+  - turns:
+      - "We moved standup notes over to Confluence last week."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-tool-line
+    tool: replace_fact
+    args: {name: standup-notes, old_string: {matches: "(?i)notion"}}
+    succeeded: true
+  - kind: tool_not_called
+    id: no-overwrite
+    tool: write_file
+    args: {name: standup-notes}
+  - kind: line_absent
+    id: old-tool-gone
+    pattern: "(?i)notion"
+    scope: user
+  - kind: line_present
+    id: new-tool-saved
+    pattern: "(?i)confluence"
+    scope: user
+  - kind: no_duplicate_fact
+    id: one-notes-line
+    pattern: "(?i)standup"
     scope: user
 ```
 
-## 3. `tests/test_evals_end_to_end.py`
+Scripted drivers:
 
-Edits to the existing table:
+- **Correct:** `index`, then replace the seed line with `- [stated] Keeps
+  standup notes in Confluence.`, then `turn(1, 1)`.
+- **Wrong:** `index`, then append that line instead. It fails exactly
+  `{replaced-tool-line, old-tool-gone, one-notes-line}`.
 
-- The `CASES` fail set for `recall-replace-fact` becomes
-  `{"replaced-in-session-2", "one-recipient-line", "old-recipient-gone"}`.
+### 1.3 `evals/scenarios/recall-superseded-definition.yaml`
 
-New scripted drivers:
-
-- **`replace_overwrite_wrong(d)`**, which reproduces the live failure.
-  - Session 1 is the same as in `replace_correct`.
-  - Session 2: `d.index()`, then read `user/workflows/weekly-report` for its
-    version.
-  - It then calls `write_file` with:
-    - `content="- [stated] Sends the weekly report to the retention team (previously sent to the growth team).\n"`
-    - `description="Weekly report routine"`
-    - `aliases=[]`
-    - `expected_version` set to that version
-  - It ends with `d.turn(2, 1)`.
-- **`replace_with_stale_metadata(d)`**:
-  - Session 1: `d.index()`, then `write_file` the `GROWTH` line with
-    `description="Weekly report to the growth team"`,
-    `aliases=["growth report"]`, and `expected_version=None`, then
-    `d.turn(1, 1)`.
-  - Session 2: `d.index()`, `d.replace(... GROWTH, RETENTION)`, then
-    `d.turn(2, 1)`.
-
-New tests, each citing AIE-1183 in its docstring:
-
-- `test_recall_replace_fact_flags_a_previously_clause`: fails exactly
-  `{"replaced-in-session-2", "old-recipient-gone"}`, and the report shows
-  0/1.
-- `test_recall_replace_fact_ignores_stale_metadata`: passes every
-  assertion, and the report shows 1/1. It also asserts the growth alias and
-  description survive session 2.
-
-`tests/test_evals_scenario.py` gains
-`test_recall_replace_fact_header_cites_the_correction_sentences` (US2.6).
-
-## 4. `tests/test_prompts_write_mechanics.py`
-
-Add tests only; existing ones stay as they are. Each docstring cites
-AIE-1183, and each test pins only load-bearing terms:
-
-- `_only_sentence_containing("even when you have read the whole file")`
-  contains `replace_fact`, `write_file`, "change or correct", "you can
-  write", and "never rewrite the file".
-- `_only_sentence_containing("states only the current fact")` contains
-  `new_string`, "of a changed fact", `"previously"`, and "no note of the
-  old value".
-
-## 5. `.claude/agents/wenchang-eval.md`
-
-Run `uv run python -m evals render-agent` after §1. The file embeds the
-framing preamble and the rendered memory prompt; tool descriptions are not
-in it. `tests/test_evals_agent.py` requires it to equal
-`render_agent_file()`.
-
-## 6. `review-pr.md`
-
-Draft it from `docs/templates/review-pr-template.md`. It must include:
-
-- The AC-to-test table.
-- The baseline table from the spec.
-- The new agent sha256 (`shasum -a 256 .claude/agents/wenchang-eval.md`)
-  and the commit the live runs must report.
-- The live section marked PENDING, with the exact commands below and the
-  miss policy.
-
-There is no ADR or ARCHITECTURE.md change.
-
-## Live runs (human merge checkpoint)
-
-From the worktree root, run the targeted N=6 set in one session:
-
-```
-CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
-/run-evals --model sonnet --trials 6 --judge recall-replace-fact write-correct-seeded-fact write-new-subject forgetting-one-fact forgetting-whole-file forgetting-two-files forgetting-only-fact curated-correction curated-shared-conflict
+```yaml
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact" and "Writes to user need no ask."
+id: recall-superseded-definition
+title: Replaces an analysis definition the user changes in a later session
+category: recall
+source: specs/AIE-1051-write-mechanics/spec.md
+sessions:
+  - turns:
+      - "For activation analysis I use a 7-day window."
+  - turns:
+      - "I've switched to a 14-day window for activation analysis."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-in-session-2
+    tool: replace_fact
+    args: {scope: user}
+    session: 2
+    succeeded: true
+  - kind: no_duplicate_fact
+    id: one-window-line
+    pattern: "(?i)activation"
+    scope: user
+  - kind: line_absent
+    id: old-window-gone
+    pattern: "(?i)\\b(7|seven)[- ]day"
+    scope: user
+  - kind: line_present
+    id: new-window-saved
+    pattern: "(?i)\\b(14|fourteen)[- ]day"
+    scope: user
 ```
 
-Then run the full corpus at N=3 in 3 headless shards, and merge them:
+Scripted drivers:
+
+- **Correct:**
+  - Session 1: `index`, then create `user/workflows/activation-analysis`
+    with `- [stated] Uses a 7-day window for activation analysis.\n` and
+    description "Activation analysis settings", then `turn(1, 1)`.
+  - Session 2: `index`, then replace that line with `- [stated] Uses a
+    14-day window for activation analysis.`, then `turn(2, 1)`.
+- **Wrong:** session 2 appends the 14-day line instead. It fails exactly
+  `{replaced-in-session-2, one-window-line, old-window-gone}`.
+
+### 1.4 `evals/scenarios/write-added-not-superseded.yaml` (over-correction guard)
+
+```yaml
+# Prompt: "Use `append_line` to add one fact to an existing file" and "Keep
+# anything with support of its own."
+id: write-added-not-superseded
+title: Adds a second audience without dropping the existing one
+category: write-mechanics
+source: specs/AIE-1051-write-mechanics/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: funnel-dashboard
+    content: |
+      - [stated] Shares the checkout funnel dashboard with the design team.
+    description: Who the user shares the checkout funnel dashboard with
+    aliases: [funnel-dashboard]
+sessions:
+  - turns:
+      - "I share the checkout funnel dashboard with the sales team too."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: design-kept
+    pattern: "(?i)design"
+    scope: user
+  - kind: line_present
+    id: sales-saved
+    pattern: "(?i)sales"
+    scope: user
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+```
+
+Scripted drivers:
+
+- **Correct:** append `- [stated] Shares the checkout funnel dashboard with
+  the sales team.`
+- **Wrong:** replace the design line with the sales line. It fails exactly
+  `{design-kept}`.
+
+### 1.5 `evals/scenarios/write-superseded-kept-on-request.yaml` (over-correction guard)
+
+In commit 1 the header cites an existing sentence. Commit 2 adds the new
+exception sentence (§2.4).
+
+```yaml
+# Prompt: "Save a fact only if it would let a future session answer better,
+# differently, or faster" and "Writes to user need no ask."
+id: write-superseded-kept-on-request
+title: Keeps a record of a replaced tool when the user asks for one
+category: write-mechanics
+source: specs/AIE-1051-write-mechanics/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: deploys
+    content: |
+      - [stated] Deploys with Jenkins.
+    description: How the user deploys
+    aliases: [deploys]
+sessions:
+  - turns:
+      - "We switched deploys from Jenkins to GitHub Actions. Please keep a record that we used Jenkins before, because our old runbooks still reference it."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: old-tool-recorded
+    pattern: "(?i)jenkins"
+    scope: user
+  - kind: line_present
+    id: new-tool-saved
+    pattern: "(?i)github actions"
+    scope: user
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+```
+
+Scripted drivers:
+
+- **Correct:** replace the line with `- [stated] Deploys with GitHub
+  Actions.`, then append `- [stated] Deployed with Jenkins before GitHub
+  Actions; old runbooks still reference it.`
+- **Wrong:** do only the replace. It fails exactly `{old-tool-recorded}`.
+
+### 1.6 Tests
+
+- Add `CASES` rows for the four scenarios with the fail sets above.
+- Add the four ids to `CORPUS` in `tests/test_evals_scenario.py`.
+
+## Commit 2: prompt edit
+
+### 2.1 `src/wenchang/prompts/forgetting.py`
+
+Append a new paragraph after "Keep anything with support of its own.",
+wrapped at 100 columns:
+
+> When a fact changes, its old value is gone too: rewrite the line to state
+> only what is true now, as though it had always read that way, with no note,
+> date, or comparison recording the change. Keep an earlier value only if the
+> user asks you to keep a record of it.
+
+- **Constraints checked:** forgetting tests ban tool names and "used to",
+  "formerly", and "previously believed". The new text has none of them.
+- **Forward end dates are unaffected:** a forward end date describes the
+  current fact, not the change.
+
+### 2.2 `src/wenchang/prompts/write_mechanics.py`
+
+- Remove the two sentences added earlier on this branch, restoring main's
+  text.
+- Insert this sentence after "...lines you were not editing.":
+
+  > Changing one fact is still `replace_fact` when it is the file's only line
+  > or when the change also updates `description` or `aliases`.
+
+### 2.3 Tests (write first)
+
+`tests/test_prompts_write_mechanics.py`:
+
+- Replace the two branch tests with one test:
+  `_only_sentence_containing("the file's only line")` names `replace_fact`,
+  `description`, and `aliases`.
+- Add an absence test for "previously", "instead of", "even when you have
+  read the whole file", and "of a changed fact".
+
+`tests/test_prompts_forgetting.py`:
+
+- Add a parametrized phrase test for "its old value is gone", "state only
+  what is true now", "recording the change", and "keep a record".
+
+`tests/test_evals_scenario.py`:
+
+- The header test asserts that `recall-replace-fact`'s header cites "When a
+  fact changes, its old value is gone too" and "Changing one fact is still
+  `replace_fact` when it is the file's only line".
+
+### 2.4 Scenario headers
+
+`recall-replace-fact.yaml` header:
 
 ```
-CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard 1/3" --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
-# repeat with --shard 2/3 and --shard 3/3, then:
-uv run python -m evals merge-runs evals/runs/<name> <shard run dirs...>
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact", "Changing one fact is still
+# `replace_fact` when it is the file's only line or when the change also
+# updates `description` or `aliases`", "When a fact changes, its old value is
+# gone too: rewrite the line to state only what is true now", and "Writes to
+# user need no ask."
 ```
+
+`write-superseded-kept-on-request.yaml`: add the citation "Keep an earlier
+value only if the user asks you to keep a record of it."
+
+### 2.5 Render the agent file
+
+Run `uv run --directory <worktree> python -m evals render-agent`, then
+record the sha256 in `review-pr.md`.
+
+## Docs
+
+`review-pr.md` covers:
+
+- The diagnosis.
+- The final text.
+- The held-outs.
+- The live gate and floors (spec).
+- The baseline-at-main procedure:
+
+  ```
+  git -C /Users/marksiebert/p/github/wenchang fetch origin
+  git -C /Users/marksiebert/p/github/wenchang worktree add --detach /tmp/wenchang-baseline origin/main
+  make -C /tmp/wenchang-baseline install
+  git -C /tmp/wenchang-baseline checkout origin/AIE-1183-replace-fact-corrections -- evals/scenarios/write-superseded-tool.yaml evals/scenarios/recall-superseded-definition.yaml evals/scenarios/write-added-not-superseded.yaml evals/scenarios/write-superseded-kept-on-request.yaml evals/scenarios/write-correct-seeded-fact.yaml
+  # launch the eval session from /tmp/wenchang-baseline and run:
+  /run-evals --model sonnet --trials 3 --judge write-superseded-tool recall-superseded-definition write-added-not-superseded write-superseded-kept-on-request write-correct-seeded-fact
+  git -C /Users/marksiebert/p/github/wenchang worktree remove --force /tmp/wenchang-baseline
+  ```
+
+  Held-outs that pass at main do not demonstrate the fix.
 
 ## Risks
 
-- `.claude/agents/wenchang-eval.md` is generated, and AIE-1182 and
-  AIE-1184 also change its inputs, so it will conflict on merge. Resolve
-  it by re-rendering on the merged tree.
-- AIE-1185 also edits `CASES`. The conflict is only textual.
+- The corpus test conflicts textually with #37 and #40 at rebase. `CASES`
+  conflicts with #40.
+- `.claude/agents/wenchang-eval.md` must be re-rendered after the rebase.
+- `curated-*` correction lines may drop their reference to the curated
+  note. No assertion depends on it.

@@ -1,0 +1,42 @@
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact, quoting the existing line as `old_string`
+# so surrounding lines stay intact" and "Writes to user need no ask."
+id: write-superseded-tool
+title: Replaces a one-line fact when the user switches tools, keeping only the current tool
+category: write-mechanics
+source: specs/AIE-1051-write-mechanics/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: standup-notes
+    content: |
+      - [stated] Keeps standup notes in Notion.
+    description: Where the user keeps standup notes
+    aliases: [standup-notes]
+sessions:
+  - turns:
+      - "We moved standup notes over to Confluence last week."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-tool-line
+    tool: replace_fact
+    args: {name: standup-notes, old_string: {matches: "(?i)notion"}}
+    succeeded: true
+  - kind: tool_not_called
+    id: no-overwrite
+    tool: write_file
+    args: {name: standup-notes}
+  - kind: line_absent
+    id: old-tool-gone
+    pattern: "(?i)notion"
+    scope: user
+  - kind: line_present
+    id: new-tool-saved
+    pattern: "(?i)confluence"
+    scope: user
+  - kind: no_duplicate_fact
+    id: one-notes-line
+    pattern: "(?i)standup"
+    scope: user

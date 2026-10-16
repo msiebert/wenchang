@@ -39,3 +39,9 @@ assertions:
     area: preferences
     name: report-format
     except: "(?i)pdf"
+  - kind: line_absent
+    id: old-format-gone
+    pattern: "(?i)pdf"
+    scope: user
+    area: preferences
+    name: report-format

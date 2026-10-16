@@ -1,0 +1,32 @@
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact" and "Writes to user need no ask."
+id: recall-superseded-definition
+title: Replaces an analysis definition the user changes in a later session
+category: recall
+source: specs/AIE-1051-write-mechanics/spec.md
+sessions:
+  - turns:
+      - "For activation analysis I use a 7-day window."
+  - turns:
+      - "I've switched to a 14-day window for activation analysis."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-in-session-2
+    tool: replace_fact
+    args: {scope: user}
+    session: 2
+    succeeded: true
+  - kind: no_duplicate_fact
+    id: one-window-line
+    pattern: "(?i)activation"
+    scope: user
+  - kind: line_absent
+    id: old-window-gone
+    pattern: "(?i)\\b(7|seven)[- ]day"
+    scope: user
+  - kind: line_present
+    id: new-window-saved
+    pattern: "(?i)\\b(14|fourteen)[- ]day"
+    scope: user
