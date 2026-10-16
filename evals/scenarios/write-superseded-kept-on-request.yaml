@@ -15,7 +15,7 @@ seed:
     aliases: [deploys]
 sessions:
   - turns:
-      - "I switched my deploys from Jenkins to GitHub Actions; keep a record that I used Jenkins before, since my old runbooks reference it."
+      - "I switched my deploys from Jenkins to GitHub Actions. I still want to remember that I used Jenkins before, since my old runbooks reference it."
 assertions:
   - kind: index_read_first
     id: index-first

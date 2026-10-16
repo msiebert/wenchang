@@ -330,9 +330,10 @@ is authoritative.
     user.
   - Set `source:` to the AIE-1183 spec.
 - **`write-superseded-kept-on-request`**
-  - Turn: "I switched my deploys from Jenkins to GitHub Actions; keep a
-    record that I used Jenkins before, since my old runbooks reference
-    it."
+  - Turn: "I switched my deploys from Jenkins to GitHub Actions. I still
+    want to remember that I used Jenkins before, since my old runbooks
+    reference it." This paraphrase avoids the prompt's "keep a record"
+    wording, so the scenario tests the rule rather than phrase matching.
   - Add `line_absent` `old-line-changed`, pattern
     `^- \[stated\] Deploys with Jenkins\.?$`, scope user.
   - Add a second wrong driver that only appends `- [stated] Deploys with
