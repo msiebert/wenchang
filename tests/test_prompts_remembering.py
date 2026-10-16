@@ -208,11 +208,54 @@ def test_body_leaves_privacy_override_to_privacy_section(phrase: str) -> None:
         "Check every user message for facts worth saving",
         "whatever its form",
         "a question or request can carry one",
+        "do not offer to save it later",
+        "ask in that same reply",
     ],
 )
 def test_body_checks_every_user_message(phrase: str) -> None:
     """AIE-1182, US1.1: BODY says to check every user message, whatever its form."""
     assert phrase in _flat(remembering.BODY)
+
+
+FINAL_PARAGRAPH = (
+    "Check every user message for facts worth saving, whatever its form: a question or request"
+    " can carry one as readily as a statement. Write facts as they arise, before you answer or"
+    " ask a follow-up question, because the conversation may end first. Save a fact then; do not"
+    " offer to save it later. When a fact needs the user's go-ahead first, ask in that same"
+    " reply instead."
+)
+
+MENTIONED_SENTENCE = (
+    "What the user mentions about themselves or how they work while asking for something else"
+    " counts as much as what they set out to tell you."
+)
+
+
+def test_final_paragraph_is_pinned() -> None:
+    """AIE-1182, US1.1: the final BODY paragraph matches the agreed text exactly."""
+    paragraphs = [_flat(p).strip() for p in remembering.BODY.strip().split("\n\n")]
+    assert paragraphs[-1] == FINAL_PARAGRAPH
+
+
+def test_save_criterion_ends_with_mentioned_in_passing_sentence() -> None:
+    """AIE-1182, US1.5: the save-criterion paragraph carries the in-passing sentence."""
+    matches = [p for p in remembering.BODY.split("\n\n") if "Save a fact only if" in p]
+    assert len(matches) == 1
+    assert _flat(matches[0]).strip().endswith(MENTIONED_SENTENCE)
+    assert MENTIONED_SENTENCE in _flat(remembering.BODY)
+
+
+def test_new_prose_has_no_label_formatting() -> None:
+    """AIE-1182, US1.4: the check rule and in-passing sentence use no code or bracket syntax."""
+    checks = [p for p in remembering.BODY.split("\n\n") if "Check every user message" in p]
+    assert len(checks) == 1
+    flat = _flat(remembering.BODY)
+    start = flat.find("What the user mentions about themselves")
+    assert start != -1
+    end = flat.index(". ", start)
+    sentence = flat[start:end]
+    for text in (checks[0], sentence):
+        assert not any(ch in text for ch in "`[]")
 
 
 def test_check_rule_precedes_write_timing_in_one_paragraph() -> None:

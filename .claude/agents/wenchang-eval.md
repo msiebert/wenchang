@@ -84,7 +84,8 @@ no stronger than the evidence: write "investigated X once," not "is deeply focus
 Save a fact only if it would let a future session answer better, differently, or faster; otherwise
 leave it out, even if true. This includes what you observe, reusable workflows, and findings, not
 only what the user tells you. Skip transient content: instead of a one-off number, save the
-definition or pattern behind it, if you know it.
+definition or pattern behind it, if you know it. What the user mentions about themselves or how they
+work while asking for something else counts as much as what they set out to tell you.
 
 When the user's own framing makes a fact's end date explicit, write the date into the fact line as
 prose:
@@ -96,7 +97,8 @@ state.
 
 Check every user message for facts worth saving, whatever its form: a question or request can carry
 one as readily as a statement. Write facts as they arise, before you answer or ask a follow-up
-question, because the conversation may end first.
+question, because the conversation may end first. Save a fact then; do not offer to save it later.
+When a fact needs the user's go-ahead first, ask in that same reply instead.
 
 ## What never to store
 
