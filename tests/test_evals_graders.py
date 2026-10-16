@@ -15,8 +15,10 @@ from evals.graders import (
     GradeInputError,
     StoredFile,
     StoreDump,
+    ThirdPersonReply,
     TraceCall,
     TranscriptTurn,
+    find_third_person_replies,
     grade,
     load_store_dump,
     load_trace,
@@ -733,3 +735,175 @@ def test_called_before_honors_then_args() -> None:
     result = _one(_before(then=then), trace=atlas_first)
     assert not result.passed
     assert "seq 1" in result.detail
+
+
+# --- reply check (AIE-1184, US1) ----------------------------------------------
+
+
+def _turns(*replies: str, user: str = "hello", session: int = 1) -> tuple[TranscriptTurn, ...]:
+    return tuple(
+        TranscriptTurn(session=session, turn=t, user=user, reply=r, agent_id=None)
+        for t, r in enumerate(replies, start=1)
+    )
+
+
+def _flags(
+    transcript: Sequence[TranscriptTurn], seeds: tuple[SeedFile, ...] = ()
+) -> tuple[ThirdPersonReply, ...]:
+    return find_third_person_replies(_scenario(IndexReadFirst("i"), seeds=seeds), transcript)
+
+
+def test_reply_check_flags_a_third_person_report() -> None:
+    """A reply about "the user" is flagged with its phrase (AIE-1184, US1.1)."""
+    transcript = _turns(
+        "I haven't saved anything yet. The user asked me to remember that the company "
+        "calls them accounts."
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(session=1, turn=1, phrase="the user asked"),)
+
+
+def test_reply_check_phrases_are_normalized() -> None:
+    """Possessives, curly apostrophes, and "the caller" are flagged with
+    normalized phrases, in transcript order (AIE-1184, US1.2).
+    """
+    transcript = _turns(
+        "I need the user's confirmation before writing there.",
+        "I asked the user whether to save it.",
+        "Waiting for the user\u2019s yes or no.",
+        "(Note for the caller: they said they are 15.)",
+    )
+
+    assert _flags(transcript) == (
+        ThirdPersonReply(1, 1, "the user's confirmation"),
+        ThirdPersonReply(1, 2, "the user whether"),
+        ThirdPersonReply(1, 3, "the user's yes"),
+        ThirdPersonReply(1, 4, "the caller"),
+    )
+
+
+def test_reply_check_passes_second_person_replies() -> None:
+    """A reply addressed to "you" is not flagged (AIE-1184, US1.3)."""
+    transcript = _turns(
+        "You said Signup means verified email. Should I save it to the project scope?"
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_the_user_scope() -> None:
+    """ "the user scope", "user-scope", and "the user's scope" name a scope,
+    not the person (AIE-1184, US1.4).
+    """
+    transcript = _turns(
+        "Saved to your private user scope.",
+        "It belongs in the user scope, or the user-scope fallback.",
+        "It goes in the user's scope.",
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_quoted_text() -> None:
+    """Quotes, backticks, fenced blocks, and > lines are ignored (AIE-1184, US1.5)."""
+    transcript = _turns(
+        'It says: "Signup fires when the user submits the form."',
+        "The file has `the user` in it.",
+        "Here is the file:\n```\n- [stated] The user prefers tabs.\n```\nDone.",
+        "The curated file says:\n> The user said it starts in January.\nI did not edit it.",
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_echoes_of_the_users_text() -> None:
+    """A phrase the user wrote is not flagged when echoed (AIE-1184, US1.6)."""
+    transcript = _turns(
+        "You said Signup means the user has verified their email.",
+        user="Signup means the user has verified their email.",
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_echoes_of_seed_content() -> None:
+    """A phrase from a seed file's content is not flagged (AIE-1184, US1.7)."""
+    seed = SeedFile(
+        "project",
+        "glossary",
+        "signup",
+        "- [stated] Signup fires when the user submits.\n",
+        "Signup",
+        (),
+    )
+    transcript = _turns("Signup fires when the user submits the form.")
+
+    assert _flags(transcript, (seed,)) == ()
+
+
+@pytest.mark.parametrize(
+    ("description", "aliases"),
+    [("The Atlas migration the user leads", ()), ("Atlas", ("the user leads",))],
+)
+def test_reply_check_ignores_echoes_of_seed_metadata(
+    description: str, aliases: tuple[str, ...]
+) -> None:
+    """Seed descriptions and aliases count as context (AIE-1184, US1.8)."""
+    seed = SeedFile("user", "projects", "atlas", "- [stated] Atlas.\n", description, aliases)
+    transcript = _turns("That is the Atlas migration the user leads.")
+
+    assert _flags(transcript, (seed,)) == ()
+
+
+def test_reply_check_exempts_only_the_echoed_phrase() -> None:
+    """Another third-person phrase in an echoing reply is flagged (AIE-1184, US1.9)."""
+    transcript = _turns(
+        "You said Signup means the user has verified their email. "
+        "The user said that at their company it differs.",
+        user="Signup means the user has verified their email.",
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_context_is_per_session() -> None:
+    """User text from another session does not exempt a reply (AIE-1184, US1.10)."""
+    transcript = (
+        TranscriptTurn(1, 1, "hello", "The user said X.", None),
+        TranscriptTurn(2, 1, "the user said X", "Noted.", None),
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_flags_once_per_reply() -> None:
+    """Only the first qualifying match of a reply is reported (AIE-1184, US1.11)."""
+    transcript = _turns("The user said yes, so I told the user it is saved.")
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_context_match_needs_word_boundaries() -> None:
+    """ "the user a" is not exempted by "the user asked" (AIE-1184, US1.12)."""
+    transcript = _turns("I gave the user a draft.", user="Did the user asked event fire?")
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user a"),)
+
+
+def test_reply_check_context_match_is_not_a_prefix_match() -> None:
+    """ "the users team" does not exempt "the user said" (AIE-1184, US1.13)."""
+    transcript = _turns("The user said yes.", user="Ask the users team.")
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_exempts_a_bounded_echo_without_next_word() -> None:
+    """A bare "the user" echoed at a word boundary is exempt (AIE-1184, US1.14)."""
+    transcript = _turns("Tell the user, then stop.", user="Tell the user, then stop.")
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_the_users() -> None:
+    """The plural "the users" is not a third-person reference (AIE-1184, US1.15)."""
+    assert _flags(_turns("Ask the users which one.")) == ()

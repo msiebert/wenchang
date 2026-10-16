@@ -592,3 +592,270 @@ def test_merge_runs_rejects_overlap_and_existing_output(tmp_path: Path) -> None:
     existing.mkdir()
     with pytest.raises(GradeInputError, match="exists"):
         merge_runs(existing, shard_dirs)
+
+
+# --- reply check in grade.json and the report (AIE-1184, US2) -----------------
+
+SECOND_PERSON = "You asked me to remember that. Saved."
+THIRD_PERSON = "I haven't saved anything yet. The user asked me to remember that."
+
+
+def _reply_transcript(trial_dir: Path, reply: str) -> None:
+    turns = [
+        TranscriptTurn(1, 1, "first", reply, "a1"),
+        TranscriptTurn(1, 2, "second", "Done.", "a2"),
+        TranscriptTurn(2, 1, "third", "Done.", "a3"),
+    ]
+    (trial_dir / "transcript.json").write_text(json.dumps(transcript_to_json(turns)))
+
+
+def _reply_trial(tmp_path: Path, trials: int = 1) -> tuple[Path, list[Path]]:
+    _, scenarios = _scenarios(tmp_path, "alpha")
+    run_dir, _ = new_run(
+        scenarios, model="sonnet", trials=trials, runs_dir=tmp_path / "runs", now=NOW
+    )
+    return run_dir, [run_dir / "alpha" / f"trial-{k}" for k in range(1, trials + 1)]
+
+
+def _age(path: Path, seconds: float) -> None:
+    stamp = path.stat().st_mtime - seconds
+    os.utime(path, (stamp, stamp))
+
+
+def test_grade_records_third_person_replies(tmp_path: Path) -> None:
+    """grade.json lists flagged replies and its results do not depend on them
+    (AIE-1184, US2.2).
+    """
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, SECOND_PERSON)
+    clean = grade_trial(trial)
+    _reply_transcript(trial, THIRD_PERSON)
+
+    graded = grade_trial(trial)
+
+    assert graded["third_person_replies"] == [{"session": 1, "turn": 1, "phrase": "the user asked"}]
+    assert _json(trial / "grade.json") == graded
+    assert (graded["results"], graded["passed"]) == (clean["results"], clean["passed"])
+
+
+def test_grade_records_an_empty_reply_check(tmp_path: Path) -> None:
+    """A clean transcript gives an empty list (AIE-1184, US2.3)."""
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, SECOND_PERSON)
+
+    assert grade_trial(trial)["third_person_replies"] == []
+
+
+def test_grade_without_a_transcript_has_no_reply_check(tmp_path: Path) -> None:
+    """With no transcript.json the reply check keys are absent (AIE-1184, US2.4)."""
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+
+    graded = grade_trial(trial)
+
+    assert "third_person_replies" not in graded
+    assert "transcript_error" not in graded
+    assert graded["passed"] is True
+
+
+def test_malformed_transcript_never_blocks_grading(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A malformed transcript is recorded as an error and grading goes on
+    (AIE-1184, US2.5).
+    """
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=True)
+    (trial / "transcript.json").write_text("not json")
+
+    assert main(["grade", str(trial)]) == 0
+
+    graded = _json(trial / "grade.json")
+    assert "third_person_replies" not in graded
+    assert "transcript.json" in graded["transcript_error"]
+    assert graded["passed"] is False
+    assert [r["passed"] for r in graded["results"]] == [True, False]
+    assert "TRANSCRIPT ERROR: " in capsys.readouterr().out
+
+
+def test_grade_cli_prints_third_person_replies(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The grade command prints one line per flagged reply (AIE-1184, US2.6)."""
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, THIRD_PERSON)
+
+    assert main(["grade", str(trial)]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == ["PASS index-first: ok", "PASS no-secret: ok"]
+    assert lines[2:] == ["THIRD-PERSON session 1 turn 1: the user asked"]
+
+
+def test_report_adds_the_reply_check_without_regrading(tmp_path: Path) -> None:
+    """A current grade.json without the reply check gains it and keeps its
+    results, even when a fresh grade would differ (AIE-1184, US2.7).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, THIRD_PERSON)
+    stale_results = [
+        {"id": "index-first", "kind": "index_read_first", "passed": False, "detail": "old"},
+        {"id": "no-secret", "kind": "no_content_matching", "passed": False, "detail": "old"},
+    ]
+    old = {"scenario": "alpha", "trial": 1, "results": stale_results, "passed": False}
+    (trial / "grade.json").write_text(json.dumps(old))
+
+    _, report = build_report(run_dir)
+
+    graded = _json(trial / "grade.json")
+    assert graded["results"] == stale_results
+    assert graded["passed"] is False
+    assert graded["third_person_replies"] == [{"session": 1, "turn": 1, "phrase": "the user asked"}]
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+
+
+def test_report_rechecks_replies_when_the_transcript_is_newer(tmp_path: Path) -> None:
+    """A transcript newer than grade.json refreshes only the reply check
+    (AIE-1184, US2.8).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, SECOND_PERSON)
+    graded = grade_trial(trial)
+    graded["results"][0]["detail"] = "kept"
+    (trial / "grade.json").write_text(json.dumps(graded))
+    _age(trial / "store.json", 20)
+    _age(trial / "trace.json", 20)
+    _age(trial / "grade.json", 10)
+    _reply_transcript(trial, THIRD_PERSON)
+
+    build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert refreshed["results"][0]["detail"] == "kept"
+    assert refreshed["third_person_replies"] == [
+        {"session": 1, "turn": 1, "phrase": "the user asked"}
+    ]
+
+
+def test_report_fully_regrades_when_dumps_are_newer(tmp_path: Path) -> None:
+    """A grade.json older than the dumps is regraded, reply check included
+    (AIE-1184, US2.9).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    grade_trial(trial)
+    _age(trial / "grade.json", 10)
+    _dump(trial, leak=True)
+    _reply_transcript(trial, THIRD_PERSON)
+
+    build_report(run_dir)
+
+    graded = _json(trial / "grade.json")
+    assert graded["passed"] is False
+    assert graded["third_person_replies"] == [{"session": 1, "turn": 1, "phrase": "the user asked"}]
+
+
+TWO_JUDGE_SCENARIO = (
+    SCENARIO
+    + """  - id: kind
+    rubric: The agent is kind.
+"""
+)
+
+
+def _judge(trial_dir: Path, verdict: str) -> None:
+    (trial_dir / "judge.json").write_text(
+        json.dumps({"verdicts": [{"id": "polite", "verdict": verdict, "reason": "r"}]})
+    )
+
+
+def _addressee_run(tmp_path: Path) -> Path:
+    directory = tmp_path / "scenarios"
+    directory.mkdir()
+    path = directory / "alpha.yaml"
+    path.write_text(TWO_JUDGE_SCENARIO.format(id="alpha"))
+    run_dir, _ = new_run(
+        [load_scenario(path)], model="sonnet", trials=3, runs_dir=tmp_path / "runs", now=NOW
+    )
+    t1, t2, t3 = (run_dir / "alpha" / f"trial-{k}" for k in (1, 2, 3))
+    for trial in (t1, t2, t3):
+        _dump(trial, leak=False)
+    _reply_transcript(t1, "The user said it is fine.")
+    _reply_transcript(t2, SECOND_PERSON)
+    _judge(t1, "fail")
+    _judge(t2, "fail")
+    return run_dir
+
+
+def test_report_separates_third_person_trials(tmp_path: Path) -> None:
+    """The report lists flagged and unchecked trials and counts judge fails in
+    flagged trials, leaving existing counts alone (AIE-1184, US2.10).
+    """
+    run_dir = _addressee_run(tmp_path)
+
+    _, report = build_report(run_dir)
+
+    (alpha,) = report["scenarios"]
+    assert alpha["third_person_trials"] == [
+        {"trial": 1, "replies": [{"session": 1, "turn": 1, "phrase": "the user said"}]}
+    ]
+    assert alpha["addressee_unchecked_trials"] == [3]
+    assert alpha["judge_third_person_fails"] == [{"id": "polite", "fails": 1}]
+    assert alpha["judge"] == [{"id": "polite", "passes": 0, "runs": 2}]
+    assert (alpha["passed_trials"], alpha["pass_rate"]) == (3, 1.0)
+    assert [a["passes"] for a in alpha["assertions"]] == [3, 3]
+
+
+def test_report_json_totals_third_person_trials(tmp_path: Path) -> None:
+    """report.json totals flagged and checked trials (AIE-1184, US2.11)."""
+    _, report = build_report(_addressee_run(tmp_path))
+
+    assert report["third_person"] == {"flagged_trials": 1, "checked_trials": 2}
+
+
+def test_report_markdown_shows_third_person_trials(tmp_path: Path) -> None:
+    """report.md shows the totals, the flagged replies, and the judge split
+    (AIE-1184, US2.12).
+    """
+    markdown, _ = build_report(_addressee_run(tmp_path))
+
+    summary_end = markdown.index("| alpha |")
+    assert markdown.index("Trials with a third-person reply: 1 of 2 checked.") > summary_end
+    assert 'Third-person replies: trial 1 (session 1 turn 1: "the user said")' in markdown
+    assert "Addressee not checked: 3" in markdown
+    assert "| Judge item | Passes | Fails with a third-person reply |" in markdown
+    assert "| polite | 0/2 | 1 |" in markdown
+
+
+def test_report_markdown_omits_empty_addressee_lines(tmp_path: Path) -> None:
+    """A scenario with no flagged or unchecked trials has neither line
+    (AIE-1184, US2.13).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, SECOND_PERSON)
+
+    markdown, _ = build_report(run_dir)
+
+    assert "Third-person replies:" not in markdown
+    assert "Addressee not checked" not in markdown
+    assert "Trials with a third-person reply: 0 of 1 checked." in markdown
+
+
+def test_merge_runs_sums_third_person_trials(tmp_path: Path) -> None:
+    """Merged totals are the sums over the shards (AIE-1184, US2.14)."""
+    shard_dirs = _sharded_runs(tmp_path)
+    for k, run_dir in enumerate(shard_dirs):
+        for trial in sorted(run_dir.glob("*/trial-*")):
+            flagged = k == 0 or trial.name == "trial-1"
+            _reply_transcript(trial, THIRD_PERSON if flagged else SECOND_PERSON)
+
+    _, report = merge_runs(tmp_path / "merged", shard_dirs)
+
+    assert report["third_person"] == {"flagged_trials": 3, "checked_trials": 4}

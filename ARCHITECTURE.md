@@ -1190,7 +1190,10 @@ imports it. The editable install makes it importable from any directory.
   assertion kinds, and an optional judge rubric.
 - **evals.graders**: pure deterministic graders over a store dump and a
   tool-call trace, plus the JSON loaders and writers that form the driver
-  contract. They never import `mcp`.
+  contract. They never import `mcp`. A separate reply check scans the
+  transcript for replies that refer to the user in the third person
+  ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). It never changes
+  an assertion result.
 - **evals.server**: a stdio MCP server, `python -m evals.server`. It
   mounts the seven memory tools with `wenchang.mcp.register_memory_tools`
   over a resettable in-memory store, plus three harness tools:
@@ -1198,7 +1201,9 @@ imports it. The editable install makes it importable from any directory.
 - **evals.agent**: renders `.claude/agents/wenchang-eval.md`, the Claude
   Code eval subagent whose tools are only the seven memory tools.
 - **evals.report** and `python -m evals`: plan a run, grade trials, and
-  write the per-run report.
+  write the per-run report. `grade.json` and the report carry the reply
+  check's flags, unchecked trials, and judge fails in flagged trials
+  separately from the pass counts.
 
 The runner workflow is `.claude/commands/run-evals.md`. It runs in a
 session launched with `evals/mcp.json`. Live runs never run in

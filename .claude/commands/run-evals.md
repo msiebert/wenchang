@@ -131,6 +131,11 @@ uv run python -m evals report <run_dir>
 
 Show the user `<run_dir>/report.md`.
 
+The report also counts trials whose reply referred to the user in the
+third person ("the user said"). These counts are a separate signal and
+never change a pass count. A judge fail in such a trial is co-occurrence,
+not proof the addressee caused it.
+
 ## Parallel shards
 
 Trials inside one session stay serial. One eval server holds one store,

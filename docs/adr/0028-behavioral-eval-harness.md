@@ -262,8 +262,10 @@ slow and nondeterministic.
   138 trials across two N=3 runs, its turn 1 reply read as a third-person
   report ("I asked the user whether...") instead of addressing the user.
   The judge failed those replies even though every deterministic assertion
-  passed. Judge items on reply wording carry this noise. No change is
-  made.
+  passed. Judge items on reply wording carry this noise. ADR 0031 adds a
+  deterministic reply check that flags such replies separately (16 of the
+  138 baseline trials) and tightens the preamble, subject to a measured
+  gate.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,

@@ -18,6 +18,7 @@ from typing import Any, Final, cast
 import evals.agent
 from evals.graders import (
     GradeInputError,
+    find_third_person_replies,
     grade,
     load_store_dump,
     load_trace,
@@ -212,8 +213,34 @@ def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
     return "\n".join(lines)
 
 
+_REPLY_CHECK_KEYS: Final = ("third_person_replies", "transcript_error")
+
+
+def _reply_check(trial_dir: Path, scenario: Scenario) -> dict[str, Any]:
+    """The reply check's grade.json fields; empty without a transcript.
+
+    A malformed transcript is recorded, never raised, so it cannot block
+    deterministic grading.
+    """
+    path = trial_dir / "transcript.json"
+    if not path.exists():
+        return {}
+    try:
+        transcript = load_transcript(path)
+    except GradeInputError as exc:
+        return {"transcript_error": str(exc)}
+    return {
+        "third_person_replies": [
+            {"session": f.session, "turn": f.turn, "phrase": f.phrase}
+            for f in find_third_person_replies(scenario, transcript)
+        ]
+    }
+
+
 def grade_trial(trial_dir: Path) -> dict[str, Any]:
-    """Grade one dumped trial and write grade.json; raises GradeInputError on bad inputs."""
+    """Grade one dumped trial and write grade.json; raises GradeInputError on bad
+    store or trace inputs.
+    """
     scenario, trial = _trial_scenario(trial_dir)
     store = load_store_dump(trial_dir / "store.json")
     trace = load_trace(trial_dir / "trace.json")
@@ -225,9 +252,27 @@ def grade_trial(trial_dir: Path) -> dict[str, Any]:
             {"id": r.id, "kind": r.kind, "passed": r.passed, "detail": r.detail} for r in results
         ],
         "passed": all(r.passed for r in results),
+        **_reply_check(trial_dir, scenario),
     }
     _write_json(trial_dir / "grade.json", graded)
     return graded
+
+
+def _refresh_reply_check(trial_dir: Path, scenario: Scenario, graded: dict[str, Any]) -> None:
+    """Recompute only the reply check of a grade.json that is current for the
+    store and trace, when it lacks one or the transcript is newer.
+    """
+    transcript = trial_dir / "transcript.json"
+    if not transcript.exists():
+        return
+    has_check = any(key in graded for key in _REPLY_CHECK_KEYS)
+    newer = transcript.stat().st_mtime > (trial_dir / "grade.json").stat().st_mtime
+    if has_check and not newer:
+        return
+    for key in _REPLY_CHECK_KEYS:
+        graded.pop(key, None)
+    graded.update(_reply_check(trial_dir, scenario))
+    _write_json(trial_dir / "grade.json", graded)
 
 
 def _judge_verdicts(trial_dir: Path, scenario: Scenario) -> dict[str, bool] | None:
@@ -295,10 +340,23 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
     return run
 
 
+_REPLY_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
+    {"session": int, "turn": int, "phrase": str}
+)
+
+
 def _load_grade(path: Path) -> dict[str, Any]:
     graded = _checked(path, _read_json(path), _GRADE_FIELDS, "grade.json")
     for i, result in enumerate(cast(list[object], graded["results"])):
         _checked(path, result, _RESULT_FIELDS, f"results[{i}]")
+    if "third_person_replies" in graded:
+        replies: object = graded["third_person_replies"]
+        if not isinstance(replies, list):
+            raise GradeInputError(f"{path}: grade.json third_person_replies must be a list")
+        for i, reply in enumerate(cast(list[object], replies)):
+            _checked(path, reply, _REPLY_FIELDS, f"third_person_replies[{i}]")
+    if "transcript_error" in graded and not isinstance(graded["transcript_error"], str):
+        raise GradeInputError(f"{path}: grade.json transcript_error must be a string")
     return graded
 
 
@@ -323,24 +381,36 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
         invalid_judge: list[int] = []
         graded: list[dict[str, Any]] = []
         judged: list[dict[str, bool]] = []
+        flagged: list[dict[str, object]] = []
+        unchecked: list[int] = []
+        flagged_verdicts: list[dict[str, bool]] = []
         scenario: Scenario | None = None
         for k in range(1, trials + 1):
             trial_dir = run_dir / ident / f"trial-{k}"
             scenario, _ = _trial_scenario(trial_dir)
             dumped = (trial_dir / "store.json").exists() and (trial_dir / "trace.json").exists()
             if _grade_is_current(trial_dir):
-                graded.append(_load_grade(trial_dir / "grade.json"))
+                current = _load_grade(trial_dir / "grade.json")
+                _refresh_reply_check(trial_dir, scenario, current)
             elif dumped:
-                graded.append(grade_trial(trial_dir))
+                current = grade_trial(trial_dir)
             else:
                 not_run.append(k)
                 continue
+            graded.append(current)
+            replies = cast(list[dict[str, object]] | None, current.get("third_person_replies"))
+            if replies is None:
+                unchecked.append(k)
+            elif replies:
+                flagged.append({"trial": k, "replies": replies})
             if (trial_dir / "judge.json").exists():
                 verdicts = _judge_verdicts(trial_dir, scenario)
                 if verdicts is None:
                     invalid_judge.append(k)
                 else:
                     judged.append(verdicts)
+                    if replies:
+                        flagged_verdicts.append(verdicts)
         assert scenario is not None
         assertions = [
             {
@@ -357,6 +427,7 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
             for a in scenario.assertions
         ]
         passed_trials = sum(1 for g in graded if g["passed"])
+        judged_ids = [j.id for j in scenario.judge if any(j.id in v for v in judged)]
         scenario_reports.append(
             {
                 "id": ident,
@@ -367,18 +438,39 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
                 "assertions": assertions,
                 "judge": [
                     {
-                        "id": j.id,
-                        "passes": sum(1 for v in judged if v.get(j.id) is True),
-                        "runs": sum(1 for v in judged if j.id in v),
+                        "id": ident,
+                        "passes": sum(1 for v in judged if v.get(ident) is True),
+                        "runs": sum(1 for v in judged if ident in v),
                     }
-                    for j in scenario.judge
-                    if any(j.id in v for v in judged)
+                    for ident in judged_ids
                 ],
                 "invalid_judge_trials": invalid_judge,
+                "third_person_trials": flagged,
+                "addressee_unchecked_trials": unchecked,
+                "judge_third_person_fails": [
+                    {
+                        "id": ident,
+                        "fails": sum(1 for v in flagged_verdicts if v.get(ident) is False),
+                    }
+                    for ident in judged_ids
+                ],
             }
         )
-    report: dict[str, Any] = {"run": run, "scenarios": scenario_reports}
-    markdown = _markdown(run, scenario_reports)
+    totals = {
+        "flagged_trials": sum(
+            len(cast(list[object], s["third_person_trials"])) for s in scenario_reports
+        ),
+        "checked_trials": sum(
+            cast(int, s["trials_run"]) - len(cast(list[object], s["addressee_unchecked_trials"]))
+            for s in scenario_reports
+        ),
+    }
+    report: dict[str, Any] = {
+        "run": run,
+        "scenarios": scenario_reports,
+        "third_person": totals,
+    }
+    markdown = _markdown(run, scenario_reports, totals)
     (run_dir / "report.md").write_text(markdown)
     _write_json(run_dir / "report.json", report)
     return markdown, report
@@ -428,7 +520,22 @@ def merge_runs(out_dir: Path, run_dirs: Sequence[Path]) -> tuple[str, dict[str, 
     return build_report(out_dir)
 
 
-def _markdown(run: dict[str, Any], scenarios: Sequence[dict[str, object]]) -> str:
+def _flagged_line(flagged: Sequence[dict[str, Any]]) -> str:
+    trials = [
+        f"trial {f['trial']} ("
+        + ", ".join(
+            f'session {r["session"]} turn {r["turn"]}: "{r["phrase"]}"'
+            for r in cast(list[dict[str, object]], f["replies"])
+        )
+        + ")"
+        for f in flagged
+    ]
+    return "Third-person replies: " + "; ".join(trials)
+
+
+def _markdown(
+    run: dict[str, Any], scenarios: Sequence[dict[str, object]], totals: Mapping[str, int]
+) -> str:
     lines = [
         f"# Eval report: {run['run_id']}",
         "",
@@ -445,6 +552,11 @@ def _markdown(run: dict[str, Any], scenarios: Sequence[dict[str, object]]) -> st
         rate = s["pass_rate"]
         shown = "n/a" if rate is None else f"{cast(float, rate):.0%}"
         lines.append(f"| {s['id']} | {s['passed_trials']}/{s['trials_run']} | {shown} |")
+    lines += [
+        "",
+        f"Trials with a third-person reply: {totals['flagged_trials']} of "
+        f"{totals['checked_trials']} checked.",
+    ]
     for s in scenarios:
         lines += ["", f"## {s['id']}", ""]
         not_run = cast(list[int], s["trials_not_run"])
@@ -453,11 +565,27 @@ def _markdown(run: dict[str, Any], scenarios: Sequence[dict[str, object]]) -> st
         lines += ["| Assertion | Kind | Passes |", "| --------- | ---- | ------ |"]
         for a in cast(list[dict[str, object]], s["assertions"]):
             lines.append(f"| {a['id']} | {a['kind']} | {a['passes']}/{a['runs']} |")
+        flagged = cast(list[dict[str, Any]], s["third_person_trials"])
+        if flagged:
+            lines += ["", _flagged_line(flagged)]
+        unchecked = cast(list[int], s["addressee_unchecked_trials"])
+        if unchecked:
+            lines += ["", f"Addressee not checked: {', '.join(map(str, unchecked))}"]
         judge = cast(list[dict[str, object]], s["judge"])
+        fails = {
+            cast(str, f["id"]): f["fails"]
+            for f in cast(list[dict[str, object]], s["judge_third_person_fails"])
+        }
         if judge:
-            lines += ["", "| Judge item | Passes |", "| ---------- | ------ |"]
+            lines += [
+                "",
+                "| Judge item | Passes | Fails with a third-person reply |",
+                "| ---------- | ------ | ------------------------------- |",
+            ]
             for j in judge:
-                lines.append(f"| {j['id']} | {j['passes']}/{j['runs']} |")
+                lines.append(
+                    f"| {j['id']} | {j['passes']}/{j['runs']} | {fails[cast(str, j['id'])]} |"
+                )
         invalid = cast(list[int], s["invalid_judge_trials"])
         if invalid:
             lines += ["", f"Trials with an invalid judge.json: {', '.join(map(str, invalid))}"]
