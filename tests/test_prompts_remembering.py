@@ -7,8 +7,9 @@ import re
 
 import pytest
 
+from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.file_format import ConfidenceLabel
-from wenchang.prompts import remembering
+from wenchang.prompts import build_memory_prompt, remembering
 
 pytestmark = pytest.mark.unit
 
@@ -199,3 +200,34 @@ def test_body_leaves_privacy_override_to_privacy_section(phrase: str) -> None:
     """AIE-1050, US6; AIE-1165: BODY leaves the refusal override to the privacy section."""
     assert remembering.BODY.strip() != ""
     assert phrase not in _flat(remembering.BODY)
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "When the user mentions their own role, team, or responsibilities",
+        "in passing",
+        "inside a question",
+        "before or alongside your answer",
+    ],
+)
+def test_body_covers_incidental_role_mentions(phrase: str) -> None:
+    """AIE-1182, US1.1: BODY says to save a role mentioned in passing before or with the answer."""
+    assert phrase in _flat(remembering.BODY)
+
+
+def test_incidental_role_rule_sits_in_write_timing_paragraph() -> None:
+    """AIE-1182, US1.2: the in-passing rule follows the write-timing sentence in its paragraph."""
+    timing = "Write facts as they arise"
+    matches = [p for p in remembering.BODY.split("\n\n") if timing in _flat(p)]
+    assert len(matches) == 1
+    flat = _flat(matches[0])
+    assert "in passing" in flat
+    assert flat.index("in passing") > flat.index(timing)
+
+
+def test_assembled_prompt_carries_incidental_role_rule() -> None:
+    """AIE-1182, US1.3: the assembled remembering section includes the in-passing rule."""
+    prompt = build_memory_prompt(REFERENCE_SLOTS)
+    section = prompt.split("## Deciding what to remember", 1)[1].split("\n## ", 1)[0]
+    assert "their own role, team, or responsibilities in passing" in _flat(section)
