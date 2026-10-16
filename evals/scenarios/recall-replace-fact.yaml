@@ -1,10 +1,10 @@
 # Prompt: "Use `append_line` to add one fact to an existing file and
-# `replace_fact` to change one fact", "To correct a fact stored in a file you
-# can write, use `replace_fact` even when you have read the whole file; never
-# rewrite the file with `write_file` to change a fact", "A correcting
-# `new_string` states only the current fact, with no "previously" or "instead
-# of" clause, and leaves no note of the old value", and "Writes to user need
-# no ask."
+# `replace_fact` to change one fact", "To change or correct a fact stored in a
+# file you can write, use `replace_fact` even when you have read the whole
+# file; never rewrite the file with `write_file` to change a fact", "The
+# `new_string` of a changed fact states only the current fact, with no
+# "previously" or "instead of" clause, and leaves no note of the old value",
+# and "Writes to user need no ask."
 id: recall-replace-fact
 title: Replaces a personal fact in a later session instead of appending a duplicate
 category: recall
