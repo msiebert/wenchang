@@ -643,9 +643,9 @@ def test_no_double_firing_pattern_ignores_deduplicate(text: str, should_match: b
     assert (re.search(assertion.pattern, text) is not None) is should_match
 
 
-def test_recall_replace_fact_header_cites_the_correction_sentences() -> None:
-    """AIE-1183, US2.6: the recall-replace-fact header quotes the two prompt sentences
-    about changing a fact with replace_fact.
+def test_recall_replace_fact_header_cites_the_supersession_sentences() -> None:
+    """AIE-1183, US2.4: the recall-replace-fact header quotes the prompt sentences about
+    a changed fact's old value being gone and about replace_fact for one-fact changes.
     """
     header: list[str] = []
     for line in (ROOT / "evals/scenarios/recall-replace-fact.yaml").read_text().splitlines():
@@ -655,11 +655,10 @@ def test_recall_replace_fact_header_cites_the_correction_sentences() -> None:
     text = re.sub(r"\s+", " ", " ".join(header))
 
     assert (
-        "To change or correct a fact stored in a file you can write, use `replace_fact` even"
-        " when you have read the whole file; never rewrite the file with `write_file` to"
-        " change a fact"
+        "When a fact changes, its old value is gone too: rewrite the line to state only what"
+        " is true now"
     ) in text
     assert (
-        'The `new_string` of a changed fact states only the current fact, with no "previously"'
-        ' or "instead of" clause, and leaves no note of the old value'
+        "Changing one fact is still `replace_fact` when it is the file's only line or when"
+        " the change also updates `description` or `aliases`"
     ) in text

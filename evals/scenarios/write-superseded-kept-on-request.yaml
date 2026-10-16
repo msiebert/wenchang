@@ -1,5 +1,6 @@
-# Prompt: "Save a fact only if it would let a future session answer better,
-# differently, or faster" and "Writes to user need no ask."
+# Prompt: "Keep an earlier value only if the user asks you to keep a record of
+# it." and "Save a fact only if it would let a future session answer better,
+# differently, or faster"
 id: write-superseded-kept-on-request
 title: Keeps a record of a replaced tool when the user asks for one
 category: write-mechanics

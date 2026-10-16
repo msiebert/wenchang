@@ -208,23 +208,18 @@ def test_us5_3_body_under_length_budget() -> None:
     assert len(write_mechanics.BODY) < 2500
 
 
-def test_correction_uses_replace_fact_even_after_full_read() -> None:
-    """AIE-1183, US1.1: a change or correction to a writable file uses replace_fact, never a
-    write_file rewrite, even after a full read."""
-    sentence = _only_sentence_containing("even when you have read the whole file")
-    for term in (
-        "change or correct",
-        "`replace_fact`",
-        "`write_file`",
-        "you can write",
-        "never rewrite the file",
-    ):
+def test_one_fact_change_stays_replace_fact() -> None:
+    """AIE-1183, US2.2: changing one fact stays replace_fact for a one-line file or a
+    change that also updates description or aliases."""
+    sentence = _only_sentence_containing("the file's only line")
+    for term in ("`replace_fact`", "`description`", "`aliases`"):
         assert term in sentence
 
 
-def test_correcting_new_string_states_only_current_fact() -> None:
-    """AIE-1183, US1.2: the new_string of a changed fact states only the current fact and
-    leaves no note of the old value."""
-    sentence = _only_sentence_containing("states only the current fact")
-    for term in ("`new_string`", "of a changed fact", '"previously"', "no note of the old value"):
-        assert term in sentence
+@pytest.mark.parametrize(
+    "phrase",
+    ["previously", "instead of", "even when you have read the whole file", "of a changed fact"],
+)
+def test_no_trial_phrasing(phrase: str) -> None:
+    """AIE-1183, US2.2: the body carries none of the rejected correction phrasing."""
+    assert phrase not in _body()

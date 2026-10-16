@@ -134,11 +134,9 @@ it should say, so each write makes the next match more likely.
 
 Match the write to the change. Use `append_line` to add one fact to an existing file and
 `replace_fact` to change one fact, quoting the existing line as `old_string` so surrounding lines
-stay intact; this makes it mechanically impossible to disturb lines you were not editing. To change
-or correct a fact stored in a file you can write, use `replace_fact` even when you have read the
-whole file; never rewrite the file with `write_file` to change a fact. The `new_string` of a
-changed fact states only the current fact, with no "previously" or "instead of" clause, and leaves
-no note of the old value. Use `write_file` only for creating a file, restructuring many lines,
+stay intact; this makes it mechanically impossible to disturb lines you were not editing. Changing
+one fact is still `replace_fact` when it is the file's only line or when the change also updates
+`description` or `aliases`. Use `write_file` only for creating a file, restructuring many lines,
 dropping a name from `aliases`, or rewriting the `description` with no fact to write. To drop one
 fact line, call `replace_fact` with an empty `new_string` and the whole line as `old_string`,
 including the line break after it (or before it, if none follows), so no blank line remains. Use
@@ -164,6 +162,10 @@ ask before removing anything.
 Removal is total: leave no note that the fact was ever true. Also drop each `[inferred]` line that
 rested solely on it, delete any file derived solely from it, and remove description text or aliases
 that exist only because of it. Keep anything with support of its own.
+
+When a fact changes, its old value is gone too: rewrite the line to state only what is true now, as
+though it had always read that way, with no note, date, or comparison recording the change. Keep an
+earlier value only if the user asks you to keep a record of it.
 
 A fact whose stated end date has passed is a candidate for dropping, not to be removed
 automatically: when you read it or during maintenance, drop it only if it no longer holds.
