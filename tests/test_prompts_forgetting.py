@@ -101,3 +101,17 @@ def test_forgetting_body_has_no_used_to_tombstones() -> None:
     assert flat.strip() != ""
     for phrase in ("used to", "used-to", "formerly", "previously believed"):
         assert phrase not in flat
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "its old value is gone",
+        "state only what is true now",
+        "recording the change",
+        "keep a record",
+    ],
+)
+def test_forgetting_body_supersedes_changed_facts(phrase: str) -> None:
+    """AIE-1183, US2.1: forgetting.BODY says a changed fact's old value is gone too."""
+    assert phrase in _flat(forgetting.BODY)
