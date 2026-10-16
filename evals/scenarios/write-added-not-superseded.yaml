@@ -3,7 +3,7 @@
 id: write-added-not-superseded
 title: Adds a second audience without dropping the existing one
 category: write-mechanics
-source: specs/AIE-1051-write-mechanics/spec.md
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
 seed:
   - scope: user
     area: workflows

@@ -3,7 +3,7 @@
 id: recall-superseded-definition
 title: Replaces an analysis definition the user changes in a later session
 category: recall
-source: specs/AIE-1051-write-mechanics/spec.md
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
 sessions:
   - turns:
       - "For activation analysis I use a 7-day window."

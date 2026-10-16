@@ -572,6 +572,7 @@ CORPUS = {
     "recall-superseded-definition",
     "write-added-not-superseded",
     "write-superseded-kept-on-request",
+    "write-superseded-shared-fact",
     "write-new-subject",
     "curated-correction",
     "curated-shared-conflict",

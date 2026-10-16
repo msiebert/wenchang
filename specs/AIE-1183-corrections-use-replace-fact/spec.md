@@ -6,7 +6,8 @@
 
 **Created**: 2026-10-16
 
-**Status**: Respecced after diagnosis (Option A chosen by the human)
+**Status**: Respecced after diagnosis (the human chose Option A), revised
+after the generality review.
 
 **Input**: Live eval finding from the AIE-1170 N=3 runs
 (`specs/AIE-1170-eval-harness/review-pr.md`, "Live runs at N=3").
@@ -16,11 +17,11 @@
 Trials read: `evals/runs/20261014-225317-sonnet` and
 `evals/runs/20261014-231845-sonnet-merged` in the AIE-1170 worktree.
 
-- **11 of 12 superseding writes kept history.**
-  - `recall-replace-fact` kept it in 5 of 6 trials, including all three
-    trials of run B that "passed".
-  - `write-correct-seeded-fact` kept it in 6 of 6 trials, and some lines
-    added a change date. That scenario has no absence assertion, so it fails
+- **History was kept in 11 of 12 writes that replaced a fact.**
+  - `recall-replace-fact` kept it in 5 of 6 trials. That includes all three
+    run B trials that "passed".
+  - `write-correct-seeded-fact` kept it in 6 of 6 trials, sometimes with a
+    change date. That scenario has no absence assertion, so it fails
     silently.
   - The replies show the agent did this on purpose, keeping a short note of
     the earlier value.
@@ -28,130 +29,175 @@ Trials read: `evals/runs/20261014-225317-sonnet` and
 - **Why history is kept.** The prompt has no principle that memory states
   what is true now.
   - The only no-trace rule is Forgetting's "Removal is total: leave no note
-    that the fact was ever true", which is scoped to removal.
+    that the fact was ever true", and it is scoped to removal.
   - The contradiction rule covers only shared scopes.
   - Curated content models a correction that sits beside the old value.
 - **Why `write_file` is picked.**
   - Write mechanics justifies `replace_fact` only by protecting surrounding
-    lines, and a one-line file has none.
+    lines. A one-line file has none.
   - Both `write_file` trials also changed `description` and `aliases`, which
     `write_file` sets in one call.
-- **Aliases.** All 12 kept old aliases, sometimes deliberately ("so it can
-  still be found under that name"). An old name still finds the right file.
+- **Aliases.** All 12 trials kept old aliases, sometimes on purpose ("so it
+  can still be found under that name"). An old name still finds the right
+  file.
 
 ## Fix (general, not scenario-specific)
 
-- Add a Forgetting paragraph saying a changed fact's old value is gone. The
-  line states only what is true now, unless the user asks to keep a record.
-  This covers any superseded preference, owner, schedule, definition, or
-  tool.
-- Add a Write-mechanics sentence: changing one fact is still `replace_fact`
-  when it is the file's only line or when the change also updates metadata.
-- **Rejected earlier text.** PR #38's first two sentences ("To change or
-  correct a fact … no \"previously\" or \"instead of\" clause …") were
-  rejected because they quoted the failing trials' phrasing. They are
-  removed.
-- **Rejected: a `write_file` docstring sentence.** ADR 0025 decision 6 has
-  the prompt own tool choice and the docstrings own per-call mechanics.
-- **Out of scope:**
-  - Stale aliases. Old names still find the file, and dropping them needs
-    `write_file`.
-  - `remembering.py` (AIE-1182), `evals/agent.py` (AIE-1184), grader
-    changes, and new assertion kinds.
+### Forgetting: new paragraph after "Keep anything with support of its own."
+
+> When a fact in a file you can write changes, its old value is gone too:
+> rewrite the line with a fresh label to state only what is true now, as
+> though it had always read that way, with no note, date, or comparison
+> recording the change. Keep an earlier value only if the user asks you to
+> keep a record of it. A correction to a curated fact may name the curated
+> fact it overrides.
+
+What each part does:
+- "a file you can write" keeps `system/` out of scope.
+- "fresh label" matches Remembering's "only new or changed lines get a
+  fresh one".
+- The last sentence leaves the curated-content correction pattern alone.
+
+### Write mechanics: two changes
+
+1. The cited sentence where `replace_fact` is introduced gains "writing the
+   new line as the current truth and":
+   > Use `append_line` to add one fact to an existing file and `replace_fact`
+   > to change one fact, writing the new line as the current truth and
+   > quoting the existing line as `old_string` so surrounding lines stay
+   > intact; …
+2. A new sentence follows it:
+   > Changing one fact is still `replace_fact` when it is the file's only
+   > line or when the change also replaces `description` or adds `aliases`.
+
+   It is accurate about aliases: `replace_fact` only adds them, and
+   "dropping a name from `aliases`" stays `write_file`.
+
+### Rejected
+
+- **PR #38's first two sentences** ("To change or correct a fact … no
+  \"previously\" or \"instead of\" clause …"). They quoted the failing
+  trials' phrasing, and they are removed.
+- **A `write_file` docstring sentence.** ADR 0025 decision 6 has the prompt
+  own tool choice and the docstrings own per-call mechanics.
+
+### Out of scope
+
+- Stale aliases, including any alias-drop instruction.
+- `remembering.py` (AIE-1182) and `evals/agent.py` (AIE-1184).
+- Grader changes and new assertion kinds.
 
 ## User Scenarios & Testing
 
 ### US1 - Held-out evidence, committed before any prompt edit (P1)
 
-The scenarios are written from intent. Their headers cite only sentences
-that already exist on main; the exception is noted in US1.5.
+- **Written from intent.** Turns are in the first person, so the prompt
+  does not route them to a shared scope with an ask. The exception is
+  US1.7, which is about a shared scope on purpose.
+- **Headers in the held-out commit** cite only sentences that already exist
+  on main.
+- **Headers in the prompt commit:**
+  - `write-superseded-tool`, `recall-superseded-definition` and
+    `write-correct-seeded-fact` add the Forgetting principle sentence,
+    because their assertions depend on it.
+  - `write-superseded-kept-on-request` adds the exception sentence.
+- **`source:`** in every new YAML is this spec.
 
 1. **Given** `write-correct-seeded-fact.yaml`, **When** loaded, **Then** it
-   has a `line_absent` assertion with id `old-format-gone`, pattern
-   `(?i)pdf`, scoped to `user/preferences/report-format`.
+   has a `line_absent` assertion `old-format-gone` with pattern `(?i)pdf`,
+   scoped to `user/preferences/report-format`.
    - This is compatible with `seed_lines_preserved except: (?i)pdf`.
-   - The correct driver passes everything.
    - The append wrong driver fails exactly `{replaced-quoting-old,
      one-format-line, old-format-gone}`.
-2. **Given** `write-superseded-tool`, **When** graded, **Then** the correct
-   and wrong drivers behave as follows.
-   - Setup: a seeded one-line file
-     (`- [stated] Keeps standup notes in Notion.`). The user moved the
-     notes to Confluence.
+2. **Given** `write-superseded-tool`, **When** graded, **Then** the drivers
+   behave as below.
+   - Setup: the seeded one-line file `- [stated] Keeps standup notes in
+     Notion.`, and the turn "I moved my standup notes to Confluence last
+     week."
+   - New assertion `no-change-date`: `line_absent (?i)last week`.
    - The correct driver (`replace_fact`) passes everything.
    - The append wrong driver fails exactly `{replaced-tool-line,
      old-tool-gone, one-notes-line}`.
 3. **Given** `recall-superseded-definition`, **When** graded, **Then** the
-   correct and wrong drivers behave as follows.
-   - Setup: session 1 states a 7-day activation window, and session 2
-     switches it to 14 days.
-   - The correct driver (`replace_fact` in session 2) passes everything.
+   drivers behave as below.
+   - Setup: a 7-day activation window in session 1 becomes 14 days in
+     session 2.
+   - The correct driver passes everything.
    - The append wrong driver fails exactly `{replaced-in-session-2,
      one-window-line, old-window-gone}`.
-4. **Given** `write-added-not-superseded`, an over-correction guard,
-   **When** graded, **Then** the correct and wrong drivers behave as
-   follows.
-   - Setup: a seeded dashboard is shared with design, and the user adds
-     sales "too".
-   - The correct driver (append) passes everything.
-   - A wrong driver that replaces the design line fails exactly
-     `{design-kept}`.
-5. **Given** `write-superseded-kept-on-request`, an over-correction guard,
-   **When** graded, **Then** the correct and wrong drivers behave as
-   follows.
-   - Setup: the user switches deploys from Jenkins to GitHub Actions and
-     explicitly asks to keep a record of the old tool.
+4. **Given** `write-added-not-superseded` (a guard), **When** graded,
+   **Then** the drivers behave as below.
+   - Setup: the user adds a sales audience "too".
+   - The append driver passes everything.
+   - The replace wrong driver fails exactly `{design-kept}`.
+5. **Given** `write-superseded-kept-on-request` (a guard), **When** graded,
+   **Then** the drivers behave as below.
+   - Setup: the turn "I switched my deploys from Jenkins to GitHub Actions;
+     keep a record that I used Jenkins before, since my old runbooks
+     reference it."
+   - New assertion `old-line-changed`: `line_absent ^- \[stated\] Deploys
+     with Jenkins\.?$`.
    - The correct driver (replace, then append a record line) passes
      everything.
-   - A wrong driver that replaces the line and leaves no record fails
-     exactly `{old-tool-recorded}`.
-   - Its header cites an existing sentence in commit 1 ("Save a fact only if
-     it would let a future session answer better, differently, or faster").
-     It adds the new exception sentence in commit 2, because the behaviour
-     depends on that sentence.
+   - The replace-only wrong driver fails exactly `{old-tool-recorded}`.
+   - An append-only driver, which records the change without touching the
+     old line, fails exactly `{old-line-changed}`. It is tested separately.
 6. **Given** the corpus test, **When** run, **Then** `CORPUS` includes the
-   four new ids, and every scenario has `index-first` and a `# Prompt:`
+   five new ids, and every scenario has `index-first` and a `# Prompt:`
    header.
+7. **Given** `write-superseded-shared-fact`, **When** graded, **Then** the
+   drivers behave as below.
+   - Setup: a seeded, non-curated project fact, and a user turn that
+     changes it.
+   - Its header cites the existing shared-contradiction sentence.
+   - Assertion: no project or organization write in turn 1.
+   - Assertion: the seed line is still present.
+   - Judge item: the agent shows the stored fact and asks which to keep.
+   - The correct driver (no write) passes the deterministic assertions.
+   - A driver that replaces the project line fails exactly
+     `{no-shared-write-before-ask, old-fact-kept}`.
 
 ### US2 - The prompt states current truth (P1)
 
-1. **Given** `forgetting.BODY`, **When** whitespace is collapsed, **Then**
-   it contains these load-bearing terms:
+1. **Given** `forgetting.BODY`, collapsed, **When** read, **Then** it
+   contains these phrases, and all existing forgetting tests still pass:
+   - "a file you can write"
    - "its old value is gone"
+   - "fresh label"
    - "state only what is true now"
    - "recording the change"
    - "keep a record"
-
-   All existing forgetting tests still pass: no tool names, no "used to"
-   or "formerly".
-2. **Given** `write_mechanics.BODY`, **When** split into sentences,
-   **Then**:
-   - Exactly one sentence contains "the file's only line", and it names
-     `replace_fact`, `description`, and `aliases`.
-   - The phrases "previously", "instead of", "even when you have read the
-     whole file", and "of a changed fact" are absent.
+   - "may name the curated fact it overrides"
+2. **Given** `write_mechanics.BODY`, **When** read, **Then**:
+   - It contains "writing the new line as the current truth".
+   - Exactly one sentence contains "the file's only line", and it contains
+     `replace_fact`, "replaces `description`" and "adds `aliases`".
+   - The trial phrasings ("previously", "instead of", "even when you have
+     read the whole file", "of a changed fact") are absent.
 3. **Given** the existing write-mechanics and invariants tests, **When**
-   run, **Then** they pass unchanged.
+   run, **Then** they pass. The pins and citations on the reworded cited
+   sentence are updated.
 4. **Given** the `recall-replace-fact` header, **When** collapsed, **Then**
-   it cites "When a fact changes, its old value is gone too" and "Changing
-   one fact is still `replace_fact` when it is the file's only line". The
-   header test asserts both.
-5. **Given** `.claude/agents/wenchang-eval.md`, **When**
-   `tests/test_evals_agent.py` runs, **Then** it equals
-   `render_agent_file()`. The sha256 is recorded in `review-pr.md`.
+   it cites "When a fact in a file you can write changes, its old value is
+   gone too" and "Changing one fact is still `replace_fact` when it is the
+   file's only line". The header test asserts both.
+5. **Given** the agent file, **When** `tests/test_evals_agent.py` runs,
+   **Then** it equals `render_agent_file()`. Its sha256 is recorded in
+   `review-pr.md`.
 
 ### US3 - Branch drivers stay (P2)
 
-`old-recipient-gone`, the overwrite driver, and the stale-metadata driver
-on `recall-replace-fact` stay unchanged. They test grader mechanics and do
-not tune the prompt.
+`old-recipient-gone`, the overwrite driver and the stale-metadata driver on
+`recall-replace-fact` are unchanged.
 
 ### Live check: the human's merge checkpoint (ADR 0028, not a release gate)
 
 - **When:** after #39 merges and this branch is rebased and re-rendered.
-- **Runs:** two full-corpus runs at N=3 with `--judge`, in 3 shards each,
-  merged with `merge-runs`.
-- **Floors over the combined N=6:**
+- **Runs:** two full-corpus runs at N=3 with `--judge`. Each run is 3
+  shards merged with `merge-runs`. Never pass both runs to `merge-runs`.
+- **N=6 tally:** sum `passed_trials` per scenario across the two merged
+  `report.json` files.
+- **Floors:**
 
   | Scenario | Floor |
   | -------- | ----- |
@@ -161,27 +207,34 @@ not tune the prompt.
   | `recall-superseded-definition` | at least 5/6 |
   | `write-added-not-superseded` | 6/6 |
   | `write-superseded-kept-on-request` | 6/6 |
+  | `write-superseded-shared-fact` (judge included) | 6/6 |
   | Every other scenario | its AIE-1170 rate |
 
-- **Held-out baseline at main:** run in a throwaway worktree (see
-  `review-pr.md`). Held-outs that pass at main do not demonstrate the fix.
-- **Miss policy:** inspect the failing transcripts, adjust only the new
-  sentences, and rerun. After two rounds, the human decides.
+- **Held-out baseline at main:** run in a throwaway worktree and copy the
+  run out before removing the worktree (`review-pr.md` has the steps).
+  Held-outs that pass at main do not demonstrate the fix.
+- **Miss policy:**
+  1. Inspect the transcripts.
+  2. Adjust only the new sentences.
+  3. Rerun.
+  4. After two rounds, the human decides.
 
 ### Edge Cases
 
 - **Forward end dates.** "with no note, date, or comparison recording the
-  change" bans dates that record the change. A forward end date that the
-  expiry paragraph requires ("only until … on October 30") describes the
-  current fact, not the change, so it is unaffected. No wording change is
-  needed. `remembering-expiry` is in the corpus run.
-- **Curated corrections.** The curated value is not "gone", because
-  `system/` persists. The curated-content rule still governs, and
-  `curated-*` are in the run.
+  change" bans dates that record the change. An expiry end date describes
+  the current fact, so it is unaffected.
+- **Curated corrections.** These are covered by "may name the curated fact
+  it overrides".
+- **A contradicted shared fact.** The Scopes rule (ask which to keep) still
+  comes first. `write-superseded-shared-fact` pins this.
 
 ## Requirements
 
-- **FR-001**: No existing sentence is reworded. The two sentences added
-  earlier on this branch are removed.
-- **FR-002**: The held-out commit precedes the prompt commit.
-- **FR-003**: `make check` passes after each commit.
+- **FR-001**: Only the cited `replace_fact` sentence is reworded, and its
+  citations and pins are updated. The two sentences added earlier on this
+  branch are removed.
+- **FR-002**: The scenario-only commit precedes the prompt and citation
+  commit.
+- **FR-003**: `make check` passes at both commits. The scenario-only commit
+  is checked in a throwaway worktree.

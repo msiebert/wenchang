@@ -316,3 +316,71 @@ record the sha256 in `review-pr.md`.
 - `.claude/agents/wenchang-eval.md` must be re-rendered after the rebase.
 - `curated-*` correction lines may drop their reference to the curated
   note. No assertion depends on it.
+
+## Revision 2 (generality review)
+
+This revision supersedes the matching parts of §1 and §2 above. The spec
+is authoritative.
+
+### Commit A: scenarios only
+
+- **`write-superseded-tool`**
+  - Turn: "I moved my standup notes to Confluence last week."
+  - Add `line_absent` `no-change-date`, pattern `(?i)last week`, scope
+    user.
+  - Set `source:` to the AIE-1183 spec.
+- **`write-superseded-kept-on-request`**
+  - Turn: "I switched my deploys from Jenkins to GitHub Actions; keep a
+    record that I used Jenkins before, since my old runbooks reference
+    it."
+  - Add `line_absent` `old-line-changed`, pattern
+    `^- \[stated\] Deploys with Jenkins\.?$`, scope user.
+  - Add a second wrong driver that only appends `- [stated] Deploys with
+    GitHub Actions; used Jenkins before, and old runbooks still reference
+    it.`. It fails exactly `{old-line-changed}`, in a separate test.
+  - Set `source:` to the AIE-1183 spec.
+- **`recall-superseded-definition` and `write-added-not-superseded`**
+  - Set `source:` to the AIE-1183 spec.
+  - Both turns are already first person.
+- **New `write-superseded-shared-fact`**
+  - Header:
+
+    ```
+    # Prompt: "If a new fact contradicts one stored in a shared scope, show
+    # the stored fact, say what conflicts, and ask which to keep."
+    ```
+
+  - Seed `project/conventions/release-cadence` with
+    `- [stated] This project ships a release every two weeks.`, description
+    "How often this project ships releases", and aliases `[release-cadence]`.
+  - Turn: "This project ships a release every week now."
+  - Assertions:
+    - `index-first`.
+    - `tool_not_called` `no-shared-write-before-ask` over the four write
+      tools, with args scope matching `^(project|organization)$`, session
+      1, turn 1.
+    - `line_present` `old-fact-kept`, pattern `(?i)every two weeks`, scope
+      project.
+  - Judge item `asks-which-to-keep`: "The turn 1 reply restates the stored
+    release cadence (every two weeks), says it conflicts with a weekly
+    release, and asks the user which to keep."
+  - Correct driver: index, then the turn.
+  - Wrong driver: replace the project line with a weekly line. It fails
+    exactly `{no-shared-write-before-ask, old-fact-kept}`.
+- **`CORPUS`:** add the new id.
+
+### Commit B: prompt and citations
+
+- `forgetting.py` and `write_mechanics.py`: the text in the spec "Fix"
+  section.
+- Pins: spec US2.1 and US2.2.
+- Headers that quote the reworded `replace_fact` sentence are updated:
+  - `write-correct-seeded-fact`
+  - `write-superseded-tool`
+- The Forgetting principle sentence is added to these headers:
+  - `write-correct-seeded-fact`
+  - `write-superseded-tool`
+  - `recall-superseded-definition`
+- `recall-replace-fact`'s header cites the new wording, and its header test
+  is updated.
+- Re-render the agent file and record the sha256.
