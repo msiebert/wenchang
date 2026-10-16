@@ -206,3 +206,19 @@ def test_us5_2_no_label_syntax(label: str) -> None:
 def test_us5_3_body_under_length_budget() -> None:
     """AIE-1051, US5.3: body is under 2500 characters."""
     assert len(write_mechanics.BODY) < 2500
+
+
+def test_correction_uses_replace_fact_even_after_full_read() -> None:
+    """AIE-1183, US1.1: a correction to a writable file uses replace_fact, never a write_file
+    rewrite, even after a full read."""
+    sentence = _only_sentence_containing("even when you have read the whole file")
+    for term in ("`replace_fact`", "`write_file`", "you can write", "never rewrite the file"):
+        assert term in sentence
+
+
+def test_correcting_new_string_states_only_current_fact() -> None:
+    """AIE-1183, US1.2: a correcting new_string states only the current fact and leaves no
+    note of the old value."""
+    sentence = _only_sentence_containing("states only the current fact")
+    for term in ("`new_string`", '"previously"', "no note of the old value"):
+        assert term in sentence
