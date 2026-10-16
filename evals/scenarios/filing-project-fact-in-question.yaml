@@ -1,0 +1,21 @@
+# Prompt: "Before saving a new fact to project or organization, ask the user and
+# name the scope." and "Scope a fact by who it is true for, not who said it"
+id: filing-project-fact-in-question
+title: Asks before saving a project fact mentioned inside a question
+category: filing
+source: specs/AIE-1182-file-role-stated/spec.md
+sessions:
+  - turns:
+      - "Our Signup event fires twice on iOS, so how should I dedupe it in a funnel?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: no-project-write-before-ask
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: {matches: "^(project|organization)$"}}
+    session: 1
+    turn: 1
+judge:
+  - id: asks-before-project-save
+    rubric: The turn 1 reply explains a way to dedupe the double-firing Signup event and asks the user before saving that it fires twice on iOS to the project scope.

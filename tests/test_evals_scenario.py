@@ -572,6 +572,10 @@ CORPUS = {
     "curated-shared-conflict",
     "forgetting-two-files",
     "forgetting-only-fact",
+    "remembering-constraint-in-request",
+    "remembering-tool-in-question",
+    "remembering-transient-in-question",
+    "filing-project-fact-in-question",
 }
 
 

@@ -1,0 +1,17 @@
+# Prompt: "Skip transient content: instead of a one-off number, save the
+# definition or pattern behind it, if you know it." and "Save a fact only if it
+# would let a future session answer better, differently, or faster; otherwise
+# leave it out, even if true."
+id: remembering-transient-in-question
+title: Does not save a transient situation the user mentions inside a question
+category: remembering
+source: specs/AIE-1182-file-role-stated/spec.md
+sessions:
+  - turns:
+      - "I'm on a train with bad wifi right now. What's the quickest way to check yesterday's signups?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: no_content_matching
+    id: no-transient-context
+    pattern: "(?i)\\btrains?\\b|wi-?fi"

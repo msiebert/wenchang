@@ -1,0 +1,17 @@
+# Prompt: "`[stated]`: the user told you directly." and "Save a fact only if it
+# would let a future session answer better, differently, or faster; otherwise
+# leave it out, even if true." and "otherwise use user."
+id: remembering-constraint-in-request
+title: Saves a lasting constraint the user mentions inside a request
+category: remembering
+source: specs/AIE-1182-file-role-stated/spec.md
+sessions:
+  - turns:
+      - "Since I present these on grayscale printouts, which chart types work best for comparing four funnels?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: constraint-saved
+    pattern: "\\[stated\\].*(?i:gr[ae]y|black.and.white|print)"
+    scope: user

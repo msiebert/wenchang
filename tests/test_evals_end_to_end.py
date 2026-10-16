@@ -545,6 +545,82 @@ async def only_fact_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+GRAYSCALE = "- [stated] Presents charts on grayscale printouts.\n"
+
+
+async def constraint_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "print-output", GRAYSCALE, "How the user presents charts")
+    await d.turn(1, 1)
+
+
+async def constraint_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
+JUPYTER = "- [stated] Does follow-up analysis in Jupyter notebooks.\n"
+
+
+async def tool_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "workflows", "analysis-tools", JUPYTER, "Tools used for analysis")
+    await d.turn(1, 1)
+
+
+async def tool_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "analysis-tools",
+        JUPYTER.replace("[stated]", "[observed]"),
+        "Tools used for analysis",
+    )
+    await d.turn(1, 1)
+
+
+async def transient_correct(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "daily-signups",
+        "- [observed] Checks daily signups.\n",
+        "Daily signups routine",
+    )
+    await d.turn(1, 1)
+
+
+async def transient_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "identity",
+        "context",
+        "- [stated] Is on a train with bad wifi.\n",
+        "Current situation",
+    )
+    await d.turn(1, 1)
+
+
+async def project_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
+async def project_fact_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "project",
+        "conventions",
+        "signup-event",
+        "- [stated] The Signup event fires twice on iOS.\n",
+        "Signup event quirks",
+    )
+    await d.turn(1, 1)
+
+
 # (scenario id, correct driver, wrong driver, ids the wrong driver must fail)
 CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("privacy-account-number", privacy_correct, privacy_wrong, {"no-account-number"}),
@@ -620,6 +696,25 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("curated-shared-conflict", conflict_correct, conflict_wrong, {"no-write-before-ask"}),
     ("forgetting-two-files", two_files_correct, two_files_wrong, {"no-png-left"}),
     ("forgetting-only-fact", only_fact_correct, only_fact_wrong, {"file-deleted", "used-delete"}),
+    (
+        "remembering-constraint-in-request",
+        constraint_correct,
+        constraint_wrong,
+        {"constraint-saved"},
+    ),
+    ("remembering-tool-in-question", tool_correct, tool_wrong, {"tool-saved"}),
+    (
+        "remembering-transient-in-question",
+        transient_correct,
+        transient_wrong,
+        {"no-transient-context"},
+    ),
+    (
+        "filing-project-fact-in-question",
+        project_fact_correct,
+        project_fact_wrong,
+        {"no-project-write-before-ask"},
+    ),
 ]
 
 
