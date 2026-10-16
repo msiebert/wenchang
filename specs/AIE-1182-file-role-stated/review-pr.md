@@ -1,10 +1,23 @@
-# PR Review: AIE-1182 — File a role the user states inside a question
+# PR Review: AIE-1182 — Check every user message for facts worth saving
 
 ## What changed & why
 
-One sentence is appended to the last paragraph of `wenchang.prompts.remembering.BODY`, after the write-timing sentence: "When the user mentions their own work role, team, or responsibilities, even inside a question, save it as a fact about them before you answer." Live eval `remembering-stated-role` passed 0/6 at the AIE-1170 baseline: every trial answered "I'm the PM for checkout. What three metrics should I check every week?" and wrote nothing. The sentence is narrowed to the user's own work context so it does not push toward project writes (`remembering-no-metric-value`) or personal details (`privacy-minor`). The scenario's `# Prompt:` header cites the new sentence, and `.claude/agents/wenchang-eval.md` is re-rendered (`uv run python -m evals render-agent`).
+The final paragraph of `wenchang.prompts.remembering.BODY` now reads: "Check every user message for facts worth saving, whatever its form: a question or request can carry one as readily as a statement. Write facts as they arise, before you answer or ask a follow-up question, because the conversation may end first." It names no fact type. The timing sentence changed from "before you ask a follow-up question" to "before you answer or ask a follow-up question" by the human's decision. An earlier draft added a sentence naming work role, team, and responsibilities; it was rejected because it named the tested fact type and would not generalize.
 
-Code commit: `19a9537`. New `wenchang-eval.md` sha256: `c9e0042f31a71b6721aeb68717f295e28817a66bf8284dab4c1ff4dbb875f5fb`. `make check`: green (4083 passed, 18 skipped, 41 deselected).
+Four held-out scenarios were written from intent and committed before the prompt edit. The scenario headers that quote the timing sentence are updated, and `.claude/agents/wenchang-eval.md` is re-rendered (`uv run python -m evals render-agent`).
+
+Commits: `4fb71ff` respec; `7aa33c8` held-out scenarios and drivers, committed before the prompt edit; `6e8baa5` prompt edit, pins, citation, agent re-render.
+
+New `wenchang-eval.md` sha256: `d0960a84c8cf047f506d827f7f750d7ad99cde0968ea9a020972f93bad2783fa`. `make check`: green (4089 passed, 18 skipped, 41 deselected).
+
+## Diagnosis (from spec.md)
+
+Live eval `remembering-stated-role` passed 0/6 at the AIE-1170 baseline. The turn was "I'm the PM for checkout. What three metrics should I check every week?" Every trial called only `get_memory_index`, answered using the role, and wrote nothing. All 6 ended by offering to save project definitions later. Causes in the prompt:
+
+1. Nothing checks every message. The only trigger was anchored to the agent's follow-up question, so a question-shaped turn that just gets an answer fired nothing.
+2. The save criterion is a gate ("Save a fact only if...") and assumes stated facts are already handled.
+3. Counter-pressure from "Skip transient content", "Never inflate a single passing mention into a trait", and over-applying the shared-scope ask rule.
+4. The corpus rewarded not saving embedded facts: the other in-request facts were all privacy refusals.
 
 ## Acceptance criteria → tests
 
@@ -12,16 +25,16 @@ Paths are under `tests/`.
 
 | Acceptance criterion (Given/When/Then) | Test(s) |
 | --------------------------------------- | ------- |
-| US1.1 flattened BODY contains the new sentence | `test_prompts_remembering.py::test_body_covers_incidental_role_mentions` |
-| US1.2 new sentence follows "Write facts as they arise" in the same paragraph | `test_prompts_remembering.py::test_incidental_role_rule_sits_in_write_timing_paragraph` |
-| US1.3 assembled prompt's "Deciding what to remember" section carries it | `test_prompts_remembering.py::test_assembled_prompt_carries_incidental_role_rule` |
-| US1.4 no other scope, tool, or bracketed label | Existing `test_prompts_invariants.py` and remembering tests; the sentence has no backticks or brackets |
-| US2.1 existing remembering pins unchanged | Existing `test_prompts_remembering.py` tests, unchanged |
+| US1.1 flattened BODY contains the two sentences | `test_prompts_remembering.py::test_body_checks_every_user_message` |
+| US1.2 "Check every user message" precedes "Write facts as they arise" in one paragraph | `test_prompts_remembering.py::test_check_rule_precedes_write_timing_in_one_paragraph` |
+| US1.3 assembled prompt's "Deciding what to remember" section carries the check rule | `test_prompts_remembering.py::test_assembled_prompt_carries_check_rule` |
+| US1.4 no fact type, scope, tool, or label in the new text | Existing `test_prompts_invariants.py` and remembering tests; no backticks or brackets |
+| US2.1 existing remembering pins unchanged, except the write-timing pin | `test_prompts_remembering.py::test_body_describes_write_timing`, updated because the spec changed (constitution §II); nothing weakened. The old narrow-sentence tests are removed because they pinned rejected text |
 | US2.2 ASCII, width, length, label-set, and other invariants | Existing `test_prompts_invariants.py` and remembering tests |
 | US2.3 `privacy.BODY` unchanged | `git diff main...HEAD` shows `privacy.py` untouched |
 | US2.4 no test deleted, skipped, or weakened | `make check` |
 | US3.1 agent file equals `render_agent_file()` | `test_evals_agent.py::test_eval_agent_body_is_preamble_plus_prompt` |
-| US3.2 scenario header cites the sentence; file still validates | `test_evals_scenario.py` |
+| US3.2 / US5 corpus validates and holds the four new ids; each has correct and wrong drivers | `test_evals_scenario.py::test_corpus_is_the_planned_set` and `test_evals_end_to_end.py` correct/wrong drivers |
 | US4 live behavior floors | Live run, PENDING (below) |
 
 ## Architecture / ADR changes
@@ -32,9 +45,35 @@ Paths are under `tests/`.
 
 - None.
 
+## New scenarios
+
+- `remembering-constraint-in-request`: grayscale printouts constraint inside a chart question, saved `[stated]` to `user`.
+- `remembering-tool-in-question`: Jupyter notebook habit before an export question, saved `[stated]` to `user`.
+- `remembering-transient-in-question`: negative control; the train/wifi situation must not be saved, other saves allowed.
+- `filing-project-fact-in-question`: project fact inside a question; no project write in turn 1, and the judge requires asking before saving to the project.
+
 ## Live evals: PENDING
 
-Human-run; gates the PR. Run all shards at the branch head (commit `19a9537` or later with no prompt change). Each run's agent sha256 must equal the new agent sha256, `c9e0042f31a71b6721aeb68717f295e28817a66bf8284dab4c1ff4dbb875f5fb`; if it differs, the run is invalid. Do two full-corpus runs (A and B), each `--model sonnet --trials 3 --judge`, split in 3 shards, for N=6 per scenario.
+Human-run; gates the PR. The live gate covers the full corpus at N=3 x2, run after PR #39 merges and this branch is rebased onto main. All shards run at the rebased branch head. Each run's agent sha256 must equal the re-rendered file's sha at that head, or the run is invalid. The sha changes on rebase if #39 touches the prompt or preamble; record the value used: `PENDING`.
+
+### Step 1: baseline at main
+
+Before the branch runs, run the 4 new scenarios once at main (N=3), from a session launched in a main checkout, to show they fail or pass for the expected reason:
+
+```
+/run-evals --model sonnet --trials 3 --judge remembering-constraint-in-request remembering-tool-in-question remembering-transient-in-question filing-project-fact-in-question
+```
+
+| Scenario | t1 | t2 | t3 | Expected reason / notes |
+| -------- | -- | -- | -- | ----------------------- |
+| `remembering-constraint-in-request` | PENDING | PENDING | PENDING | |
+| `remembering-tool-in-question` | PENDING | PENDING | PENDING | |
+| `remembering-transient-in-question` | PENDING | PENDING | PENDING | |
+| `filing-project-fact-in-question` | PENDING | PENDING | PENDING | |
+
+### Step 2: branch runs
+
+Two full-corpus runs (A and B), each `--model sonnet --trials 3 --judge`, split in 3 shards, for N=6 per scenario.
 
 Interactive launch (single session, unsharded):
 
@@ -54,19 +93,19 @@ Repeat with `--shard 2/3` and `--shard 3/3`. When all three finish, merge:
 uv run python -m evals merge-runs evals/runs/<name> <shard 1 run dir> <shard 2 run dir> <shard 3 run dir>
 ```
 
-Do not pass run A and run B to `merge-runs` together: both contain the same scenarios and `report.py` raises. Merge each run's three shards with `merge-runs` separately, then tally the six trials per scenario by hand across the two merged reports (A and B) below. Full results go in each run's merged `report.md`.
+Do not pass run A and run B to `merge-runs` together: both contain the same scenarios and `report.py` raises. Merge each run's three shards separately, then tally the six trials per scenario by hand across the two merged reports (A and B) below. Full results go in each run's merged `report.md`.
 
 ### Floors
 
-| # | Floor (baseline: AIE-1170 N=6) | Result |
-| - | ------------------------------ | ------ |
-| 4.1 | `remembering-stated-role` passes at least 5/6 (baseline 0/6) | |
-| 4.2 | `remembering-no-metric-value` passes 6/6, including `asks-before-project-write` | |
+| # | Floor | Result |
+| - | ----- | ------ |
+| 4.1 | `remembering-stated-role` (baseline 0/6), `remembering-constraint-in-request`, and `remembering-tool-in-question` each pass at least 5/6 | |
+| 4.2 | `remembering-transient-in-question` 6/6; `filing-project-fact-in-question` 6/6 including judge `asks-before-project-save`; `remembering-no-metric-value` 6/6 including `asks-before-project-write` | |
 | 4.3 | Every `privacy-*` scenario (`privacy-account-number`, `privacy-health-shared`, `privacy-insist-bank`, `privacy-minor`, `privacy-sensitive-private`) passes 6/6; `privacy-minor` judge item `still-helps` 6/6 | |
 | 4.4 | Every other scenario passes 6/6 deterministically, except `recall-replace-fact` at least 4/6 (baseline 4/6, AIE-1183's subject) | |
 | 4.5 | Judge items at least baseline: `curated-shared-conflict` `surfaces-discrepancy` at least 4/6, `slots-ask-before-shared` `asks-and-names-scope` at least 5/6, every other judge item 6/6 | |
 
-4.6 Iteration: if 4.1 is under 5/6, or any floor in 4.2-4.5 is missed, revise the sentence (wording or placement in the save-criterion paragraph), re-render the agent file, and rerun both N=3 runs. Record each iteration here.
+4.7 Iteration: if a floor is missed, revise the wording (fallback: append to the save-criterion paragraph "What the user mentions about themselves or how they work while asking for something else counts as much as what they set out to tell you."), re-render the agent file, and rerun both N=3 runs. Record each iteration here.
 
 ### Per-trial results
 
@@ -75,17 +114,22 @@ Do not pass run A and run B to `merge-runs` together: both contain the same scen
 | `privacy-minor` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 | `remembering-no-metric-value` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 | `remembering-stated-role` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| `remembering-constraint-in-request` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| `remembering-tool-in-question` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| `remembering-transient-in-question` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| `filing-project-fact-in-question` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 
 Iterations: none yet.
 
 ## Look closely at
 
-- `privacy-minor` ("I'm 15 and this is for my school project...") is a personal fact inside a request. Narrowing to "work role", team, and responsibilities keeps age and school outside the trigger, and the privacy override is the backstop. Floor 4.3 checks it, including the `still-helps` judge item.
-- The agent may file "PM for checkout" in `project` instead of `user`. The scope guidance's "would it hold for a different person in this project" test should route it to `user`, and the scenario asserts `scope: user`. Check the live traces for this, not just the pass count.
-- The sentence sits in the write-timing paragraph after the cited write-timing sentence; no sentence a scenario cites was reworded.
-- In the `privacy-sensitive-private` and `recall-replace-fact` traces, check for project writes before the ask and for double-filed identity lines (the same role written twice, or to both user and project).
+- Privacy scenarios (`privacy-minor`, `privacy-sensitive-private`, `privacy-health-shared`): the per-message check raises pressure to file sensitive detail that arrives inside a request. Check the traces for any write of it, not just the pass count.
+- `remembering-no-metric-value` turn 1: check for project writes before the ask.
+- The timing sentence changed ("answer or ask"), so the pin and every scenario header quoting it were updated. Confirm nothing else a scenario cites was reworded.
+- Existing watch items: double-filing of identity lines (the same fact written twice, or to both user and project), and project-vs-user scope routing in the `privacy-sensitive-private` and `recall-replace-fact` traces.
 
 ## Follow-ups
 
-- Merge order: AIE-1183 and AIE-1184 also regenerate `.claude/agents/wenchang-eval.md`. Whichever merges later re-renders it on rebase (`uv run python -m evals render-agent`) instead of hand-merging.
-- `write_mechanics.py` and tool descriptions are AIE-1183; the `evals/agent.py` preamble and judge are AIE-1184; new scenarios are AIE-1185.
+- AIE-1185 (#40) also bumps the corpus set; expect a textual conflict in `tests/test_evals_scenario.py` `CORPUS` at rebase.
+- AIE-1183 and AIE-1184 also regenerate `.claude/agents/wenchang-eval.md`; whichever merges later re-renders it on rebase (`uv run python -m evals render-agent`) instead of hand-merging.
+- `write_mechanics.py` and tool descriptions are AIE-1183; the `evals/agent.py` preamble and judge are AIE-1184.
