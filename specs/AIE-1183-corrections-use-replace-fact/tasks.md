@@ -1,23 +1,27 @@
-# Tasks: Corrections use replace_fact (AIE-1183)
+# Tasks: A changed fact states only what is true now (AIE-1183)
 
-Tests come first. In each task, test-writer writes the failing tests,
-implementer makes them pass, and `make check` must be green before the
-next task starts.
+Tests come first. `make check` must be green after each commit.
 
-- [ ] T1 (US1, US2), test-writer:
-  - Add the prose tests from plan §4.
-  - Add the end-to-end driver and fail-set changes from plan §3.
-  - Confirm they fail for the right reason: the new sentences are missing,
-    and `old-recipient-gone` is not a known assertion yet.
-- [ ] T2 (US1), implementer: replace `write_mechanics.BODY` with the exact
-  text in plan §1.
-- [ ] T3 (US2), implementer: edit `evals/scenarios/recall-replace-fact.yaml`
-  as described in plan §2.
-- [ ] T4 (US3), implementer:
-  - Run `uv run python -m evals render-agent`.
-  - Confirm `tests/test_evals_agent.py` passes.
-  - Run `make check`.
-- [ ] T5, doc-updater: write `review-pr.md` (plan §6), including the agent
-  sha256 and the commit.
-- [ ] T6, human: run the live checks (plan, "Live runs") and record the
-  results in `review-pr.md`.
+## Commit 1: held-out evidence
+
+- [ ] T1, test-writer: add the `CASES` rows and drivers for the four new
+  scenarios, update the `write-correct-seeded-fact` fail set, and update
+  `CORPUS` (plan §1.1-§1.6).
+- [ ] T2, implementer: write the five YAML edits (plan §1.1-§1.5), then run
+  `make check`.
+- [ ] T3, lead: commit.
+
+## Commit 2: prompt edit
+
+- [ ] T4, test-writer: update the prose pins and the header test (plan
+  §2.3).
+- [ ] T5, implementer: edit `forgetting.py` and `write_mechanics.py`, update
+  the two headers, re-render the agent file, run `make check`, and report
+  the sha256 (plan §2.1, §2.2, §2.4, §2.5).
+- [ ] T6, doc-updater: update `review-pr.md`.
+- [ ] T7, lead: commit, push, and update PR #38's title and body.
+
+## Human
+
+- [ ] T8: run the baseline at main and the live gate after #39 merges, then
+  fill in `review-pr.md`.

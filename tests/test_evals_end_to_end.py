@@ -530,6 +530,84 @@ async def correct_fact_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+NOTION_LINE = "- [stated] Keeps standup notes in Notion."
+CONFLUENCE_LINE = "- [stated] Keeps standup notes in Confluence."
+
+
+async def superseded_tool_correct(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "standup-notes", NOTION_LINE, CONFLUENCE_LINE)
+    await d.turn(1, 1)
+
+
+async def superseded_tool_wrong(d: Driver) -> None:
+    await d.index()
+    await d.append("user", "workflows", "standup-notes", CONFLUENCE_LINE)
+    await d.turn(1, 1)
+
+
+WINDOW_7 = "- [stated] Uses a 7-day window for activation analysis."
+WINDOW_14 = "- [stated] Uses a 14-day window for activation analysis."
+
+
+async def superseded_definition_session_1(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user", "workflows", "activation-analysis", f"{WINDOW_7}\n", "Activation analysis settings"
+    )
+    await d.turn(1, 1)
+
+
+async def superseded_definition_correct(d: Driver) -> None:
+    await superseded_definition_session_1(d)
+    await d.index()
+    await d.replace("user", "workflows", "activation-analysis", WINDOW_7, WINDOW_14)
+    await d.turn(2, 1)
+
+
+async def superseded_definition_wrong(d: Driver) -> None:
+    await superseded_definition_session_1(d)
+    await d.index()
+    await d.append("user", "workflows", "activation-analysis", WINDOW_14)
+    await d.turn(2, 1)
+
+
+DESIGN_AUDIENCE = "- [stated] Shares the checkout funnel dashboard with the design team."
+SALES_AUDIENCE = "- [stated] Shares the checkout funnel dashboard with the sales team."
+
+
+async def added_audience_correct(d: Driver) -> None:
+    await d.index()
+    await d.append("user", "workflows", "funnel-dashboard", SALES_AUDIENCE)
+    await d.turn(1, 1)
+
+
+async def added_audience_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "funnel-dashboard", DESIGN_AUDIENCE, SALES_AUDIENCE)
+    await d.turn(1, 1)
+
+
+JENKINS_LINE = "- [stated] Deploys with Jenkins."
+ACTIONS_LINE = "- [stated] Deploys with GitHub Actions."
+JENKINS_RECORD = (
+    "- [stated] Deployed with Jenkins before GitHub Actions; old runbooks still reference it."
+)
+
+
+async def kept_on_request_correct(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "deploys", JENKINS_LINE, ACTIONS_LINE)
+    await d.append("user", "workflows", "deploys", JENKINS_RECORD)
+    await d.turn(1, 1)
+
+
+async def kept_on_request_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "deploys", JENKINS_LINE, ACTIONS_LINE)
+    await d.turn(1, 1)
+
+
 ROUTINE = "- [stated] Checks the refunds dashboard every Monday morning before standup."
 
 
@@ -806,7 +884,31 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "write-correct-seeded-fact",
         correct_fact_correct,
         correct_fact_wrong,
-        {"replaced-quoting-old", "one-format-line"},
+        {"replaced-quoting-old", "one-format-line", "old-format-gone"},
+    ),
+    (
+        "write-superseded-tool",
+        superseded_tool_correct,
+        superseded_tool_wrong,
+        {"replaced-tool-line", "old-tool-gone", "one-notes-line"},
+    ),
+    (
+        "recall-superseded-definition",
+        superseded_definition_correct,
+        superseded_definition_wrong,
+        {"replaced-in-session-2", "one-window-line", "old-window-gone"},
+    ),
+    (
+        "write-added-not-superseded",
+        added_audience_correct,
+        added_audience_wrong,
+        {"design-kept"},
+    ),
+    (
+        "write-superseded-kept-on-request",
+        kept_on_request_correct,
+        kept_on_request_wrong,
+        {"old-tool-recorded"},
     ),
     (
         "write-new-subject",
