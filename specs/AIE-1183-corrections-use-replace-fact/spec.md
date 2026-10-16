@@ -132,9 +132,11 @@ What each part does:
    - The replace wrong driver fails exactly `{design-kept}`.
 5. **Given** `write-superseded-kept-on-request` (a guard), **When** graded,
    **Then** the drivers behave as below.
-   - Setup: the turn "I switched my deploys from Jenkins to GitHub Actions;
-     keep a record that I used Jenkins before, since my old runbooks
-     reference it."
+   - Setup: the turn "I switched my deploys from Jenkins to GitHub Actions.
+     I still want to remember that I used Jenkins before, since my old
+     runbooks reference it." It paraphrases the request rather than reusing
+     the prompt's wording, so the scenario tests the rule, not phrase
+     matching.
    - New assertion `old-line-changed`: `line_absent ^- \[stated\] Deploys
      with Jenkins\.?$`.
    - The correct driver (replace, then append a record line) passes
