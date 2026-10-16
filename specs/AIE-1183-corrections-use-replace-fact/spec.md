@@ -8,6 +8,12 @@
 
 **Status**: Approved after spec review (revised)
 
+**Revisions**: The two sentences were reworded after code review. Session 2's
+user states an update ("I now send ... instead"), not a mistake, so
+"correct" alone let an agent decide the history ban does not apply. The
+first sentence now says "change or correct", and the second is about "the
+`new_string` of a changed fact".
+
 **Input**: Live eval finding from the AIE-1170 N=3 runs
 (`specs/AIE-1170-eval-harness/review-pr.md`, "Live runs at N=3").
 
@@ -59,12 +65,12 @@ collapsed). They pin only load-bearing terms (ADR 0025 decision 8).
 
 1. **Given** the body, **When** it is split into sentences, **Then**
    exactly one sentence contains "even when you have read the whole file".
-   That sentence contains `replace_fact`, `write_file`, "you can write",
-   and "never rewrite the file".
+   That sentence contains `replace_fact`, `write_file`, "change or
+   correct", "you can write", and "never rewrite the file".
 2. **Given** the body, **When** it is split into sentences, **Then**
    exactly one sentence contains "states only the current fact". That
-   sentence contains `new_string`, "\"previously\"", and "no note of the
-   old value".
+   sentence contains `new_string`, "of a changed fact", "\"previously\"",
+   and "no note of the old value".
 3. **Given** the body, **When** the existing tests in
    `tests/test_prompts_write_mechanics.py` and the invariants in
    `tests/test_prompts_invariants.py` run, **Then** they all pass unchanged.
@@ -102,6 +108,8 @@ collapsed). They pin only load-bearing terms (ADR 0025 decision 8).
 6. **Given** the scenario's leading `# Prompt:` comment, **When** read,
    **Then** it also cites the "even when you have read the whole file"
    sentence and the "states only the current fact" sentence.
+   `test_recall_replace_fact_header_cites_the_correction_sentences` covers
+   this.
 
 ### User Story 3 - The eval agent file matches the prompt (Priority: P1)
 

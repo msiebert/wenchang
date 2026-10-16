@@ -11,22 +11,26 @@ drivers, and the rendered eval agent file.
 Two sentences go in after the "mechanically impossible" sentence. Every
 existing sentence stays word for word; only the line wrapping after the
 insertion changes. I checked the new `BODY` against every existing
-write-mechanics and invariants test: 986 characters, longest line 99.
+write-mechanics and invariants test: 1005 characters, longest line 99.
 Replace `BODY` with exactly:
 
 ```
 Match the write to the change. Use `append_line` to add one fact to an existing file and
 `replace_fact` to change one fact, quoting the existing line as `old_string` so surrounding lines
-stay intact; this makes it mechanically impossible to disturb lines you were not editing. To
-correct a fact stored in a file you can write, use `replace_fact` even when you have read the whole
-file; never rewrite the file with `write_file` to change a fact. A correcting `new_string` states
-only the current fact, with no "previously" or "instead of" clause, and leaves no note of the old
-value. Use `write_file` only for creating a file, restructuring many lines, dropping a name from
-`aliases`, or rewriting the `description` with no fact to write. To drop one fact line, call
-`replace_fact` with an empty `new_string` and the whole line as `old_string`, including the line
-break after it (or before it, if none follows), so no blank line remains. Use `delete_file` only
-when the whole file goes.
+stay intact; this makes it mechanically impossible to disturb lines you were not editing. To change
+or correct a fact stored in a file you can write, use `replace_fact` even when you have read the
+whole file; never rewrite the file with `write_file` to change a fact. The `new_string` of a
+changed fact states only the current fact, with no "previously" or "instead of" clause, and leaves
+no note of the old value. Use `write_file` only for creating a file, restructuring many lines,
+dropping a name from `aliases`, or rewriting the `description` with no fact to write. To drop one
+fact line, call `replace_fact` with an empty `new_string` and the whole line as `old_string`,
+including the line break after it (or before it, if none follows), so no blank line remains. Use
+`delete_file` only when the whole file goes.
 ```
+
+The first sentence says "change or correct" because session 2's user states
+an update ("I now send ... instead"), not a mistake. With "correct" alone an
+agent could decide the history ban did not apply.
 
 Why each sentence is there:
 
@@ -36,7 +40,8 @@ Why each sentence is there:
 - **"even when you have read the whole file ... never rewrite"** targets
   the read-then-overwrite path seen in the live runs.
 - **"states only the current fact ... no note of the old value"** targets
-  the "(previously sent to the growth team)" line.
+  the "(previously sent to the growth team)" line. "of a changed fact"
+  covers an update the user states, not only a mistake.
 
 Rejected alternatives:
 
@@ -46,6 +51,9 @@ Rejected alternatives:
   to the prompt.
 - An alias/description sentence. It would route agents back to
   `write_file`, restate filing.py, and nothing would test it.
+- A "pass an updated description on the same call" clause (reviewer
+  suggestion). filing.py owns that rule, and the AIE-1051 US3.2 test bans
+  "same call" and "same write" in this body.
 
 ## 2. `evals/scenarios/recall-replace-fact.yaml`
 
@@ -53,12 +61,12 @@ Replace the header comment with:
 
 ```
 # Prompt: "Use `append_line` to add one fact to an existing file and
-# `replace_fact` to change one fact", "To correct a fact stored in a file you
-# can write, use `replace_fact` even when you have read the whole file; never
-# rewrite the file with `write_file` to change a fact", "A correcting
-# `new_string` states only the current fact, with no "previously" or "instead
-# of" clause, and leaves no note of the old value", and "Writes to user need
-# no ask."
+# `replace_fact` to change one fact", "To change or correct a fact stored in a
+# file you can write, use `replace_fact` even when you have read the whole
+# file; never rewrite the file with `write_file` to change a fact", "The
+# `new_string` of a changed fact states only the current fact, with no
+# "previously" or "instead of" clause, and leaves no note of the old value",
+# and "Writes to user need no ask."
 ```
 
 Then append this assertion:
@@ -103,7 +111,11 @@ New tests, each citing AIE-1183 in its docstring:
   `{"replaced-in-session-2", "old-recipient-gone"}`, and the report shows
   0/1.
 - `test_recall_replace_fact_ignores_stale_metadata`: passes every
-  assertion, and the report shows 1/1.
+  assertion, and the report shows 1/1. It also asserts the growth alias and
+  description survive session 2.
+
+`tests/test_evals_scenario.py` gains
+`test_recall_replace_fact_header_cites_the_correction_sentences` (US2.6).
 
 ## 4. `tests/test_prompts_write_mechanics.py`
 
@@ -111,10 +123,11 @@ Add tests only; existing ones stay as they are. Each docstring cites
 AIE-1183, and each test pins only load-bearing terms:
 
 - `_only_sentence_containing("even when you have read the whole file")`
-  contains `replace_fact`, `write_file`, "you can write", and "never
-  rewrite the file".
+  contains `replace_fact`, `write_file`, "change or correct", "you can
+  write", and "never rewrite the file".
 - `_only_sentence_containing("states only the current fact")` contains
-  `new_string`, `"previously"`, and "no note of the old value".
+  `new_string`, "of a changed fact", `"previously"`, and "no note of the
+  old value".
 
 ## 5. `.claude/agents/wenchang-eval.md`
 

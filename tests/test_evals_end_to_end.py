@@ -15,6 +15,7 @@ import pytest
 from mcp.client import Client
 from mcp.types import CallToolResult
 
+from evals.graders import load_store_dump
 from evals.report import build_report, grade_trial, new_run
 from evals.scenario import SCENARIO_DIR, load_scenario
 from evals.server import EvalState, build_eval_server
@@ -744,6 +745,11 @@ def test_recall_replace_fact_ignores_stale_metadata(tmp_path: Path) -> None:
     assert _failed(graded) == set(), graded
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (1, 1)
+    (store_path,) = (tmp_path / "runs").glob("**/store.json")
+    kept = load_store_dump(store_path).get("user", "workflows", "weekly-report")
+    assert kept is not None
+    assert "growth report" in kept.aliases
+    assert kept.description == "Weekly report to the growth team"
 
 
 def test_every_shipped_scenario_has_scripted_drivers() -> None:
