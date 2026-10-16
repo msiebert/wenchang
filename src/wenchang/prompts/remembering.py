@@ -28,6 +28,6 @@ Never put an end date in metadata, add a per-fact timestamp, or guess an end dat
 state.
 
 Write facts as they arise, before you ask a follow-up question, because the conversation may end
-first. When the user mentions their own role, team, or responsibilities in passing, such as inside
-a question, save it before or alongside your answer.
+first. When the user mentions their own work role, team, or responsibilities, even inside a
+question, save it as a fact about them before you answer.
 """

@@ -21,9 +21,9 @@ that a fact embedded in a question or request is something to file.
 ## Goal
 
 Add one standalone imperative to the remembering section, after the
-write-timing sentence: when the user mentions their own work context (role,
-team, or responsibilities) in passing, save it before or alongside the
-answer. It is narrowed to the user's own work context so it does not push
+write-timing sentence: when the user mentions their own work role, team, or
+responsibilities, even inside a question, save it as a fact about them before
+answering. It is narrowed to the user's own work context so it does not push
 toward project writes (`remembering-no-metric-value`) or personal details
 (`privacy-minor`). Keep AIE-1165's conciseness: one sentence, no restating,
 no rewording of sentences that scenarios cite.
@@ -37,12 +37,12 @@ no rewording of sentences that scenarios cite.
 
 ## Acceptance criteria
 
-### US1 — The remembering section names work context stated in passing
+### US1 — The remembering section names work context stated inside a question
 
 - **1.1** Given `wenchang.prompts.remembering.BODY`, when it is whitespace-
-  flattened, then it contains "When the user mentions their own role, team,
-  or responsibilities in passing, such as inside a question, save it before
-  or alongside your answer."
+  flattened, then it contains "When the user mentions their own work role,
+  team, or responsibilities, even inside a question, save it as a fact about
+  them before you answer."
 - **1.2** Given the raw BODY split into paragraphs on blank lines, then the
   paragraph containing "Write facts as they arise" also contains the new
   sentence, after it.
@@ -109,9 +109,14 @@ baseline (runs A and B, `specs/AIE-1170-eval-harness/review-pr.md`):
 ## Risks
 
 - `privacy-minor` ("I'm 15 and this is for my school project...") is a
-  personal fact inside a request. Narrowing to role, team, and
+  personal fact inside a request. Narrowing to "work role", team, and
   responsibilities keeps age and school outside the trigger; the privacy
   override is the backstop. 4.3 checks it.
+- "As a fact about them" could be read as a push to save more than a role.
+  The sentence names only work role, team, and responsibilities, and the
+  Applying-memory line "Never inflate a single passing mention into a trait"
+  still applies. It points to the user scope without naming it, so
+  `privacy-sensitive-private` (no shared write) is not disturbed.
 - The agent may file the role in `project` ("PM for checkout" reads as
   project-flavored). The scope guidance's "would it hold for a different
   person in this project" test should route it to `user`; the scenario

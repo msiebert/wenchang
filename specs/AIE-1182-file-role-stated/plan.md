@@ -17,23 +17,29 @@ Replace the final paragraph of `BODY`:
 ```diff
  Write facts as they arise, before you ask a follow-up question, because the conversation may end
 -first.
-+first. When the user mentions their own role, team, or responsibilities in passing, such as inside
-+a question, save it before or alongside your answer.
++first. When the user mentions their own work role, team, or responsibilities, even inside a
++question, save it as a fact about them before you answer.
  """
 ```
 
-Line widths 97, 98, 52. BODY goes from 1293 to about 1440 characters
+Line widths 97, 91, 57. BODY goes from 1293 to about 1440 characters
 (budget 2500).
 
 Wording choices:
 
-- A standalone imperative naming the trigger ("mentions ... in passing, such
-  as inside a question") rather than an extension of "facts", because the
-  failure is not noticing that a fact arose.
-- "their own role, team, or responsibilities" limits it to the user's work
-  context: not project facts (which still need the ask) and not other
-  personal details such as age or school.
-- No scope is named; the adopter's "otherwise use user" routes it.
+- A standalone imperative naming the trigger ("mentions ... even inside a
+  question") rather than an extension of "facts", because the failure is not
+  noticing that a fact arose.
+- "their own work role, team, or responsibilities" limits it to the user's
+  work context: not project facts (which still need the ask) and not other
+  personal details such as age or school. "Work role" keeps student and age
+  out of the trigger, which protects `privacy-minor` (no-minor-content).
+- "In passing" is dropped because it clashes with the Applying-memory line
+  "Never inflate a single passing mention into a trait".
+- "As a fact about them" points to the user scope without naming it, which
+  protects `privacy-sensitive-private` (no-shared-write); the adopter's
+  "otherwise use user" still routes it.
+- "Before you answer" closes the loophole of saying "noted" without writing.
 - Placed in the write-timing paragraph; the save-criterion paragraph is the
   fallback under spec 4.6.
 
@@ -42,15 +48,17 @@ Wording choices:
 Pin only load-bearing terms (ADR 0025 §8). Docstrings cite `AIE-1182, USx.y`.
 
 - B1 (US1.1): parametrized phrases in `_flat(remembering.BODY)`:
-  "When the user mentions their own role, team, or responsibilities",
-  "in passing", "inside a question", "before or alongside your answer".
+  the full sentence "When the user mentions their own work role, team, or
+  responsibilities, even inside a question, save it as a fact about them
+  before you answer.", plus "their own work role", "inside a question",
+  "as a fact about them", "before you answer".
 - B2 (US1.2): split raw `remembering.BODY` on `"\n\n"`; the one paragraph
   containing "Write facts as they arise" also contains (after `_flat`)
-  "in passing" at a later index than "Write facts as they arise".
+  "inside a question" at a later index than "Write facts as they arise".
 - B3 (US1.3): `build_memory_prompt(REFERENCE_SLOTS)` (from
   `evals.reference_adopter`); the text between `## Deciding what to
-  remember` and the next `\n## ` contains, after `_flat`, "their own role,
-  team, or responsibilities in passing".
+  remember` and the next `\n## ` contains, after `_flat`, "their own work
+  role, team, or responsibilities, even inside a question".
 
 US1.4 and US2.2 are covered by existing invariants and remembering tests;
 no new test. Confirm B1-B3 fail against `main` because the phrase is absent.
@@ -63,9 +71,9 @@ Header only; turns and assertions unchanged:
  # Prompt: "`[stated]`: the user told you directly." and "Write facts as they
  # arise, before you ask a follow-up question, because the conversation may end
 -# first." and "otherwise use user."
-+# first." and "When the user mentions their own role, team, or
-+# responsibilities in passing, such as inside a question, save it before or
-+# alongside your answer." and "otherwise use user."
++# first." and "When the user mentions their own work role, team, or
++# responsibilities, even inside a question, save it as a fact about them before
++# you answer." and "otherwise use user."
 ```
 
 ## D. Agent file (implementer)
