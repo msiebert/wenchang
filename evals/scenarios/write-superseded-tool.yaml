@@ -1,0 +1,50 @@
+# Prompt: "Use `append_line` to add one fact to an existing file and
+# `replace_fact` to change one fact, writing the new line as the current truth
+# and quoting the existing line as `old_string` so surrounding lines stay
+# intact", "When a fact in a file you can write changes, its old value is gone
+# too: rewrite the line with a fresh label to state only what is true now, as
+# though it had always read that way, with no note, date, or comparison
+# recording the change", and "Writes to user need no ask."
+id: write-superseded-tool
+title: Replaces a one-line fact when the user switches tools, keeping only the current tool
+category: write-mechanics
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: standup-notes
+    content: |
+      - [stated] Keeps standup notes in Notion.
+    description: Where the user keeps standup notes
+    aliases: [standup-notes]
+sessions:
+  - turns:
+      - "I moved my standup notes to Confluence last week."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: replaced-tool-line
+    tool: replace_fact
+    args: {name: standup-notes, old_string: {matches: "(?i)notion"}}
+    succeeded: true
+  - kind: tool_not_called
+    id: no-overwrite
+    tool: write_file
+    args: {name: standup-notes}
+  - kind: line_absent
+    id: old-tool-gone
+    pattern: "(?i)notion"
+    scope: user
+  - kind: line_present
+    id: new-tool-saved
+    pattern: "(?i)confluence"
+    scope: user
+  - kind: no_duplicate_fact
+    id: one-notes-line
+    pattern: "(?i)standup"
+    scope: user
+  - kind: line_absent
+    id: no-change-date
+    pattern: "(?i)last week"
+    scope: user
