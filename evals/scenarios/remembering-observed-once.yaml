@@ -1,0 +1,30 @@
+# Prompt: "`[observed]`: you saw it in a tool result, session data, or
+# behavior." and "`[inferred]`: you concluded it from a pattern across several
+# observations." and "Phrase facts no stronger than the evidence: write
+# "investigated X once," not "is deeply focused on X."" and "Never inflate a
+# single passing mention into a trait".
+id: remembering-observed-once
+title: Does not turn one observed query into a stated or inferred trait
+category: remembering
+source: specs/AIE-1050-remembering/spec.md
+context_records:
+  - system: query history
+    content: "Earlier in this session the user ran one Insights query: churn rate by signup cohort over the last 90 days. It is the only churn query in their history."
+sessions:
+  - turns:
+      - "What does that churn query tell us? Keep it to two sentences."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_absent
+    id: not-stated
+    pattern: "\\[stated\\].*(?i:churn)"
+  - kind: line_absent
+    id: not-inferred
+    pattern: "\\[inferred\\].*(?i:churn)"
+  - kind: no_content_matching
+    id: no-trait-wording
+    pattern: "(?i)(focus|specializ|priorit|cares about|interested in|works on)\\w*[^.\\n]*churn"
+judge:
+  - id: interprets-query
+    rubric: The turn 1 reply interprets the churn query in at most a few sentences.

@@ -44,6 +44,8 @@ from evals.scenario import (
     LinePresent,
     NoContentMatching,
     NoDuplicateFact,
+    ReplyMatching,
+    ReplyNotMatching,
     Scenario,
     SeedLinesPreserved,
     Session,
@@ -971,3 +973,180 @@ def test_reply_check_modifier_letter_apostrophe() -> None:
 def test_reply_check_dashes_before_scope(dash: str) -> None:
     """An en or em dash before "scope" is excluded like a hyphen (AIE-1184, US1.22)."""
     assert _flags(_turns(f"Saved to the user{dash}scope file.")) == ()
+
+
+# --- reply assertions (AIE-1185, US1) -------------------------------------------
+
+
+def _reply_one(
+    assertion: Assertion, transcript: Sequence[TranscriptTurn], **kwargs: object
+) -> AssertionResult:
+    scenario = _scenario(assertion, **kwargs)  # type: ignore[arg-type]
+    (result,) = grade(scenario, StoreDump(()), (), transcript)
+    return result
+
+
+def _replies(*replies: str, session: int = 1) -> tuple[TranscriptTurn, ...]:
+    return _turns(*replies, session=session)
+
+
+def test_reply_matching_passes_when_some_reply_matches() -> None:
+    """A reply that matches the pattern passes (AIE-1185, US1.2)."""
+    result = _reply_one(ReplyMatching("r", r"(?i)\bsaved\b"), _replies("Nothing yet.", "Saved it."))
+
+    assert result.passed
+    assert result.kind == "reply_matching"
+
+
+def test_reply_matching_fails_and_names_the_turns_checked() -> None:
+    """No matching reply fails, and the detail names the turns it checked (AIE-1185, US1.2)."""
+    result = _reply_one(ReplyMatching("r", "saved"), _replies("Nothing yet.", "Still nothing."))
+
+    assert not result.passed
+    assert "session 1 turn 1" in result.detail
+    assert "session 1 turn 2" in result.detail
+
+
+def test_reply_matching_without_a_recorded_reply_fails() -> None:
+    """No recorded turn at all fails with "no reply recorded" (AIE-1185, US1.2)."""
+    result = _reply_one(ReplyMatching("r", "."), ())
+
+    assert not result.passed
+    assert "no reply recorded" in result.detail
+
+
+def test_reply_matching_honors_session_and_turn_filters() -> None:
+    """Only turns matching the filter are searched; a filter that selects no
+    recorded turn fails with "no reply recorded" (AIE-1185, US1.2).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "u", "alpha", None),
+        TranscriptTurn(1, 2, "u", "beta", None),
+        TranscriptTurn(2, 1, "u", "gamma", None),
+    )
+
+    def run(**filters: int) -> AssertionResult:
+        return _reply_one(
+            ReplyMatching("r", "beta|gamma", **filters),  # type: ignore[arg-type]
+            transcript,
+            sessions=2,
+        )
+
+    assert run().passed
+    assert run(turn=2).passed
+    assert run(session=2).passed
+    assert not run(session=1, turn=1).passed
+    assert run(session=1).passed
+    missing = _reply_one(ReplyMatching("r", ".", session=1, turn=2), transcript[:1], sessions=2)
+    assert not missing.passed
+    assert "no reply recorded" in missing.detail
+
+
+def test_reply_not_matching_passes_when_no_reply_matches() -> None:
+    """A recorded reply that does not match passes (AIE-1185, US1.3)."""
+    result = _reply_one(ReplyNotMatching("r", r"(?i)\bcharts?\b"), _replies("Use a left join."))
+
+    assert result.passed
+    assert result.kind == "reply_not_matching"
+
+
+def test_reply_not_matching_names_the_first_offending_turn() -> None:
+    """A matching reply fails and the detail names the first offending session
+    and turn (AIE-1185, US1.3).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "u", "fine", None),
+        TranscriptTurn(1, 2, "u", "I kept the charts dark.", None),
+        TranscriptTurn(2, 1, "u", "more charts", None),
+    )
+
+    result = _reply_one(ReplyNotMatching("r", "charts"), transcript, sessions=2)
+
+    assert not result.passed
+    assert "session 1 turn 2" in result.detail
+    assert "session 2" not in result.detail
+
+
+def test_reply_not_matching_without_a_recorded_reply_fails() -> None:
+    """A missing reply fails with "no reply recorded", as it does for the
+    judge (AIE-1185, US1.3).
+    """
+    result = _reply_one(ReplyNotMatching("r", "anything"), ())
+
+    assert not result.passed
+    assert "no reply recorded" in result.detail
+
+
+def test_reply_not_matching_honors_session_and_turn_filters() -> None:
+    """A match outside the filter is ignored; a filter that selects no recorded
+    turn fails with "no reply recorded" (AIE-1185, US1.3).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "u", "bad", None),
+        TranscriptTurn(1, 2, "u", "good", None),
+        TranscriptTurn(2, 1, "u", "good", None),
+    )
+
+    def run(**filters: int) -> AssertionResult:
+        return _reply_one(
+            ReplyNotMatching("r", "bad", **filters),  # type: ignore[arg-type]
+            transcript,
+            sessions=2,
+        )
+
+    assert not run().passed
+    assert not run(turn=1).passed
+    assert run(turn=2).passed
+    assert run(session=2).passed
+    missing = _reply_one(ReplyNotMatching("r", "bad", session=2, turn=2), transcript, sessions=2)
+    assert not missing.passed
+    assert "no reply recorded" in missing.detail
+
+
+def test_reply_kinds_fail_without_a_transcript_and_others_grade_as_before() -> None:
+    """grade without a transcript fails the reply kinds with "no reply recorded"
+    and grades every other kind as before (AIE-1185, US1.4).
+    """
+    scenario = _scenario(
+        IndexReadFirst("index"),
+        ReplyMatching("must", "x"),
+        ReplyNotMatching("must-not", "x"),
+    )
+    trace = [_call(1, "get_memory_index")]
+
+    results = grade(scenario, StoreDump(()), trace)
+
+    assert [(r.id, r.passed) for r in results] == [
+        ("index", True),
+        ("must", False),
+        ("must-not", False),
+    ]
+    assert all("no reply recorded" in r.detail for r in results[1:])
+    assert results == grade(scenario, StoreDump(()), trace, ())
+
+
+def _no_trait_reply() -> ReplyNotMatching:
+    scenario = load_scenario(ROOT / "evals" / "scenarios" / "applying-no-trait.yaml")
+    return next(
+        a
+        for a in scenario.assertions
+        if a.id == "no-trait-reply" and isinstance(a, ReplyNotMatching)
+    )
+
+
+@pytest.mark.parametrize(
+    ("reply", "passes"),
+    [
+        ("Since you usually work late, I put the focus blocks in the evenings.", False),
+        ("One late night before a deadline doesn't mean you usually work late.", True),
+        ("Since you don't usually work late, I kept the blocks in the morning.", True),
+    ],
+    ids=["asserts-trait", "denies-trait-with-means", "denies-trait-with-dont"],
+)
+def test_no_trait_reply_pattern_on_canned_replies(reply: str, passes: bool) -> None:
+    """The applying-no-trait pattern fails on an assertive claim and passes on
+    a reply that denies the trait (AIE-1185, US1.8).
+    """
+    result = _reply_one(_no_trait_reply(), _replies(reply))
+
+    assert result.passed is passes, result.detail

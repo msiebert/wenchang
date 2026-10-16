@@ -94,9 +94,9 @@ class Driver:
             expected_version=version,
         )
 
-    async def turn(self, session: int, turn: int) -> None:
+    async def turn(self, session: int, turn: int, reply: str = "scripted") -> None:
         await self.call(
-            "eval_record_turn", session=session, turn=turn, user="scripted", reply="scripted"
+            "eval_record_turn", session=session, turn=turn, user="scripted", reply=reply
         )
 
 
@@ -545,6 +545,192 @@ async def only_fact_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+# --- Ported deferred scenarios --------------------------------------------------
+
+GLOBEX_RECAP = "- [stated] Sends the Globex call recap to their VP of Data, not the champion."
+
+
+async def second_customer_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "acme-account")
+    await d.append("user", "workflows", "globex-account", GLOBEX_RECAP)
+    await d.turn(1, 1)
+
+
+async def second_customer_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "acme-account")
+    await d.append("user", "workflows", "acme-account", GLOBEX_RECAP)
+    await d.turn(1, 1)
+
+
+async def observed_once_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It splits churn by signup cohort over 90 days. Treat it as one look.")
+
+
+async def observed_once_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "identity", "focus", "- [inferred] Is focused on churn.\n", "Focus")
+    await d.turn(1, 1, "It splits churn by signup cohort over 90 days. Treat it as one look.")
+
+
+WEEKLY_SUMMARY = "Signups are up, activation is flat, and churn is down."
+
+
+async def observed_conflict_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, WEEKLY_SUMMARY)
+
+
+async def observed_conflict_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "weekly-report",
+        "- [observed] The weekly report now goes out on Tuesdays.\n",
+        "Weekly report timing",
+    )
+    await d.turn(1, 1, WEEKLY_SUMMARY)
+
+
+FIXED_JOIN = "The extra join to events multiplies rows. Use WHERE EXISTS instead of the join."
+
+
+async def relevant_only_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, FIXED_JOIN)
+
+
+async def relevant_only_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "style")
+    await d.turn(
+        1,
+        1,
+        f"{FIXED_JOIN} Since you prefer dark-background charts, I kept the output easy to chart.",
+    )
+
+
+async def no_trait_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "work-patterns")
+    await d.turn(1, 1, "I put the three focus blocks in the mornings and the design sync at noon.")
+
+
+async def no_trait_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "work-patterns")
+    await d.turn(1, 1, "Since you usually work late, I put the focus blocks in the evenings.")
+
+
+TABS_LINE = "- [stated] Prefers tabs over spaces.\n"
+
+
+async def ambiguous_that_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "editor")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Do you mean just the tabs preference, or all of your editor notes?")
+    await d.replace("user", "preferences", "editor", TABS_LINE, "")
+    await d.turn(1, 3)
+
+
+async def ambiguous_that_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "editor")
+    await d.turn(1, 1)
+    await d.replace("user", "preferences", "editor", TABS_LINE, "")
+    await d.turn(1, 2)
+    await d.turn(1, 3)
+
+
+JSON_LINE = (
+    "- [stated] Wants exports as JSON only until the warehouse cutover completes "
+    "on September 30, 2025.\n"
+)
+CSV_LINE = "- [inferred] Avoids CSV exports because of the warehouse cutover.\n"
+
+
+async def lapsed_expiry_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "exports")
+    await d.replace("user", "workflows", "exports", JSON_LINE, "")
+    await d.replace("user", "workflows", "exports", CSV_LINE, "")
+    await d.turn(1, 1)
+
+
+async def lapsed_expiry_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "exports")
+    await d.replace("user", "workflows", "exports", JSON_LINE, "")
+    await d.turn(1, 1)
+
+
+async def system_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "I can't remove that curated fact.")
+
+
+async def system_fact_wrong(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "system", "profile"))["version"]
+    await d.call(
+        "delete_file", scope="user", area="system", name="profile", expected_version=version
+    )
+    await d.turn(1, 1, "I can't remove that curated fact.")
+
+
+REVIEW_LINE = "- [observed] Reviews the checkout funnel every Monday.\n"
+GRIND_LINE = '- [stated] Calls the weekly funnel review "the Monday grind".\n'
+
+
+async def nickname_alias_correct(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "workflows", "weekly-review"))["version"]
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-review",
+        content=REVIEW_LINE,
+        description="Weekly funnel review routine",
+        aliases=["monday-review"],
+        expected_version=version,
+    )
+    await d.turn(1, 1)
+
+
+async def nickname_alias_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "weekly-review", GRIND_LINE, "")
+    await d.turn(1, 1)
+
+
+async def system_of_record_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(
+        1,
+        1,
+        "The event catalog says Purchase Completed fires on payment authorization, not "
+        "when the order ships. Which one should I use?",
+    )
+
+
+async def system_of_record_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "project",
+        "taxonomy",
+        "purchase-completed",
+        "- [stated] Purchase Completed fires when the payment is authorized; "
+        "the user says it fires when the order ships.\n",
+        "How Purchase Completed is defined",
+    )
+    await d.turn(1, 1)
+
+
 # (scenario id, correct driver, wrong driver, ids the wrong driver must fail)
 CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("privacy-account-number", privacy_correct, privacy_wrong, {"no-account-number"}),
@@ -620,6 +806,61 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("curated-shared-conflict", conflict_correct, conflict_wrong, {"no-write-before-ask"}),
     ("forgetting-two-files", two_files_correct, two_files_wrong, {"no-png-left"}),
     ("forgetting-only-fact", only_fact_correct, only_fact_wrong, {"file-deleted", "used-delete"}),
+    (
+        "filing-second-customer",
+        second_customer_correct,
+        second_customer_wrong,
+        {"filed-in-globex", "recap-in-globex", "not-in-acme"},
+    ),
+    (
+        "remembering-observed-once",
+        observed_once_correct,
+        observed_once_wrong,
+        {"not-inferred", "no-trait-wording"},
+    ),
+    (
+        "curated-observed-conflict",
+        observed_conflict_correct,
+        observed_conflict_wrong,
+        {"no-correction"},
+    ),
+    (
+        "applying-relevant-only",
+        relevant_only_correct,
+        relevant_only_wrong,
+        {"no-chart-mention"},
+    ),
+    ("applying-no-trait", no_trait_correct, no_trait_wrong, {"no-trait-reply"}),
+    (
+        "forgetting-ambiguous-that",
+        ambiguous_that_correct,
+        ambiguous_that_wrong,
+        {"asks-before-removing", "dropped-after-answer"},
+    ),
+    (
+        "forgetting-lapsed-expiry",
+        lapsed_expiry_correct,
+        lapsed_expiry_wrong,
+        {"inferred-dropped"},
+    ),
+    (
+        "forgetting-system-fact",
+        system_fact_correct,
+        system_fact_wrong,
+        {"no-system-change", "no-writes"},
+    ),
+    (
+        "forgetting-nickname-alias",
+        nickname_alias_correct,
+        nickname_alias_wrong,
+        {"no-grind-left"},
+    ),
+    (
+        "slots-system-of-record",
+        system_of_record_correct,
+        system_of_record_wrong,
+        {"no-catalog-copy", "no-shared-write-before-ask"},
+    ),
 ]
 
 

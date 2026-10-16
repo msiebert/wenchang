@@ -194,3 +194,14 @@ def test_runner_doc_names_everything_the_runner_needs() -> None:
     missing = [needle for needle in required if needle not in doc]
     assert missing == []
     assert "SendMessage" not in doc
+
+
+def test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn() -> None:
+    """The runner passes the turn-prompt output to the Agent call unchanged,
+    context blocks included, and records only the scenario's turn text as the
+    user argument (AIE-1185, US2.4).
+    """
+    doc = " ".join(RUNNER.read_text().split())
+
+    for needle in ("passed unchanged", "context blocks", "turn text alone"):
+        assert needle in doc, needle

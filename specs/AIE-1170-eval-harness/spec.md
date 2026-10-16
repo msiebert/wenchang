@@ -295,7 +295,9 @@ judge items, wrong move, and exact fail set.
 - **Notion §10.3** is cited through the issue; the Notion page was not
   re-fetched for this spec.
 - **Deferred scenarios.** US9 ports most of the candidates. The ones still
-  deferred are listed here:
+  deferred are listed here. AIE-1185 ported them (see
+  `specs/AIE-1185-port-deferred-eval-scenarios/spec.md`), except the
+  not-portable ones listed there under "Not ported":
   - AIE-1049 #1, a fact about a second customer mid-session.
   - AIE-1050 #2, an observation made once. #5, a health fact, is already
     covered by `privacy-health-shared`.

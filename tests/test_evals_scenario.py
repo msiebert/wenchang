@@ -10,19 +10,24 @@ from evals.reference_adopter import (
     ADMIN_IDENTITY,
     MEMBER_IDENTITY,
     REFERENCE_SEED_FILES,
+    REFERENCE_SLOTS,
     SeedFile,
 )
 from evals.scenario import (
     ASSERTION_KINDS,
+    CATEGORIES,
     AliasPresent,
     ArgMatcher,
     CalledBefore,
+    ContextRecord,
     FileAbsent,
     IndexReadFirst,
     LineAbsent,
     LinePresent,
     NoContentMatching,
     NoDuplicateFact,
+    ReplyMatching,
+    ReplyNotMatching,
     Scenario,
     ScenarioError,
     SeedLinesPreserved,
@@ -31,6 +36,7 @@ from evals.scenario import (
     load_all,
     load_scenario,
 )
+from wenchang.prompts import build_memory_prompt
 
 pytestmark = pytest.mark.unit
 
@@ -435,7 +441,7 @@ def test_missing_file_is_rejected(tmp_path: Path) -> None:
 
 
 def test_assertion_kinds_are_the_closed_set() -> None:
-    """ASSERTION_KINDS is exactly the eleven kinds US4 defines (AIE-1170, US3.4, US4.17)."""
+    """ASSERTION_KINDS is exactly the thirteen kinds US4 defines (AIE-1170, US3.4, US4.17)."""
     assert set(ASSERTION_KINDS) == {
         "called_before",
         "index_read_first",
@@ -448,6 +454,8 @@ def test_assertion_kinds_are_the_closed_set() -> None:
         "tool_called",
         "tool_not_called",
         "alias_present",
+        "reply_matching",
+        "reply_not_matching",
     }
 
 
@@ -572,6 +580,16 @@ CORPUS = {
     "curated-shared-conflict",
     "forgetting-two-files",
     "forgetting-only-fact",
+    "filing-second-customer",
+    "remembering-observed-once",
+    "curated-observed-conflict",
+    "applying-relevant-only",
+    "applying-no-trait",
+    "forgetting-ambiguous-that",
+    "forgetting-lapsed-expiry",
+    "forgetting-system-fact",
+    "forgetting-nickname-alias",
+    "slots-system-of-record",
 }
 
 
@@ -605,6 +623,267 @@ def test_judge_rubrics_name_their_turn() -> None:
     offenders = [
         (s.id, j.id)
         for s in load_all()
+        for j in s.judge
+        if re.match(r"The (session \d+ )?turn \d+ reply", j.rubric) is None
+    ]
+    assert offenders == []
+
+
+# --- Reply assertions (AIE-1185, US1) -------------------------------------------
+
+REPLY_KINDS = [("reply_matching", ReplyMatching), ("reply_not_matching", ReplyNotMatching)]
+
+
+@pytest.mark.parametrize(("kind", "cls"), REPLY_KINDS, ids=[k for k, _ in REPLY_KINDS])
+def test_reply_kinds_parse(
+    tmp_path: Path, kind: str, cls: type[ReplyMatching] | type[ReplyNotMatching]
+) -> None:
+    """Reply assertions parse with optional session and turn filters that
+    default to None (AIE-1185, US1.1).
+    """
+    assertions = (
+        f"assertions:\n  - kind: {kind}\n    id: filtered\n    pattern: '(?i)done'\n"
+        "    session: 2\n    turn: 1\n"
+        f"  - kind: {kind}\n    id: unfiltered\n    pattern: 'x'\n"
+    )
+    sessions = "sessions:\n  - turns: [a, b]\n  - turns: [c]\n"
+    s = load_scenario(_write(tmp_path, _minimal(sessions=sessions, assertions=assertions)))
+
+    filtered, unfiltered = s.assertions
+    assert isinstance(filtered, (ReplyMatching, ReplyNotMatching))
+    assert isinstance(unfiltered, (ReplyMatching, ReplyNotMatching))
+    assert type(filtered) is cls
+    assert type(unfiltered) is cls
+    assert (filtered.id, filtered.pattern, filtered.session, filtered.turn) == (
+        "filtered",
+        "(?i)done",
+        2,
+        1,
+    )
+    assert (unfiltered.pattern, unfiltered.session, unfiltered.turn) == ("x", None, None)
+    assert ASSERTION_KINDS[kind] is cls
+
+
+REPLY_MALFORMED: list[tuple[str, str, str]] = [
+    ("bad-regex", "    pattern: '('\n", "pattern"),
+    ("missing-pattern", "    session: 1\n", "pattern"),
+    ("unknown-key", "    pattern: x\n    colour: blue\n", "colour"),
+    ("session-out-of-range", "    pattern: x\n    session: 2\n", "session"),
+    ("turn-out-of-range", "    pattern: x\n    turn: 2\n", "turn"),
+]
+
+
+@pytest.mark.parametrize("kind", [k for k, _ in REPLY_KINDS])
+@pytest.mark.parametrize(
+    ("case", "body", "needle"), REPLY_MALFORMED, ids=[m[0] for m in REPLY_MALFORMED]
+)
+def test_malformed_reply_kinds_are_rejected(
+    tmp_path: Path, kind: str, case: str, body: str, needle: str
+) -> None:
+    """Reply assertions with a bad regex, an unknown or missing key, or a
+    session or turn outside the scenario raise ScenarioError (AIE-1185, US1.1).
+    """
+    path = _write(
+        tmp_path,
+        _minimal(assertions=f"assertions:\n  - kind: {kind}\n{body}"),
+        stem="mini",
+    )
+
+    with pytest.raises(ScenarioError) as info:
+        load_scenario(path)
+
+    assert str(path) in str(info.value)
+    assert needle in str(info.value), case
+
+
+# --- Context records (AIE-1185, US2) --------------------------------------------
+
+
+def test_context_records_parse(tmp_path: Path) -> None:
+    """context_records parse into a tuple of ContextRecord in order, and
+    default to an empty tuple (AIE-1185, US2.1).
+    """
+    extra = (
+        "context_records:\n"
+        "  - system: event catalog\n"
+        "    content: 'Purchase Completed: fires on payment.'\n"
+        "  - {system: query history, content: 'One churn query.'}\n"
+    )
+
+    with_records = load_scenario(_write(tmp_path, _minimal(extra=extra)))
+    without = load_scenario(_write(tmp_path, _minimal(id="id: plain\n")))
+
+    assert with_records.context_records == (
+        ContextRecord("event catalog", "Purchase Completed: fires on payment."),
+        ContextRecord("query history", "One churn query."),
+    )
+    assert without.context_records == ()
+
+
+CONTEXT_MALFORMED: list[tuple[str, str, str]] = [
+    ("empty-list", "context_records: []\n", "context_records"),
+    ("not-a-list", "context_records: catalog\n", "context_records"),
+    ("item-not-a-mapping", "context_records:\n  - just text\n", "context_records[0]"),
+    (
+        "unknown-key",
+        "context_records:\n  - {system: a, content: b, colour: c}\n",
+        "context_records[0]",
+    ),
+    ("missing-system", "context_records:\n  - {content: b}\n", "context_records[0]"),
+    ("missing-content", "context_records:\n  - {system: a}\n", "context_records[0]"),
+    ("blank-system", "context_records:\n  - {system: ' ', content: b}\n", "context_records[0]"),
+    ("blank-content", "context_records:\n  - {system: a, content: ''}\n", "context_records[0]"),
+    ("non-string-system", "context_records:\n  - {system: 5, content: b}\n", "context_records[0]"),
+    (
+        "non-string-content",
+        "context_records:\n  - {system: a, content: [b]}\n",
+        "context_records[0]",
+    ),
+    (
+        "second-item-bad",
+        "context_records:\n  - {system: a, content: b}\n  - {system: c}\n",
+        "context_records[1]",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "extra", "needle"), CONTEXT_MALFORMED, ids=[m[0] for m in CONTEXT_MALFORMED]
+)
+def test_malformed_context_records_are_rejected(
+    tmp_path: Path, case: str, extra: str, needle: str
+) -> None:
+    """An empty or non-list value, a non-mapping item, an unknown or missing
+    key, or a blank or non-string value raises ScenarioError naming the file
+    and the item (AIE-1185, US2.1).
+    """
+    path = _write(tmp_path, _minimal(extra=extra), stem="mini")
+
+    with pytest.raises(ScenarioError) as info:
+        load_scenario(path)
+
+    assert str(path) in str(info.value)
+    assert needle in str(info.value), case
+
+
+# --- The ten ported scenarios (AIE-1185, US3) -----------------------------------
+
+NEW_IDS = (
+    "filing-second-customer",
+    "remembering-observed-once",
+    "curated-observed-conflict",
+    "applying-relevant-only",
+    "applying-no-trait",
+    "forgetting-ambiguous-that",
+    "forgetting-lapsed-expiry",
+    "forgetting-system-fact",
+    "forgetting-nickname-alias",
+    "slots-system-of-record",
+)
+
+CITATIONS: dict[str, tuple[str, ...]] = {
+    "filing-second-customer": (
+        "File each fact in the file that is about its subject, not whichever file happens "
+        "to be open.",
+        "If a file on the subject exists, append to it or edit it instead of creating a duplicate.",
+        "Writes to user need no ask.",
+    ),
+    "remembering-observed-once": (
+        "`[observed]`: you saw it in a tool result, session data, or behavior.",
+        "`[inferred]`: you concluded it from a pattern across several observations.",
+        'Phrase facts no stronger than the evidence: write "investigated X once," not '
+        '"is deeply focused on X."',
+        "Never inflate a single passing mention into a trait",
+    ),
+    "curated-observed-conflict": (
+        "Correct a curated fact only when the user explicitly says it is wrong, never "
+        "because of something you observed or inferred.",
+    ),
+    "applying-relevant-only": (
+        "Use a stored fact only if it changes the substance: what you conclude, recommend, or ask.",
+        "A detail that changes nothing reads as surveillance rather than attentiveness.",
+    ),
+    "applying-no-trait": (
+        "Never inflate a single passing mention into a trait: one late night before a "
+        "deadline does not make the user someone who always works late.",
+        "Apply each fact at the level recorded, no more broadly or certainly than its "
+        "wording and confidence label support.",
+    ),
+    "forgetting-ambiguous-that": (
+        "Delete the file if the fact was the file's only fact or the user means the whole "
+        "file; if it is ambiguous which they mean, ask before removing anything.",
+    ),
+    "forgetting-lapsed-expiry": (
+        "A fact whose stated end date has passed is a candidate for dropping, not to be "
+        "removed automatically: when you read it or during maintenance, drop it only if it "
+        "no longer holds.",
+        "Also drop each `[inferred]` line that rested solely on it",
+    ),
+    "forgetting-system-fact": (
+        "Never drop or delete anything in `system/`. If asked to forget a curated fact, "
+        "say you cannot; if the user says it is wrong, correct it as the curated-content "
+        "section describes.",
+    ),
+    "forgetting-nickname-alias": (
+        "Removal is total: leave no note that the fact was ever true.",
+        "Also drop each `[inferred]` line that rested solely on it, delete any file derived "
+        "solely from it, and remove description text or aliases that exist only because of "
+        "it.",
+    ),
+    "slots-system-of-record": (
+        "Never copy their contents into memory.",
+        "Event definitions live in the product's event catalog; refer to an event by its "
+        "catalog name.",
+        "Before saving a new fact to project or organization, ask the user and name the scope.",
+    ),
+}
+
+
+def _collapse(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_categories_gain_applying() -> None:
+    """The applying category is accepted (AIE-1185, US3.1)."""
+    assert "applying" in CATEGORIES
+
+
+def test_new_scenarios_are_in_the_corpus() -> None:
+    """The ten ported scenarios load from the shipped directory (AIE-1185, US3.1)."""
+    assert set(NEW_IDS) <= {s.id for s in load_all()}
+    assert set(CITATIONS) == set(NEW_IDS)
+
+
+@pytest.mark.parametrize("ident", NEW_IDS)
+def test_new_scenarios_cite_the_prompt_verbatim(ident: str) -> None:
+    """Each cited sentence is in the reference memory prompt and in the
+    scenario's # Prompt: header, whitespace collapsed (AIE-1185, US3.2).
+    """
+    prompt = _collapse(build_memory_prompt(REFERENCE_SLOTS))
+    header = _collapse(
+        " ".join(
+            line.removeprefix("#").strip()
+            for line in (ROOT / "evals" / "scenarios" / f"{ident}.yaml").read_text().splitlines()
+            if line.startswith("#")
+        )
+    )
+
+    for sentence in CITATIONS[ident]:
+        assert _collapse(sentence) in prompt, sentence
+        assert _collapse(sentence) in header, sentence
+
+
+def test_new_scenarios_judge_rubrics_name_their_turn() -> None:
+    """The ten new scenarios' judge rubrics each start by naming the reply they
+    grade (AIE-1185, US3.4).
+    """
+    new = [s for s in load_all() if s.id in NEW_IDS]
+
+    assert {s.id for s in new} == set(NEW_IDS)
+    assert any(s.judge for s in new)
+    offenders = [
+        (s.id, j.id)
+        for s in new
         for j in s.judge
         if re.match(r"The (session \d+ )?turn \d+ reply", j.rubric) is None
     ]

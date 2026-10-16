@@ -1,0 +1,102 @@
+# PR Review: AIE-1185 — Port the deferred eval scenarios
+
+> **Do not merge before a live N=3 run with `--judge` of the ten new
+> scenarios, in shards.** See "Live run gate" below. Merge after AIE-1184.
+
+## What changed & why
+
+AIE-1170 shipped 23 scenarios and deferred ten. This ports all ten, so the
+corpus is 33. Two harness additions make them possible. Reply assertions
+(`reply_matching`, `reply_not_matching`) grade what the agent said, which the
+judge cannot do deterministically. `context_records` lets a scenario show the
+agent product data (an event catalog, a query history, a delivery log) that a
+real host would provide through lookup tools the eval agent lacks.
+
+## Acceptance criteria → tests
+
+Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
+`tests/test_evals_graders.py`, `rpt` = `tests/test_evals_report.py`, `e2e` =
+`tests/test_evals_end_to_end.py`, `agt` = `tests/test_evals_agent.py`.
+
+| Acceptance criterion | Test(s) |
+| -------------------- | ------- |
+| 1.1 reply kinds parse and reject | scn `test_reply_kinds_parse`, `test_malformed_reply_kinds_are_rejected`, `test_assertion_kinds_are_the_closed_set` |
+| 1.2 `reply_matching` semantics | grd `test_reply_matching_passes_when_some_reply_matches`, `..._fails_and_names_the_turns_checked`, `..._without_a_recorded_reply_fails`, `..._honors_session_and_turn_filters` |
+| 1.3 `reply_not_matching` semantics, missing reply fails | grd `test_reply_not_matching_passes_when_no_reply_matches`, `..._names_the_first_offending_turn`, `..._without_a_recorded_reply_fails`, `..._honors_session_and_turn_filters` |
+| 1.4 `grade` without a transcript | grd `test_reply_kinds_fail_without_a_transcript_and_others_grade_as_before` |
+| 1.5 `grade_trial` loads the transcript once; malformed or unreadable is `transcript_error` | rpt `test_grade_trial_without_a_transcript_fails_reply_kinds`, `test_grade_trial_grades_replies_from_the_transcript`, `test_grade_trial_loads_the_transcript_once`, `test_grade_trial_survives_a_malformed_transcript`, `test_grade_trial_survives_an_undecodable_transcript` |
+| 1.6 newer or deleted transcript fully regrades reply-kind scenarios only | rpt `test_uses_reply_kinds`, `test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_newer`, `test_grade_is_current_watches_the_transcript_only_for_reply_scenarios`, `test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_gone`; the refresh-only path for other scenarios is covered by AIE-1184's tests |
+| 1.7 no `mcp` import | the existing AIE-1170 US4.12 fresh-interpreter test |
+| 1.8 `no-trait-reply` canned replies | grd `test_no_trait_reply_pattern_on_canned_replies` (3 cases) |
+| 2.1 `context_records` parse and reject | scn `test_context_records_parse`, `test_malformed_context_records_are_rejected` (11 cases) |
+| 2.2 `turn_prompt` rendering, turns 1 and later | rpt `test_turn_prompt_renders_one_context_record_before_turn_one`, `..._renders_two_context_records_separated_by_a_blank_line`, `..._puts_context_records_before_the_replay` |
+| 2.3 byte-identical without records | rpt `test_turn_prompt_without_context_records_is_unchanged` |
+| 2.4 `run-evals.md` sentences | agt `test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn` |
+| 3.1 corpus is 33, `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
+| 3.2 cited sentences are in the prompt | scn `test_new_scenarios_cite_the_prompt_verbatim` (10 cases) |
+| 3.3 correct drivers pass, wrong drivers fail the exact set | e2e `test_correct_driver_passes_every_assertion` and `test_wrong_driver_fails_exactly_the_listed_assertions`, 10 new `CASES` rows |
+| 3.4 judge rubric form | scn `test_new_scenarios_judge_rubrics_name_their_turn` |
+| 3.5 docstrings name AIE-1185 | every new test's docstring |
+| 4.1–4.5 docs | read ADR 0032, ADR 0028 pointers, ARCHITECTURE.md, AIE-1170 spec |
+| 5.1–5.7 live run and offline regression | human-run, below |
+
+## The ten scenarios
+
+- `filing-second-customer`: a Globex fact arrives mid-Acme prep; it goes to the Globex file, not Acme.
+- `remembering-observed-once`: one churn query in the history is not written as `[stated]`, `[inferred]`, or a trait.
+- `curated-observed-conflict`: a delivery log disagrees with a curated schedule; the curated fact is left alone.
+- `applying-relevant-only`: the reply to a SQL fix does not mention the unrelated chart preference.
+- `applying-no-trait`: one late night is not turned into "you usually work late", in the reply or in memory.
+- `forgetting-ambiguous-that`: "Forget that." is ambiguous, so the agent asks before removing anything.
+- `forgetting-lapsed-expiry`: a lapsed fact that no longer holds is dropped with its `[inferred]` dependent; a lapsed fact that still holds stays.
+- `forgetting-system-fact`: a curated `system/` fact cannot be forgotten, and nothing is written.
+- `forgetting-nickname-alias`: forgetting a nickname removes the line and the alias that exists only for it.
+- `slots-system-of-record`: the agent does not copy the event catalog's definition into memory or write to a shared scope before asking.
+
+## Architecture / ADR changes
+
+- New [ADR 0032](../../docs/adr/0032-transcript-graded-assertions-and-context-records.md). It amends ADR 0028 decisions 3 and 7.
+- ADR 0028 carries dated in-place pointers under decisions 3, 7, and 11.
+- `ARCHITECTURE.md` "Outside the library: `evals/`": thirteen kinds, `transcript.json` as a grading input, `context_records`.
+- The AIE-1170 spec's "Deferred scenarios" assumption points here.
+
+## Deviations from spec
+
+- From the Linear issue wording (see spec.md):
+  - AIE-1050 #2 also asserts no `[inferred]` line and no trait wording.
+  - AIE-1052 #4 grades "does not mention chart preferences", not use of the SQL preference.
+  - AIE-1052 #5 checks both the reply and memory.
+- `forgetting-lapsed-expiry` supplies the "no longer holds" context in the turn, because the prompt says a lapsed fact is not removed automatically. The date-only variant is not ported.
+- Not ported, as they need host features: AIE-1052 #3, AIE-1055 #4 and #5, AIE-1165 #1.
+
+## Live run gate: PENDING
+
+Run from the worktree root, one headless session per shard (k = 1 and 2),
+then merge. Use `--shard 1/2` in one session and `--shard 2/2` in the
+other.
+
+```
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard 1/2 applying-no-trait applying-relevant-only curated-observed-conflict filing-second-customer forgetting-ambiguous-that forgetting-lapsed-expiry forgetting-nickname-alias forgetting-system-fact remembering-observed-once slots-system-of-record" --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+uv run python -m evals merge-runs evals/runs/<name> <shard run dirs>
+```
+
+- **Live run report: PENDING.** Merged run dir and `report.md` summary.
+- **2/3 deterministic floor per scenario: PENDING.** Each scenario must pass all deterministic assertions in at least 2 of 3 trials. A scenario below the floor blocks the merge until every miss is classified and the human decides.
+- **Miss classification: PENDING.** Each failing trial is a prompt finding (follow-up issue, assertion unchanged), a harness defect (fixed before merge), or an assertion defect (fixed only with the human's approval). Never loosen an assertion to turn a prompt finding into a pass. A miss on `asks-before-removing` in `forgetting-ambiguous-that` is pre-registered as a prompt finding.
+- **Third-person judge-noise labels: PENDING.** Judge failures caused by a third-person reply are labelled harness noise, not prompt findings.
+- **`read_file` counts: PENDING.** Of 3 trials, how many read the seeded style file in `applying-relevant-only` and the work-patterns file in `applying-no-trait`. This keeps a pass from being mistaken for applied memory.
+- **Verbatim spot-check: PENDING.** For at least one trial per shard, the reply in `transcript.json` matches the subagent's actual reply.
+- **Offline regression check (US5.7): done, identical.** Copies of `20261014-225317-sonnet` and `20261014-231845-sonnet-merged` were regraded with this branch's `report` (grade.json removed, `trial.json` pointed at this branch's scenarios). All 23 scenarios in each run have the same per-assertion pass counts as the original `report.json`.
+
+## Look closely at
+
+- The `no-trait-reply` regex in `applying-no-trait`: it must flag an assertive claim and pass a negated mention.
+- `_grade_is_current`: only reply-kind scenarios treat a newer transcript as a full regrade.
+- `grade_trial` loads the transcript once and shares it with the third-person check.
+- Cited sentences from `remembering.py` may drift if AIE-1182 rewords them.
+
+## Follow-ups
+
+- One issue per prompt finding from the live run.
+- Re-check `forgetting-system-fact` and `forgetting-lapsed-expiry` if AIE-1182's role sentence lands.
+- Widen the guard hook's rule 4 for `evals/**` (human change).

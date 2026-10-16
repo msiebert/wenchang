@@ -43,6 +43,8 @@ slow and nondeterministic.
    extras.
 
 3. **The driver contract is the scenario YAML plus five JSON files.**
+   **Amended (2026-10-16) by ADR 0032.** Graders now also take the
+   transcript, and `transcript.json` is a grading input.
    Graders are pure functions of (scenario, store dump, trace), and
    `evals.scenario` and `evals.graders` never import `mcp`. A driver writes
    three files and grading writes two:
@@ -188,6 +190,8 @@ slow and nondeterministic.
    `eval_record_turn`.** Reading Claude Code's subagent transcript files
    was rejected, because their layout under `~/.claude/projects/` is
    internal. A paraphrased copy would affect only the judge.
+   **Amended (2026-10-16) by ADR 0032.** A paraphrased copy now also
+   affects the reply assertion kinds, so the live gate spot-checks it.
 
 8. **The judge is optional and separate.** `wenchang-eval-judge` (Read and
    Write, `omitClaudeMd`) writes `judge.json`. The report shows judge
@@ -206,7 +210,8 @@ slow and nondeterministic.
     so widening its rule 4 for the same paths, and giving doc-updater
     `AGENTS.md`, is a manual follow-up.
 
-11. **Corpus expansion (2026-10-14).** After the first passing live run,
+11. **Corpus expansion (2026-10-14).** The corpus is 33 scenarios per
+    ADR 0032. After the first passing live run,
     the corpus grew from 8 to 23 scenarios. They cover privacy,
     remembering, filing, write mechanics, curated content, shared-scope
     asks, and forgetting. Each still cites its prompt sentence, has

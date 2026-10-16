@@ -3,7 +3,7 @@
 # stored fact, say what conflicts, and ask which to keep." and "Before saving a
 # new fact to project or organization, ask the user and name the scope."
 # Covers specs/AIE-1055-prompt-slots/spec.md #3 only as a shared-scope
-# conflict; the system-of-record variant is deferred.
+# conflict; the system-of-record variant is slots-system-of-record.
 id: curated-shared-conflict
 title: Surfaces a conflict with a curated shared fact before writing
 category: curated

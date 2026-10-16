@@ -1,8 +1,8 @@
 """Deterministic graders over a trial's store dump and tool-call trace.
 
-Pure functions of (scenario, store dump, trace). The JSON loaders and writers
-here define the driver contract: any driver that produces store.json,
-trace.json, and transcript.json can be graded.
+Pure functions of the scenario, the store dump, the trace, and the transcript.
+The JSON loaders and writers here define the driver contract: any driver that
+produces store.json, trace.json, and transcript.json can be graded.
 """
 
 import json
@@ -25,6 +25,8 @@ from evals.scenario import (
     LinePresent,
     NoContentMatching,
     NoDuplicateFact,
+    ReplyMatching,
+    ReplyNotMatching,
     Scenario,
     SeedLinesPreserved,
     ToolCalled,
@@ -487,7 +489,53 @@ def _called_before(a: CalledBefore, s: Scenario, trace: Sequence[TraceCall]) -> 
     return None
 
 
-def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> str | None:
+def _selected_replies(
+    a: ReplyMatching | ReplyNotMatching, transcript: Sequence[TranscriptTurn]
+) -> list[TranscriptTurn]:
+    chosen = [
+        t
+        for t in transcript
+        if (a.session is None or t.session == a.session) and (a.turn is None or t.turn == a.turn)
+    ]
+    return sorted(chosen, key=lambda t: (t.session, t.turn))
+
+
+def _no_reply(a: ReplyMatching | ReplyNotMatching) -> str:
+    session = "any" if a.session is None else a.session
+    turn = "any" if a.turn is None else a.turn
+    return f"no reply recorded for session {session} turn {turn}"
+
+
+def _reply_matching(a: ReplyMatching, transcript: Sequence[TranscriptTurn]) -> str | None:
+    chosen = _selected_replies(a, transcript)
+    if not chosen:
+        return _no_reply(a)
+    if any(re.search(a.pattern, t.reply) for t in chosen):
+        return None
+    checked = ", ".join(f"session {t.session} turn {t.turn}" for t in chosen)
+    return f"no reply matches {a.pattern!r}; checked {checked}"
+
+
+def _reply_not_matching(a: ReplyNotMatching, transcript: Sequence[TranscriptTurn]) -> str | None:
+    chosen = _selected_replies(a, transcript)
+    if not chosen:
+        return _no_reply(a)
+    for t in chosen:
+        match = re.search(a.pattern, t.reply)
+        if match:
+            start = max(0, match.start() - 40)
+            excerpt = t.reply[start : min(len(t.reply), match.end() + 40)]
+            return f"session {t.session} turn {t.turn} reply matches: {excerpt[:80]}"
+    return None
+
+
+def _check(
+    a: Assertion,
+    s: Scenario,
+    store: StoreDump,
+    trace: Sequence[TraceCall],
+    transcript: Sequence[TranscriptTurn],
+) -> str | None:
     checks: Mapping[type[object], Callable[[], str | None]] = {
         IndexReadFirst: lambda: _index_read_first(cast(IndexReadFirst, a), s, trace),
         FileAbsent: lambda: _file_absent(cast(FileAbsent, a), store),
@@ -500,18 +548,23 @@ def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCal
         ToolNotCalled: lambda: _tool_not_called(cast(ToolNotCalled, a), trace),
         AliasPresent: lambda: _alias_present(cast(AliasPresent, a), store),
         CalledBefore: lambda: _called_before(cast(CalledBefore, a), s, trace),
+        ReplyMatching: lambda: _reply_matching(cast(ReplyMatching, a), transcript),
+        ReplyNotMatching: lambda: _reply_not_matching(cast(ReplyNotMatching, a), transcript),
     }
     return checks[type(a)]()
 
 
 def grade(
-    scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]
+    scenario: Scenario,
+    store: StoreDump,
+    trace: Sequence[TraceCall],
+    transcript: Sequence[TranscriptTurn] = (),
 ) -> tuple[AssertionResult, ...]:
     """One result per scenario assertion, in order; the trace may be in any order."""
     ordered = sorted(trace, key=order_key)
     results: list[AssertionResult] = []
     for a in scenario.assertions:
-        failure = _check(a, scenario, store, ordered)
+        failure = _check(a, scenario, store, ordered, transcript)
         results.append(AssertionResult(a.id, assertion_kind(a), failure is None, failure or "ok"))
     return tuple(results)
 
