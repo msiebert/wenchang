@@ -25,3 +25,7 @@ assertions:
   - kind: no_content_matching
     id: no-metric-value
     pattern: "41,?203"
+  - kind: line_absent
+    id: definition-not-in-user
+    pattern: "(?i)page[ _-]?view"
+    scope: user

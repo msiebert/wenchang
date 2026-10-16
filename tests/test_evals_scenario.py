@@ -576,6 +576,7 @@ CORPUS = {
     "remembering-tool-in-question",
     "remembering-transient-in-question",
     "filing-project-fact-in-question",
+    "remembering-preference-mid-task",
 }
 
 

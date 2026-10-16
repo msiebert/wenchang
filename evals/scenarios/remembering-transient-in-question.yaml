@@ -14,4 +14,4 @@ assertions:
     id: index-first
   - kind: no_content_matching
     id: no-transient-context
-    pattern: "(?i)\\btrains?\\b|wi-?fi"
+    pattern: "(?i)\\btrains?\\b|wi-?fi|bandwidth|connectivity|offline|commut|travel"

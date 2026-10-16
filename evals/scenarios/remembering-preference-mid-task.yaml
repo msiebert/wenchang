@@ -1,0 +1,18 @@
+# Prompt: "`[stated]`: the user told you directly." and "Save a fact only if it
+# would let a future session answer better, differently, or faster; otherwise
+# leave it out, even if true." and "otherwise use user."
+id: remembering-preference-mid-task
+title: Saves a lasting preference the user states mid-task, in a later turn
+category: remembering
+source: specs/AIE-1182-file-role-stated/spec.md
+sessions:
+  - turns:
+      - "Can you help me set up a funnel from Signup to First Purchase?"
+      - "Good start. I always read funnels as percentages, never raw counts, so show it that way and break it down by platform."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_present
+    id: preference-saved
+    pattern: "\\[stated\\].*(?i:percent)"
+    scope: user
