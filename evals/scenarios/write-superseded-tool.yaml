@@ -4,7 +4,7 @@
 id: write-superseded-tool
 title: Replaces a one-line fact when the user switches tools, keeping only the current tool
 category: write-mechanics
-source: specs/AIE-1051-write-mechanics/spec.md
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
 seed:
   - scope: user
     area: workflows
@@ -15,7 +15,7 @@ seed:
     aliases: [standup-notes]
 sessions:
   - turns:
-      - "We moved standup notes over to Confluence last week."
+      - "I moved my standup notes to Confluence last week."
 assertions:
   - kind: index_read_first
     id: index-first
@@ -39,4 +39,8 @@ assertions:
   - kind: no_duplicate_fact
     id: one-notes-line
     pattern: "(?i)standup"
+    scope: user
+  - kind: line_absent
+    id: no-change-date
+    pattern: "(?i)last week"
     scope: user

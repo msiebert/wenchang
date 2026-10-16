@@ -573,6 +573,33 @@ async def kept_on_request_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+async def kept_on_request_append_only(d: Driver) -> None:
+    await d.index()
+    await d.append(
+        "user",
+        "workflows",
+        "deploys",
+        "- [stated] Deploys with GitHub Actions; used Jenkins before,"
+        " and old runbooks still reference it.",
+    )
+    await d.turn(1, 1)
+
+
+EVERY_TWO_WEEKS = "- [stated] This project ships a release every two weeks."
+EVERY_WEEK = "- [stated] This project ships a release every week."
+
+
+async def shared_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
+async def shared_fact_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("project", "conventions", "release-cadence", EVERY_TWO_WEEKS, EVERY_WEEK)
+    await d.turn(1, 1)
+
+
 ROUTINE = "- [stated] Checks the refunds dashboard every Monday morning before standup."
 
 
@@ -747,6 +774,12 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         {"old-tool-recorded"},
     ),
     (
+        "write-superseded-shared-fact",
+        shared_fact_correct,
+        shared_fact_wrong,
+        {"no-shared-write-before-ask", "old-fact-kept"},
+    ),
+    (
         "write-new-subject",
         new_subject_correct,
         new_subject_wrong,
@@ -852,6 +885,19 @@ def test_recall_replace_fact_ignores_stale_metadata(tmp_path: Path) -> None:
     assert kept is not None
     assert "growth report" in kept.aliases
     assert kept.description == "Weekly report to the growth team"
+
+
+def test_kept_on_request_flags_an_unchanged_old_line(tmp_path: Path) -> None:
+    """Appending the new tool without replacing the old line fails only the
+    old-line-changed assertion (AIE-1183, US1).
+    """
+    graded, report = _run_trial(
+        tmp_path, "write-superseded-kept-on-request", kept_on_request_append_only
+    )
+
+    assert _failed(graded) == {"old-line-changed"}, graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
 
 
 def test_every_shipped_scenario_has_scripted_drivers() -> None:
