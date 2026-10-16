@@ -1,4 +1,4 @@
-# Plan: File a role the user states inside a question
+# Plan: File a fact the user states inside a question
 
 **Linear issue**: AIE-1182 | **Spec**: [spec.md](spec.md)
 
@@ -12,69 +12,48 @@ No ARCHITECTURE.md change.
 
 ## A. Prompt text (`src/wenchang/prompts/remembering.py`, implementer)
 
-Replace the final paragraph of `BODY`:
+Replace the final paragraph of `BODY`. The base is the branch's current final
+paragraph (write-timing sentence plus the narrow role sentence):
 
-```diff
- Write facts as they arise, before you ask a follow-up question, because the conversation may end
--first.
-+first. When the user mentions their own work role, team, or responsibilities, even inside a
-+question, save it as a fact about them before you answer.
- """
+```
+Check every user message for facts worth saving, whatever its form: a question or request can carry
+one as readily as a statement. Write facts as they arise, before you answer or ask a follow-up
+question, because the conversation may end first.
 ```
 
-Line widths 97, 91, 57. BODY goes from 1293 to about 1440 characters
-(budget 2500).
-
-Wording choices:
-
-- A standalone imperative naming the trigger ("mentions ... even inside a
-  question") rather than an extension of "facts", because the failure is not
-  noticing that a fact arose.
-- "their own work role, team, or responsibilities" limits it to the user's
-  work context: not project facts (which still need the ask) and not other
-  personal details such as age or school. "Work role" keeps student and age
-  out of the trigger, which protects `privacy-minor` (no-minor-content).
-- "In passing" is dropped because it clashes with the Applying-memory line
-  "Never inflate a single passing mention into a trait".
-- "As a fact about them" points to the user scope without naming it, which
-  protects `privacy-sensitive-private` (no-shared-write); the adopter's
-  "otherwise use user" still routes it.
-- "Before you answer" closes the loophole of saying "noted" without writing.
-- Placed in the write-timing paragraph; the save-criterion paragraph is the
-  fallback under spec 4.6.
+It names no fact type, so it covers preferences, constraints, ownership, tools,
+and project facts alike. What to save and where stays with the save criterion,
+the scope guidance and its ask rule, and the privacy override. Stay within the
+2500-character budget and 100 columns.
 
 ## B. Tests (`tests/test_prompts_remembering.py`, test-writer)
 
 Pin only load-bearing terms (ADR 0025 §8). Docstrings cite `AIE-1182, USx.y`.
 
-- B1 (US1.1): parametrized phrases in `_flat(remembering.BODY)`:
-  the full sentence "When the user mentions their own work role, team, or
-  responsibilities, even inside a question, save it as a fact about them
-  before you answer.", plus "their own work role", "inside a question",
-  "as a fact about them", "before you answer".
-- B2 (US1.2): split raw `remembering.BODY` on `"\n\n"`; the one paragraph
-  containing "Write facts as they arise" also contains (after `_flat`)
-  "inside a question" at a later index than "Write facts as they arise".
-- B3 (US1.3): `build_memory_prompt(REFERENCE_SLOTS)` (from
-  `evals.reference_adopter`); the text between `## Deciding what to
-  remember` and the next `\n## ` contains, after `_flat`, "their own work
-  role, team, or responsibilities, even inside a question".
+- Update `test_body_describes_write_timing`: "before you ask a follow-up"
+  becomes "before you answer or ask a follow-up".
+- Remove `test_body_covers_incidental_role_mentions`,
+  `test_incidental_role_rule_sits_in_write_timing_paragraph`, and
+  `test_assembled_prompt_carries_incidental_role_rule`; they pin rejected text.
+- US1.1: parametrized phrases in `_flat(remembering.BODY)`: "Check every user
+  message for facts worth saving", "whatever its form", "a question or request
+  can carry one", "before you answer or ask a follow-up".
+- US1.2: split raw `remembering.BODY` on `"\n\n"`; one paragraph contains
+  "Check every user message" at an earlier index than "Write facts as they
+  arise".
+- US1.3: `build_memory_prompt(REFERENCE_SLOTS)` (from
+  `evals.reference_adopter`); the text between `## Deciding what to remember`
+  and the next `\n## ` contains, after `_flat`, "Check every user message for
+  facts worth saving".
 
-US1.4 and US2.2 are covered by existing invariants and remembering tests;
-no new test. Confirm B1-B3 fail against `main` because the phrase is absent.
+US1.4 and US2.2 are covered by existing invariants; no new test. Confirm the new
+tests fail against the branch's pre-edit prompt because the phrases are absent.
 
-## C. Scenario comment (`evals/scenarios/remembering-stated-role.yaml`, implementer)
+## C. Scenario headers (`evals/scenarios/`, implementer)
 
-Header only; turns and assertions unchanged:
-
-```diff
- # Prompt: "`[stated]`: the user told you directly." and "Write facts as they
- # arise, before you ask a follow-up question, because the conversation may end
--# first." and "otherwise use user."
-+# first." and "When the user mentions their own work role, team, or
-+# responsibilities, even inside a question, save it as a fact about them before
-+# you answer." and "otherwise use user."
-```
+Grep for "before you ask a follow-up" under `evals/scenarios` and update the
+quoted text to the new timing sentence (`remembering-stated-role` at least).
+Turns and assertions unchanged.
 
 ## D. Agent file (implementer)
 
@@ -82,18 +61,18 @@ After A, run `uv run python -m evals render-agent` from the worktree to
 regenerate `.claude/agents/wenchang-eval.md`, then record its sha256 for
 review-pr.md.
 
-## E. Docs (doc-updater)
+## E. Held-out scenarios (T2, before any prompt edit)
 
-`specs/AIE-1182-file-role-stated/review-pr.md` from the template. Live-eval
-section PENDING, with commit hash, agent sha256, the launch command:
+The four scenarios in spec US5. implementer writes the yaml, each with a
+`# Prompt:` header citing existing sentences, index-first, durable facts.
+test-writer writes a correct and a wrong scripted driver per scenario in
+`tests/test_evals_end_to_end.py` with exact fail sets, and adds the 4 ids to the
+CORPUS set in the corpus-set test.
 
-```
-CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
-```
+## F. Docs (doc-updater)
 
-the shard and merge invocations per `.claude/commands/run-evals.md`, the US4
-floors table, and per-trial result slots for `privacy-minor`,
-`remembering-no-metric-value`, and `remembering-stated-role`.
+`specs/AIE-1182-file-role-stated/review-pr.md` from the template, with live-eval
+slots for US4.
 
 ## Gate
 
