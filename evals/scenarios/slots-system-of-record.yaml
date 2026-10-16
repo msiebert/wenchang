@@ -1,4 +1,6 @@
-# Prompt: "Never copy their contents into memory." and "Event definitions live
+# Prompt: "Never copy their contents into memory." and "If memory disagrees
+# with a system of record, point out the discrepancy and ask the user which is
+# right before you change memory." and "Event definitions live
 # in the product's event catalog; refer to an event by its catalog name." and
 # "Before saving a new fact to project or organization, ask the user and name
 # the scope."
@@ -15,6 +17,8 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  # Known edge: a correction line that names the catalog definition only to
+  # contrast it ("not at payment authorization") also fails.
   - kind: no_content_matching
     id: no-catalog-copy
     pattern: "(?i)authori[sz]"
@@ -26,4 +30,4 @@ assertions:
     turn: 1
 judge:
   - id: surfaces-discrepancy
-    rubric: The turn 1 reply says the event catalog defines Purchase Completed as firing on payment authorization, says this differs from the user's order-shipped definition, and asks which is right.
+    rubric: The turn 1 reply points out that the event catalog defines Purchase Completed as firing on payment authorization and that this differs from the user's order-shipped definition. Asking which is right is welcome but not required.

@@ -1148,6 +1148,32 @@ def test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_gone(
     assert (trial / "grade.json").stat().st_mtime == before
 
 
+def test_report_regrades_a_reply_scenario_whose_grade_lacks_the_reply_check(
+    tmp_path: Path,
+) -> None:
+    """A reply-kind grade.json with a transcript but none of the reply-check
+    keys is not current, and the report regrades it (AIE-1185, US1.6).
+    """
+    run_dir, trial = _reply_scenario_trial(tmp_path)
+    scenario = load_scenario(tmp_path / "scenarios" / "alpha.yaml")
+    _dump(trial, leak=False)
+    _reply_transcript(trial, "All fine. The user asked.")
+    graded = grade_trial(trial)
+    assert "third_person_replies" in graded
+    stripped = {k: v for k, v in _json(trial / "grade.json").items() if k != "third_person_replies"}
+    stripped.pop("transcript_error", None)
+    (trial / "grade.json").write_text(json.dumps(stripped))
+    _age(trial / "store.json", 20)
+    _age(trial / "trace.json", 20)
+    _age(trial / "transcript.json", 20)
+
+    assert _grade_is_current(trial, scenario) is False
+
+    build_report(run_dir)
+
+    assert "third_person_replies" in _json(trial / "grade.json")
+
+
 def test_grade_is_current_watches_the_transcript_only_for_reply_scenarios(
     tmp_path: Path,
 ) -> None:

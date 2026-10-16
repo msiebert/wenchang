@@ -207,7 +207,7 @@ def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
     if not 1 <= turn <= len(turns):
         raise GradeInputError(f"{trial_dir}: session {session} has no turn {turn}")
     context = "".join(
-        f"[From the product's {r.system}]\n{r.content.rstrip(chr(10))}\n\n"
+        f"[From the product's {r.system}]\n{r.content.rstrip('\n')}\n\n"
         for r in scenario.context_records
     )
     if turn == 1:
@@ -408,10 +408,10 @@ def _grade_is_current(trial_dir: Path, scenario: Scenario) -> bool:
     dumps = [trial_dir / "store.json", trial_dir / "trace.json"]
     if uses_reply_kinds(scenario):
         transcript = trial_dir / "transcript.json"
-        if not transcript.exists():
-            graded = _read_json(grade_path)
-            if isinstance(graded, dict) and any(k in graded for k in _REPLY_CHECK_KEYS):
-                return False
+        graded = _read_json(grade_path)
+        has_check = isinstance(graded, dict) and any(k in graded for k in _REPLY_CHECK_KEYS)
+        if transcript.exists() != has_check:
+            return False
         dumps.append(transcript)
     newest = max((p.stat().st_mtime for p in dumps if p.exists()), default=0.0)
     return grade_path.stat().st_mtime >= newest

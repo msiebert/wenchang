@@ -203,5 +203,11 @@ def test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn() 
     """
     doc = " ".join(RUNNER.read_text().split())
 
-    for needle in ("passed unchanged", "context blocks", "turn text alone"):
+    needles = (
+        "passed unchanged",
+        "context blocks",
+        "turn text alone",
+        "For turn 1 it is the scripted text, after any context blocks.",
+    )
+    for needle in needles:
         assert needle in doc, needle

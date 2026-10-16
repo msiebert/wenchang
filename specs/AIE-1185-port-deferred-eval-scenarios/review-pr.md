@@ -25,9 +25,9 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 | 1.3 `reply_not_matching` semantics, missing reply fails | grd `test_reply_not_matching_passes_when_no_reply_matches`, `..._names_the_first_offending_turn`, `..._without_a_recorded_reply_fails`, `..._honors_session_and_turn_filters` |
 | 1.4 `grade` without a transcript | grd `test_reply_kinds_fail_without_a_transcript_and_others_grade_as_before` |
 | 1.5 `grade_trial` loads the transcript once; malformed or unreadable is `transcript_error` | rpt `test_grade_trial_without_a_transcript_fails_reply_kinds`, `test_grade_trial_grades_replies_from_the_transcript`, `test_grade_trial_loads_the_transcript_once`, `test_grade_trial_survives_a_malformed_transcript`, `test_grade_trial_survives_an_undecodable_transcript` |
-| 1.6 newer or deleted transcript fully regrades reply-kind scenarios only | rpt `test_uses_reply_kinds`, `test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_newer`, `test_grade_is_current_watches_the_transcript_only_for_reply_scenarios`, `test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_gone`; the refresh-only path for other scenarios is covered by AIE-1184's tests |
+| 1.6 a newer transcript, a deleted one, or a grade without the reply check fully regrades reply-kind scenarios only | rpt `test_uses_reply_kinds`, `test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_newer`, `test_grade_is_current_watches_the_transcript_only_for_reply_scenarios`, `test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_gone`, `test_report_regrades_a_reply_scenario_whose_grade_lacks_the_reply_check`; the refresh-only path for other scenarios is covered by AIE-1184's tests |
 | 1.7 no `mcp` import | the existing AIE-1170 US4.12 fresh-interpreter test |
-| 1.8 `no-trait-reply` canned replies | grd `test_no_trait_reply_pattern_on_canned_replies` (3 cases) |
+| 1.8 trait patterns on canned lines, both directions | grd `test_no_trait_wording_pattern_on_canned_lines` (3 cases), `test_no_trait_written_pattern_on_canned_lines` (5 cases) |
 | 2.1 `context_records` parse and reject | scn `test_context_records_parse`, `test_malformed_context_records_are_rejected` (11 cases) |
 | 2.2 `turn_prompt` rendering, turns 1 and later | rpt `test_turn_prompt_renders_one_context_record_before_turn_one`, `..._renders_two_context_records_separated_by_a_blank_line`, `..._puts_context_records_before_the_replay` |
 | 2.3 byte-identical without records | rpt `test_turn_prompt_without_context_records_is_unchanged` |
@@ -46,16 +46,17 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 - `remembering-observed-once`: one churn query in the history is not written as `[stated]`, `[inferred]`, or a trait.
 - `curated-observed-conflict`: a delivery log disagrees with a curated schedule; the curated fact is left alone.
 - `applying-relevant-only`: the reply to a SQL fix does not mention the unrelated chart preference.
-- `applying-no-trait`: one late night is not turned into "you usually work late", in the reply or in memory.
-- `forgetting-ambiguous-that`: "Forget that." is ambiguous, so the agent asks before removing anything.
+- `applying-no-trait`: one late night is not written into memory as a habit. The reply is graded only by the judge.
+- `forgetting-ambiguous-that`: after a neutral "What do my editor notes say?", "Forget that." is ambiguous, so the agent asks before removing anything.
 - `forgetting-lapsed-expiry`: a lapsed fact that no longer holds is dropped with its `[inferred]` dependent; a lapsed fact that still holds stays.
 - `forgetting-system-fact`: a curated `system/` fact cannot be forgotten, and nothing is written.
 - `forgetting-nickname-alias`: forgetting a nickname removes the line and the alias that exists only for it.
-- `slots-system-of-record`: the agent does not copy the event catalog's definition into memory or write to a shared scope before asking.
+- `slots-system-of-record`: the agent does not copy the event catalog's definition into memory or write to a shared scope before asking. The judge checks it points out the discrepancy; asking which is right is welcome but not required.
+- `remembering-observed-once`, `curated-observed-conflict`, and the two applying scenarios also assert `get_memory_index` was called, because `index-first` passes vacuously when no memory call is made. The applying scenarios also require a `read_file` of the seeded file.
 
 ## Architecture / ADR changes
 
-- New [ADR 0032](../../docs/adr/0032-transcript-graded-assertions-and-context-records.md). It amends ADR 0028 decisions 3 and 7.
+- New [ADR 0032](../../docs/adr/0032-transcript-graded-assertions-and-context-records.md). It amends ADR 0028 decisions 3, 7, and 11.
 - ADR 0028 carries dated in-place pointers under decisions 3, 7, and 11.
 - `ARCHITECTURE.md` "Outside the library: `evals/`": thirteen kinds, `transcript.json` as a grading input, `context_records`.
 - The AIE-1170 spec's "Deferred scenarios" assumption points here.
@@ -65,7 +66,8 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 - From the Linear issue wording (see spec.md):
   - AIE-1050 #2 also asserts no `[inferred]` line and no trait wording.
   - AIE-1052 #4 grades "does not mention chart preferences", not use of the SQL preference.
-  - AIE-1052 #5 checks both the reply and memory.
+  - AIE-1052 #5 checks memory deterministically and leaves the reply to the judge. A regex cannot separate negated restraint from the trait claim.
+  - AIE-1052 #2: review asked for `no-correction` to match `(?i)tuesday|monday`. The seeded `system/` file says Mondays, so "monday" moved to a user-scope `line_absent` (`no-schedule-note`), plus a turn-1 project-write check.
 - `forgetting-lapsed-expiry` supplies the "no longer holds" context in the turn, because the prompt says a lapsed fact is not removed automatically. The date-only variant is not ported.
 - Not ported, as they need host features: AIE-1052 #3, AIE-1055 #4 and #5, AIE-1165 #1.
 
@@ -90,8 +92,9 @@ uv run python -m evals merge-runs evals/runs/<name> <shard run dirs>
 
 ## Look closely at
 
-- The `no-trait-reply` regex in `applying-no-trait`: it must flag an assertive claim and pass a negated mention.
-- `_grade_is_current`: only reply-kind scenarios treat a newer transcript as a full regrade.
+- The trait regexes: `no-trait-wording` matches only a trait verb about the user, not a line describing the query; `no-trait-written` skips negations, including curly apostrophes.
+- `no-catalog-copy`'s known edge: a correction that names the catalog definition only to contrast with it also fails.
+- `_grade_is_current`: only reply-kind scenarios treat a newer or deleted transcript, or a grade without the reply check, as a full regrade.
 - `grade_trial` loads the transcript once and shares it with the third-person check.
 - Cited sentences from `remembering.py` may drift if AIE-1182 rewords them.
 

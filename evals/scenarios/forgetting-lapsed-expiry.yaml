@@ -47,7 +47,7 @@ assertions:
     except: "(?i)json|csv|cutover"
   - kind: line_present
     id: pod-kept
-    pattern: "(?i)growth pod"
+    pattern: "(?i)growth[- ]pod"
     scope: user
   - kind: tool_not_called
     id: files-kept

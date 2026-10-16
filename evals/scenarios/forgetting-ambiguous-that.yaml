@@ -17,7 +17,7 @@ seed:
     aliases: [editor, ide]
 sessions:
   - turns:
-      - "What do my editor notes say? Mainly I want to know whether I prefer tabs or spaces."
+      - "What do my editor notes say?"
       - "Forget that."
       - "Just the tabs preference. Keep the rest of my editor notes."
 assertions:

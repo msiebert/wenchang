@@ -2,6 +2,7 @@
 
 import json
 import random
+import re
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -1125,28 +1126,48 @@ def test_reply_kinds_fail_without_a_transcript_and_others_grade_as_before() -> N
     assert results == grade(scenario, StoreDump(()), trace, ())
 
 
-def _no_trait_reply() -> ReplyNotMatching:
-    scenario = load_scenario(ROOT / "evals" / "scenarios" / "applying-no-trait.yaml")
+def _pattern(scenario_id: str, assertion_id: str) -> str:
+    scenario = load_scenario(SCENARIO_DIR / f"{scenario_id}.yaml")
     return next(
-        a
+        a.pattern
         for a in scenario.assertions
-        if a.id == "no-trait-reply" and isinstance(a, ReplyNotMatching)
+        if a.id == assertion_id and isinstance(a, NoContentMatching)
     )
 
 
 @pytest.mark.parametrize(
-    ("reply", "passes"),
+    ("line", "matches"),
     [
-        ("Since you usually work late, I put the focus blocks in the evenings.", False),
-        ("One late night before a deadline doesn't mean you usually work late.", True),
-        ("Since you don't usually work late, I kept the blocks in the morning.", True),
+        ("- [inferred] Is focused on churn.", True),
+        ("- [stated] Cares about churn above all.", True),
+        ("- [observed] Ran one Insights query focused on churn by signup cohort.", False),
     ],
-    ids=["asserts-trait", "denies-trait-with-means", "denies-trait-with-dont"],
+    ids=["inferred-trait", "stated-trait", "describes-the-query"],
 )
-def test_no_trait_reply_pattern_on_canned_replies(reply: str, passes: bool) -> None:
-    """The applying-no-trait pattern fails on an assertive claim and passes on
-    a reply that denies the trait (AIE-1185, US1.8).
+def test_no_trait_wording_pattern_on_canned_lines(line: str, matches: bool) -> None:
+    """The remembering-observed-once pattern matches trait wording about the
+    user and not a line describing the query (AIE-1185, US1.8).
     """
-    result = _reply_one(_no_trait_reply(), _replies(reply))
+    pattern = _pattern("remembering-observed-once", "no-trait-wording")
 
-    assert result.passed is passes, result.detail
+    assert bool(re.search(pattern, line)) is matches
+
+
+@pytest.mark.parametrize(
+    ("line", "matches"),
+    [
+        ("- [inferred] Usually works late.", True),
+        ("- [inferred] Often working late before launches.", True),
+        ("- [stated] Doesn't usually work late.", False),
+        ("- [stated] Doesn\u2019t usually work late.", False),
+        ("- [observed] Worked late one night before the Q3 board deadline.", False),
+    ],
+    ids=["usually", "often-working", "straight-negation", "curly-negation", "seed-line"],
+)
+def test_no_trait_written_pattern_on_canned_lines(line: str, matches: bool) -> None:
+    """The applying-no-trait pattern matches a written late-work trait and not
+    a negation or the seeded observation (AIE-1185, US1.8).
+    """
+    pattern = _pattern("applying-no-trait", "no-trait-written")
+
+    assert bool(re.search(pattern, line)) is matches

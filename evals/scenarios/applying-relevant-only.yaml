@@ -23,6 +23,14 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
+    id: read-seed
+    tool: read_file
+    args: {scope: user, name: style}
+    succeeded: true
   - kind: reply_not_matching
     id: no-chart-mention
     pattern: "(?i)\\bcharts?\\b|dark[- ]background"

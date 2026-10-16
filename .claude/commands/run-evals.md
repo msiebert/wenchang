@@ -87,7 +87,7 @@ returns an error. Never edit any file outside `evals/runs/`.
 2. Run each session `s` (1-based), and each turn `t` (1-based) within it:
    - **Build the prompt.** Run `uv run python -m evals turn-prompt
      <trial_dir> <s> <t>` and use its output exactly as the prompt. For
-     turn 1 it is the scripted text. For a later turn it replays the
+     turn 1 it is the scripted text, after any context blocks. For a later turn it replays the
      session's earlier exchanges, then the new turn. The `turn-prompt`
      output, including any `[From the product's ...]` context blocks, is
      passed unchanged as the whole `Agent` prompt.

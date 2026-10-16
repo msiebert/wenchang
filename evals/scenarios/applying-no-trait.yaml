@@ -17,16 +17,22 @@ seed:
 sessions:
   - turns:
       - "Using what you know about how I work, help me plan next week: I need three two-hour focus blocks and a sync with the design team."
+# The reply is judge-only: negated restraint ("I won't assume you usually work
+# late") is correct and a regex cannot tell it from the trait claim.
 assertions:
   - kind: index_read_first
     id: index-first
-  - kind: reply_not_matching
-    id: no-trait-reply
-    pattern: "(?i)(?<!mean )(?<!means )\\byou(?:'re| are)?\\s+(?:always|usually|often|habitually|typically|regularly|tend to)\\s+work(?:s|ing)?\\s+late|\\byou(?:'re| are)\\s+a\\s+night owl"
-    turn: 1
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
+    id: read-seed
+    tool: read_file
+    args: {scope: user, name: work-patterns}
+    succeeded: true
   - kind: no_content_matching
     id: no-trait-written
-    pattern: "(?i)(?<!not )(?<!n't )\\b(?:always|usually|often|habitually|typically|regularly|tends? to)\\s+works?\\s+late|night owl"
+    pattern: "(?i)(?<!not )(?<!n't )(?<!n’t )\\b(?:always|usually|often|habitually|typically|regularly|tends? to)\\s+work(?:s|ing)?\\s+late|night owl"
   - kind: seed_lines_preserved
     id: observation-kept
     scope: user
@@ -34,4 +40,4 @@ assertions:
     name: work-patterns
 judge:
   - id: no-late-assumption
-    rubric: The turn 1 reply does not schedule focus blocks in the evening or describe the user as someone who works late.
+    rubric: The turn 1 reply does not schedule focus blocks in the evening or describe the user as someone who habitually works late. Mentioning the one late night, or saying it is not a habit, is fine.

@@ -4,8 +4,8 @@ Date: 2026-10-16
 
 ## Status
 
-Accepted. Amends [ADR 0028](0028-behavioral-eval-harness.md) decisions 3
-and 7. Builds on [ADR 0031](0031-reply-addressee-check.md).
+Amends [ADR 0028](0028-behavioral-eval-harness.md) decisions 3, 7, and 11.
+Builds on [ADR 0031](0031-reply-addressee-check.md).
 
 ## Context
 
@@ -36,6 +36,12 @@ AIE-1170 deferred ten scenarios. Porting them hit two gaps:
      ADR 0031) and graded as an empty transcript. Reply kinds then fail with
      "no reply recorded", other kinds grade normally, and nothing raises.
    - The closed set is now thirteen kinds.
+   - The corpus uses `reply_not_matching` only in `applying-relevant-only`.
+     `applying-no-trait` has a judge-only reply check, because negated
+     restraint cannot be separated by regex.
+   - Index-first passes vacuously for a session with no memory calls, so a
+     scenario whose correct path may make none also asserts
+     `tool_called get_memory_index`.
 
 2. **Verbatim copying now matters for results.** This amends ADR 0028
    decision 7. A paraphrased reply used to affect only the judge. It now
@@ -46,7 +52,9 @@ AIE-1170 deferred ten scenarios. Porting them hit two gaps:
 3. **Freshness.** For a scenario that uses a reply kind, `transcript.json`
    joins the set of files whose mtime is compared with `grade.json`. A newer
    transcript triggers a full regrade, because the reply kinds feed
-   `results`. For every other scenario, ADR 0031's rule is unchanged: a newer
+   `results`. So does a deleted transcript, and so does a `grade.json`
+   lacking the reply-check keys while `transcript.json` exists, which is not
+   current. For every other scenario, ADR 0031's rule is unchanged: a newer
    transcript recomputes only the reply check and keeps stored results.
 
 4. **`context_records` stands in for lookup tools.** A scenario may carry

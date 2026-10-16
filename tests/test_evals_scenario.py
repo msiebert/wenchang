@@ -834,6 +834,8 @@ CITATIONS: dict[str, tuple[str, ...]] = {
         "Never copy their contents into memory.",
         "Event definitions live in the product's event catalog; refer to an event by its "
         "catalog name.",
+        "If memory disagrees with a system of record, point out the discrepancy and ask the "
+        "user which is right before you change memory.",
         "Before saving a new fact to project or organization, ask the user and name the scope.",
     ),
 }

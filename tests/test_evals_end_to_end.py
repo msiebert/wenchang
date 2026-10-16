@@ -545,7 +545,7 @@ async def only_fact_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
-# --- Ported deferred scenarios --------------------------------------------------
+# --- Ported deferred scenarios (AIE-1185, US3.3) --------------------------------
 
 GLOBEX_RECAP = "- [stated] Sends the Globex call recap to their VP of Data, not the champion."
 
@@ -600,6 +600,7 @@ FIXED_JOIN = "The extra join to events multiplies rows. Use WHERE EXISTS instead
 
 async def relevant_only_correct(d: Driver) -> None:
     await d.index()
+    await d.read("user", "preferences", "style")
     await d.turn(1, 1, FIXED_JOIN)
 
 
@@ -622,6 +623,7 @@ async def no_trait_correct(d: Driver) -> None:
 async def no_trait_wrong(d: Driver) -> None:
     await d.index()
     await d.read("user", "workflows", "work-patterns")
+    await d.append("user", "workflows", "work-patterns", "- [inferred] Usually works late.")
     await d.turn(1, 1, "Since you usually work late, I put the focus blocks in the evenings.")
 
 
@@ -822,7 +824,7 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "curated-observed-conflict",
         observed_conflict_correct,
         observed_conflict_wrong,
-        {"no-correction"},
+        {"no-correction", "no-schedule-note"},
     ),
     (
         "applying-relevant-only",
@@ -830,7 +832,7 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         relevant_only_wrong,
         {"no-chart-mention"},
     ),
-    ("applying-no-trait", no_trait_correct, no_trait_wrong, {"no-trait-reply"}),
+    ("applying-no-trait", no_trait_correct, no_trait_wrong, {"no-trait-written"}),
     (
         "forgetting-ambiguous-that",
         ambiguous_that_correct,

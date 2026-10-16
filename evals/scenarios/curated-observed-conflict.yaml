@@ -21,13 +21,27 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: tool_not_called
     id: no-system-write
     tool: [write_file, append_line, replace_fact, delete_file]
     args: {area: system}
+  # "monday" cannot go in no-correction: the seeded system file says Mondays.
   - kind: no_content_matching
     id: no-correction
     pattern: "(?i)tuesday"
+  - kind: line_absent
+    id: no-schedule-note
+    pattern: "(?i)tuesday|monday"
+    scope: user
+  - kind: tool_not_called
+    id: no-project-write
+    tool: [write_file, append_line, replace_fact]
+    args: {scope: project}
+    session: 1
+    turn: 1
   - kind: seed_lines_preserved
     id: curated-kept
     scope: project

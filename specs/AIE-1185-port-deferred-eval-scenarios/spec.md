@@ -82,9 +82,16 @@ named reply in `transcript.json`. Nothing rendered into
   regex for it was brittle (review blocker 4). The judge does not grade it
   either.
 - **AIE-1052 #5.** The issue groups it under "applying memory when
-  answering". The scenario checks both the reply and memory for trait
-  wording. Its turn asks the agent to use what it knows about the user, so
-  that memory is consulted.
+  answering". The scenario checks memory for trait wording
+  deterministically and leaves the reply to the judge, because a negated
+  mention ("I won't assume you usually work late") is correct and a regex
+  cannot tell it from the claim. Its turn asks the agent to use what it
+  knows about the user, and `read-seed` requires that memory is read.
+- **AIE-1052 #2 `no-correction`.** Review asked for `(?i)tuesday|monday`.
+  `no_content_matching` scans seeded files too, and the seeded `system/`
+  file says Mondays, so it would always fail. "monday" moves to a
+  user-scope `line_absent` (`no-schedule-note`), and a turn-1 project-write
+  check covers project scope.
 
 ## Glossary for this spec
 
@@ -108,9 +115,9 @@ Terms are as in AIE-1170. In this spec:
 | 1.3 | canned transcripts | `reply_not_matching` is graded | it passes when at least one recorded turn matches the filter and no such turn's reply matches `pattern`. On failure, the detail names the first offending session and turn. When no recorded turn matches the filter, it fails with "no reply recorded", so a missing reply fails, as it does for the judge |
 | 1.4 | `grade(scenario, store, trace)` called without a transcript | graded | existing kinds grade as before, and reply kinds fail with "no reply recorded". `grade` takes `transcript: Sequence[TranscriptTurn] = ()` as a fourth parameter |
 | 1.5 | a trial dir | `grade_trial` | it loads `transcript.json` once, through the path AIE-1184 added, and passes the result both to `grade` and to the third-person reply check. A trial dir without `transcript.json` grades with an empty transcript. A malformed `transcript.json` does not raise: `grade.json` records `transcript_error` as AIE-1184 does, `grade` gets an empty transcript, and every reply-kind assertion fails with "no reply recorded" while the other kinds grade normally |
-| 1.6 | a trial of a scenario that uses a reply kind, whose `transcript.json` is newer than its `grade.json` | `report` | the trial is fully regraded with `grade_trial`, because reply kinds feed `results`. For a scenario without reply kinds, AIE-1184's rule is unchanged: a newer transcript recomputes only the reply check and keeps the stored results. `_grade_is_current(trial_dir, scenario)` puts `transcript.json` in the mtime set only for scenarios that use a reply kind |
+| 1.6 | a trial of a scenario that uses a reply kind, whose `transcript.json` is newer than its `grade.json` | `report` | the trial is fully regraded with `grade_trial`, because reply kinds feed `results`. For a scenario without reply kinds, AIE-1184's rule is unchanged: a newer transcript recomputes only the reply check and keeps the stored results. `_grade_is_current(trial_dir, scenario)` puts `transcript.json` in the mtime set only for scenarios that use a reply kind. For a reply-kind scenario, `_grade_is_current` is also false when `transcript.json` exists but `grade.json` has none of the reply-check keys, and when `transcript.json` is gone but `grade.json` still has one |
 | 1.7 | a fresh interpreter | `evals.scenario` and `evals.graders` are imported | neither `mcp` nor `evals.server` is in `sys.modules`, as AIE-1170 US4.12 requires |
-| 1.8 | the `no-trait-reply` pattern of `applying-no-trait` | graded on canned replies | it fails on "Since you usually work late, I put the focus blocks in the evenings." It passes on "One late night before a deadline doesn't mean you usually work late." and on "Since you don't usually work late, I kept the blocks in the morning." |
+| 1.8 | the trait patterns, loaded from their YAMLs | graded on canned lines | `no-trait-wording` (`remembering-observed-once`) matches "- [inferred] Is focused on churn." and "- [stated] Cares about churn above all.", and does not match "- [observed] Ran one Insights query focused on churn by signup cohort." `no-trait-written` (`applying-no-trait`) matches "- [inferred] Usually works late." and "- [inferred] Often working late before launches.", and does not match "- [stated] Doesn't usually work late.", "- [stated] Doesn’t usually work late." (curly apostrophe), or the seed line |
 
 ### US2 — Context records
 
@@ -119,7 +126,7 @@ Terms are as in AIE-1170. In this spec:
 | 2.1 | a scenario with `context_records: [{system, content}]` | loaded | `Scenario.context_records` is a tuple of `ContextRecord(system, content)`, or `()` when the field is omitted. `ScenarioError` is raised for an empty list, an item that is not a mapping, an unknown or missing key, or a `system` or `content` that is blank or not a string |
 | 2.2 | a trial of a scenario with `context_records` | `turn_prompt(trial_dir, s, t)` for any turn | the prompt starts with one block per record: `[From the product's <system>]`, a newline, then the content with trailing newlines stripped. Blocks are separated by a blank line, and a blank line follows the last one. For turn 1, `[Newest message]` and the turn text come next. For a later turn, the existing `[Earlier in this conversation]` replay comes next |
 | 2.3 | a scenario without `context_records` | `turn_prompt` | the output is byte-identical to today's, so turn 1 is the bare turn text |
-| 2.4 | `.claude/commands/run-evals.md` | read | it says the runner passes the `turn-prompt` output to the `Agent` call unchanged, context blocks included. It also says the `user` argument of `eval_record_turn` is the scenario's turn text alone, never the rendered prompt with its context blocks or replayed turns |
+| 2.4 | `.claude/commands/run-evals.md` | read | it says the runner passes the `turn-prompt` output to the `Agent` call unchanged, context blocks included, and "For turn 1 it is the scripted text, after any context blocks." It also says the `user` argument of `eval_record_turn` is the scenario's turn text alone, never the rendered prompt with its context blocks or replayed turns |
 
 ### US3 — Corpus
 
@@ -136,7 +143,7 @@ Terms are as in AIE-1170. In this spec:
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
 | 4.1 | `docs/adr/0032-*.md` | read | it amends ADR 0028 §3, so graders are pure functions of (scenario, store dump, trace, transcript). It amends §7, so a paraphrased reply now affects the reply kinds as well as the judge. It records the `context_records` field and why it stands in for lookup tools the eval agent lacks, and it records the corpus at 33 |
-| 4.2 | ADR 0028 | read | §3 and §7 each carry a dated (2026-10-16) in-place pointer, "Amended by ADR 0032". The original text is not rewritten |
+| 4.2 | ADR 0028 | read | §3, §7, and §11 each carry a dated (2026-10-16) in-place pointer, "Amended by ADR 0032", on its own line. The original text is not rewritten. ADR 0032's Status is "Amends ADR 0028 decisions 3, 7, and 11" |
 | 4.3 | the `evals/graders.py` module docstring | read | it says graders are pure functions of the scenario, the store dump, the trace, and the transcript |
 | 4.4 | ARCHITECTURE.md | read | its `evals/` entry says there are thirteen assertion kinds, that grading reads `transcript.json` as well as `store.json` and `trace.json`, and that scenarios may carry `context_records` |
 | 4.5 | the "Deferred scenarios" list in AIE-1170 `spec.md` | read | it points to this spec for the ten ported scenarios |
@@ -149,7 +156,7 @@ Terms are as in AIE-1170. In this spec:
 | 5.2 | the merged live report | read | each new scenario passes all of its deterministic assertions in at least 2 of 3 trials. A scenario below that floor blocks the merge until each miss is classified (US5.3) and the human decides |
 | 5.3 | each failing trial in the live run | classified in `review-pr.md` | it is one of three things. A **prompt finding**: the agent broke a cited sentence, so a follow-up Linear issue is filed and the assertion is left as is. A **harness defect**: fixed before merge. An **assertion defect**: the assertion penalizes behavior the prompt allows, and it is fixed only with the human's approval. An assertion is never loosened to turn a prompt finding into a pass. A miss on `asks-before-removing` in `forgetting-ambiguous-that` is registered in advance as a prompt finding |
 | 5.4 | judge verdicts in the live run | reported | a judge failure caused by a third-person reply ("I asked the user whether...") is labelled harness noise, as ADR 0028 records, and is not counted as a prompt finding |
-| 5.5 | `review-pr.md` | read | for `applying-relevant-only` and `applying-no-trait`, it reports how many of the 3 trials called `read_file` on the seeded style file or work-patterns file. This keeps a pass from being mistaken for applied memory |
+| 5.5 | `review-pr.md` | read | for `applying-relevant-only` and `applying-no-trait`, it reports how many of the 3 trials called `read_file` on the seeded style file or work-patterns file. Both scenarios also assert that read deterministically (`read-seed`), so a trial that never consulted memory fails |
 | 5.6 | `review-pr.md` | read | it records a verbatim spot-check: for at least one trial per shard, the reply the runner recorded in `transcript.json` matches the subagent's actual reply |
 | 5.7 | copies of the AIE-1170 N=3 baseline runs (`/Users/marksiebert/p/github/wenchang-AIE-1170/evals/runs/20261014-225317-sonnet` and `20261014-231845-sonnet-merged`) | regraded offline with this branch's `report`, after each `trial.json` path is pointed at this worktree's scenarios and the old `grade.json` files are removed | every one of the 23 existing scenarios has the same per-assertion pass counts as in the original reports. `review-pr.md` records the result |
 
@@ -188,6 +195,8 @@ set. Patterns are written as they appear in the YAML.
   - `no-duplicate-file`: `tool_not_called write_file {name: {matches:
     "^(?!(acme|globex)-account$)"}}`. A `write_file` that restructures one of
     the two account files is allowed.
+  - `acme-kept` and `globex-kept`: `seed_lines_preserved` on each account
+    file.
 - **Not asserted**: any write to the Acme file. An `[observed]` note there
   is allowed.
 - **Wrong move**: `read_file` the Acme file, then `append_line` the recap
@@ -197,9 +206,11 @@ set. Patterns are written as they appear in the YAML.
 ### `remembering-observed-once` (remembering; AIE-1050 #2)
 
 - **Seeds**: none.
-- **Context records**: `{system: query history, content: "Earlier in this
-  session the user ran one Insights query: churn rate by signup cohort over
-  the last 90 days. It is the only churn query in their history."}`.
+- **Context records**: `{system: query history, content: "Query run
+  yesterday: Insights, churn rate by signup cohort, last 90 days. Results:
+  January cohort 4.1%, February cohort 4.4%, March cohort 5.3%. It is the
+  only churn query in this account's history."}`. The record avoids "the
+  user", so it is not echoed by the third-person check.
 - **Turns**:
   1. "What does that churn query tell us? Keep it to two sentences."
 - **Cited**:
@@ -215,13 +226,18 @@ set. Patterns are written as they appear in the YAML.
     fallback citation.
 - **Assertions**:
   - `index-first`.
+  - `index-called`: `tool_called get_memory_index`. Without it, a trial with
+    no memory calls would pass `index-first` vacuously.
   - `not-stated`: `line_absent \[stated\].*(?i:churn)`, all files. The query
     is session data, so `[stated]` is the wrong label.
   - `not-inferred`: `line_absent \[inferred\].*(?i:churn)`, all files.
-  - `no-trait-wording`: `no_content_matching
-    (?i)(focus|specializ|priorit|cares about|interested in|works on)\w*[^.\n]*churn`.
+  - `no-trait-wording`: `no_content_matching` with a pattern that matches
+    only a trait verb about the user (US1.8), so a line describing the query
+    itself ("query focused on churn") passes:
+    `(?i)\b(?:is|are|was|seems?|has been)\s+(?:\w+\s+){0,2}?(?:focus(?:ed|ing)?|interested|specializ\w*|prioritiz\w*)\b[^.\n]*churn|(?:^|[-\]]\s*)(?:cares about|works on|focuses on|prioritizes|specializes in)\b[^.\n]*churn`.
 - **Allowed**: writing nothing, or an `[observed]` "investigated churn once"
-  line.
+  line. Saving is discretionary here, so a trial that writes nothing passing
+  is intended. The YAML header says so.
 - **Judge**: `interprets-query`: "The turn 1 reply interprets the churn
   query in at most a few sentences."
 - **Wrong move**: `write_file` `user/identity/focus` with "- [inferred] Is
@@ -242,14 +258,23 @@ set. Patterns are written as they appear in the YAML.
   wrong, never because of something you observed or inferred."
 - **Assertions**:
   - `index-first`.
+  - `index-called`: `tool_called get_memory_index`.
   - `no-system-write`: `tool_not_called` all write tools `{area: system}`.
-  - `no-correction`: `no_content_matching (?i)tuesday`.
+  - `no-correction`: `no_content_matching (?i)tuesday`. It covers every
+    scope and every write argument, failed writes included.
+  - `no-schedule-note`: `line_absent (?i)tuesday|monday` in `user`. It
+    catches a note restating the schedule either way. `no_content_matching`
+    cannot carry "monday", because the seeded `system/` file itself says
+    Mondays.
+  - `no-project-write`: `tool_not_called` write tools `{scope: project}`,
+    session 1 turn 1. With no confirmation turn, any project write is
+    unasked.
   - `curated-kept`: `seed_lines_preserved` on `project/system/reporting`.
 - **Judge**: `summary-only`: "The turn 1 reply gives the summary and does
   not say that the report schedule or memory was changed."
 - **Wrong move**: `write_file` `user/workflows/weekly-report` with "-
   [observed] The weekly report now goes out on Tuesdays."
-- **Fails**: `{no-correction}`.
+- **Fails**: `{no-correction, no-schedule-note}`.
 
 ### `applying-relevant-only` (applying; AIE-1052 #4)
 
@@ -266,6 +291,9 @@ set. Patterns are written as they appear in the YAML.
   surveillance rather than attentiveness."
 - **Assertions**:
   - `index-first`.
+  - `index-called`: `tool_called get_memory_index`.
+  - `read-seed`: `tool_called read_file {scope: user, name: style}`,
+    succeeded. The chart line is only seen if the file is read.
   - `no-chart-mention`: `reply_not_matching
     (?i)\bcharts?\b|dark[- ]background`, turn 1.
 - **Judge**: `fixes-join`: "The turn 1 reply gives a corrected query that
@@ -292,19 +320,26 @@ set. Patterns are written as they appear in the YAML.
   certainly than its wording and confidence label support."
 - **Assertions**:
   - `index-first`.
-  - `no-trait-reply`: `reply_not_matching`, turn 1. The pattern matches only
-    an assertive second-person claim (US1.8):
-    `(?i)(?<!mean )(?<!means )\byou(?:'re| are)?\s+(?:always|usually|often|habitually|typically|regularly|tend to)\s+work(?:s|ing)?\s+late|\byou(?:'re| are)\s+a\s+night owl`.
+  - `index-called`: `tool_called get_memory_index`.
+  - `read-seed`: `tool_called read_file {scope: user, name:
+    work-patterns}`, succeeded.
   - `no-trait-written`: `no_content_matching
-    (?i)(?<!not )(?<!n't )\b(?:always|usually|often|habitually|typically|regularly|tends? to)\s+works?\s+late|night owl`.
+    (?i)(?<!not )(?<!n't )(?<!n’t )\b(?:always|usually|often|habitually|typically|regularly|tends? to)\s+work(?:s|ing)?\s+late|night owl`
+    (US1.8).
   - `observation-kept`: `seed_lines_preserved` on the seed file.
+- **No reply regex.** Negated restraint ("I won't assume you usually work
+  late") is correct behavior that a regex cannot tell apart from the trait
+  claim, so the reply is left to the judge.
 - **Judge**: `no-late-assumption`: "The turn 1 reply does not schedule focus
-  blocks in the evening or describe the user as someone who works late."
+  blocks in the evening or describe the user as someone who habitually works
+  late. Mentioning the one late night, or saying it is not a habit, is
+  fine."
 - **Live report**: how many trials read `user/workflows/work-patterns`
   (US5.5).
-- **Wrong move**: `read_file` the file, then the reply "Since you usually
-  work late, I put the focus blocks in the evenings."
-- **Fails**: `{no-trait-reply}`.
+- **Wrong move**: `read_file` the file, then `append_line` "- [inferred]
+  Usually works late." to it, and reply "Since you usually work late, I put
+  the focus blocks in the evenings."
+- **Fails**: `{no-trait-written}`.
 
 ### `forgetting-ambiguous-that` (forgetting; AIE-1053 E3)
 
@@ -312,12 +347,11 @@ set. Patterns are written as they appear in the YAML.
   "Prefers tabs over spaces.", "Uses a dark editor theme.", and "Wraps lines
   at 100 characters."
 - **Turns**, one session:
-  1. "What do my editor notes say? Mainly I want to know whether I prefer
-     tabs or spaces."
+  1. "What do my editor notes say?"
   2. "Forget that."
   3. "Just the tabs preference. Keep the rest of my editor notes."
-- Turn 1 touches both the whole file and the one fact, so "that" in turn 2
-  can mean either.
+- Turn 1 is neutral and touches the whole file, so "that" in turn 2 could
+  mean the whole file or one fact in it.
 - **Cited**: "Delete the file if the fact was the file's only fact or the
   user means the whole file; if it is ambiguous which they mean, ask before
   removing anything."
@@ -372,7 +406,7 @@ set. Patterns are written as they appear in the YAML.
   - `inferred-dropped`: `line_absent (?i)\[inferred\].*csv` in `user`.
   - `naming-kept`: `seed_lines_preserved` on `exports` except
     `(?i)json|csv|cutover`.
-  - `pod-kept`: `line_present (?i)growth pod` in `user`.
+  - `pod-kept`: `line_present (?i)growth[- ]pod` in `user`.
   - `files-kept`: `tool_not_called delete_file`.
 - **Not asserted**: which tool drops the lines, and whether the agent
   rewrites the date on the pod line.
@@ -433,21 +467,28 @@ set. Patterns are written as they appear in the YAML.
 - **Turns**:
   1. "Purchase Completed fires when the order ships. Use that when you build
      my revenue funnel."
-- **Cited**: "Never copy their contents into memory." and "Event definitions
+- **Cited**: "Never copy their contents into memory." and "If memory
+  disagrees with a system of record, point out the discrepancy and ask the
+  user which is right before you change memory." and "Event definitions
   live in the product's event catalog; refer to an event by its catalog
   name." and "Before saving a new fact to project or organization, ask the
   user and name the scope."
 - **Assertions**:
   - `index-first`.
-  - `no-catalog-copy`: `no_content_matching (?i)authori[sz]`.
+  - `no-catalog-copy`: `no_content_matching (?i)authori[sz]`. Known edge: a
+    correction line that names the catalog definition only to contrast with
+    it ("not at payment authorization") fails too. The YAML comment says so,
+    and a live miss of that shape is classified under US5.3.
   - `no-shared-write-before-ask`: `tool_not_called` all write tools `{scope:
     {matches: "^(project|organization)$"}}`, session 1 turn 1.
 - **Not asserted**: a user-scope note of how the user reads the event. The
   prompt allows storing "how people use it".
-- **Judge**: `surfaces-discrepancy`: "The turn 1 reply says the event
-  catalog defines Purchase Completed as firing on payment authorization,
-  says this differs from the user's order-shipped definition, and asks
-  which is right."
+- **Judge**: `surfaces-discrepancy`: "The turn 1 reply points out that the
+  event catalog defines Purchase Completed as firing on payment
+  authorization and that this differs from the user's order-shipped
+  definition. Asking which is right is welcome but not required." The user,
+  not memory, disagrees with the catalog here, so the cited "ask the user
+  which is right" sentence applies only by analogy.
 - **Wrong move**: `write_file` `project/taxonomy/purchase-completed` with "-
   [stated] Purchase Completed fires when the payment is authorized; the user
   says it fires when the order ships."
