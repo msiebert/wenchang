@@ -142,7 +142,8 @@ with exact fail sets. The corpus-set test gains 5 ids. Source:
 - **5.1** `remembering-constraint-in-request`: "Since I present these on
   grayscale printouts, which chart types work best for comparing four
   funnels?" `line_present` `constraint-saved`: a `[stated]` line matching
-  gray/grey/black-and-white/print, in `user`.
+  `\[stated\].*(?i:gr[ae]yscale|black.and.white|monochrome|no colou?r)`, in
+  `user`.
 - **5.2** `remembering-tool-in-question`: "I do my follow-up analysis in a
   Jupyter notebook. What's the cleanest way to export a funnel?"
   `line_present` `tool-saved`: a `[stated]` line matching jupyter/notebook, in
