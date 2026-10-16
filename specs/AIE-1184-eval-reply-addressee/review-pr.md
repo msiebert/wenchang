@@ -29,20 +29,27 @@ Abbreviations: grd = `tests/test_evals_graders.py`, rpt =
 | 1.6, 1.7 echoes of user text and seed content | grd `test_reply_check_ignores_echoes_of_the_users_text`, `..._of_seed_content` |
 | 1.8 seed description and aliases | grd `test_reply_check_ignores_echoes_of_seed_metadata` |
 | 1.9 only the echoed phrase is exempt | grd `test_reply_check_exempts_only_the_echoed_phrase` |
-| 1.10 context is per session | grd `test_reply_check_context_is_per_session` |
+| 1.10 context is per session and up to the turn | grd `test_reply_check_context_is_per_session`, `test_reply_check_later_user_turns_do_not_exempt_earlier_replies` |
 | 1.11 one flag per reply | grd `test_reply_check_flags_once_per_reply` |
 | 1.12–1.14 word-boundary context match | grd `test_reply_check_context_match_needs_word_boundaries`, `..._is_not_a_prefix_match`, `test_reply_check_exempts_a_bounded_echo_without_next_word` |
 | 1.15 "the users" not matched | grd `test_reply_check_ignores_the_users` |
+| 1.18 bare echo needs the same ending (curated-shared-conflict) | grd `test_reply_check_bare_echo_needs_the_same_ending`, `test_reply_check_bare_echo_at_the_end_of_both_texts` |
+| 1.19 "the caller's" | grd `test_reply_check_caller_possessive` |
+| 1.20 any whitespace between "the" and "user" | grd `test_reply_check_any_whitespace_between_the_and_user` |
+| 1.21 U+02BC apostrophe | grd `test_reply_check_modifier_letter_apostrophe` |
+| 1.22 en and em dash before "scope" | grd `test_reply_check_dashes_before_scope` |
 | 1.16, 1.17 no `mcp` import; `grade` unchanged | grd `test_graders_do_not_import_the_driver` and the existing grader tests |
 | 2.1 preamble text, rendered file | agt `test_preamble_frames_each_message_as_the_users_turn`, `test_eval_agent_body_is_preamble_plus_prompt` |
 | 2.2–2.4 grade.json key flagged, empty, absent | rpt `test_grade_records_third_person_replies`, `test_grade_records_an_empty_reply_check`, `test_grade_without_a_transcript_has_no_reply_check` |
-| 2.5 malformed transcript never blocks | rpt `test_malformed_transcript_never_blocks_grading` |
+| 2.5 malformed, undecodable, or deep transcript never blocks | rpt `test_malformed_transcript_never_blocks_grading`, `test_unreadable_transcript_never_blocks_grading` |
 | 2.6 CLI line | rpt `test_grade_cli_prints_third_person_replies` |
 | 2.7 no silent regrade | rpt `test_report_adds_the_reply_check_without_regrading` |
 | 2.8 newer transcript refreshes check only | rpt `test_report_rechecks_replies_when_the_transcript_is_newer` |
 | 2.9 newer dumps regrade fully | rpt `test_report_fully_regrades_when_dumps_are_newer` |
 | 2.10–2.13 report entries, totals, markdown | rpt `test_report_separates_third_person_trials`, `test_report_json_totals_third_person_trials`, `test_report_markdown_shows_third_person_trials`, `test_report_markdown_omits_empty_addressee_lines` |
 | 2.14 merged totals | rpt `test_merge_runs_sums_third_person_trials` |
+| 2.16 deleted transcript drops the check | rpt `test_report_drops_the_check_when_the_transcript_is_gone` |
+| 2.17 current check left alone | rpt `test_report_leaves_a_current_check_alone` |
 | 2.15 scripted correct drivers clean | e2e `test_correct_driver_passes_every_assertion` |
 | 3.1–3.5 live gate | human-run, below |
 
@@ -67,8 +74,9 @@ Abbreviations: grd = `tests/test_evals_graders.py`, rpt =
 
 ## Baseline re-measured with the shipped code (US3.1)
 
-Copies of the AIE-1170 baseline dirs were re-reported with
-`uv run python -m evals report <copy>`:
+Copies of the AIE-1170 baseline dirs, made with `cp -Rp` to preserve
+mtimes, were re-reported with the shipped code, after the review fixes.
+For every trial, `results` and `passed` matched the originals:
 
 - Run A (`20261014-225317-sonnet`): `Trials with a third-person reply: 7 of
   69 checked.` Deterministic results are unchanged

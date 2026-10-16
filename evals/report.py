@@ -229,6 +229,9 @@ def _reply_check(trial_dir: Path, scenario: Scenario) -> dict[str, Any]:
         transcript = load_transcript(path)
     except GradeInputError as exc:
         return {"transcript_error": str(exc)}
+    except (ValueError, RecursionError) as exc:
+        # Undecodable bytes or nesting too deep for the JSON parser.
+        return {"transcript_error": f"{path}: cannot parse: {type(exc).__name__}"}
     return {
         "third_person_replies": [
             {"session": f.session, "turn": f.turn, "phrase": f.phrase}
@@ -260,12 +263,17 @@ def grade_trial(trial_dir: Path) -> dict[str, Any]:
 
 def _refresh_reply_check(trial_dir: Path, scenario: Scenario, graded: dict[str, Any]) -> None:
     """Recompute only the reply check of a grade.json that is current for the
-    store and trace, when it lacks one or the transcript is newer.
+    store and trace, when it lacks one or the transcript is newer; drop it
+    when the transcript is gone.
     """
     transcript = trial_dir / "transcript.json"
-    if not transcript.exists():
-        return
     has_check = any(key in graded for key in _REPLY_CHECK_KEYS)
+    if not transcript.exists():
+        if has_check:
+            for key in _REPLY_CHECK_KEYS:
+                graded.pop(key, None)
+            _write_json(trial_dir / "grade.json", graded)
+        return
     newer = transcript.stat().st_mtime > (trial_dir / "grade.json").stat().st_mtime
     if has_check and not newer:
         return
@@ -438,21 +446,21 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
                 "assertions": assertions,
                 "judge": [
                     {
-                        "id": ident,
-                        "passes": sum(1 for v in judged if v.get(ident) is True),
-                        "runs": sum(1 for v in judged if ident in v),
+                        "id": item_id,
+                        "passes": sum(1 for v in judged if v.get(item_id) is True),
+                        "runs": sum(1 for v in judged if item_id in v),
                     }
-                    for ident in judged_ids
+                    for item_id in judged_ids
                 ],
                 "invalid_judge_trials": invalid_judge,
                 "third_person_trials": flagged,
                 "addressee_unchecked_trials": unchecked,
                 "judge_third_person_fails": [
                     {
-                        "id": ident,
-                        "fails": sum(1 for v in flagged_verdicts if v.get(ident) is False),
+                        "id": item_id,
+                        "fails": sum(1 for v in flagged_verdicts if v.get(item_id) is False),
                     }
-                    for ident in judged_ids
+                    for item_id in judged_ids
                 ],
             }
         )

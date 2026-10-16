@@ -27,14 +27,21 @@ honest preamble, to be kept only if a measurement showed it helps.
    every recorded reply. It is pure and imports no `mcp`.
    - It ignores quoted text: fenced code blocks, `>` lines, and `"..."`,
      `“...”`, and `` `...` `` spans on one line.
-   - It matches `the user`, with an optional possessive `'s` or `’s`, and
-     `the caller`. "the user scope", "the user's scope", "the user-scope",
-     and "the users" do not match.
-   - It skips a match whose phrase (the match plus its next word,
-     normalized) also appears at word boundaries in the context. The
-     context is the session's user text up to that turn, plus every seed
-     file's content, description, and aliases. A reply that echoes "Signup
-     means the user has verified" is therefore not flagged.
+   - It matches `the user` and `the caller`.
+     - Any whitespace run (newlines and NBSP included) may separate the
+       words.
+     - An optional possessive `'s`, `’s`, or `ʼs` may follow.
+     - "the user scope", "the user's scope", "the user-scope", "the
+       user—scope", and "the users" do not match.
+   - It skips a match that echoes the context. The context is the
+     session's user text up to that turn, plus every seed file's content,
+     description, and aliases.
+     - A phrase with a next word (the match plus that word, normalized)
+       must appear at word boundaries. A reply that echoes "Signup means the
+       user has verified" is therefore not flagged.
+     - A bare match must appear with the same following character, or end
+       a context text when it ends the reply. A seed's "the user submits"
+       therefore does not exempt "I'll check with the user."
    - It reports at most one flag per reply.
 
    An assertion kind was rejected for three reasons:
@@ -50,8 +57,10 @@ honest preamble, to be kept only if a measurement showed it helps.
 2. **The check is a separate signal and never fails anything.**
    - `grade.json` gains `third_person_replies` (a list of `{session, turn,
      phrase}`) when `transcript.json` exists.
-   - A malformed transcript gives `transcript_error` instead and never
-     blocks deterministic grading.
+   - A malformed, undecodable, or too-deeply-nested transcript gives
+     `transcript_error` instead and never blocks deterministic grading.
+   - If `transcript.json` is deleted after a check was recorded, the check
+     is dropped and the trial counts as unchecked.
    - `results` and `passed` are unchanged.
    - A `grade.json` that is current for the store and trace, but lacks the
      check or is older than the transcript, gets only the check recomputed.
@@ -96,5 +105,10 @@ honest preamble, to be kept only if a measurement showed it helps.
   - The pattern misses phrasings like "they asked me to", so the count is
     a lower bound.
   - Future analytics scenarios may add noisy hits, such as "where the user
-    drops off". The check never fails a trial, so the noise stays in the
-    count.
+    drops off", "the user ID", "the user property", or "the user profile".
+    "user-facing" is never a match, because it has no "the". The check
+    never fails a trial, so the noise stays in the count.
+  - Two quoting forms are not stripped:
+    - a fence opened and closed on one line, such as ```` ```the user``` ````;
+    - straight-quote inch marks (`5" wide ... "the user`), which can pair
+      with the wrong quote and hide or expose text.

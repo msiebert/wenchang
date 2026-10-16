@@ -518,16 +518,18 @@ def grade(
 
 # --- reply check --------------------------------------------------------------
 
+_APOSTROPHES: Final = "'\u2019\u02bc"
 # "the user" or "the caller", but not the user scope ("the user's scope" included)
 # and not "the users". The possessive quantifier keeps "'s" from backtracking.
 THIRD_PERSON_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"\bthe user(?:'s|\u2019s)?+(?![\w'\u2019])(?![-\s]+scopes?\b)|\bthe caller\b",
+    rf"\bthe\s+user(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
+    rf"|\bthe\s+caller(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])",
     re.IGNORECASE,
 )
 _FENCED_BLOCK: Final = re.compile(r"^[ \t]*```.*?(?:^[ \t]*```[^\n]*$|\Z)", re.M | re.S)
 _QUOTE_LINE: Final = re.compile(r"^[ \t]*>.*$", re.M)
 _QUOTED_SPAN: Final = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
-_NEXT_WORD: Final = re.compile(r"\s+[\w'\u2019]+")
+_NEXT_WORD: Final = re.compile(rf"\s+[\w{_APOSTROPHES}]+")
 
 
 @dataclass(frozen=True)
@@ -540,11 +542,28 @@ class ThirdPersonReply:
 
 
 def _normalize(text: str) -> str:
-    return " ".join(text.lower().replace("\u2019", "'").split())
+    return " ".join(text.lower().replace("\u2019", "'").replace("\u02bc", "'").split())
 
 
 def _unquoted(reply: str) -> str:
     return _QUOTED_SPAN.sub("", _QUOTE_LINE.sub("", _FENCED_BLOCK.sub("", reply)))
+
+
+def _is_echo(phrase: str, rest: str | None, context: Sequence[str]) -> bool:
+    """Whether the phrase echoes a context text.
+
+    A phrase with a next word (rest is None) must appear at word boundaries.
+    A bare phrase must appear before the same next character, or end a
+    context text when it ends the reply.
+    """
+    escaped = re.escape(phrase)
+    if rest is None:
+        pattern = rf"(?<!\w){escaped}(?!\w)"
+    elif not rest:
+        pattern = rf"(?<!\w){escaped}$"
+    else:
+        pattern = rf"(?<!\w){escaped}\s?{re.escape(rest[0])}"
+    return any(re.search(pattern, text) for text in context)
 
 
 def find_third_person_replies(
@@ -555,18 +574,23 @@ def find_third_person_replies(
     Quoted text is ignored, and so is a phrase that echoes the session's user
     text so far or the scenario's seed files.
     """
-    seeds = [part for f in scenario.seed_files for part in (f.content, f.description, *f.aliases)]
+    seeds = [
+        _normalize(part)
+        for f in scenario.seed_files
+        for part in (f.content, f.description, *f.aliases)
+    ]
     flags: list[ThirdPersonReply] = []
     for t in transcript:
-        users = [u.user for u in transcript if u.session == t.session and u.turn <= t.turn]
-        context = _normalize(" ".join([*users, *seeds]))
+        users = [
+            _normalize(u.user) for u in transcript if u.session == t.session and u.turn <= t.turn
+        ]
         reply = _unquoted(t.reply)
         for match in THIRD_PERSON_PATTERN.finditer(reply):
             following = _NEXT_WORD.match(reply, match.end())
-            phrase = _normalize(
-                reply[match.start() : following.end() if following else match.end()]
-            )
-            if not re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", context):
+            end = following.end() if following else match.end()
+            phrase = _normalize(reply[match.start() : end])
+            rest = None if following else reply[end:].lstrip()
+            if not _is_echo(phrase, rest, [*users, *seeds]):
                 flags.append(ThirdPersonReply(t.session, t.turn, phrase))
                 break
     return tuple(flags)

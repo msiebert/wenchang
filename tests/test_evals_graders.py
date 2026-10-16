@@ -30,6 +30,7 @@ from evals.graders import (
 )
 from evals.reference_adopter import MEMBER_IDENTITY, SeedFile
 from evals.scenario import (
+    SCENARIO_DIR,
     AliasPresent,
     ArgMatcher,
     Assertion,
@@ -48,6 +49,7 @@ from evals.scenario import (
     Session,
     ToolCalled,
     ToolNotCalled,
+    load_scenario,
 )
 
 pytestmark = pytest.mark.unit
@@ -907,3 +909,65 @@ def test_reply_check_exempts_a_bounded_echo_without_next_word() -> None:
 def test_reply_check_ignores_the_users() -> None:
     """The plural "the users" is not a third-person reference (AIE-1184, US1.15)."""
     assert _flags(_turns("Ask the users which one.")) == ()
+
+
+def test_reply_check_later_user_turns_do_not_exempt_earlier_replies() -> None:
+    """User text from a later turn of the same session does not exempt an
+    earlier reply (AIE-1184, US1.10).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "hello", "The user said X.", None),
+        TranscriptTurn(1, 2, "the user said X", "Noted.", None),
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_bare_echo_needs_the_same_ending() -> None:
+    """A bare "the user" before punctuation is not exempted by the words "the
+    user" elsewhere in a seed (curated-shared-conflict) (AIE-1184, US1.18).
+    """
+    scenario = load_scenario(SCENARIO_DIR / "curated-shared-conflict.yaml")
+    transcript = (TranscriptTurn(1, 1, "hello", "I'll check with the user.", None),)
+
+    assert find_third_person_replies(scenario, transcript) == (ThirdPersonReply(1, 1, "the user"),)
+
+
+def test_reply_check_bare_echo_at_the_end_of_both_texts() -> None:
+    """A bare "the user" ending the reply is exempt only if a context text ends
+    with it too (AIE-1184, US1.18).
+    """
+    assert _flags(_turns("You can tell the user", user="Tell the user")) == ()
+    assert _flags(_turns("You can tell the user", user="Tell the user now")) == (
+        ThirdPersonReply(1, 1, "the user"),
+    )
+
+
+def test_reply_check_caller_possessive() -> None:
+    """ "the caller's" is matched with its possessive (AIE-1184, US1.19)."""
+    assert _flags(_turns("This is the caller\u2019s note.")) == (
+        ThirdPersonReply(1, 1, "the caller's note"),
+    )
+
+
+@pytest.mark.parametrize("gap", ["\n", "\u00a0", "  \t"])
+def test_reply_check_any_whitespace_between_the_and_user(gap: str) -> None:
+    """Newlines, NBSP, and runs of spaces between "the" and "user" still match
+    (AIE-1184, US1.20).
+    """
+    assert _flags(_turns(f"I asked the{gap}user whether to save it.")) == (
+        ThirdPersonReply(1, 1, "the user whether"),
+    )
+
+
+def test_reply_check_modifier_letter_apostrophe() -> None:
+    """U+02BC counts as an apostrophe (AIE-1184, US1.21)."""
+    assert _flags(_turns("I need the user\u02bcs confirmation.")) == (
+        ThirdPersonReply(1, 1, "the user's confirmation"),
+    )
+
+
+@pytest.mark.parametrize("dash", ["\u2013", "\u2014"])
+def test_reply_check_dashes_before_scope(dash: str) -> None:
+    """An en or em dash before "scope" is excluded like a hyphen (AIE-1184, US1.22)."""
+    assert _flags(_turns(f"Saved to the user{dash}scope file.")) == ()

@@ -677,7 +677,8 @@ def test_malformed_transcript_never_blocks_grading(
     assert "transcript.json" in graded["transcript_error"]
     assert graded["passed"] is False
     assert [r["passed"] for r in graded["results"]] == [True, False]
-    assert "TRANSCRIPT ERROR: " in capsys.readouterr().out
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1] == f"TRANSCRIPT ERROR: {graded['transcript_error']}"
 
 
 def test_grade_cli_prints_third_person_replies(
@@ -737,7 +738,9 @@ def test_report_rechecks_replies_when_the_transcript_is_newer(tmp_path: Path) ->
     build_report(run_dir)
 
     refreshed = _json(trial / "grade.json")
+    assert refreshed["results"] == graded["results"]
     assert refreshed["results"][0]["detail"] == "kept"
+    assert refreshed["passed"] == graded["passed"]
     assert refreshed["third_person_replies"] == [
         {"session": 1, "turn": 1, "phrase": "the user asked"}
     ]
@@ -859,3 +862,73 @@ def test_merge_runs_sums_third_person_trials(tmp_path: Path) -> None:
     _, report = merge_runs(tmp_path / "merged", shard_dirs)
 
     assert report["third_person"] == {"flagged_trials": 3, "checked_trials": 4}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b'{"turns": [\xff]}', b"[" * 100000 + b"]" * 100000],
+    ids=["undecodable", "deeply-nested"],
+)
+def test_unreadable_transcript_never_blocks_grading(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], body: bytes
+) -> None:
+    """Undecodable or deeply nested transcripts are recorded as errors and
+    grading and reporting go on (AIE-1184, US2.5).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    (trial / "transcript.json").write_bytes(body)
+
+    assert main(["grade", str(trial)]) == 0
+
+    graded = _json(trial / "grade.json")
+    assert "transcript.json" in graded["transcript_error"]
+    assert "third_person_replies" not in graded
+    assert graded["passed"] is True
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"TRANSCRIPT ERROR: {graded['transcript_error']}"
+    )
+    _, report = build_report(run_dir)
+    (alpha,) = report["scenarios"]
+    assert alpha["addressee_unchecked_trials"] == [1]
+
+
+def test_report_drops_the_check_when_the_transcript_is_gone(tmp_path: Path) -> None:
+    """A recorded check whose transcript was deleted is dropped, so the trial
+    counts as unchecked (AIE-1184, US2.16).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, THIRD_PERSON)
+    graded = grade_trial(trial)
+    (trial / "transcript.json").unlink()
+
+    _, report = build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert "third_person_replies" not in refreshed
+    assert "transcript_error" not in refreshed
+    assert (refreshed["results"], refreshed["passed"]) == (graded["results"], graded["passed"])
+    (alpha,) = report["scenarios"]
+    assert alpha["addressee_unchecked_trials"] == [1]
+    assert alpha["third_person_trials"] == []
+
+
+def test_report_leaves_a_current_check_alone(tmp_path: Path) -> None:
+    """A current grade.json that already has the check is neither recomputed
+    nor rewritten (AIE-1184, US2.17).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, THIRD_PERSON)
+    _age(trial / "store.json", 30)
+    _age(trial / "trace.json", 30)
+    _age(trial / "transcript.json", 30)
+    graded = grade_trial(trial)
+    _age(trial / "grade.json", 10)
+    before = (trial / "grade.json").stat().st_mtime
+
+    build_report(run_dir)
+
+    assert (trial / "grade.json").stat().st_mtime == before
+    assert _json(trial / "grade.json")["third_person_replies"] == graded["third_person_replies"]

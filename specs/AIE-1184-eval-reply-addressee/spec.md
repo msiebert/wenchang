@@ -17,8 +17,9 @@ in the AIE-1170 worktree.
 Allow-test-changes: `tests/test_evals_agent.py::test_preamble_frames_each_message_as_the_users_turn`
 pins the old preamble byte for byte. This issue changes the preamble, so
 that test's expected string and docstring are rewritten (US2.1). If the
-US3 gate fails, the revert restores both. No other existing test is
-weakened.
+US3 gate fails, the revert restores both. The end-to-end correct-driver
+test is extended with a `third_person_replies == []` check (US2.15). No
+other existing test is weakened.
 
 ## Deviation from the issue
 
@@ -86,19 +87,29 @@ Rules, applied to one reply (`TranscriptTurn.reply`) at a time:
   - text inside `"..."`, `“...”`, or `` `...` `` on one line.
 
   Replies quote memory lines and curated files, which may say "the user".
-- **R2 Pattern.** Case-insensitive `\bthe user`, then an optional `'s`
-  or `’s` taken possessively (never backtracked), with no word character
-  or apostrophe after it. The match is not followed by hyphens or
-  whitespace and then `scope` or `scopes`. `\bthe caller\b` also matches.
-  "the user scope", "the user-scope", and "the user's scope" do not match.
-  "the users" does not match.
+- **R2 Pattern.** The match is case-insensitive.
+  - It is `\bthe`, any whitespace run (newlines and NBSP included), then
+    `user`.
+  - An optional `'s`, `’s`, or `ʼs` follows. It is taken possessively and
+    never backtracked.
+  - No word character or apostrophe may come after it.
+  - It must not be followed by hyphens, en or em dashes, or whitespace and
+    then `scope` or `scopes`.
+  - `the caller` matches the same way, possessive included, with no scope
+    exclusion.
+  - "the user scope", "the user-scope", "the user—scope", "the user's
+    scope", and "the users" do not match.
 - **R3 Echoes are ignored.**
   - The phrase is the match plus, when whitespace and a word follow it,
     that next word. It is lowercased, `’` becomes `'`, and whitespace
     collapses to single spaces.
-  - A match is skipped if its phrase occurs in the same normalization of
-    the context, bounded on both sides by a non-word character or the
-    text's edge.
+  - A match with a next word is skipped if its phrase occurs in the same
+    normalization of a context text, bounded on both sides by a non-word
+    character or the text's edge.
+  - A bare match has no next word. It is skipped only if a context text
+    has the phrase, after a non-word character or at the text's start,
+    followed by the same next non-space character. If the reply ends
+    after the match, the phrase must instead end a context text.
   - The context is the user text of every transcript turn in the same
     session up to and including this turn, plus every scenario seed file's
     content, description, and aliases.
@@ -122,6 +133,12 @@ Rules, applied to one reply (`TranscriptTurn.reply`) at a time:
 | 1.13 | the user turn "Ask the users team." and the reply "The user said yes." | as 1.1 | one flag, phrase `"the user said"` |
 | 1.14 | the user turn "Tell the user, then stop." and the reply "Tell the user, then stop." | as 1.1 | returns `()` (the phrase `"the user"` is followed by `,` in the reply, has no next word, and occurs at a word boundary in the context) |
 | 1.15 | the reply "Ask the users which one." | as 1.1 | returns `()` (R2 does not match "the users") |
+| 1.10b | a session 1 turn 1 reply "The user said X." and a turn 2 user text "the user said X" | as 1.1 | the turn 1 reply is flagged (later turns are not context) |
+| 1.18 | the shipped `curated-shared-conflict` scenario, whose seed says "the user submits", and the reply "I'll check with the user." | as 1.1 | one flag, phrase `"the user"`; a reply ending "tell the user" is exempt only if a context text ends with "the user" |
+| 1.19 | the reply "This is the caller’s note." | as 1.1 | one flag, phrase `"the caller's note"` |
+| 1.20 | "the", a newline, an NBSP, or several spaces, then "user whether" | as 1.1 | one flag, phrase `"the user whether"` |
+| 1.21 | the reply "I need the userʼs confirmation." (U+02BC) | as 1.1 | one flag, phrase `"the user's confirmation"` |
+| 1.22 | the reply "Saved to the user–scope file." with an en or em dash | as 1.1 | returns `()` |
 | 1.16 | `evals.graders` | its imports are checked (existing test) | it still imports no `mcp` module |
 | 1.17 | any scenario, store, and trace | `grade(scenario, store, trace)` | its signature and results are unchanged |
 
@@ -133,7 +150,7 @@ Rules, applied to one reply (`TranscriptTurn.reply`) at a time:
 | 2.2 | a dumped trial with `transcript.json` whose session 1 turn 1 reply is flagged | `grade_trial(trial_dir)` | `grade.json` has `"third_person_replies": [{"session": 1, "turn": 1, "phrase": "the user asked"}]`; `results` and `passed` equal those for the same trial with a second-person reply |
 | 2.3 | a dumped trial with `transcript.json` and no flagged reply | as 2.2 | `grade.json` has `"third_person_replies": []` |
 | 2.4 | a dumped trial with no `transcript.json` | as 2.2 | `grade.json` has neither `third_person_replies` nor `transcript_error`, and grading succeeds as today |
-| 2.5 | a dumped trial with a malformed `transcript.json` | as 2.2, and `python -m evals grade` | grading succeeds with the usual `results` and `passed`; `grade.json` has no `third_person_replies` and has `"transcript_error": "<message naming transcript.json>"`; the CLI exits 0 and prints `TRANSCRIPT ERROR: <message>` |
+| 2.5 | a dumped trial whose `transcript.json` is malformed, undecodable (`b'{"turns": [\xff]}'`), or nested 100000 deep | as 2.2, and `python -m evals grade`, then `build_report` | grading succeeds with the usual `results` and `passed`; `grade.json` has no `third_person_replies` and has `"transcript_error": "<message naming transcript.json>"`; the CLI exits 0, and its last line is exactly `TRANSCRIPT ERROR: <that message>`; the report lists the trial as unchecked |
 | 2.6 | the trial of 2.2 | `python -m evals grade <trial_dir>` | stdout has the existing PASS/FAIL lines, then `THIRD-PERSON session 1 turn 1: the user asked`; exit code 0 |
 | 2.7 | a `grade.json` that is current for store.json and trace.json, lacks `third_person_replies`, and whose `results` and `passed` deliberately differ from what a fresh grade would give, with `transcript.json` present | `build_report(run_dir)` | `grade.json` gains `third_person_replies`, its `results` and `passed` are kept unchanged, and the report counts them as they were |
 | 2.8 | a `grade.json` current for store and trace but older than `transcript.json` | `build_report(run_dir)` | only `third_person_replies` (or `transcript_error`) is recomputed; `results` and `passed` are kept |
@@ -143,6 +160,8 @@ Rules, applied to one reply (`TranscriptTurn.reply`) at a time:
 | 2.12 | the run of 2.10 | `report.md` is read | it has `Trials with a third-person reply: 1 of 2 checked.` after the summary table; the scenario section has `Third-person replies: trial 1 (session 1 turn 1: "the user said")` and `Addressee not checked: 3`; the judge table header is `\| Judge item \| Passes \| Fails with a third-person reply \|` and its row is `\| polite \| 0/2 \| 1 \|` |
 | 2.13 | a scenario with no flagged and no unchecked trials | as 2.12 | its section has no `Third-person replies:` or `Addressee not checked` line |
 | 2.14 | shard runs with flagged trials | `merge_runs(out, shards)` | the merged `third_person` totals are the sums over the shards |
+| 2.16 | a recorded check whose `transcript.json` was then deleted | `build_report(run_dir)` | `third_person_replies` and `transcript_error` are dropped from `grade.json`, `results` and `passed` are kept, and the trial counts as unchecked |
+| 2.17 | a `grade.json` current for store, trace, and transcript that already has the check | `build_report(run_dir)` | it is not rewritten (mtime unchanged) and its flags are unchanged |
 | 2.15 | any shipped scenario run by its scripted correct driver (end to end) | it is graded | `grade.json` has `"third_person_replies": []` |
 
 ### US3 — Measurement gate for the preamble (human-run, not in `make check`)
