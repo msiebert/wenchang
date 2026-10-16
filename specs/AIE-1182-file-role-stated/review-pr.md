@@ -2,9 +2,9 @@
 
 ## What changed & why
 
-One sentence is appended to the last paragraph of `wenchang.prompts.remembering.BODY`, after the write-timing sentence: "When the user mentions their own role, team, or responsibilities in passing, such as inside a question, save it before or alongside your answer." Live eval `remembering-stated-role` passed 0/6 at the AIE-1170 baseline: every trial answered "I'm the PM for checkout. What three metrics should I check every week?" and wrote nothing. The sentence is narrowed to the user's own work context so it does not push toward project writes (`remembering-no-metric-value`) or personal details (`privacy-minor`). The scenario's `# Prompt:` header cites the new sentence, and `.claude/agents/wenchang-eval.md` is re-rendered (`uv run python -m evals render-agent`).
+One sentence is appended to the last paragraph of `wenchang.prompts.remembering.BODY`, after the write-timing sentence: "When the user mentions their own work role, team, or responsibilities, even inside a question, save it as a fact about them before you answer." Live eval `remembering-stated-role` passed 0/6 at the AIE-1170 baseline: every trial answered "I'm the PM for checkout. What three metrics should I check every week?" and wrote nothing. The sentence is narrowed to the user's own work context so it does not push toward project writes (`remembering-no-metric-value`) or personal details (`privacy-minor`). The scenario's `# Prompt:` header cites the new sentence, and `.claude/agents/wenchang-eval.md` is re-rendered (`uv run python -m evals render-agent`).
 
-Code commit: `517da3e`. New `wenchang-eval.md` sha256: `f3b127b973c65c82047a8d087091be7ec7b7930b259cb806f76cae9b9a7af5ae`. `make check`: green (4082 passed, 18 skipped, 41 deselected).
+Code commit: `19a9537`. New `wenchang-eval.md` sha256: `c9e0042f31a71b6721aeb68717f295e28817a66bf8284dab4c1ff4dbb875f5fb`. `make check`: green (4083 passed, 18 skipped, 41 deselected).
 
 ## Acceptance criteria → tests
 
@@ -34,7 +34,7 @@ Paths are under `tests/`.
 
 ## Live evals: PENDING
 
-Human-run; gates the PR. Run against commit `517da3e`, with agent sha256 `f3b127b973c65c82047a8d087091be7ec7b7930b259cb806f76cae9b9a7af5ae`. Do two full-corpus runs (A and B), each `--model sonnet --trials 3 --judge`, split in 3 shards, for N=6 per scenario.
+Human-run; gates the PR. Run all shards at the branch head (commit `19a9537` or later with no prompt change). Each run's agent sha256 must equal the new agent sha256, `c9e0042f31a71b6721aeb68717f295e28817a66bf8284dab4c1ff4dbb875f5fb`; if it differs, the run is invalid. Do two full-corpus runs (A and B), each `--model sonnet --trials 3 --judge`, split in 3 shards, for N=6 per scenario.
 
 Interactive launch (single session, unsharded):
 
@@ -42,7 +42,7 @@ Interactive launch (single session, unsharded):
 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
 ```
 
-Sharded, per run (A, then B). Launch from the repo root, for k = 1, 2, 3:
+Sharded, per run (A, then B). Launch from the repo root:
 
 ```
 CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard 1/3" --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
@@ -54,7 +54,7 @@ Repeat with `--shard 2/3` and `--shard 3/3`. When all three finish, merge:
 uv run python -m evals merge-runs evals/runs/<name> <shard 1 run dir> <shard 2 run dir> <shard 3 run dir>
 ```
 
-Then merge run A and run B the same way if a combined N=6 report is wanted; otherwise tally the six trials by hand below.
+Do not pass run A and run B to `merge-runs` together: both contain the same scenarios and `report.py` raises. Merge each run's three shards with `merge-runs` separately, then tally the six trials per scenario by hand across the two merged reports (A and B) below. Full results go in each run's merged `report.md`.
 
 ### Floors
 
@@ -80,9 +80,10 @@ Iterations: none yet.
 
 ## Look closely at
 
-- `privacy-minor` ("I'm 15 and this is for my school project...") is a personal fact inside a request. Narrowing to role, team, and responsibilities keeps age and school outside the trigger, and the privacy override is the backstop. Floor 4.3 checks it, including the `still-helps` judge item.
+- `privacy-minor` ("I'm 15 and this is for my school project...") is a personal fact inside a request. Narrowing to "work role", team, and responsibilities keeps age and school outside the trigger, and the privacy override is the backstop. Floor 4.3 checks it, including the `still-helps` judge item.
 - The agent may file "PM for checkout" in `project` instead of `user`. The scope guidance's "would it hold for a different person in this project" test should route it to `user`, and the scenario asserts `scope: user`. Check the live traces for this, not just the pass count.
-- The sentence sits in the save-criterion paragraph after the cited write-timing sentence; no sentence a scenario cites was reworded.
+- The sentence sits in the write-timing paragraph after the cited write-timing sentence; no sentence a scenario cites was reworded.
+- In the `privacy-sensitive-private` and `recall-replace-fact` traces, check for project writes before the ask and for double-filed identity lines (the same role written twice, or to both user and project).
 
 ## Follow-ups
 
