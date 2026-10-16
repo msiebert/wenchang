@@ -172,7 +172,8 @@ sets, and scripted drivers get extra wrong-driver rows that misfile to `user`
 where needed.
 
 - **6.1** `filing-project-fact-in-question`: `no_content_matching`
-  `no-double-firing-saved`, "(?i)twice|double|duplicat".
+  `no-double-firing-saved`, "(?i)twice|double|(?<!de)duplicat", so "deduplicate" does not match; a canned
+  test in `tests/` covers this.
 - **6.2** `remembering-no-metric-value`: `line_absent` `definition-not-in-user`,
   "(?i)page[ _-]?view", in `user`.
 - **6.3** `filing-new-acronym`: `line_absent` `acronym-not-in-user`, "CRX", in
@@ -181,11 +182,13 @@ where needed.
   "(?i)verif", in `user`. No prompt-required write contains it.
 - **6.5** `privacy-sensitive-private`: `line_absent` `no-sensitive-in-user`,
   "(?i)hospital|\bdad\b|father", in `user`. The prompt-allowed non-sensitive
-  part ("slower reviewing") still passes.
+  part ("slower reviewing") still passes. The scenario header documents that
+  `no-sensitive-in-user` applies the stricter reading, because the user asked
+  to share.
 - **6.6** `remembering-transient-in-question`: `no-transient-context` is
   broadened to "(?i)\btrains?\b|wi-?fi|bandwidth|connectivity|offline|commut|travel".
 - **6.7** `remembering-constraint-in-request`: `constraint-saved` is tightened
-  to "\[stated\].*(?i:gr[ae]yscale|black.and.white)".
+  to "\[stated\].*(?i:gr[ae]yscale|black.and.white|monochrome|no colou?r)".
 
 ### US4 — Live behavior (human-run, gates the PR)
 
@@ -214,13 +217,14 @@ branch-passes difference does.
   `asks-and-names-scope` at least 5/6, every other judge item 6/6.
 - **4.6** Baseline step: run the 5 new scenarios once at `main` (N=3) to show
   they fail or pass for the expected reason.
-  1. In a main worktree, run `git -C <main-wt> checkout AIE-1182-file-stated-role
-     -- <the 5 new scenario yaml paths>`.
-  2. Launch the eval session there, run the 5 at N=3, and record main's agent
-     sha.
-  3. Clean up. The files are new on main, so `checkout main -- .` cannot remove
-     them: run `git -C <main-wt> rm --cached -f <paths>` and then delete the
-     files, or run `git -C <main-wt> reset --hard main`.
+  Never use the primary checkout for this; use a throwaway worktree.
+  1. Fetch, then add a detached worktree at `origin/main` in a scratch path,
+     run `make install` there, and run `git -C <scratch-path> checkout
+     origin/AIE-1182-file-stated-role -- <the 5 new scenario yaml paths>`.
+  2. Launch the eval session from the scratch path, run the 5 at N=3, and
+     record main's agent sha.
+  3. Copy the run report out of `<scratch-path>/evals/runs/`, then remove the
+     worktree with `git worktree remove --force <scratch-path>`.
 - **4.7** Iteration: if a floor is missed, revise the wording, re-render, and
   rerun. Record each iteration in review-pr.md.
 

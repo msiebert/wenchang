@@ -18,7 +18,7 @@ assertions:
     turn: 1
   - kind: no_content_matching
     id: no-double-firing-saved
-    pattern: "(?i)twice|double|duplicat"
+    pattern: "(?i)twice|double|(?<!de)duplicat"
 judge:
   - id: asks-before-project-save
     rubric: The turn 1 reply explains a way to dedupe the double-firing Signup event and asks the user before saving that it fires twice on iOS to the project scope.

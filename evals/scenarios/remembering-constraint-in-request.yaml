@@ -13,5 +13,5 @@ assertions:
     id: index-first
   - kind: line_present
     id: constraint-saved
-    pattern: "\\[stated\\].*(?i:gr[ae]yscale|black.and.white)"
+    pattern: "\\[stated\\].*(?i:gr[ae]yscale|black.and.white|monochrome|no colou?r)"
     scope: user

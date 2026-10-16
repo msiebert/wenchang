@@ -62,7 +62,7 @@ Paths are under `tests/`.
 
 New held-outs (five), written from intent before the prompt edit:
 
-- `remembering-constraint-in-request`: grayscale printouts constraint inside a chart question, saved `[stated]` to `user`. The pattern was tightened to grayscale/black-and-white.
+- `remembering-constraint-in-request`: grayscale printouts constraint inside a chart question, saved `[stated]` to `user`. `constraint-saved` is `\[stated\].*(?i:gr[ae]yscale|black.and.white|monochrome|no colou?r)`.
 - `remembering-tool-in-question`: Jupyter notebook habit before an export question, saved `[stated]` to `user`.
 - `remembering-preference-mid-task`: the durable fact arrives in turn 2 of an ongoing task, a "percentages, never raw counts" preference, saved `[stated]` to `user`.
 - `remembering-transient-in-question`: over-correction guard; the train/wifi situation must not be saved, other saves allowed. The transient pattern was broadened (train, wifi, bandwidth, connectivity, offline, commute, travel).
@@ -73,8 +73,8 @@ US6 guards on existing scenarios (stricter, not weakened; existing fail sets are
 - `remembering-no-metric-value`: `definition-not-in-user`.
 - `filing-new-acronym`: `acronym-not-in-user`.
 - `curated-shared-conflict`: `definition-not-in-user` (deterministic).
-- `privacy-sensitive-private`: `no-sensitive-in-user`.
-- `filing-project-fact-in-question`: `no-double-firing-saved`.
+- `privacy-sensitive-private`: `no-sensitive-in-user`. The scenario header documents that this applies the stricter reading, because the user asked to share.
+- `filing-project-fact-in-question`: `no-double-firing-saved`, `(?i)twice|double|(?<!de)duplicat`, so "deduplicate" does not match; a canned test in `tests/` covers this.
 
 ## Live evals: PENDING
 
@@ -84,16 +84,20 @@ Held-outs passing at main do not demonstrate the fix; only a main-fails/branch-p
 
 ### Step 1: baseline at main
 
-Run the 5 new scenarios once at main (N=3) to show they fail or pass for the expected reason. `<main-wt>` is a worktree at `origin/main`.
+Run the 5 new scenarios once at main (N=3) to show they fail or pass for the expected reason.
+
+Never use the primary checkout (/Users/marksiebert/p/github/wenchang) for this; use a throwaway worktree. `<scratch-path>` is a new path outside the repo.
 
 ```
 git -C /Users/marksiebert/p/github/wenchang fetch origin
-git -C <main-wt> checkout origin/AIE-1182-file-stated-role -- evals/scenarios/remembering-constraint-in-request.yaml evals/scenarios/remembering-tool-in-question.yaml evals/scenarios/remembering-transient-in-question.yaml evals/scenarios/filing-project-fact-in-question.yaml evals/scenarios/remembering-preference-mid-task.yaml
+git -C /Users/marksiebert/p/github/wenchang worktree add --detach <scratch-path> origin/main
+make -C <scratch-path> install
+git -C <scratch-path> checkout origin/AIE-1182-file-stated-role -- evals/scenarios/remembering-constraint-in-request.yaml evals/scenarios/remembering-tool-in-question.yaml evals/scenarios/remembering-transient-in-question.yaml evals/scenarios/filing-project-fact-in-question.yaml evals/scenarios/remembering-preference-mid-task.yaml
 ```
 
 Main's `tests/` and `CORPUS` will not match the extra scenarios; that is fine because tests are not run there.
 
-From `<main-wt>`, launch the eval session with the standard launch command (Step 2, interactive), then run:
+From `<scratch-path>`, launch the eval session with the standard launch command (Step 2, interactive), then run:
 
 ```
 /run-evals --model sonnet --trials 3 --judge remembering-constraint-in-request remembering-tool-in-question remembering-transient-in-question filing-project-fact-in-question remembering-preference-mid-task
@@ -102,16 +106,15 @@ From `<main-wt>`, launch the eval session with the standard launch command (Step
 Record main's agent sha:
 
 ```
-shasum -a 256 <main-wt>/.claude/agents/wenchang-eval.md
+shasum -a 256 <scratch-path>/.claude/agents/wenchang-eval.md
 ```
 
 Main's agent sha256: `PENDING`
 
-Clean up. The files are new on main, so this removes the staged files; run `clean -n` first to double-check nothing else is untracked:
+Copy the run report out of `<scratch-path>/evals/runs/` before removing the worktree:
 
 ```
-git -C <main-wt> reset --hard origin/main
-git -C <main-wt> clean -n
+git -C /Users/marksiebert/p/github/wenchang worktree remove --force <scratch-path>
 ```
 
 | Scenario | t1 | t2 | t3 | Expected reason / notes |
@@ -180,14 +183,18 @@ Iterations: none yet.
 ### PR body snippet (baseline at main)
 
 ```
-Baseline at main (5 new held-outs, N=3; passing at main does not demonstrate the fix):
+Baseline at main (5 new held-outs, N=3; passing at main does not demonstrate the fix).
+Never use the primary checkout (/Users/marksiebert/p/github/wenchang) for this; use a throwaway worktree.
 git -C /Users/marksiebert/p/github/wenchang fetch origin
-git -C <main-wt> checkout origin/AIE-1182-file-stated-role -- evals/scenarios/remembering-constraint-in-request.yaml evals/scenarios/remembering-tool-in-question.yaml evals/scenarios/remembering-transient-in-question.yaml evals/scenarios/filing-project-fact-in-question.yaml evals/scenarios/remembering-preference-mid-task.yaml
+git -C /Users/marksiebert/p/github/wenchang worktree add --detach <scratch-path> origin/main
+make -C <scratch-path> install
+git -C <scratch-path> checkout origin/AIE-1182-file-stated-role -- evals/scenarios/remembering-constraint-in-request.yaml evals/scenarios/remembering-tool-in-question.yaml evals/scenarios/remembering-transient-in-question.yaml evals/scenarios/filing-project-fact-in-question.yaml evals/scenarios/remembering-preference-mid-task.yaml
 # main's tests/CORPUS won't match; tests are not run there
-# launch the eval session from <main-wt>, then:
+# launch the eval session from <scratch-path> with the standard launch command, then:
 /run-evals --model sonnet --trials 3 --judge remembering-constraint-in-request remembering-tool-in-question remembering-transient-in-question filing-project-fact-in-question remembering-preference-mid-task
-shasum -a 256 <main-wt>/.claude/agents/wenchang-eval.md
-git -C <main-wt> reset --hard origin/main   # then: git -C <main-wt> clean -n
+shasum -a 256 <scratch-path>/.claude/agents/wenchang-eval.md   # record main's agent sha
+# copy the run report out of <scratch-path>/evals/runs/ before removing
+git -C /Users/marksiebert/p/github/wenchang worktree remove --force <scratch-path>
 ```
 
 ## Look closely at

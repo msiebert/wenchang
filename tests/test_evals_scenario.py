@@ -14,6 +14,7 @@ from evals.reference_adopter import (
 )
 from evals.scenario import (
     ASSERTION_KINDS,
+    SCENARIO_DIR,
     AliasPresent,
     ArgMatcher,
     CalledBefore,
@@ -614,3 +615,25 @@ def test_judge_rubrics_name_their_turn() -> None:
         if re.match(r"The (session \d+ )?turn \d+ reply", j.rubric) is None
     ]
     assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("text", "should_match"),
+    [
+        ("- [observed] Asked how to deduplicate Signup.", False),
+        ("asked how to deduplicate Signup", False),
+        ("- [stated] Signup sends duplicate events on iOS.", True),
+    ],
+)
+def test_no_double_firing_pattern_ignores_deduplicate(text: str, should_match: bool) -> None:
+    """The filing scenario's no-double-firing-saved pattern matches a stored
+    "duplicate" fact but not the word "deduplicate" (AIE-1182, US6.1).
+    """
+    scenario = load_scenario(SCENARIO_DIR / "filing-project-fact-in-question.yaml")
+    [assertion] = [
+        a
+        for a in scenario.assertions
+        if isinstance(a, NoContentMatching) and a.id == "no-double-firing-saved"
+    ]
+
+    assert (re.search(assertion.pattern, text) is not None) is should_match
