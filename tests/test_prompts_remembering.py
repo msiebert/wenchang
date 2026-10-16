@@ -186,12 +186,12 @@ def test_fact_line_pattern_counts_multiple_lines() -> None:
     "phrase",
     [
         "Write facts as they arise",
-        "before you ask a follow-up",
+        "before you answer or ask a follow-up",
         "conversation may end",
     ],
 )
 def test_body_describes_write_timing(phrase: str) -> None:
-    """AIE-1050, US6; AIE-1165: BODY says to write facts as they arise."""
+    """AIE-1050, US6; AIE-1165; AIE-1182: BODY says to write facts as they arise."""
     assert phrase in _flat(remembering.BODY)
 
 
@@ -205,33 +205,28 @@ def test_body_leaves_privacy_override_to_privacy_section(phrase: str) -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
-        "When the user mentions their own work role, team, or responsibilities, "
-        "even inside a question, save it as a fact about them before you answer.",
-        "their own work role",
-        "inside a question",
-        "as a fact about them",
-        "before you answer",
+        "Check every user message for facts worth saving",
+        "whatever its form",
+        "a question or request can carry one",
     ],
 )
-def test_body_covers_incidental_role_mentions(phrase: str) -> None:
-    """AIE-1182, US1.1: BODY says to save a work role mentioned in a question before answering."""
+def test_body_checks_every_user_message(phrase: str) -> None:
+    """AIE-1182, US1.1: BODY says to check every user message, whatever its form."""
     assert phrase in _flat(remembering.BODY)
 
 
-def test_incidental_role_rule_sits_in_write_timing_paragraph() -> None:
-    """AIE-1182, US1.2: the role-mention rule follows the write-timing sentence in its paragraph."""
+def test_check_rule_precedes_write_timing_in_one_paragraph() -> None:
+    """AIE-1182, US1.2: the check-every-message rule precedes the write-timing sentence."""
     timing = "Write facts as they arise"
-    matches = [p for p in remembering.BODY.split("\n\n") if timing in _flat(p)]
+    matches = [p for p in remembering.BODY.split("\n\n") if timing in p]
     assert len(matches) == 1
     flat = _flat(matches[0])
-    assert "inside a question" in flat
-    assert flat.index("inside a question") > flat.index(timing)
+    assert "Check every user message" in flat
+    assert flat.index("Check every user message") < flat.index(timing)
 
 
-def test_assembled_prompt_carries_incidental_role_rule() -> None:
-    """AIE-1182, US1.3: the assembled remembering section includes the role-mention rule."""
+def test_assembled_prompt_carries_check_rule() -> None:
+    """AIE-1182, US1.3: the assembled remembering section includes the check-every-message rule."""
     prompt = build_memory_prompt(REFERENCE_SLOTS)
     section = prompt.split("## Deciding what to remember", 1)[1].split("\n## ", 1)[0]
-    assert "their own work role, team, or responsibilities, even inside a question" in _flat(
-        section
-    )
+    assert "Check every user message for facts worth saving" in _flat(section)

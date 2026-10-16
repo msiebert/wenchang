@@ -27,7 +27,7 @@ prose:
 Never put an end date in metadata, add a per-fact timestamp, or guess an end date the user did not
 state.
 
-Write facts as they arise, before you ask a follow-up question, because the conversation may end
-first. When the user mentions their own work role, team, or responsibilities, even inside a
-question, save it as a fact about them before you answer.
+Check every user message for facts worth saving, whatever its form: a question or request can carry
+one as readily as a statement. Write facts as they arise, before you answer or ask a follow-up
+question, because the conversation may end first.
 """

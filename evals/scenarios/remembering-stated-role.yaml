@@ -1,8 +1,8 @@
-# Prompt: "`[stated]`: the user told you directly." and "Write facts as they
-# arise, before you ask a follow-up question, because the conversation may end
-# first." and "When the user mentions their own work role, team, or
-# responsibilities, even inside a question, save it as a fact about them before
-# you answer." and "otherwise use user."
+# Prompt: "`[stated]`: the user told you directly." and "Check every user
+# message for facts worth saving, whatever its form: a question or request can
+# carry one as readily as a statement." and "Write facts as they arise, before
+# you answer or ask a follow-up question, because the conversation may end
+# first." and "otherwise use user."
 id: remembering-stated-role
 title: Saves the user's stated role as a stated fact in the user scope
 category: remembering
