@@ -247,6 +247,44 @@ async def replace_wrong(d: Driver) -> None:
     await d.turn(2, 1)
 
 
+async def replace_overwrite_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "workflows", "weekly-report", f"{GROWTH}\n", "Weekly report routine")
+    await d.turn(1, 1)
+    await d.index()
+    version = (await d.read("user", "workflows", "weekly-report"))["version"]
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-report",
+        content="- [stated] Sends the weekly report to the retention team"
+        " (previously sent to the growth team).\n",
+        description="Weekly report routine",
+        aliases=[],
+        expected_version=version,
+    )
+    await d.turn(2, 1)
+
+
+async def replace_with_stale_metadata(d: Driver) -> None:
+    await d.index()
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-report",
+        content=f"{GROWTH}\n",
+        description="Weekly report to the growth team",
+        aliases=["growth report"],
+        expected_version=None,
+    )
+    await d.turn(1, 1)
+    await d.index()
+    await d.replace("user", "workflows", "weekly-report", GROWTH, RETENTION)
+    await d.turn(2, 1)
+
+
 # --- forgetting-whole-file ----------------------------------------------------
 
 
@@ -723,7 +761,7 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "recall-replace-fact",
         replace_correct,
         replace_wrong,
-        {"replaced-in-session-2", "one-recipient-line"},
+        {"replaced-in-session-2", "one-recipient-line", "old-recipient-gone"},
     ),
     (
         "forgetting-whole-file",
@@ -894,6 +932,28 @@ def test_wrong_driver_fails_exactly_the_listed_assertions(
     assert _failed(graded) == fails, graded
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+def test_recall_replace_fact_flags_a_previously_clause(tmp_path: Path) -> None:
+    """Overwriting with a "previously" note fails the replace and old-recipient
+    assertions (AIE-1183).
+    """
+    graded, report = _run_trial(tmp_path, "recall-replace-fact", replace_overwrite_wrong)
+
+    assert _failed(graded) == {"replaced-in-session-2", "old-recipient-gone"}, graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+def test_recall_replace_fact_ignores_stale_metadata(tmp_path: Path) -> None:
+    """Stale description and aliases that mention the old recipient do not fail
+    the scenario (AIE-1183).
+    """
+    graded, report = _run_trial(tmp_path, "recall-replace-fact", replace_with_stale_metadata)
+
+    assert _failed(graded) == set(), graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (1, 1)
 
 
 def test_every_shipped_scenario_has_scripted_drivers() -> None:
