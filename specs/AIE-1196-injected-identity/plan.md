@@ -70,7 +70,8 @@ unchanged.
   - `remembering-fact-about-user` and `remembering-stated-name`:
     "`[stated]`: the user told you directly."
 - Prompt commit: all seven `no-operator-name` files add "You know the user
-  only through memory and what they tell you in this conversation."
+  who the user is only through memory and what they tell you in this
+  conversation."
 
 ### Scripted drivers (`tests/test_evals_end_to_end.py`)
 
