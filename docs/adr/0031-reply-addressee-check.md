@@ -4,7 +4,7 @@ Date: 2026-10-16
 
 ## Status
 
-Accepted. The preamble part depends on the measurement under Consequences.
+Accepted. The preamble part passed the measurement under Consequences.
 
 ## Context
 
@@ -99,8 +99,11 @@ honest preamble, to be kept only if a measurement showed it helps.
   and the check lands alone. Measure before AIE-1182 or AIE-1183 land, and
   merge AIE-1184 first. One known confound: the baseline predates
   5bd1355's `model=` rule.
-- **Outcome: PENDING.** The measured counts go here and in
-  `specs/AIE-1184-eval-reply-addressee/review-pr.md`.
+- **Outcome: preamble kept.** The gate passed on one N=6 `--judge` run
+  (138 trials of the 23 baseline scenarios, commit 6e1d259) at 8 of 138
+  flagged trials against a baseline of 16. No scenario fell more than 1
+  below baseline, and summed judge passes were 45 of 48, equal to baseline.
+  Details are in `specs/AIE-1184-eval-reply-addressee/review-pr.md`.
 - **Limits.**
   - The pattern misses phrasings like "they asked me to", so the count is
     a lower bound.
