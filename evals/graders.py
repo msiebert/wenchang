@@ -534,23 +534,23 @@ THIRD_PERSON_PATTERN: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 _STATEMENT_SPLIT: Final = re.compile(r"\n[ \t]*\n|;")
-_SELECT_FROM: Final = re.compile(r"\bselect\b.*?\bfrom\s+[a-z_][\w.]*(.*)", re.I | re.S)
+_SELECT: Final = re.compile(r"\bselect\b", re.I)
+_FROM: Final = re.compile(r"\bfrom\s+[a-z_][\w.]*", re.I)
 _SELECT_CLAUSE: Final = re.compile(
     r"\bjoin\s+[a-z_][\w.]*(?:\s+(?:as\s+)?[a-z_]\w*)?\s+on\b"
-    r"|\bwhere\s+[a-z_][\w.]*\s*(?:=|<>|!=|<=|>=|<|>)"
-    r"|\bgroup\s+by\b|\border\s+by\b",
+    r"|\bwhere\s+[a-z_][\w.]*\s*(?:=|<>|!=|<=|>=|<|>)",
     re.I,
 )
 _SQL_WRITE: Final = re.compile(
-    r"\binsert\s+into\s+[a-z_]"
+    r"\binsert\s+into\s+[a-z_][\w.]*\s*(?:\(|values\b|select\b)"
     r"|\bupdate\s+[a-z_][\w.]*\s+set\s+[a-z_][\w.]*\s*="
     r"|\bdelete\s+from\s+[a-z_][\w.]*\s+where\b"
-    r"|\bcreate\s+table\b",
+    r"|\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?[a-z_][\w.]*\s*\(",
     re.I,
 )
 _ADDRESSEE_END: Final = re.compile(
-    r"(?<![\w'])(?:(?:asks?|asked|asking|tells?|told|telling|reminds?|reminded|informs?"
-    r"|informed|reminding|informing)|(?:check|confirm)\s+with|(?:wait|waiting)\s+for"
+    rf"(?<![\w{_APOSTROPHES}])(?:(?:asks?|asked|asking|tells?|told|telling|reminds?|reminded"
+    r"|informs?|informed)|(?:check|confirm)\s+with|(?:wait|waiting)\s+for"
     r"|(?:reply|respond)\s+to)$",
     re.I,
 )
@@ -617,7 +617,6 @@ _SPEECH_VERBS: Final = frozenset(
         "noted",
     ]
 )
-_WORD: Final = re.compile(rf"[\w{_APOSTROPHES}]+")
 _FENCED_BLOCK: Final = re.compile(r"^[ \t]*```.*?(?:^[ \t]*```[^\n]*$|\Z)", re.M | re.S)
 _QUOTE_LINE: Final = re.compile(r"^[ \t]*>.*$", re.M)
 _QUOTED_SPAN: Final = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
@@ -662,8 +661,9 @@ def _has_sql(text: str) -> bool:
     for statement in _STATEMENT_SPLIT.split(text):
         if _SQL_WRITE.search(statement):
             return True
-        m = _SELECT_FROM.search(statement)
-        if m and _SELECT_CLAUSE.search(m.group(1)):
+        select = _SELECT.search(statement)
+        source = _FROM.search(statement, select.end()) if select else None
+        if source and _SELECT_CLAUSE.search(statement, source.end()):
             return True
     return False
 
@@ -673,16 +673,13 @@ def _is_data_use(reply: str, match: re.Match[str]) -> bool:
     phrase = match.group().lower()
     if not phrase.endswith("user") or _ADDRESSEE_END.search(reply[: match.start()].rstrip()):
         return False
-    words = _WORD.finditer(reply, match.end())
-    following = next(words, None)
-    if following is None or following.group().lower() not in _DATA_VERBS:
+    following = _NEXT_WORD.match(reply, match.end())
+    if following is None or following.group().strip().lower() not in _DATA_VERBS:
         return False
-    if reply[match.end() : following.start()].strip():
-        return False
-    after = next(words, None)
-    if after is not None and after.group().lower() in _ADVERBS:
-        after = next(words, None)
-    return after is None or after.group().lower() not in _SPEECH_VERBS
+    after = _NEXT_WORD.match(reply, following.end())
+    if after is not None and after.group().strip().lower() in _ADVERBS | {"been"}:
+        after = _NEXT_WORD.match(reply, after.end())
+    return after is None or after.group().strip().lower() not in _SPEECH_VERBS
 
 
 def find_third_person_replies(
@@ -698,6 +695,7 @@ def find_third_person_replies(
         for f in scenario.seed_files
         for part in (f.content, f.description, *f.aliases)
     ]
+    user_sql = {(u.session, u.turn): _has_sql(u.user) for u in transcript}
     flags: list[ThirdPersonReply] = []
     for t in transcript:
         users = [
@@ -705,7 +703,9 @@ def find_third_person_replies(
         ]
         reply = _unquoted(t.reply)
         sql_turn = _has_sql(t.reply) or any(
-            _has_sql(u.user) for u in transcript if u.session == t.session and u.turn <= t.turn
+            has
+            for (session, turn), has in user_sql.items()
+            if session == t.session and turn <= t.turn
         )
         for match in THIRD_PERSON_PATTERN.finditer(reply):
             if sql_turn and _is_data_use(reply, match):

@@ -4,6 +4,7 @@ import json
 import random
 import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -1214,6 +1215,9 @@ def test_reply_check_flags_a_data_verb_without_sql() -> None:
         "Select the option from the list where it is needed.",
         "Select a report from Insights.\n\nThen order by date.",
         "Select the rows from the export; then where x = 1 applies.",
+        "Select the files from memory and order by date.",
+        "I'll insert into the memory file.",
+        "Let me create table of contents.",
     ],
 )
 def test_reply_check_prose_is_not_an_sql_turn(user: str) -> None:
@@ -1221,6 +1225,139 @@ def test_reply_check_prose_is_not_an_sql_turn(user: str) -> None:
     assert _flags(_turns("The user has a draft.", user=user)) == (
         ThirdPersonReply(1, 1, "the user has"),
     )
+
+
+@pytest.mark.parametrize(
+    ("reply", "phrase"),
+    [
+        ("The user has been asked twice.", "the user has"),
+        ("The user also has two rows.", "the user also"),
+    ],
+)
+def test_reply_check_sql_turn_lookahead_edges(reply: str, phrase: str) -> None:
+    """The word "been" is skipped like an adverb; an adverb before the data verb is not
+    (AIE-1199, US2.11).
+    """
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+def test_reply_check_sql_turn_punctuation_ends_the_lookahead() -> None:
+    """A sentence end stops the look-ahead, so "The user exists." is exempt (AIE-1199, US2.11)."""
+    assert _flags(_turns("The user exists. Note it.", user=SQL_USER)) == ()
+
+
+ADDRESSEES = [
+    "ask",
+    "asks",
+    "asked",
+    "asking",
+    "tell",
+    "tells",
+    "told",
+    "telling",
+    "remind",
+    "reminds",
+    "reminded",
+    "inform",
+    "informs",
+    "informed",
+    "check with",
+    "confirm with",
+    "wait for",
+    "waiting for",
+    "reply to",
+    "respond to",
+]
+
+ADVERBS = ["also", "already", "just", "explicitly", "previously", "not", "never"]
+
+SPEECH_VERBS = [
+    "ask",
+    "asked",
+    "asking",
+    "say",
+    "said",
+    "saying",
+    "tell",
+    "told",
+    "telling",
+    "mention",
+    "mentioned",
+    "mentioning",
+    "request",
+    "requested",
+    "requesting",
+    "state",
+    "stated",
+    "explain",
+    "explained",
+    "confirm",
+    "confirmed",
+    "want",
+    "wanted",
+    "wanting",
+    "write",
+    "wrote",
+    "written",
+    "share",
+    "shared",
+    "paste",
+    "pasted",
+    "prefer",
+    "preferred",
+    "reply",
+    "replied",
+    "answer",
+    "answered",
+    "clarify",
+    "clarified",
+    "note",
+    "noted",
+]
+
+
+@pytest.mark.parametrize("word", ADDRESSEES)
+def test_reply_check_every_addressee_word_blocks_the_exemption(word: str) -> None:
+    """Each addressee word before "the user who" keeps the flag in an SQL turn
+    (AIE-1199, US2.12).
+    """
+    reply = f"I will {word} the user who owns it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user who"),)
+
+
+def test_reply_check_curly_apostrophe_addressee_blocks_the_exemption() -> None:
+    """A curly apostrophe in the text before the match does not hide the addressee
+    word (AIE-1199, US2.12).
+    """
+    reply = "I\u2019ll tell the user who owns it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user who"),)
+
+
+@pytest.mark.parametrize("adverb", ADVERBS)
+def test_reply_check_every_adverb_is_skipped_before_a_speech_verb(adverb: str) -> None:
+    """Each adverb between the data verb and a speech verb still flags (AIE-1199, US2.12)."""
+    reply = f"The user has {adverb} asked for it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+@pytest.mark.parametrize("verb", SPEECH_VERBS)
+def test_reply_check_every_speech_verb_after_a_data_verb_is_flagged(verb: str) -> None:
+    """Each speech verb after a data verb keeps the flag in an SQL turn (AIE-1199, US2.12)."""
+    reply = f"The user did {verb} it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user did"),)
+
+
+def test_reply_check_long_select_run_is_checked_quickly() -> None:
+    """A 200,000-character user text of repeated "select " is checked in under
+    two seconds (AIE-1199, US2.13).
+    """
+    user = "select " * 28572
+    start = time.perf_counter()
+    flags = _flags(_turns("The user has a draft.", user=user))
+    elapsed = time.perf_counter() - start
+
+    assert flags == (ThirdPersonReply(1, 1, "the user has"),)
+    assert elapsed < 2.0
 
 
 def test_reply_check_sql_in_another_session_does_not_count() -> None:
