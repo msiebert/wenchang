@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-16
 
-**Status**: Approved after adversarial spec review round 3
+**Status**: Approved after adversarial spec review round 3; amended after code review
 
 **Input**: Linear AIE-1199; ADR 0031; the AIE-1184 N=6 run
 (`wenchang-AIE-1184/evals/runs/aie1184-n6`) and the AIE-1185 N=3 run
@@ -55,8 +55,10 @@ user taps the button" (1). These name product and data vocabulary or an
 end user of the product, not the person the agent addresses. Its other 6
 flags, and all 6 flags of the AIE-1183 N=6 run, are true positives.
 
-This issue does three things (the third is the vocabulary rule, US1.7 to
-US1.9):
+This issue does three things. The first two are below. The third is the
+vocabulary rule: a non-possessive "the user" followed by a data noun ("the
+user ID") or an interface action verb ("the user taps") is never a match,
+in any turn (US1.7 to US1.9).
 
 1. **SQL turns exempt data verbs.** A turn is an SQL turn when its reply,
    or any user text of its session up to that turn, contains an SQL
@@ -123,14 +125,17 @@ AIE-1182 run, returns no flag:
 **US1.8** "the user" directly followed by an interface action verb names an
 end user of the product, and is not flagged in any turn. The verbs are:
 taps, tapped, clicks, clicked, swipes, swiped, scrolls, scrolled, presses,
-pressed, hovers, hovered, installs, installed, launches, visits, lands,
-logs, signs. Given the AIE-1182 trial 6 excerpt "for example a UUID created
+pressed, hovers, hovered. ("logs", "signs", "visits", and "installs" are
+left out: a memory agent may use them of the person it addresses.) Given the AIE-1182 trial 6 excerpt "for example a UUID created
 when the user taps the button.", the check returns no flag.
 
-**US1.9** The rules of US1.7 and US1.8 apply to "the user" only, never to
-a possessive or to "the caller". Given "I'll check the user's profile." the
+**US1.9** The rules of US1.7 and US1.8 apply in every turn, SQL turns
+included; they act on the pattern, so a vocabulary use is never a match
+and the SQL-turn rule never sees it. They apply to "the user" only, never
+to a possessive or to "the caller". Given "I'll check the user's profile." the
 check flags "the user's profile". Given "Ask the user\nProfile questions
-later." it flags "the user" (a newline is not a compound separator).
+later." it flags "the user profile" (the phrase rule still reads the next
+word across the newline; a newline is not a compound separator).
 
 ### US2 — Third-person replies are still flagged
 
@@ -196,6 +201,23 @@ text below and the reply "The user has a draft.", the reply is flagged with
   (select and from in one paragraph, the clause in another)
 - "Select the rows from the export; then where x = 1 applies."
   (a `;` ends the statement)
+- "Select the files from memory and order by date." ("order by" and
+  "group by" are not SQL markers)
+- "I'll insert into the memory file." (an insert needs `(`, `values`, or
+  `select` after the table)
+- "Let me create table of contents." (a create needs `(` after the name)
+
+**US2.11** In an SQL turn, "The user has been asked twice." is flagged with
+"the user has" ("been" is skipped like an adverb). "The user exists. Note
+it." is not flagged: punctuation ends the look-ahead. "The user also has
+two rows." is flagged with "the user also" (the adverb is skipped only
+after the data verb).
+
+**US2.12** Each addressee word, adverb, and speech verb of US2.3 and US2.4
+is covered by a parametrized test.
+
+**US2.13** A user text of 200,000 characters made of repeated "select "
+with no "from" is checked in under two seconds.
 
 **US2.8** Given SQL in another session only, when a reply in this session
 says "The user has a draft", then it is flagged.
@@ -257,7 +279,11 @@ does not make a data turn; "the caller" is not exempt; an SQL statement
 with a blank line inside it, or a `;` inside a string literal, is split and
 may not be recognized (a missed exemption, the safe direction); in an SQL
 turn a third-person reply like "the user has a draft" with no addressee
-word before it is exempt.
+word before it is exempt; "the user has to approve" in an SQL turn is
+exempt; a quoted span deleted between "the user" and a data verb ("the
+user "x" has") lets the exemption apply; a `transcript_error` naming an
+absolute path is rewritten once after a run dir is copied; a data noun or interface verb used of the
+addressee ("I'll update the user profile they described") is now missed.
 
 **US4.2** `specs/AIE-1199-third-person-data-rows/review-pr.md` exists, from
 the template, with the acceptance-criteria to test mapping and the

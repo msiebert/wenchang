@@ -26,12 +26,18 @@ Case-insensitive, on raw text (fences, backticks, and quotes not stripped).
 Split the text into statements at blank lines (`\n[ \t]*\n`) and at `;`.
 True when any one statement holds either:
 
-1. `\bselect\b` ... `\bfrom\s+[a-z_][\w.]*` and, after that `from`, one of:
+1. `\bselect\b`, then the first `\bfrom\s+[a-z_][\w.]*` after it, and,
+   after that `from`, one of:
    - `\bjoin\s+[a-z_][\w.]*(?:\s+(?:as\s+)?[a-z_]\w*)?\s+on\b`
    - `\bwhere\s+[a-z_][\w.]*\s*(?:=|<>|!=|<=|>=|<|>)`
-   - `\bgroup\s+by\b` or `\border\s+by\b`
-2. `\binsert\s+into\s+[a-z_]`, `\bupdate\s+[a-z_][\w.]*\s+set\s+[a-z_][\w.]*\s*=`,
-   `\bdelete\s+from\s+[a-z_][\w.]*\s+where\b`, or `\bcreate\s+table\b`.
+   ("group by" and "order by" are not markers: prose uses them.) Each
+   search runs once per statement, so the cost is linear in the text.
+2. `\binsert\s+into\s+[a-z_][\w.]*\s*(?:\(|values\b|select\b)`,
+   `\bupdate\s+[a-z_][\w.]*\s+set\s+[a-z_][\w.]*\s*=`,
+   `\bdelete\s+from\s+[a-z_][\w.]*\s+where\b`, or
+   `\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?[a-z_][\w.]*\s*\(`.
+
+`_has_sql` runs once per user turn and once per reply, not once per pair.
 
 Newlines inside a statement are allowed, so multi-line SQL counts.
 
@@ -47,8 +53,10 @@ In an SQL turn, a match is skipped when all hold:
   whitespace trimmed) does not end with an addressee word from spec US2.3;
 - the next word (the same word `_NEXT_WORD` already finds) is a data verb
   from spec US1.6, whole word, case-insensitive;
-- the word after it, skipping at most one adverb from spec US2.4, is not a
-  speech verb from spec US2.4.
+- the word after it, skipping at most one adverb from spec US2.4 or
+  "been", is not a speech verb from spec US2.4. Only whitespace may sit
+  between these words; punctuation ends the look-ahead, so "The user
+  exists. Note it." reads no word after "exists".
 
 The match is `the user` or `the caller`; only `the user` is exempt (US2.10).
 The echo rule is unchanged and still applies. Reported phrases are
