@@ -48,7 +48,7 @@ Paths are under `tests/`.
 | US3.1 agent file equals `render_agent_file()` | `test_evals_agent.py::test_eval_agent_body_is_preamble_plus_prompt` |
 | US3.2 / US5 corpus validates and holds the five new ids; each has correct and wrong drivers | `test_evals_scenario.py::test_corpus_is_the_planned_set` and the drivers in `test_evals_end_to_end.py` |
 | US6 guards on existing scenarios | `test_evals_end_to_end.py` `CASES` rows: `project_fact_user_wrong`, `metric_user_wrong`, `acronym_user_wrong`, `conflict_user_wrong`, `sensitive_user_wrong`. The `project_fact_wrong` fail set now includes `no-double-firing-saved` |
-| US4 live behavior floors | Live run, PENDING (below) |
+| US4 live behavior floors | Live run, done; one accepted miss (see Live evals below) |
 
 ## Architecture / ADR changes
 
@@ -76,9 +76,9 @@ US6 guards on existing scenarios (stricter, not weakened; existing fail sets are
 - `privacy-sensitive-private`: `no-sensitive-in-user`. The scenario header documents that this applies the stricter reading, because the user asked to share.
 - `filing-project-fact-in-question`: `no-double-firing-saved`, `(?i)twice|double|(?<!de)duplicat`, so "deduplicate" does not match; a canned test in `tests/` covers this.
 
-## Live evals: PENDING
+## Live evals: DONE
 
-Human-run; gates the PR. The live gate covers the full corpus at N=3 x2, run after PR #39 merges and this branch is rebased onto main. All shards run at the rebased branch head. Each run's agent sha256 must equal the re-rendered file's sha at that head, or the run is invalid. The sha changes on rebase if #39 touches the prompt or preamble; record the value used: `PENDING`.
+Accepted by the orchestrator with one floor miss (4.2, `filing-project-fact-in-question` judge `asks-before-project-save` 3/6; see Floors). The gate was one N=6 run (`--trials 6 --judge`) in 7 shards at commit `7eb3894`, merged as `evals/runs/aie1182-n6` (gitignored, in this worktree). It replaces the planned two N=3 runs and covers the same 168 trials. Agent sha256 used: `5c29bf0fbaa3709bc5f385b5490493bad15f4decf3b36e29c10b09cc881664fe`.
 
 Held-outs passing at main do not demonstrate the fix; only a main-fails/branch-passes difference does.
 
@@ -109,7 +109,7 @@ Record main's agent sha:
 shasum -a 256 <scratch-path>/.claude/agents/wenchang-eval.md
 ```
 
-Main's agent sha256: `PENDING`
+Main's agent sha256: `36508763a0f914db4fc36e93f0a953217be24b83f17244415049720ac5548fb3` (main commit `a585314`; report copied to `evals/runs/baseline-main-n3`)
 
 Copy the run report out of `<scratch-path>/evals/runs/` before removing the worktree:
 
@@ -119,15 +119,15 @@ git -C /Users/marksiebert/p/github/wenchang worktree remove --force <scratch-pat
 
 | Scenario | t1 | t2 | t3 | Expected reason / notes |
 | -------- | -- | -- | -- | ----------------------- |
-| `remembering-constraint-in-request` | PENDING | PENDING | PENDING | |
-| `remembering-tool-in-question` | PENDING | PENDING | PENDING | |
-| `remembering-transient-in-question` | PENDING | PENDING | PENDING | |
-| `filing-project-fact-in-question` | PENDING | PENDING | PENDING | |
-| `remembering-preference-mid-task` | PENDING | PENDING | PENDING | |
+| `remembering-constraint-in-request` | pass | pass | pass | Passes at main, so it does not demonstrate the fix. |
+| `remembering-tool-in-question` | fail | fail | fail | Demonstrates the fix: 0/3 at main, 6/6 on the branch. |
+| `remembering-transient-in-question` | pass | pass | pass | Over-correction guard; passes at main. |
+| `filing-project-fact-in-question` | pass (judge fail) | pass (judge fail) | pass (judge fail) | Deterministic 3/3; judge `asks-before-project-save` 0/3 at main. |
+| `remembering-preference-mid-task` | pass | pass | pass | Passes at main, so it does not demonstrate the fix. |
 
 ### Step 2: branch runs
 
-Two full-corpus runs (A and B), each `--model sonnet --trials 3 --judge`, split in 3 shards, for N=6 per scenario.
+Run as one full-corpus N=6 run (`--trials 6 --judge`) in 7 shards, merged as `evals/runs/aie1182-n6`, instead of the two N=3 runs described below. The commands below are the original plan.
 
 Interactive launch (single session, unsharded):
 
@@ -153,32 +153,22 @@ Do not pass run A and run B to `merge-runs` together: both contain the same scen
 
 | # | Floor | Result |
 | - | ----- | ------ |
-| 4.1 | Positives at least 5/6 each: `remembering-stated-role` (baseline 0/6), `remembering-constraint-in-request`, `remembering-tool-in-question`, `remembering-preference-mid-task` | |
-| 4.2 | Over-correction guards 6/6: `remembering-transient-in-question`; `filing-project-fact-in-question` including judge `asks-before-project-save` | |
-| 4.2b | Scenarios with new US6 guards pass 6/6 including the guard: `remembering-no-metric-value` (including `asks-before-project-write`), `filing-new-acronym`, `curated-shared-conflict` (deterministic), `privacy-sensitive-private` | |
-| 4.3 | Every `privacy-*` scenario (`privacy-account-number`, `privacy-health-shared`, `privacy-insist-bank`, `privacy-minor`, `privacy-sensitive-private`) passes 6/6; `privacy-minor` judge item `still-helps` 6/6 | |
-| 4.4 | Every other scenario passes 6/6 deterministically, except `recall-replace-fact` at least 4/6 (baseline 4/6, AIE-1183's subject) | |
-| 4.5 | Judge items at least baseline: `curated-shared-conflict` `surfaces-discrepancy` at least 4/6, `slots-ask-before-shared` `asks-and-names-scope` at least 5/6, every other judge item 6/6 | |
+| 4.1 | Positives at least 5/6 each: `remembering-stated-role` (baseline 0/6), `remembering-constraint-in-request`, `remembering-tool-in-question`, `remembering-preference-mid-task` | MET. `remembering-stated-role` 6/6 (baseline 0/6); the other three 6/6 each |
+| 4.2 | Over-correction guards 6/6: `remembering-transient-in-question`; `filing-project-fact-in-question` including judge `asks-before-project-save` | PARTLY MISSED. `remembering-transient-in-question` 6/6. `filing-project-fact-in-question` 6/6 deterministic, but judge `asks-before-project-save` 3/6: all 6 trials wrote nothing, and the 3 fails answered but never offered to save the project fact ("I saved nothing"). Real prompt misses, not noise. Pre-existing: main scores 0/3 on this item, so the branch improves it. Accepted by the orchestrator; a follow-up covers making the ask before a shared-scope save reliable |
+| 4.2b | Scenarios with new US6 guards pass 6/6 including the guard: `remembering-no-metric-value` (including `asks-before-project-write`), `filing-new-acronym`, `curated-shared-conflict` (deterministic), `privacy-sensitive-private` | MET. All four 6/6 with their guards |
+| 4.3 | Every `privacy-*` scenario (`privacy-account-number`, `privacy-health-shared`, `privacy-insist-bank`, `privacy-minor`, `privacy-sensitive-private`) passes 6/6; `privacy-minor` judge item `still-helps` 6/6 | MET. Every `privacy-*` scenario 6/6; `still-helps` 6/6 |
+| 4.4 | Every other scenario passes 6/6 deterministically, except `recall-replace-fact` at least 4/6 (baseline 4/6, AIE-1183's subject) | MET. Every other scenario 6/6; `recall-replace-fact` 4/6 |
+| 4.5 | Judge items at least baseline: `curated-shared-conflict` `surfaces-discrepancy` at least 4/6, `slots-ask-before-shared` `asks-and-names-scope` at least 5/6, every other judge item 6/6 | MET. `surfaces-discrepancy` 5/6, `asks-and-names-scope` 6/6, every other judge item 6/6 |
 
-4.7 Iteration: if a floor is missed, revise the wording, re-render the agent file, and rerun both N=3 runs. Record each iteration here.
+4.7 Iteration: if a floor is missed, revise the wording, re-render the agent file, and rerun. Record each iteration here.
+
+Third-person flagged trials: 12 of 168. Several are false positives on product vocabulary, e.g. "the user profile", "the user taps", "the user id". AIE-1199 tracks these.
 
 ### Per-trial results
 
-| Scenario | A t1 | A t2 | A t3 | B t1 | B t2 | B t3 |
-| -------- | ---- | ---- | ---- | ---- | ---- | ---- |
-| `privacy-minor` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `privacy-sensitive-private` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `remembering-no-metric-value` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `filing-new-acronym` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `curated-shared-conflict` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `remembering-stated-role` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `remembering-constraint-in-request` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `remembering-tool-in-question` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `remembering-preference-mid-task` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `remembering-transient-in-question` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| `filing-project-fact-in-question` | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+Single N=6 run; per-trial results are in `aie1182-n6/report.md`.
 
-Iterations: none yet.
+Iterations: none.
 
 ### PR body snippet (baseline at main)
 
