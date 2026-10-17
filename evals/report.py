@@ -263,23 +263,23 @@ def grade_trial(trial_dir: Path) -> dict[str, Any]:
 
 def _refresh_reply_check(trial_dir: Path, scenario: Scenario, graded: dict[str, Any]) -> None:
     """Recompute only the reply check of a grade.json that is current for the
-    store and trace, when it lacks one or the transcript is newer; drop it
-    when the transcript is gone.
+    store and trace, and rewrite it when it differs from the recorded one; drop
+    it when the transcript is gone.
     """
     transcript = trial_dir / "transcript.json"
-    has_check = any(key in graded for key in _REPLY_CHECK_KEYS)
     if not transcript.exists():
-        if has_check:
+        if any(key in graded for key in _REPLY_CHECK_KEYS):
             for key in _REPLY_CHECK_KEYS:
                 graded.pop(key, None)
             _write_json(trial_dir / "grade.json", graded)
         return
-    newer = transcript.stat().st_mtime > (trial_dir / "grade.json").stat().st_mtime
-    if has_check and not newer:
+    fresh = _reply_check(trial_dir, scenario)
+    recorded = {key: graded[key] for key in _REPLY_CHECK_KEYS if key in graded}
+    if recorded == fresh:
         return
     for key in _REPLY_CHECK_KEYS:
         graded.pop(key, None)
-    graded.update(_reply_check(trial_dir, scenario))
+    graded.update(fresh)
     _write_json(trial_dir / "grade.json", graded)
 
 
