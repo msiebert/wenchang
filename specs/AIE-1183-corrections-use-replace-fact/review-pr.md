@@ -87,7 +87,7 @@ Parametrized end-to-end cases are `test_correct_driver_passes_every_assertion[<i
 - Curated corrections may drop their reference to the curated note. No assertion depends on it, and `system/` content still persists under the curated-content rule.
 - In the live run, watch for alias cleanup done through a single combined `write_file`. Cleanup of that kind would be fine, but it is out of scope here.
 
-## Live evals — PENDING
+## Live evals — DONE
 
 This is the human's merge checkpoint and not a release gate (ADR 0028).
 
@@ -145,9 +145,34 @@ Per the diagnosis, run B's `recall-replace-fact` "passes" kept history.
 
 **Miss policy.** Inspect the failing transcripts, adjust only the new sentences, and rerun. After two rounds, the human decides.
 
-**Results.** _Pending._
+**Results.** Done. The orchestrator accepted the run with two 5/6 misses, explained below.
+
+**Runs.**
+
+- Branch: one N=6 run (`--trials 6 --judge`) in 7 shards, merged as `evals/runs/aie1183-n6` (gitignored, in this worktree). It replaces the two N=3 runs and covers the same 168 trials. Commit c0f6a66, agent sha256 `198c5602f87cc10be1e9f29093f7914382ce58b06b40546f3d37331e2a7fe000`.
+- Baseline at main (a585314): N=3, `evals/runs/baseline-main-n3`, copied into this worktree.
+
+| Scenario | Main (N=3) | Branch (N=6) |
+| -------- | ---------- | ------------ |
+| `recall-replace-fact` | 3/6 in the AIE-1184 run on main's prompt | 6/6 |
+| `write-correct-seeded-fact` | 0/3, every trial failed `old-format-gone` ("(changed from PDF)") | 6/6 |
+| `write-superseded-tool` | 0/3, every trial failed `old-tool-gone` (for example "(moved from Notion in the week before 2026-10-16)") | 6/6 |
+| `recall-superseded-definition` | 0/3 | 6/6 |
+| `write-added-not-superseded` | 3/3 | 6/6 |
+| `write-superseded-kept-on-request` | 3/3 | 6/6 |
+| `write-superseded-shared-fact` | 3/3, judge 3/3 | deterministic 6/6, judge `asks-which-to-keep` 5/6 |
+| `filing-new-acronym` | 6/6 | 5/6 |
+
+**Accepted misses.**
+
+- `write-superseded-shared-fact` judge 5/6. The one fail (trial 2) was a third-person reply ("I asked the user whether...") with correct behavior: it read first and wrote nothing. Classified as harness noise.
+- `filing-new-acronym` 5/6 (baseline 6/6). Trial 1 added the new facts, description and alias with one `write_file` on the existing file instead of `append_line`. The end state was correct and nothing was lost. It is the only `write_file` on this scenario across every run, so the new "rewrite the line" wording plausibly nudged it.
+- Every other scenario met its rate. Third-person flagged trials: 6 of 168.
 
 ## Follow-ups
+
+- Scope the "rewrite the line" sentence to changed values, so that adding a fact (even with aliases or a description) stays `append_line`. This addresses the `filing-new-acronym` trial 1 miss.
+- Fix the `no-new-file` assertion label on `filing-new-acronym`. It fires on a `write_file` overwrite, so the label is inaccurate.
 
 - Stale aliases. Old names still find the file, and dropping them needs `write_file`.
 - The corpus test and `CASES` conflict textually with #37 and #40 at rebase.
