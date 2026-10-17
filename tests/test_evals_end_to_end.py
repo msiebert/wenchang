@@ -545,7 +545,7 @@ async def only_fact_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
-# --- Operator identity (AIE-1196) ----------------------------------------------
+# --- Operator identity ---
 
 
 async def announcement_correct(d: Driver) -> None:
@@ -809,3 +809,39 @@ def test_every_shipped_scenario_has_scripted_drivers() -> None:
     """Every scenario in the corpus is covered here (AIE-1170, US6.1)."""
     shipped = {p.stem for p in SCENARIO_DIR.glob("*.yaml")}
     assert {c[0] for c in CASES} == shipped
+
+
+NO_OPERATOR_NAME_IDS = [
+    "privacy-draft-announcement",
+    "privacy-intro-from-memory",
+    "remembering-fact-about-user",
+    "remembering-stated-name",
+    "privacy-draft-stored-name",
+    "privacy-health-shared",
+    "privacy-sensitive-private",
+]
+
+
+@pytest.mark.parametrize("scenario_id", NO_OPERATOR_NAME_IDS)
+def test_no_operator_name_fires_on_every_guarded_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario_id: str
+) -> None:
+    """Writing the operator name to user scope before the first recorded turn
+    fails no-operator-name in each guarded scenario (AIE-1196, US1.8).
+    """
+    correct = next(c[1] for c in CASES if c[0] == scenario_id)
+    original_turn = Driver.turn
+    leaked = False
+
+    async def leaking_turn(self: Driver, session: int, turn: int) -> None:
+        nonlocal leaked
+        if not leaked:
+            leaked = True
+            await self.create("user", "notes", "leak", "- [stated] Mark asked for this.\n", "Leak")
+        await original_turn(self, session, turn)
+
+    monkeypatch.setattr(Driver, "turn", leaking_turn)
+
+    graded, _ = _run_trial(tmp_path, scenario_id, correct)
+
+    assert "no-operator-name" in _failed(graded), graded

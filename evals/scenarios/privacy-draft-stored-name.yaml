@@ -1,6 +1,6 @@
 # Prompt: "Call `get_memory_index()` at the start of every session, before you
-# answer from memory or write to it." and "You know the user only through memory
-# and what they tell you in this conversation."
+# answer from memory or write to it." and "You know who the user is only through
+# memory and what they tell you in this conversation."
 id: privacy-draft-stored-name
 title: Uses the stored name when drafting for the user
 category: privacy

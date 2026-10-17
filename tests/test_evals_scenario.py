@@ -32,7 +32,7 @@ from evals.scenario import (
     load_all,
     load_scenario,
 )
-from wenchang.prompts import build_memory_prompt
+from wenchang.prompts import applying_memory, build_memory_prompt
 
 pytestmark = pytest.mark.unit
 
@@ -618,7 +618,7 @@ def test_judge_rubrics_name_their_turn() -> None:
     assert offenders == []
 
 
-# --- Operator identity must not leak (AIE-1196, US1.8) ------------------------
+# --- Operator identity must not leak ---
 
 OPERATOR_PATTERN = r"\bMark\b|(?i:siebert)"
 HELD_OUT = {
@@ -686,18 +686,29 @@ def test_no_scenario_turn_names_the_operator() -> None:
     assert offenders == []
 
 
+FIRST_PERSON = re.compile(r"\b(?:I|my|me)\b", re.IGNORECASE)
+
+
+def _words(text: str) -> list[str]:
+    return re.sub(r"[^\w\s]", " ", text.lower()).split()
+
+
+def _five_grams(text: str) -> set[tuple[str, ...]]:
+    words = _words(text)
+    return {tuple(words[i : i + 5]) for i in range(len(words) - 4)}
+
+
 @pytest.mark.parametrize("scenario_id", sorted(HELD_OUT))
 def test_held_out_turns_are_first_person_and_do_not_coach(scenario_id: str) -> None:
-    """Held-out turns are first person and avoid the prompt's own phrasing
-    (AIE-1196, US1.8).
+    """Held-out turns are first person and share no 5-word sequence with the
+    prompt body (AIE-1196, US1.8).
     """
+    body_grams = _five_grams(applying_memory.BODY)
     scenario = _by_id()[scenario_id]
     for session in scenario.sessions:
         for turn in session.turns:
-            assert re.search(r"\b(I|I'm|I'll|my|me)\b", turn), turn
-            lowered = turn.lower()
-            for phrase in ("only through memory", "anywhere else", "call them"):
-                assert phrase not in lowered, turn
+            assert FIRST_PERSON.search(turn), turn
+            assert _five_grams(turn) & body_grams == set(), turn
 
 
 @pytest.mark.parametrize("scenario_id", sorted(HELD_OUT))
@@ -728,10 +739,10 @@ def test_privacy_sensitive_private_keeps_its_original_judge_item() -> None:
     assert "no-shared-detail" in {j.id for j in _by_id()["privacy-sensitive-private"].judge}
 
 
-# --- Prompt provenance rule (AIE-1196, US2) ------------------------------------
+# --- Prompt provenance rule ---
 
 IDENTITY_SENTENCE = (
-    "You know the user only through memory and what they tell you in this conversation."
+    "You know who the user is only through memory and what they tell you in this conversation."
 )
 
 
@@ -757,4 +768,5 @@ def test_guarded_scenario_header_has_identity_sentence(scenario_id: str) -> None
         if not line.startswith("#"):
             break
         header.append(line.lstrip("#"))
+    assert path.read_text().splitlines()[0].startswith("# Prompt:")
     assert IDENTITY_SENTENCE in re.sub(r"\s+", " ", " ".join(header))

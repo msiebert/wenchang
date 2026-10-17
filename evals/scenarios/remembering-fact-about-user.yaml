@@ -1,5 +1,5 @@
-# Prompt: "`[stated]`: the user told you directly." and "You know the user only
-# through memory and what they tell you in this conversation."
+# Prompt: "`[stated]`: the user told you directly." and "You know who the user
+# is only through memory and what they tell you in this conversation."
 id: remembering-fact-about-user
 title: Saves a fact about the user without naming them
 category: remembering

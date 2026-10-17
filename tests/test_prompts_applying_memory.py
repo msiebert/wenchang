@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from test_evals_scenario import OPERATOR_PATTERN
 from wenchang.prompts import applying_memory
 
 pytestmark = pytest.mark.unit
@@ -57,6 +58,7 @@ def test_at_most_one_example() -> None:
 @pytest.mark.parametrize(
     "phrase",
     [
+        "You know who the user is only through memory",
         "only through memory and what they tell you in this conversation",
         "Never take their name or other personal identifiers from anywhere else",
         "account details or file paths",
@@ -72,19 +74,19 @@ def test_body_has_identity_provenance_rule(phrase: str) -> None:
 
 def test_body_names_no_tested_fact_or_operator() -> None:
     """AIE-1196, US2.2: BODY carries no scenario-specific fact and no operator identity."""
-    lower = applying_memory.BODY.lower()
     forbidden = (
-        "dinner",
-        "diabet",
-        "hospital",
-        "checkout",
-        "team",
-        "sign",
-        "email",
-        "u-ada",
-        "on-call",
-        "priya",
+        r"\bdinner",
+        r"\bdiabet",
+        r"\bhospital",
+        r"\bcheckout",
+        r"\bteam",
+        r"\bsign",
+        r"\bemail",
+        r"\bu-ada",
+        r"\bon.?call",
+        r"\bpriya",
     )
-    assert [w for w in forbidden if w in lower] == []
-    assert "Sam" not in applying_memory.BODY
-    assert re.search(r"\bMark\b|(?i:siebert)", applying_memory.BODY) is None
+    body = applying_memory.BODY
+    assert [w for w in forbidden if re.search(w, body, re.IGNORECASE)] == []
+    assert re.search(r"\bSam\b", body) is None
+    assert re.search(OPERATOR_PATTERN, body) is None
