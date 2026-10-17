@@ -75,9 +75,9 @@ AIE-1170 deferred ten scenarios. Porting them hit two gaps:
      observation described by the user (it would become a statement, not
      session data).
 
-5. **Corpus and ordering.** The corpus is 33 scenarios, the 23 from
-   AIE-1170 plus the ten ported here, with a new `applying` category. This
-   change merges after AIE-1184, whose transcript loading and
+5. **Corpus and ordering.** The corpus is 37 scenarios, the 23 from
+   AIE-1170, the ten ported here, and four held-out forgetting scenarios
+   (see the spec), with a new `applying` category. This change merges after AIE-1184, whose transcript loading and
    `_grade_is_current` changes it builds on.
 
 ## Consequences

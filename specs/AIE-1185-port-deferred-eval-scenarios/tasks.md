@@ -48,7 +48,7 @@ before any grader or report code. Every task runs the same loop:
 - **Tests:**
   - `test_evals_end_to_end.py`: `Driver.turn` gains a `reply` argument;
     20 drivers; 10 `CASES` rows.
-  - `test_evals_scenario.py`: the corpus at 33, `CITATIONS`, and the
+  - `test_evals_scenario.py`: the corpus at 37, `CITATIONS`, and the
     rubric form.
 - **Implementation:**
   - The `applying` category.
@@ -83,3 +83,19 @@ before any grader or report code. Every task runs the same loop:
   3. Classify every miss.
   4. Fill in the PENDING sections of `review-pr.md`.
 - The PR is not merged before this run.
+
+## T7: Held-out forgetting scenarios and prompt fix
+
+- **Covers:** US6.1 to US6.10.
+- **Steps:**
+  1. test-writer and implementer add the four held-out scenarios (commit
+     e5f9406), before any prompt edit.
+  2. test-writer adds phrase tests in `test_prompts_forgetting.py` and
+     citations in the `forgetting-ambiguous-that` and `forgetting-two-files`
+     headers.
+  3. implementer edits `forgetting.py` and re-renders
+     `.claude/agents/wenchang-eval.md`.
+  4. Run `make check`.
+  5. Human reruns live: `forgetting-ambiguous-that`, the four held-outs,
+     `forgetting-two-files`, `forgetting-one-fact`, `forgetting-whole-file`,
+     `forgetting-only-fact`, `forgetting-nickname-alias`.

@@ -6,7 +6,8 @@
 ## What changed & why
 
 AIE-1170 shipped 23 scenarios and deferred ten. This ports all ten, so the
-corpus is 33. Two harness additions make them possible. Reply assertions
+corpus is 33, and the live finding below adds four held-out
+scenarios for 37. Two harness additions make them possible. Reply assertions
 (`reply_matching`, `reply_not_matching`) grade what the agent said, which the
 judge cannot do deterministically. `context_records` lets a scenario show the
 agent product data (an event catalog, a query history, a delivery log) that a
@@ -32,7 +33,7 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 | 2.2 `turn_prompt` rendering, turns 1 and later | rpt `test_turn_prompt_renders_one_context_record_before_turn_one`, `..._renders_two_context_records_separated_by_a_blank_line`, `..._puts_context_records_before_the_replay` |
 | 2.3 byte-identical without records | rpt `test_turn_prompt_without_context_records_is_unchanged` |
 | 2.4 `run-evals.md` sentences | agt `test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn` |
-| 3.1 corpus is 33, `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
+| 3.1 corpus is 37, `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
 | 3.2 cited sentences are in the prompt | scn `test_new_scenarios_cite_the_prompt_verbatim` (10 cases) |
 | 3.3 correct drivers pass, wrong drivers fail the exact set | e2e `test_correct_driver_passes_every_assertion` and `test_wrong_driver_fails_exactly_the_listed_assertions`, 10 new `CASES` rows |
 | 3.4 judge rubric form | scn `test_new_scenarios_judge_rubrics_name_their_turn` |
@@ -54,8 +55,23 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 - `slots-system-of-record`: the agent does not copy the event catalog's definition into memory or write to a shared scope before asking. The judge checks it points out the discrepancy; asking which is right is welcome but not required.
 - `remembering-observed-once`, `curated-observed-conflict`, and the two applying scenarios also assert `get_memory_index` was called, because `index-first` passes vacuously when no memory call is made. The applying scenarios also require a `read_file` of the seeded file.
 
+## Live finding and prompt fix (US6)
+
+- **Finding.** In `evals/runs/aie1185-n3` (gitignored), `forgetting-ambiguous-that` scored 0/3. Turn 2 ("Forget that.", after a neutral recall of a three-fact file) deleted the whole file without asking, then said it could restore the other two facts. Turn 3 rewrote the file. `asks-before-removing`, `dropped-after-answer`, `file-kept`, and judge `asks-which` failed 3/3.
+- **Diagnosis.** The Forgetting text never said what makes a request ambiguous. The agent saw the ambiguity, chose the likelier reading, and used the "user means the whole file" clause. Nothing barred removing first and offering to restore.
+- **New text** (`prompts/forgetting.py`, after "ask before removing anything."): "A request is ambiguous when it could mean different removals, even if one reading seems likelier. When you ask, name the choices and remove nothing until the user answers; never remove the broadest reading and offer to restore the rest. When only one removal fits, remove it without asking. One fact held in several files is still one fact: remove it from each."
+- **Held-outs**, added in e5f9406 before the prompt edit, each with correct and wrong drivers and headers citing only pre-fix sentences:
+  - `forgetting-ambiguous-several-facts`: "Delete that." after three report preferences; ask, then drop one line.
+  - `forgetting-ambiguous-two-files`: "Take that meeting out of your memory." after two meeting files; ask, then delete one.
+  - `forgetting-clear-one-of-several` (guard): "Forget the part about Fridays." drops that line without asking.
+  - `forgetting-clear-whole-after-recall` (guard): "Erase all of it. I've shelved the project." deletes the file without asking.
+- **Generality.** An adversarial review removed an earlier draft whose examples mirrored the held-out shapes. The fix names no scenario facts.
+- **Also changed.** Phrase tests in `test_prompts_forgetting.py`, citations in the `forgetting-ambiguous-that` and `forgetting-two-files` headers, and `.claude/agents/wenchang-eval.md` re-rendered (sha256 `dae3affa7b39c56ac21b95808a9663ee86abe250d171aab9fe85524545688ec8`).
+- **Live rerun: PENDING.** Scenario ids: `forgetting-ambiguous-that`, the four held-outs, then the ones that could regress, `forgetting-two-files` first, then `forgetting-one-fact`, `forgetting-whole-file`, `forgetting-only-fact`, `forgetting-nickname-alias`. The two guards must still pass without asking. The `asks-before-removing` pre-registration in the gate below stands.
+
 ## Architecture / ADR changes
 
+- No new ADR for the prompt fix: it changes no module boundary, API, or storage semantics.
 - New [ADR 0032](../../docs/adr/0032-transcript-graded-assertions-and-context-records.md). It amends ADR 0028 decisions 3, 7, and 11.
 - ADR 0028 carries dated in-place pointers under decisions 3, 7, and 11.
 - `ARCHITECTURE.md` "Outside the library: `evals/`": thirteen kinds, `transcript.json` as a grading input, `context_records`.
@@ -96,6 +112,7 @@ uv run python -m evals merge-runs evals/runs/<name> <shard run dirs>
 - `no-catalog-copy`'s known edge: a correction that names the catalog definition only to contrast with it also fails.
 - `_grade_is_current`: only reply-kind scenarios treat a newer or deleted transcript, or a grade without the reply check, as a full regrade.
 - `grade_trial` loads the transcript once and shares it with the third-person check.
+- The added Forgetting sentences: the ambiguity test and the ask-then-remove rule must not make the two guard scenarios ask.
 - Cited sentences from `remembering.py` may drift if AIE-1182 rewords them.
 
 ## Follow-ups

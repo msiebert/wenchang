@@ -237,7 +237,7 @@ Every new test docstring names "AIE-1185, USx.y".
 - Parse and reject cases for both reply kinds (US1.1) and for
   `context_records` (US2.1).
 - The closed-set test gains exactly two kinds.
-- The corpus test is updated to 33 ids.
+- The corpus test is updated to 37 ids.
 - A `CITATIONS: dict[str, tuple[str, ...]]` table for the ten new ids
   checks that each sentence, with whitespace collapsed, appears in the
   collapsed `build_memory_prompt(REFERENCE_SLOTS)` (US3.2).
@@ -292,7 +292,7 @@ file-copy step under `evals/runs/`, which is gitignored.
     `reply_not_matching`, not only the judge. US5.6 spot-checks this.
   - It also records `context_records`, its rendering, and why it stands in
     for lookup tools the eval agent lacks; the closed set at thirteen
-    kinds; the corpus at 33; and the merge order after AIE-1184.
+    kinds; the corpus at 37; and the merge order after AIE-1184.
 - **ADR 0028**: dated (2026-10-16) in-place pointers, "Amended by ADR 0032",
   under §3 and §7. No other change.
 - **ARCHITECTURE.md**: the `evals/` entry gets thirteen assertion kinds,

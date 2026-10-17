@@ -785,6 +785,16 @@ NEW_IDS = (
     "slots-system-of-record",
 )
 
+_AMBIGUOUS_REQUEST_SENTENCE = (
+    "A request is ambiguous when it could mean different removals, even if one reading "
+    "seems likelier."
+)
+_ASK_SENTENCE = (
+    "When you ask, name the choices and remove nothing until the user answers; never remove "
+    "the broadest reading and offer to restore the rest."
+)
+_ONE_FACT_SENTENCE = "One fact held in several files is still one fact: remove it from each."
+
 CITATIONS: dict[str, tuple[str, ...]] = {
     "filing-second-customer": (
         "File each fact in the file that is about its subject, not whichever file happens "
@@ -816,6 +826,8 @@ CITATIONS: dict[str, tuple[str, ...]] = {
     "forgetting-ambiguous-that": (
         "Delete the file if the fact was the file's only fact or the user means the whole "
         "file; if it is ambiguous which they mean, ask before removing anything.",
+        _AMBIGUOUS_REQUEST_SENTENCE,
+        _ASK_SENTENCE,
     ),
     "forgetting-lapsed-expiry": (
         "A fact whose stated end date has passed is a candidate for dropping, not to be "
@@ -921,6 +933,24 @@ HELD_OUT_CITATIONS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+EXTRA_CITATIONS: dict[str, tuple[str, ...]] = {
+    "forgetting-two-files": (_ONE_FACT_SENTENCE,),
+}
+
+
+def _assert_cited_in_prompt_and_header(ident: str, sentences: tuple[str, ...]) -> None:
+    prompt = _collapse(build_memory_prompt(REFERENCE_SLOTS))
+    header = _collapse(
+        " ".join(
+            line.removeprefix("#").strip()
+            for line in (ROOT / "evals" / "scenarios" / f"{ident}.yaml").read_text().splitlines()
+            if line.startswith("#")
+        )
+    )
+    for sentence in sentences:
+        assert _collapse(sentence) in prompt, sentence
+        assert _collapse(sentence) in header, sentence
+
 
 def test_held_out_scenarios_are_in_the_corpus() -> None:
     """The four held-out forgetting scenarios load from the shipped directory
@@ -935,18 +965,15 @@ def test_held_out_scenarios_cite_the_prompt_verbatim(ident: str) -> None:
     """Each cited sentence is in the reference memory prompt and in the
     scenario's comment header, whitespace collapsed (AIE-1185).
     """
-    prompt = _collapse(build_memory_prompt(REFERENCE_SLOTS))
-    header = _collapse(
-        " ".join(
-            line.removeprefix("#").strip()
-            for line in (ROOT / "evals" / "scenarios" / f"{ident}.yaml").read_text().splitlines()
-            if line.startswith("#")
-        )
-    )
+    _assert_cited_in_prompt_and_header(ident, HELD_OUT_CITATIONS[ident])
 
-    for sentence in HELD_OUT_CITATIONS[ident]:
-        assert _collapse(sentence) in prompt, sentence
-        assert _collapse(sentence) in header, sentence
+
+@pytest.mark.parametrize("ident", EXTRA_CITATIONS)
+def test_one_fact_in_several_files_scenario_cites_the_prompt(ident: str) -> None:
+    """The forgetting-two-files header cites the one-fact-in-several-files
+    sentence, which is in the reference memory prompt (AIE-1185).
+    """
+    _assert_cited_in_prompt_and_header(ident, EXTRA_CITATIONS[ident])
 
 
 def test_held_out_scenarios_judge_rubrics_name_their_turn() -> None:

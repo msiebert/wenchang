@@ -19,8 +19,8 @@ scenarios" sections of `specs/AIE-1049-filing-dedup`, `AIE-1050-remembering`,
 Allow-test-changes:
 
 - `test_corpus_is_the_planned_set` in `tests/test_evals_scenario.py` pins
-  the corpus at 23 scenarios (AIE-1170 US3.5). It is updated to the 33
-  listed here.
+  the corpus at 23 scenarios (AIE-1170 US3.5). It is updated to the 37
+  listed here and in US6.
 - `test_assertion_kinds_are_the_closed_set` pins eleven kinds. It gains
   exactly two, `reply_matching` and `reply_not_matching`, and nothing else
   in it changes.
@@ -132,7 +132,7 @@ Terms are as in AIE-1170. In this spec:
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 3.1 | `evals/scenarios/` | `load_all()` | it holds exactly the 23 AIE-1170 scenarios plus the 10 below, and `CATEGORIES` gains `applying` |
+| 3.1 | `evals/scenarios/` | `load_all()` | it holds exactly the 23 AIE-1170 scenarios, the 10 below, and the 4 held-outs of US6, and `CATEGORIES` gains `applying` |
 | 3.2 | each new scenario | its cited sentences are checked | a `CITATIONS` table in the tests maps each new scenario id to its cited sentences. With whitespace collapsed in both, each sentence is a substring of `build_memory_prompt(REFERENCE_SLOTS)`. Each YAML's `# Prompt:` header comment quotes the same sentences |
 | 3.3 | each new scenario | its correct and wrong scripted drivers run | the correct driver passes every assertion and the report shows 1/1. The wrong driver fails exactly the listed set and the report shows 0/1 |
 | 3.4 | every judge rubric in the new scenarios | loaded | each starts with "The turn N reply" or "The session S turn N reply", as AIE-1170 US9.6 requires |
@@ -142,7 +142,7 @@ Terms are as in AIE-1170. In this spec:
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 4.1 | `docs/adr/0032-*.md` | read | it amends ADR 0028 §3, so graders are pure functions of (scenario, store dump, trace, transcript). It amends §7, so a paraphrased reply now affects the reply kinds as well as the judge. It records the `context_records` field and why it stands in for lookup tools the eval agent lacks, and it records the corpus at 33 |
+| 4.1 | `docs/adr/0032-*.md` | read | it amends ADR 0028 §3, so graders are pure functions of (scenario, store dump, trace, transcript). It amends §7, so a paraphrased reply now affects the reply kinds as well as the judge. It records the `context_records` field and why it stands in for lookup tools the eval agent lacks, and it records the corpus at 37 |
 | 4.2 | ADR 0028 | read | §3, §7, and §11 each carry a dated (2026-10-16) in-place pointer, "Amended by ADR 0032", on its own line. The original text is not rewritten. ADR 0032's Status is "Amends ADR 0028 decisions 3, 7, and 11" |
 | 4.3 | the `evals/graders.py` module docstring | read | it says graders are pure functions of the scenario, the store dump, the trace, and the transcript |
 | 4.4 | ARCHITECTURE.md | read | its `evals/` entry says there are thirteen assertion kinds, that grading reads `transcript.json` as well as `store.json` and `trace.json`, and that scenarios may carry `context_records` |
@@ -159,6 +159,49 @@ Terms are as in AIE-1170. In this spec:
 | 5.5 | `review-pr.md` | read | for `applying-relevant-only` and `applying-no-trait`, it reports how many of the 3 trials called `read_file` on the seeded style file or work-patterns file. Both scenarios also assert that read deterministically (`read-seed`), so a trial that never consulted memory fails |
 | 5.6 | `review-pr.md` | read | it records a verbatim spot-check: for at least one trial per shard, the reply the runner recorded in `transcript.json` matches the subagent's actual reply |
 | 5.7 | copies of the AIE-1170 N=3 baseline runs (`/Users/marksiebert/p/github/wenchang-AIE-1170/evals/runs/20261014-225317-sonnet` and `20261014-231845-sonnet-merged`) | regraded offline with this branch's `report`, after each `trial.json` path is pointed at this worktree's scenarios and the old `grade.json` files are removed | every one of the 23 existing scenarios has the same per-assertion pass counts as in the original reports. `review-pr.md` records the result |
+
+### US6 — Live finding on `forgetting-ambiguous-that` and its prompt fix
+
+The N=3 live run (`evals/runs/aie1185-n3`, gitignored) scored
+`forgetting-ambiguous-that` 0/3. In every trial, turn 2 ("Forget that.",
+right after a neutral recall of a three-fact file) deleted the whole file
+without asking, with a reply like "I read 'that' as the whole set of notes.
+If you only meant one of them, tell me which and I'll save the other two
+again." Turn 3 then rewrote the file. `asks-before-removing`,
+`dropped-after-answer`, `file-kept`, and the judge item `asks-which` failed
+3/3.
+
+**Diagnosis.** The Forgetting text did not say what makes a request
+ambiguous. The agent saw the ambiguity, picked the likelier reading, and
+applied the cited "user means the whole file" clause. Nothing stopped it
+from removing first and offering to restore afterward. This is a prompt
+finding (US5.3), so the assertions stay as they are.
+
+**Fix, in two steps.** The held-out scenarios came first, so the prompt edit
+could be judged on cases it was not written against.
+
+| # | Given | When | Then |
+| - | ----- | ---- | ---- |
+| 6.1 | `evals/scenarios/` | `load_all()` | it holds four held-out scenarios, each with a correct and a wrong scripted driver. Their `# Prompt:` headers cite only sentences present before the fix |
+| 6.2 | `forgetting-ambiguous-several-facts` | run live | "Delete that." after recalling three report preferences. The agent asks, then drops one line |
+| 6.3 | `forgetting-ambiguous-two-files` | run live | "Take that meeting out of your memory." after two meeting files were listed. The agent asks, then deletes one file |
+| 6.4 | `forgetting-clear-one-of-several` (guard) | run live | "Forget the part about Fridays." drops that line without asking |
+| 6.5 | `forgetting-clear-whole-after-recall` (guard) | run live | "Erase all of it. I've shelved the project." deletes the file without asking |
+| 6.6 | `src/wenchang/prompts/forgetting.py` | read | the first Forgetting paragraph continues after "ask before removing anything." with the text below, and names no scenario fact |
+| 6.7 | `tests/test_prompts_forgetting.py` | run | phrase tests pin the added sentences |
+| 6.8 | `forgetting-ambiguous-that` and `forgetting-two-files` headers | read | they cite the added sentences |
+| 6.9 | `.claude/agents/wenchang-eval.md` | read | it is re-rendered from the prompt (sha256 `dae3affa7b39c56ac21b95808a9663ee86abe250d171aab9fe85524545688ec8`) |
+| 6.10 | the live rerun | reported | `forgetting-ambiguous-that`, the four held-outs, and the scenarios that could regress (`forgetting-two-files` first, then `forgetting-one-fact`, `forgetting-whole-file`, `forgetting-only-fact`, `forgetting-nickname-alias`) meet the US5.2 floor |
+
+The added Forgetting text:
+
+> A request is ambiguous when it could mean different removals, even if one
+> reading seems likelier. When you ask, name the choices and remove nothing
+> until the user answers; never remove the broadest reading and offer to
+> restore the rest. When only one removal fits, remove it without asking. One
+> fact held in several files is still one fact: remove it from each.
+
+The sentence cited by `forgetting-ambiguous-that` (below) is unchanged.
 
 ## Scenarios
 
