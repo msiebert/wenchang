@@ -23,8 +23,9 @@ MCP_SERVER_NAME: Final = "wenchang"
 # A subagent otherwise reads its input as a task from a parent agent.
 EVAL_AGENT_PREAMBLE: Final[str] = (
     "You are an assistant helping a Mixpanel user. Each message you receive is that "
-    "user's own turn; reply to them directly. Earlier turns of this conversation may "
-    "be included above the newest one."
+    "user's own turn. Your reply goes to that user word for word, so in your reply "
+    'address them as "you" and never call them "the user". Earlier turns of this '
+    "conversation may be included above the newest one."
 )
 _DESCRIPTION: Final = (
     "Eval subject for the wenchang memory harness. Spawned only by the /run-evals runner; "

@@ -660,12 +660,13 @@ def _failed(graded: dict[str, Any]) -> set[str]:
 def test_correct_driver_passes_every_assertion(
     tmp_path: Path, scenario_id: str, correct: Script, wrong: Script, fails: set[str]
 ) -> None:
-    """A correct scripted agent passes every assertion and the report shows
-    1/1 (AIE-1170, US6.1).
+    """A correct scripted agent passes every assertion, has no third-person
+    reply, and the report shows 1/1 (AIE-1170, US6.1; AIE-1184, US2.15).
     """
     graded, report = _run_trial(tmp_path, scenario_id, correct)
 
     assert _failed(graded) == set(), graded
+    assert graded["third_person_replies"] == []
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (1, 1)
 

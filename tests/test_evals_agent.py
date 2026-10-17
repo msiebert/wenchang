@@ -79,13 +79,14 @@ def test_eval_agent_body_is_preamble_plus_prompt() -> None:
 
 
 def test_preamble_frames_each_message_as_the_users_turn() -> None:
-    """Every turn arrives as an Agent prompt, so the preamble only says each
-    message is the user's turn and may carry earlier turns (AIE-1170, US2.2).
+    """Each message is the user's turn and may carry earlier turns, and the
+    reply addresses the user as "you", never as "the user" (AIE-1184, US2.1).
     """
     assert EVAL_AGENT_PREAMBLE == (
         "You are an assistant helping a Mixpanel user. Each message you receive is that "
-        "user's own turn; reply to them directly. Earlier turns of this conversation may "
-        "be included above the newest one."
+        "user's own turn. Your reply goes to that user word for word, so in your reply "
+        'address them as "you" and never call them "the user". Earlier turns of this '
+        "conversation may be included above the newest one."
     )
     assert EVAL_AGENT_PREAMBLE in EVAL_AGENT.read_text()
 

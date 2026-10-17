@@ -35,12 +35,15 @@ from evals.scenario import (
 __all__ = [
     "SCANNED_ARGUMENTS",
     "SCANNED_TOOLS",
+    "THIRD_PERSON_PATTERN",
     "AssertionResult",
     "GradeInputError",
     "StoreDump",
     "StoredFile",
+    "ThirdPersonReply",
     "TraceCall",
     "TranscriptTurn",
+    "find_third_person_replies",
     "grade",
     "load_store_dump",
     "load_trace",
@@ -511,3 +514,83 @@ def grade(
         failure = _check(a, scenario, store, ordered)
         results.append(AssertionResult(a.id, assertion_kind(a), failure is None, failure or "ok"))
     return tuple(results)
+
+
+# --- reply check --------------------------------------------------------------
+
+_APOSTROPHES: Final = "'\u2019\u02bc"
+# "the user" or "the caller", but not the user scope ("the user's scope" included)
+# and not "the users". The possessive quantifier keeps "'s" from backtracking.
+THIRD_PERSON_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"\bthe\s+user(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
+    rf"|\bthe\s+caller(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])",
+    re.IGNORECASE,
+)
+_FENCED_BLOCK: Final = re.compile(r"^[ \t]*```.*?(?:^[ \t]*```[^\n]*$|\Z)", re.M | re.S)
+_QUOTE_LINE: Final = re.compile(r"^[ \t]*>.*$", re.M)
+_QUOTED_SPAN: Final = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+_NEXT_WORD: Final = re.compile(rf"\s+[\w{_APOSTROPHES}]+")
+
+
+@dataclass(frozen=True)
+class ThirdPersonReply:
+    """A reply that refers to the user in the third person."""
+
+    session: int
+    turn: int
+    phrase: str
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().replace("\u2019", "'").replace("\u02bc", "'").split())
+
+
+def _unquoted(reply: str) -> str:
+    return _QUOTED_SPAN.sub("", _QUOTE_LINE.sub("", _FENCED_BLOCK.sub("", reply)))
+
+
+def _is_echo(phrase: str, rest: str | None, context: Sequence[str]) -> bool:
+    """Whether the phrase echoes a context text.
+
+    A phrase with a next word (rest is None) must appear at word boundaries.
+    A bare phrase must appear before the same next character, or end a
+    context text when it ends the reply.
+    """
+    escaped = re.escape(phrase)
+    if rest is None:
+        pattern = rf"(?<!\w){escaped}(?!\w)"
+    elif not rest:
+        pattern = rf"(?<!\w){escaped}$"
+    else:
+        pattern = rf"(?<!\w){escaped}\s?{re.escape(rest[0])}"
+    return any(re.search(pattern, text) for text in context)
+
+
+def find_third_person_replies(
+    scenario: Scenario, transcript: Sequence[TranscriptTurn]
+) -> tuple[ThirdPersonReply, ...]:
+    """At most one flag per reply, in transcript order.
+
+    Quoted text is ignored, and so is a phrase that echoes the session's user
+    text so far or the scenario's seed files.
+    """
+    seeds = [
+        _normalize(part)
+        for f in scenario.seed_files
+        for part in (f.content, f.description, *f.aliases)
+    ]
+    flags: list[ThirdPersonReply] = []
+    for t in transcript:
+        users = [
+            _normalize(u.user) for u in transcript if u.session == t.session and u.turn <= t.turn
+        ]
+        reply = _unquoted(t.reply)
+        for match in THIRD_PERSON_PATTERN.finditer(reply):
+            following = _NEXT_WORD.match(reply, match.end())
+            end = following.end() if following else match.end()
+            phrase = _normalize(reply[match.start() : end])
+            rest = None if following else reply[end:].lstrip()
+            if not _is_echo(phrase, rest, [*users, *seeds]):
+                flags.append(ThirdPersonReply(t.session, t.turn, phrase))
+                break
+    return tuple(flags)
