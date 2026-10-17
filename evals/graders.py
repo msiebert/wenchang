@@ -519,13 +519,105 @@ def grade(
 # --- reply check --------------------------------------------------------------
 
 _APOSTROPHES: Final = "'\u2019\u02bc"
+_DATA_NOUNS: Final = "ids?|profiles?|propert(?:y|ies)|tables?|rows?|records?|columns?|attributes?"
+_INTERFACE_VERBS: Final = (
+    "taps|tapped|clicks|clicked|swipes|swiped|scrolls|scrolled|presses|pressed|hovers|hovered"
+)
 # "the user" or "the caller", but not the user scope ("the user's scope" included)
-# and not "the users". The possessive quantifier keeps "'s" from backtracking.
+# and not "the users". A non-possessive "the user" also skips data nouns and
+# interface verbs ("the user id", "the user taps").
 THIRD_PERSON_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"\bthe\s+user(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
+    rf"\bthe\s+user(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
+    rf"(?!(?:[ \t\u00a0]+|[ \t]*[-\u2013\u2014][ \t]*)(?:{_DATA_NOUNS}|{_INTERFACE_VERBS})\b)"
+    rf"|\bthe\s+user[{_APOSTROPHES}]s(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
     rf"|\bthe\s+caller(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])",
     re.IGNORECASE,
 )
+_STATEMENT_SPLIT: Final = re.compile(r"\n[ \t]*\n|;")
+_SELECT_FROM: Final = re.compile(r"\bselect\b.*?\bfrom\s+[a-z_][\w.]*(.*)", re.I | re.S)
+_SELECT_CLAUSE: Final = re.compile(
+    r"\bjoin\s+[a-z_][\w.]*(?:\s+(?:as\s+)?[a-z_]\w*)?\s+on\b"
+    r"|\bwhere\s+[a-z_][\w.]*\s*(?:=|<>|!=|<=|>=|<|>)"
+    r"|\bgroup\s+by\b|\border\s+by\b",
+    re.I,
+)
+_SQL_WRITE: Final = re.compile(
+    r"\binsert\s+into\s+[a-z_]"
+    r"|\bupdate\s+[a-z_][\w.]*\s+set\s+[a-z_][\w.]*\s*="
+    r"|\bdelete\s+from\s+[a-z_][\w.]*\s+where\b"
+    r"|\bcreate\s+table\b",
+    re.I,
+)
+_ADDRESSEE_END: Final = re.compile(
+    r"(?<![\w'])(?:(?:asks?|asked|asking|tells?|told|telling|reminds?|reminded|informs?"
+    r"|informed|reminding|informing)|(?:check|confirm)\s+with|(?:wait|waiting)\s+for"
+    r"|(?:reply|respond)\s+to)$",
+    re.I,
+)
+_DATA_VERBS: Final = frozenset(
+    [
+        "has",
+        "have",
+        "had",
+        "is",
+        "are",
+        "was",
+        "were",
+        "with",
+        "who",
+        "whose",
+        "did",
+        "does",
+        "exists",
+    ]
+)
+_ADVERBS: Final = frozenset(["also", "already", "just", "explicitly", "previously", "not", "never"])
+_SPEECH_VERBS: Final = frozenset(
+    [
+        "ask",
+        "asked",
+        "asking",
+        "say",
+        "said",
+        "saying",
+        "tell",
+        "told",
+        "telling",
+        "mention",
+        "mentioned",
+        "mentioning",
+        "request",
+        "requested",
+        "requesting",
+        "state",
+        "stated",
+        "explain",
+        "explained",
+        "confirm",
+        "confirmed",
+        "want",
+        "wanted",
+        "wanting",
+        "write",
+        "wrote",
+        "written",
+        "share",
+        "shared",
+        "paste",
+        "pasted",
+        "prefer",
+        "preferred",
+        "reply",
+        "replied",
+        "answer",
+        "answered",
+        "clarify",
+        "clarified",
+        "note",
+        "noted",
+    ]
+)
+_WORD: Final = re.compile(rf"[\w{_APOSTROPHES}]+")
 _FENCED_BLOCK: Final = re.compile(r"^[ \t]*```.*?(?:^[ \t]*```[^\n]*$|\Z)", re.M | re.S)
 _QUOTE_LINE: Final = re.compile(r"^[ \t]*>.*$", re.M)
 _QUOTED_SPAN: Final = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
@@ -566,6 +658,33 @@ def _is_echo(phrase: str, rest: str | None, context: Sequence[str]) -> bool:
     return any(re.search(pattern, text) for text in context)
 
 
+def _has_sql(text: str) -> bool:
+    for statement in _STATEMENT_SPLIT.split(text):
+        if _SQL_WRITE.search(statement):
+            return True
+        m = _SELECT_FROM.search(statement)
+        if m and _SELECT_CLAUSE.search(m.group(1)):
+            return True
+    return False
+
+
+def _is_data_use(reply: str, match: re.Match[str]) -> bool:
+    """Whether a non-possessive "the user" is the subject of a data verb."""
+    phrase = match.group().lower()
+    if not phrase.endswith("user") or _ADDRESSEE_END.search(reply[: match.start()].rstrip()):
+        return False
+    words = _WORD.finditer(reply, match.end())
+    following = next(words, None)
+    if following is None or following.group().lower() not in _DATA_VERBS:
+        return False
+    if reply[match.end() : following.start()].strip():
+        return False
+    after = next(words, None)
+    if after is not None and after.group().lower() in _ADVERBS:
+        after = next(words, None)
+    return after is None or after.group().lower() not in _SPEECH_VERBS
+
+
 def find_third_person_replies(
     scenario: Scenario, transcript: Sequence[TranscriptTurn]
 ) -> tuple[ThirdPersonReply, ...]:
@@ -585,7 +704,12 @@ def find_third_person_replies(
             _normalize(u.user) for u in transcript if u.session == t.session and u.turn <= t.turn
         ]
         reply = _unquoted(t.reply)
+        sql_turn = _has_sql(t.reply) or any(
+            _has_sql(u.user) for u in transcript if u.session == t.session and u.turn <= t.turn
+        )
         for match in THIRD_PERSON_PATTERN.finditer(reply):
+            if sql_turn and _is_data_use(reply, match):
+                continue
             following = _NEXT_WORD.match(reply, match.end())
             end = following.end() if following else match.end()
             phrase = _normalize(reply[match.start() : end])

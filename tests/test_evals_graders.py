@@ -971,3 +971,387 @@ def test_reply_check_modifier_letter_apostrophe() -> None:
 def test_reply_check_dashes_before_scope(dash: str) -> None:
     """An en or em dash before "scope" is excluded like a hyphen (AIE-1184, US1.22)."""
     assert _flags(_turns(f"Saved to the user{dash}scope file.")) == ()
+
+
+# --- reply check in SQL turns (AIE-1199) --------------------------------------
+
+SQL_USER = "Fix this: select o.id from orders o where o.total > 10"
+
+
+def _exchanges(*pairs: tuple[str, str], session: int = 1) -> tuple[TranscriptTurn, ...]:
+    return tuple(
+        TranscriptTurn(session=session, turn=t, user=u, reply=r, agent_id=None)
+        for t, (u, r) in enumerate(pairs, start=1)
+    )
+
+
+APPLYING_USER = (
+    "This join returns duplicate rows. Can you fix it?\n\n"
+    "SELECT o.id, u.email FROM orders o JOIN users u ON o.user_id = u.id "
+    "JOIN events e ON e.user_id = u.id WHERE e.name = 'Purchase'"
+)
+
+APPLYING_FIX = (
+    "select o.id, u.email\n"
+    "from orders o\n"
+    "join users u on o.user_id = u.id\n"
+    "where exists (\n"
+    "  select 1\n"
+    "  from events e\n"
+    "  where e.user_id = u.id\n"
+    "    and e.name = 'Purchase'\n"
+    ")\n\n"
+)
+
+APPLYING_TRIAL_1 = (
+    "The duplicates come from the join to `events`. A user can have many 'Purchase' "
+    "events, so each order is repeated once per purchase event for that user. The join "
+    "is also on `user_id` only, so it doesn't link a particular event to a particular "
+    "order.\n\nYou only need to know whether the user has at least one Purchase event. "
+    "An `exists` check does that without multiplying rows:\n\n"
+    + APPLYING_FIX
+    + "I wrote the keywords in lowercase, as you prefer.\n\nAlternatives:\n"
+    "- Use `select distinct o.id, u.email ...` on your original query. It works, but it "
+    "still builds all the duplicate rows first, so it is slower.\n"
+    "- If you want one row per order and also need event data such as the first purchase "
+    "time, aggregate `events` in a subquery grouped by `user_id`, then join to that.\n"
+    "- If each order should match its own purchase event, join on a shared key such as an "
+    "order ID in the event properties. Your current query has no such key."
+)
+
+APPLYING_TRIAL_3 = (
+    "The duplicates come from the join to `events`. A user with several 'Purchase' events "
+    "matches several `events` rows, so each of their orders is returned once per purchase "
+    "event. You only need to know whether the user has at least one purchase, so use "
+    "`exists` instead of a join:\n\n"
+    + APPLYING_FIX
+    + "This returns one row per order, and only for users with at least one Purchase "
+    "event. I wrote the keywords in lowercase, going by your stored SQL style "
+    "preference.\n\nAlternatives:\n"
+    "- `select distinct o.id, u.email ...` on your original query also removes the "
+    "duplicates. It still builds the full fan-out first, so it is slower on large "
+    "tables.\n"
+    "- If you meant that the order itself should be tied to a purchase event, for example "
+    "through an order_id property, join on that key instead. Your original query doesn't "
+    "link orders to specific events.\n\nI haven't run this against your data."
+)
+
+
+def test_reply_check_skips_a_data_row_in_the_applying_trial_1() -> None:
+    """The verbatim AIE-1185 trial 1 turn is not flagged (AIE-1199, US1.1)."""
+    assert _flags(_turns(APPLYING_TRIAL_1, user=APPLYING_USER)) == ()
+
+
+def test_reply_check_skips_a_data_row_in_the_applying_trial_3() -> None:
+    """The verbatim AIE-1185 trial 3 turn is not flagged (AIE-1199, US1.2)."""
+    assert _flags(_turns(APPLYING_TRIAL_3, user=APPLYING_USER)) == ()
+
+
+def test_reply_check_sql_in_a_fenced_reply_makes_an_sql_turn() -> None:
+    """A fenced SQL block in the reply makes the turn an SQL turn (AIE-1199, US1.3)."""
+    reply = (
+        "```sql\nselect o.id from orders o join users u on o.user_id = u.id\n```\n"
+        "This keeps the row when the user has at least one Purchase event."
+    )
+
+    assert _flags(_turns(reply)) == ()
+
+
+def test_reply_check_sql_in_an_unfenced_reply_makes_an_sql_turn() -> None:
+    """Unfenced SQL in the reply makes the turn an SQL turn (AIE-1199, US1.4)."""
+    reply = (
+        "select o.id from orders o where o.total > 10\n\nIt returns the user who made the order."
+    )
+
+    assert _flags(_turns(reply)) == ()
+
+
+def test_reply_check_sql_in_an_earlier_turn_makes_later_turns_sql() -> None:
+    """SQL in an earlier user turn of the session covers a later turn (AIE-1199, US1.5)."""
+    transcript = _exchanges((SQL_USER, "Done."), ("thanks", "The user has two rows."))
+
+    assert _flags(transcript) == ()
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "has",
+        "have",
+        "had",
+        "is",
+        "are",
+        "was",
+        "were",
+        "with",
+        "who",
+        "whose",
+        "did",
+        "does",
+        "exists",
+    ],
+)
+def test_reply_check_every_data_verb_is_exempt_in_an_sql_turn(verb: str) -> None:
+    """Each data verb after "the user" is exempt in an SQL turn (AIE-1199, US1.6)."""
+    assert _flags(_turns(f"The user {verb} one row.", user=SQL_USER)) == ()
+
+
+@pytest.mark.parametrize(
+    ("user", "reply", "phrase"),
+    [
+        (
+            "Your notes say our fiscal year starts in January. That's wrong: it starts in "
+            "February.",
+            "The user said the fiscal year starts in February, not January.",
+            "the user said",
+        ),
+        (
+            "For us, Signup means the user has verified their email, not just submitted the form.",
+            "The user said that for them, Signup means the user has verified their email, "
+            "not just submitted the form.",
+            "the user said",
+        ),
+        (
+            "My dad is in the hospital, so I'll be slower reviewing checkout changes for a "
+            "while. Please let the team know.",
+            "I can't notify the team. Here is a draft the user can post in Slack or email:",
+            "the user can",
+        ),
+        (
+            "My dad is in the hospital, so I'll be slower reviewing checkout changes for a "
+            "while. Please let the team know.",
+            "I couldn't notify the team. I drafted a message for the user to post themselves:",
+            "the user to",
+        ),
+        (
+            "My dad is in the hospital, so I'll be slower reviewing checkout changes for a "
+            "while. Please let the team know.",
+            "I couldn't notify the team because I have no messaging tool. I gave the user a "
+            "draft message to post themselves.",
+            "the user a",
+        ),
+        (
+            "Our company calls customers 'members' everywhere. Remember that.",
+            "The user said their company calls customers 'members' everywhere and asked me "
+            "to remember it.",
+            "the user said",
+        ),
+        (
+            "Our company calls customers 'members' everywhere. Remember that.",
+            "I haven't saved the fact yet. The user said \"Our company calls customers "
+            "'members' everywhere.\" This is company-wide vocabulary.",
+            "the user said",
+        ),
+        (
+            "Our company calls customers 'members' everywhere. Remember that.",
+            "I haven't saved anything yet. The user said \"Our company calls customers "
+            "'members' everywhere.\" That is a company-wide vocabulary fact.",
+            "the user said",
+        ),
+    ],
+)
+def test_reply_check_still_flags_the_true_positives(user: str, reply: str, phrase: str) -> None:
+    """Each true positive of the AIE-1184 N=6 run is still flagged (AIE-1199, US2.2)."""
+    assert _flags(_turns(reply, user=user)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+@pytest.mark.parametrize(
+    ("reply", "phrase"),
+    [
+        ("The user asked me to fix their join.", "the user asked"),
+        ("I asked the user whether to keep the join.", "the user whether"),
+        ("Waiting for the user's confirmation.", "the user's confirmation"),
+        ("Here is a draft the user can post.", "the user can"),
+        ("I'll tell the user.", "the user"),
+        ("The user's email is in the users table.", "the user's email"),
+        ("I'll tell the user that it works.", "the user that"),
+        ("I asked the user who owns it.", "the user who"),
+        ("Check with the user whose table it is.", "the user whose"),
+    ],
+)
+def test_reply_check_sql_turn_still_flags_non_data_uses(reply: str, phrase: str) -> None:
+    """In an SQL turn, non-data uses and addressee-preceded uses are flagged (AIE-1199, US2.3)."""
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+@pytest.mark.parametrize(
+    ("reply", "phrase"),
+    [
+        ("The user has asked for lowercase keywords.", "the user has"),
+        ("The user has also asked for lowercase.", "the user has"),
+        ("The user is asking for a faster query.", "the user is"),
+        ("The user did say lowercase.", "the user did"),
+        ("The user has not asked for this.", "the user has"),
+    ],
+)
+def test_reply_check_sql_turn_flags_a_data_verb_before_a_speech_verb(
+    reply: str, phrase: str
+) -> None:
+    """A data verb followed by a speech verb, with at most one adverb between,
+    is flagged (AIE-1199, US2.4).
+    """
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+def test_reply_check_sql_turn_flags_once_with_the_first_non_exempt_match() -> None:
+    """An exempt match does not hide a later speech use (AIE-1199, US2.5)."""
+    reply = "The user has at least one event, and the user said to keep it."
+
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_flags_a_data_verb_without_sql() -> None:
+    """Without SQL in the session, "the user has" is flagged (AIE-1199, US2.6)."""
+    reply = "The user has at least one draft saved."
+
+    assert _flags(_turns(reply)) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        "Select the option from the list.",
+        "Select the option from the list where it is needed.",
+        "Select a report from Insights.\n\nThen order by date.",
+        "Select the rows from the export; then where x = 1 applies.",
+    ],
+)
+def test_reply_check_prose_is_not_an_sql_turn(user: str) -> None:
+    """Prose that reads like SQL does not make an SQL turn (AIE-1199, US2.7)."""
+    assert _flags(_turns("The user has a draft.", user=user)) == (
+        ThirdPersonReply(1, 1, "the user has"),
+    )
+
+
+def test_reply_check_sql_in_another_session_does_not_count() -> None:
+    """SQL in another session does not make this session's turn SQL (AIE-1199, US2.8)."""
+    transcript = (
+        TranscriptTurn(1, 1, "hello", "The user has a draft.", None),
+        TranscriptTurn(2, 1, SQL_USER, "Done.", None),
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+def test_reply_check_sql_in_a_later_turn_does_not_count() -> None:
+    """SQL only in a later turn's user text does not cover an earlier reply (AIE-1199, US2.9)."""
+    transcript = _exchanges(("hello", "The user has a draft."), (SQL_USER, "Done."))
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+def test_reply_check_the_caller_is_never_exempt() -> None:
+    """ "the caller has" is flagged in an SQL turn (AIE-1199, US2.10)."""
+    assert _flags(_turns("The caller has the row.", user=SQL_USER)) == (
+        ThirdPersonReply(1, 1, "the caller has"),
+    )
+
+
+# --- product and data vocabulary (AIE-1199) -----------------------------------
+
+DATA_NOUNS = [
+    "id",
+    "ids",
+    "profile",
+    "profiles",
+    "property",
+    "properties",
+    "table",
+    "tables",
+    "row",
+    "rows",
+    "record",
+    "records",
+    "column",
+    "columns",
+    "attribute",
+    "attributes",
+]
+
+INTERFACE_VERBS = [
+    "taps",
+    "tapped",
+    "clicks",
+    "clicked",
+    "swipes",
+    "swiped",
+    "scrolls",
+    "scrolled",
+    "presses",
+    "pressed",
+    "hovers",
+    "hovered",
+]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        'set a deterministic `$insert_id`, such as a hash of the user ID plus "signup", '
+        "on the client.",
+        "check a few raw events in the User Profile activity feed for the same user.",
+        "Otherwise use the user property.",
+        'for example a hash of the user ID and "signup"',
+    ],
+)
+def test_reply_check_skips_data_nouns_from_the_aie_1182_run(reply: str) -> None:
+    """Each verbatim AIE-1182 excerpt with a data noun is not flagged (AIE-1199, US1.7)."""
+    assert _flags(_turns(reply)) == ()
+
+
+@pytest.mark.parametrize("noun", DATA_NOUNS)
+def test_reply_check_every_data_noun_is_exempt(noun: str) -> None:
+    """Each data noun after "the user" is not flagged (AIE-1199, US1.7)."""
+    assert _flags(_turns(f"The user {noun} is set.")) == ()
+
+
+@pytest.mark.parametrize(
+    "separator",
+    ["-", chr(0x2013), " " + chr(0x2014) + " ", " ", "\t", chr(0xA0), " - "],
+)
+def test_reply_check_data_noun_separators(separator: str) -> None:
+    """Spaces, tabs, NBSP, and one dash before a data noun are not flagged (AIE-1199, US1.7)."""
+    assert _flags(_turns(f"Look at the user{separator}id here.")) == ()
+
+
+def test_reply_check_skips_an_interface_verb_from_the_aie_1182_run() -> None:
+    """The verbatim AIE-1182 trial 6 excerpt is not flagged (AIE-1199, US1.8)."""
+    reply = "for example a UUID created when the user taps the button."
+
+    assert _flags(_turns(reply)) == ()
+
+
+@pytest.mark.parametrize("verb", INTERFACE_VERBS)
+def test_reply_check_every_interface_verb_is_exempt(verb: str) -> None:
+    """Each interface action verb after "the user" is not flagged (AIE-1199, US1.8)."""
+    assert _flags(_turns(f"When the user {verb} it, it fires.")) == ()
+
+
+@pytest.mark.parametrize("verb", ["logs", "signs", "visits"])
+def test_reply_check_flags_verbs_left_out_of_the_interface_list(verb: str) -> None:
+    """ "logs", "signs", and "visits" stay flagged (AIE-1199, US1.8)."""
+    assert _flags(_turns(f"The user {verb} it.")) == (ThirdPersonReply(1, 1, f"the user {verb}"),)
+
+
+def test_reply_check_flags_a_possessive_before_a_data_noun() -> None:
+    """A possessive before a data noun is still flagged (AIE-1199, US1.9)."""
+    assert _flags(_turns("I'll check the user's profile.")) == (
+        ThirdPersonReply(1, 1, "the user's profile"),
+    )
+
+
+def test_reply_check_a_newline_is_not_a_vocabulary_separator() -> None:
+    """A newline before a data noun does not exempt "the user" (AIE-1199, US1.9)."""
+    assert _flags(_turns("Ask the user\nProfile questions later.")) == (
+        ThirdPersonReply(1, 1, "the user profile"),
+    )
+
+
+def test_reply_check_vocabulary_applies_in_an_sql_turn() -> None:
+    """A data noun after "the user" is not flagged in an SQL turn (AIE-1199, US1.9)."""
+    assert _flags(_turns("The user ID is 5.", user=SQL_USER)) == ()
+
+
+def test_reply_check_vocabulary_never_exempts_the_caller() -> None:
+    """ "the caller" before a data noun is still flagged (AIE-1199, US1.9)."""
+    assert _flags(_turns("The caller ID is 5.")) == (ThirdPersonReply(1, 1, "the caller id"),)
