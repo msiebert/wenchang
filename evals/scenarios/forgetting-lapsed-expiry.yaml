@@ -1,0 +1,54 @@
+# Prompt: "A fact whose stated end date has passed is a candidate for
+# dropping, not to be removed automatically: when you read it or during
+# maintenance, drop it only if it no longer holds." and "Also drop each
+# `[inferred]` line that rested solely on it".
+id: forgetting-lapsed-expiry
+title: Drops a lapsed fact that no longer holds and its inferred line, and keeps one that still holds
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: exports
+    content: |
+      - [stated] Wants exports as JSON only until the warehouse cutover completes on September 30, 2025.
+      - [inferred] Avoids CSV exports because of the warehouse cutover.
+      - [stated] Names export files with the project slug.
+    description: Export format and naming habits
+    aliases: [exports]
+  - scope: user
+    area: identity
+    name: team
+    content: |
+      - [stated] Is on the growth pod until the reorg on August 1, 2025.
+    description: The user's team
+    aliases: [team, pod]
+sessions:
+  - turns:
+      - "The warehouse cutover finished months ago. The reorg slipped, though, so I'm still on the growth pod. What export format should I use for the growth pod's funnel data?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_absent
+    id: json-dropped
+    pattern: "(?i)json"
+    scope: user
+    area: workflows
+    name: exports
+  - kind: line_absent
+    id: inferred-dropped
+    pattern: "(?i)\\[inferred\\].*csv"
+    scope: user
+  - kind: seed_lines_preserved
+    id: naming-kept
+    scope: user
+    area: workflows
+    name: exports
+    except: "(?i)json|csv|cutover"
+  - kind: line_present
+    id: pod-kept
+    pattern: "(?i)growth[- ]pod"
+    scope: user
+  - kind: tool_not_called
+    id: files-kept
+    tool: delete_file

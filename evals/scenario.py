@@ -39,6 +39,7 @@ __all__ = [
     "Assertion",
     "CallMatcher",
     "CalledBefore",
+    "ContextRecord",
     "FileAbsent",
     "FileFilter",
     "FileRef",
@@ -48,6 +49,8 @@ __all__ = [
     "LinePresent",
     "NoContentMatching",
     "NoDuplicateFact",
+    "ReplyMatching",
+    "ReplyNotMatching",
     "Scenario",
     "ScenarioError",
     "SeedLinesPreserved",
@@ -69,6 +72,7 @@ CATEGORIES: Final[frozenset[str]] = frozenset(
         "write-mechanics",
         "curated",
         "slots",
+        "applying",
     }
 )
 IDENTITIES: Final[Mapping[str, Identity]] = MappingProxyType(
@@ -230,6 +234,34 @@ class CalledBefore:
     session: int | None = None
 
 
+@dataclass(frozen=True)
+class ReplyMatching:
+    """Some recorded reply of a matching turn matches the pattern."""
+
+    id: str
+    pattern: str
+    session: int | None = None
+    turn: int | None = None
+
+
+@dataclass(frozen=True)
+class ReplyNotMatching:
+    """At least one reply is recorded for a matching turn, and none matches the pattern."""
+
+    id: str
+    pattern: str
+    session: int | None = None
+    turn: int | None = None
+
+
+@dataclass(frozen=True)
+class ContextRecord:
+    """A product record shown above every turn as "[From the product's <system>]"."""
+
+    system: str
+    content: str
+
+
 type Assertion = (
     IndexReadFirst
     | FileAbsent
@@ -242,6 +274,8 @@ type Assertion = (
     | ToolNotCalled
     | AliasPresent
     | CalledBefore
+    | ReplyMatching
+    | ReplyNotMatching
 )
 
 ASSERTION_KINDS: Final[Mapping[str, type[Assertion]]] = MappingProxyType(
@@ -257,6 +291,8 @@ ASSERTION_KINDS: Final[Mapping[str, type[Assertion]]] = MappingProxyType(
         "tool_not_called": ToolNotCalled,
         "alias_present": AliasPresent,
         "called_before": CalledBefore,
+        "reply_matching": ReplyMatching,
+        "reply_not_matching": ReplyNotMatching,
     }
 )
 
@@ -294,6 +330,8 @@ _KIND_KEYS: Final[Mapping[str, tuple[frozenset[str], frozenset[str]]]] = Mapping
         "tool_not_called": (_CALL_KEYS, frozenset({"tool"})),
         "alias_present": (_FILE_KEYS | {"alias"}, _FILE_KEYS | {"alias"}),
         "called_before": (frozenset({"first", "then", "session"}), frozenset({"first", "then"})),
+        "reply_matching": (frozenset({"pattern", "session", "turn"}), frozenset({"pattern"})),
+        "reply_not_matching": (frozenset({"pattern", "session", "turn"}), frozenset({"pattern"})),
     }
 )
 _TOP_KEYS: Final = frozenset(
@@ -309,6 +347,7 @@ _TOP_KEYS: Final = frozenset(
         "assertions",
         "judge",
         "index_max_bytes",
+        "context_records",
     }
 )
 _TOP_REQUIRED: Final = frozenset({"id", "title", "category", "source", "sessions", "assertions"})
@@ -339,6 +378,7 @@ class Scenario:
     judge: tuple[JudgeItem, ...]
     path: Path
     index_max_bytes: int | None = None
+    context_records: tuple[ContextRecord, ...] = ()
 
 
 class _Loader:
@@ -526,6 +566,14 @@ class _Loader:
                 first = self.order_matcher(data["first"], f"{where}.first", sessions)
                 then = self.order_matcher(data["then"], f"{where}.then", sessions)
                 return CalledBefore(ident, first, then, session)
+            case "reply_matching":
+                pattern = self.pattern(data["pattern"], f"{where}.pattern")
+                session, turn = self.session_turn(data, where, sessions)
+                return ReplyMatching(ident, pattern, session, turn)
+            case "reply_not_matching":
+                pattern = self.pattern(data["pattern"], f"{where}.pattern")
+                session, turn = self.session_turn(data, where, sessions)
+                return ReplyNotMatching(ident, pattern, session, turn)
             case _:
                 alias = self.text(data["alias"], f"{where}.alias")
                 return AliasPresent(ident, self.file_ref(data, where), alias)
@@ -589,6 +637,24 @@ class _Loader:
             raise self.fail(f"duplicate judge id(s): {', '.join(duplicates)}")
         return tuple(items)
 
+    def context_records(self, raw: object) -> tuple[ContextRecord, ...]:
+        if not isinstance(raw, list) or not raw:
+            raise self.fail("context_records must be a non-empty list")
+        keys = frozenset({"system", "content"})
+        records: list[ContextRecord] = []
+        for i, item in enumerate(cast(list[object], raw)):
+            where = f"context_records[{i}]"
+            data = self.mapping(item, where)
+            self.keys(data, keys, keys, where)
+            values: list[str] = []
+            for key in ("system", "content"):
+                value: object = data[key]
+                if not isinstance(value, str) or not value.strip():
+                    raise self.fail(f"{where}.{key} must be a non-blank string")
+                values.append(value)
+            records.append(ContextRecord(values[0], values[1]))
+        return tuple(records)
+
     def scenario(self, document: object) -> Scenario:
         data = self.mapping(document, "the scenario document")
         self.keys(data, _TOP_KEYS, _TOP_REQUIRED, "scenario")
@@ -649,6 +715,9 @@ class _Loader:
                 self.integer(data["index_max_bytes"], "index_max_bytes", minimum=1)
                 if "index_max_bytes" in data
                 else None
+            ),
+            context_records=(
+                self.context_records(data["context_records"]) if "context_records" in data else ()
             ),
         )
 

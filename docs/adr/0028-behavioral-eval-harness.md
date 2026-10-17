@@ -94,6 +94,9 @@ slow and nondeterministic.
    - **Trial dir.** `eval_reset` accepts a `trial_dir` only under the
      server's runs root, which defaults to `evals/runs/` and is gitignored.
 
+   **Amended (2026-10-16) by ADR 0032.** Graders now also take the
+   transcript, and `transcript.json` is a grading input.
+
 4. **The eval server mounts the memory tools with `register_memory_tools`
    and adds three harness tools.**
    - The harness tools are `eval_reset`, `eval_record_turn`, and
@@ -189,6 +192,9 @@ slow and nondeterministic.
    was rejected, because their layout under `~/.claude/projects/` is
    internal. A paraphrased copy would affect only the judge.
 
+   **Amended (2026-10-16) by ADR 0032.** A paraphrased copy now also
+   affects the reply assertion kinds, so the live gate spot-checks it.
+
 8. **The judge is optional and separate.** `wenchang-eval-judge` (Read and
    Write, `omitClaudeMd`) writes `judge.json`. The report shows judge
    verdicts in their own columns, and they never change deterministic pass
@@ -226,6 +232,8 @@ slow and nondeterministic.
     or "The session S turn N reply"). The judge agent grades only that
     reply, and a missing reply is a `fail`. The remaining deferred
     scenarios are listed in the spec.
+
+    **Amended (2026-10-16) by ADR 0032.** The corpus is 42 scenarios.
 
 12. **Parallel runs are sharded across sessions (2026-10-14).** Trials
     inside one runner session stay serial. One eval server holds one

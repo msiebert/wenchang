@@ -6,7 +6,11 @@ HEADING: Final[str] = "Forgetting"
 BODY: Final[str] = """\
 Forgetting has two moves: drop one fact's line, or delete the whole file. Delete the file if the
 fact was the file's only fact or the user means the whole file; if it is ambiguous which they mean,
-ask before removing anything.
+ask before removing anything. A request is ambiguous when it could mean different removals, even
+if one reading seems likelier. When you ask, name the choices and remove nothing until the user
+answers; never remove the broadest reading and offer to restore the rest. When only one removal
+fits, remove it without asking. One fact held in several files is still one fact: remove it from
+each.
 
 Removal is total: leave no note that the fact was ever true. Also drop each `[inferred]` line that
 rested solely on it, delete any file derived solely from it, and remove description text or aliases

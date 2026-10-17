@@ -1186,11 +1186,16 @@ imports it. The editable install makes it importable from any directory.
   It holds the prompt slots, scopes, policy, identities, and seed files,
   shared by the tests and the evals.
 - **evals.scenario**: the YAML scenario format and loader. A scenario has
-  seed files, an optional per-scenario index cap, sessions of scripted user turns, a closed set of eleven
-  assertion kinds, and an optional judge rubric.
-- **evals.graders**: pure deterministic graders over a store dump and a
-  tool-call trace, plus the JSON loaders and writers that form the driver
-  contract. They never import `mcp`. A separate reply check scans the
+  seed files, an optional per-scenario index cap, optional `context_records`
+  (product data rendered above every turn, standing in for lookup tools the
+  eval agent lacks), sessions of scripted user turns, a closed set of
+  thirteen assertion kinds, and an optional judge rubric.
+- **evals.graders**: pure deterministic graders over a store dump, a
+  tool-call trace, and the transcript, plus the JSON loaders and writers
+  that form the driver contract. Grading reads `transcript.json` as well as
+  `store.json` and `trace.json`. They never import `mcp`
+  ([ADR 0032](docs/adr/0032-transcript-graded-assertions-and-context-records.md)).
+  A separate reply check scans the
   transcript for replies that refer to the user in the third person
   ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). It never changes
   an assertion result.
