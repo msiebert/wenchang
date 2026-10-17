@@ -91,7 +91,9 @@ Parametrized end-to-end cases are `test_correct_driver_passes_every_assertion[<i
 
 This is the human's merge checkpoint and not a release gate (ADR 0028).
 
-**Identity.** Agent sha256 `198c5602f87cc10be1e9f29093f7914382ce58b06b40546f3d37331e2a7fe000`, commit = the PR head. Each `run.json` must match both. The agent file is rendered on top of main with #39 merged.
+**Identity.** Agent sha256 `f84a877053432214cc3d56f79125b69c320dea539e29d6321ff597181a97b9f5`, commit = the PR head. Each `run.json` must match both. The agent file is rendered on top of main with #39 and #37 merged.
+
+The combined prompt (#37 + #38) was not live-run together; the separate N=6 runs of each PR are the evidence.
 
 **Gate.** Full corpus at N=3, twice, each as 3 shards merged with `merge-runs`. From the worktree root, for k = 1..3:
 
