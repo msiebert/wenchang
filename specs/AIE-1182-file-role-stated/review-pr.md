@@ -7,13 +7,13 @@
 - **A, the final paragraph**: "Check every user message for facts worth saving, whatever its form: a question or request can carry one as readily as a statement. Write facts as they arise, before you answer or ask a follow-up question, because the conversation may end first. Save a fact then; do not offer to save it later. When a fact needs the user's go-ahead first, ask in that same reply instead."
 - **B, appended to the save-criterion paragraph**: "What the user mentions about themselves or how they work while asking for something else counts as much as what they set out to tell you."
 
-The timing sentence changed from "before you ask a follow-up question" to "before you answer or ask a follow-up question" by the human's decision. Five held-out scenarios were written from intent and committed before the prompt edit; guards on existing scenarios were added in `a9d621c`. The scenario headers that quote the timing sentence are updated, and `.claude/agents/wenchang-eval.md` is re-rendered (`uv run python -m evals render-agent`).
+The timing sentence changed from "before you ask a follow-up question" to "before you answer or ask a follow-up question" by the human's decision. Five held-out scenarios were written from intent and committed before the prompt edit; guards on existing scenarios were added in `8995036`. The scenario headers that quote the timing sentence are updated, and `.claude/agents/wenchang-eval.md` is re-rendered (`uv run python -m evals render-agent`).
 
-Commits on the current approach: `4fb71ff` respec; `7aa33c8` held-out scenarios and drivers; `a9d621c` guards plus the mid-task held-out (both before the prompt edit); `08c1480` prompt A+B, pins, agent re-render.
+Commits on the current approach: `81cd5e5` respec; `5604205` held-out scenarios and drivers; `8995036` guards plus the mid-task held-out (both before the prompt edit); `e5a8820` prompt A+B, pins, agent re-render.
 
-Superseded approach: commits `517da3e`, `0a1dab3`, `19a9537` and `5a07913` added a narrow sentence naming the fact type (work role, team, responsibilities). It was rejected because it named the tested fact type and would not generalize. They are kept only as history; the final diff contains none of that text.
+Superseded approach: commits `76e4691`, `0351888`, `b9f7181` and `0f7c3a1` added a narrow sentence naming the fact type (work role, team, responsibilities). It was rejected because it named the tested fact type and would not generalize. They are kept only as history; the final diff contains none of that text.
 
-Agent `wenchang-eval.md` sha256: `59182398fd234870e2503027a962bc0328d1b9a4dd5dda9e3a4445d55c9d0635`. `make check`: green (4106 passed, 18 skipped, 41 deselected).
+Agent `wenchang-eval.md` sha256: `5c29bf0fbaa3709bc5f385b5490493bad15f4decf3b36e29c10b09cc881664fe`. `make check`: green (4152 passed, 18 skipped, 41 deselected).
 
 ## Diagnosis (from spec.md)
 
