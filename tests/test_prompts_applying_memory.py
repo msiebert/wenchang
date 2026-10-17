@@ -52,3 +52,39 @@ def test_at_most_one_example() -> None:
     """AIE-1052, US2.7: BODY contains at most one example marker."""
     lower = _normalized(applying_memory.BODY).lower()
     assert sum(lower.count(m) for m in EXAMPLE_MARKERS) <= 1
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "only through memory and what they tell you in this conversation",
+        "Never take their name or other personal identifiers from anywhere else",
+        "account details or file paths",
+        "Unless memory holds their name or they state it",
+        'call them "you"',
+        "for or about them",
+    ],
+)
+def test_body_has_identity_provenance_rule(phrase: str) -> None:
+    """AIE-1196, US2.1: BODY says the user is known only through memory and the conversation."""
+    assert phrase in _normalized(applying_memory.BODY)
+
+
+def test_body_names_no_tested_fact_or_operator() -> None:
+    """AIE-1196, US2.2: BODY carries no scenario-specific fact and no operator identity."""
+    lower = applying_memory.BODY.lower()
+    forbidden = (
+        "dinner",
+        "diabet",
+        "hospital",
+        "checkout",
+        "team",
+        "sign",
+        "email",
+        "u-ada",
+        "on-call",
+        "priya",
+    )
+    assert [w for w in forbidden if w in lower] == []
+    assert "Sam" not in applying_memory.BODY
+    assert re.search(r"\bMark\b|(?i:siebert)", applying_memory.BODY) is None

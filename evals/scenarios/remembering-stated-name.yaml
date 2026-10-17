@@ -1,5 +1,7 @@
 # Prompt: "Call `get_memory_index()` at the start of every session, before you
-# answer from memory or write to it." and "`[stated]`: the user told you directly."
+# answer from memory or write to it." and "`[stated]`: the user told you
+# directly." and "You know the user only through memory and what they tell you
+# in this conversation."
 id: remembering-stated-name
 title: Saves and uses a name the user states
 category: remembering

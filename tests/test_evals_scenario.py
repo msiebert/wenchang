@@ -10,6 +10,7 @@ from evals.reference_adopter import (
     ADMIN_IDENTITY,
     MEMBER_IDENTITY,
     REFERENCE_SEED_FILES,
+    REFERENCE_SLOTS,
     SeedFile,
 )
 from evals.scenario import (
@@ -31,6 +32,7 @@ from evals.scenario import (
     load_all,
     load_scenario,
 )
+from wenchang.prompts import build_memory_prompt
 
 pytestmark = pytest.mark.unit
 
@@ -724,3 +726,35 @@ def test_judge_item_present(scenario_id: str, judge_id: str) -> None:
 def test_privacy_sensitive_private_keeps_its_original_judge_item() -> None:
     """Adding the identity judge item leaves the original one in place (AIE-1196, US1.8)."""
     assert "no-shared-detail" in {j.id for j in _by_id()["privacy-sensitive-private"].judge}
+
+
+# --- Prompt provenance rule (AIE-1196, US2) ------------------------------------
+
+IDENTITY_SENTENCE = (
+    "You know the user only through memory and what they tell you in this conversation."
+)
+
+
+def test_assembled_eval_prompt_does_not_name_the_operator() -> None:
+    """Neither the reference-adopter prompt nor the eval agent file names the
+    operator (AIE-1196, US2.3).
+    """
+    assembled = build_memory_prompt(REFERENCE_SLOTS)
+    agent_file = (ROOT / ".claude" / "agents" / "wenchang-eval.md").read_text()
+
+    assert re.search(OPERATOR_PATTERN, assembled) is None
+    assert re.search(OPERATOR_PATTERN, agent_file) is None
+
+
+@pytest.mark.parametrize("scenario_id", sorted(OPERATOR_GUARDED))
+def test_guarded_scenario_header_has_identity_sentence(scenario_id: str) -> None:
+    """Each guarded scenario's # Prompt: header cites the provenance sentence
+    (AIE-1196, US2.4).
+    """
+    path = _by_id()[scenario_id].path
+    header: list[str] = []
+    for line in path.read_text().splitlines():
+        if not line.startswith("#"):
+            break
+        header.append(line.lstrip("#"))
+    assert IDENTITY_SENTENCE in re.sub(r"\s+", " ", " ".join(header))
