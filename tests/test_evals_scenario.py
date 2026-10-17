@@ -590,6 +590,10 @@ CORPUS = {
     "forgetting-system-fact",
     "forgetting-nickname-alias",
     "slots-system-of-record",
+    "forgetting-ambiguous-several-facts",
+    "forgetting-ambiguous-two-files",
+    "forgetting-clear-one-of-several",
+    "forgetting-clear-whole-after-recall",
 }
 
 
@@ -886,6 +890,76 @@ def test_new_scenarios_judge_rubrics_name_their_turn() -> None:
     offenders = [
         (s.id, j.id)
         for s in new
+        for j in s.judge
+        if re.match(r"The (session \d+ )?turn \d+ reply", j.rubric) is None
+    ]
+    assert offenders == []
+
+
+# --- Held-out forgetting scenarios (AIE-1185) -----------------------------------
+
+HELD_OUT_IDS = (
+    "forgetting-ambiguous-several-facts",
+    "forgetting-ambiguous-two-files",
+    "forgetting-clear-one-of-several",
+    "forgetting-clear-whole-after-recall",
+)
+
+_AMBIGUOUS_SENTENCE = (
+    "Delete the file if the fact was the file's only fact or the user means the whole "
+    "file; if it is ambiguous which they mean, ask before removing anything."
+)
+
+HELD_OUT_CITATIONS: dict[str, tuple[str, ...]] = {
+    "forgetting-ambiguous-several-facts": (_AMBIGUOUS_SENTENCE,),
+    "forgetting-ambiguous-two-files": (_AMBIGUOUS_SENTENCE,),
+    "forgetting-clear-one-of-several": (
+        "Forgetting has two moves: drop one fact's line, or delete the whole file.",
+    ),
+    "forgetting-clear-whole-after-recall": (
+        "Delete the file if the fact was the file's only fact or the user means the whole file",
+    ),
+}
+
+
+def test_held_out_scenarios_are_in_the_corpus() -> None:
+    """The four held-out forgetting scenarios load from the shipped directory
+    (AIE-1185).
+    """
+    assert set(HELD_OUT_IDS) <= {s.id for s in load_all()}
+    assert set(HELD_OUT_CITATIONS) == set(HELD_OUT_IDS)
+
+
+@pytest.mark.parametrize("ident", HELD_OUT_IDS)
+def test_held_out_scenarios_cite_the_prompt_verbatim(ident: str) -> None:
+    """Each cited sentence is in the reference memory prompt and in the
+    scenario's comment header, whitespace collapsed (AIE-1185).
+    """
+    prompt = _collapse(build_memory_prompt(REFERENCE_SLOTS))
+    header = _collapse(
+        " ".join(
+            line.removeprefix("#").strip()
+            for line in (ROOT / "evals" / "scenarios" / f"{ident}.yaml").read_text().splitlines()
+            if line.startswith("#")
+        )
+    )
+
+    for sentence in HELD_OUT_CITATIONS[ident]:
+        assert _collapse(sentence) in prompt, sentence
+        assert _collapse(sentence) in header, sentence
+
+
+def test_held_out_scenarios_judge_rubrics_name_their_turn() -> None:
+    """The held-out scenarios' judge rubrics each start by naming the reply
+    they grade (AIE-1185).
+    """
+    held_out = [s for s in load_all() if s.id in HELD_OUT_IDS]
+
+    assert {s.id for s in held_out} == set(HELD_OUT_IDS)
+    assert all(s.judge for s in held_out)
+    offenders = [
+        (s.id, j.id)
+        for s in held_out
         for j in s.judge
         if re.match(r"The (session \d+ )?turn \d+ reply", j.rubric) is None
     ]

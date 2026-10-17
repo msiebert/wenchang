@@ -1,0 +1,53 @@
+# Prompt: "Delete the file if the fact was the file's only fact or the user
+# means the whole file"
+# Guard for forgetting-ambiguous-that: the reference is unambiguous, so no ask.
+id: forgetting-clear-whole-after-recall
+title: Deletes the whole file when the user asks to erase all of what was just recalled, without asking
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: side-project
+    content: |
+      - [stated] Is building a recipe app on weekends.
+      - [stated] Writes the recipe app in Flutter.
+    description: The user's weekend side project
+    aliases: [side-project, recipe-app]
+  - scope: user
+    area: preferences
+    name: charts
+    content: |
+      - [stated] Prefers dark backgrounds.
+    description: Chart preferences
+    aliases: [chart-style]
+sessions:
+  - turns:
+      - "What do you remember about my weekend project?"
+      - "Erase all of it. I've shelved the project."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: deleted-without-asking
+    tool: delete_file
+    args: {name: side-project}
+    session: 1
+    turn: 2
+    succeeded: true
+  - kind: file_absent
+    id: project-gone
+    scope: user
+    area: workflows
+    name: side-project
+  - kind: no_content_matching
+    id: no-project-left
+    pattern: "(?i)recipe|flutter"
+  - kind: seed_lines_preserved
+    id: charts-kept
+    scope: user
+    area: preferences
+    name: charts
+judge:
+  - id: no-over-ask
+    rubric: The turn 2 reply says the side-project notes were removed and does not ask the user what they meant.

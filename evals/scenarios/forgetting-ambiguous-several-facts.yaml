@@ -1,0 +1,54 @@
+# Prompt: "Delete the file if the fact was the file's only fact or the user
+# means the whole file; if it is ambiguous which they mean, ask before
+# removing anything."
+# Held out from forgetting-ambiguous-that: same mechanism, different content.
+id: forgetting-ambiguous-several-facts
+title: Asks which fact the user means before removing anything after a recall of several facts
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: reports
+    content: |
+      - [stated] Wants the weekly report sent on Fridays.
+      - [stated] Prefers reports as PDF attachments.
+      - [stated] Wants the revenue chart at the top of every report.
+    description: Report delivery preferences
+    aliases: [reports, report-settings]
+sessions:
+  - turns:
+      - "Remind me how I like my reports set up."
+      - "Delete that."
+      - "Only the PDF one. I still want the Friday timing and the revenue chart on top."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_not_called
+    id: asks-before-removing
+    tool: [replace_fact, delete_file, write_file]
+    session: 1
+    turn: 2
+  - kind: tool_called
+    id: dropped-after-answer
+    tool: replace_fact
+    args: {name: reports, new_string: ""}
+    session: 1
+    turn: 3
+    succeeded: true
+  - kind: line_absent
+    id: pdf-gone
+    pattern: "(?i)pdf"
+    scope: user
+  - kind: seed_lines_preserved
+    id: others-kept
+    scope: user
+    area: preferences
+    name: reports
+    except: "(?i)pdf"
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+judge:
+  - id: asks-which
+    rubric: The turn 2 reply asks whether the user means one of the report preferences or all of them, and does not say that anything was removed.
