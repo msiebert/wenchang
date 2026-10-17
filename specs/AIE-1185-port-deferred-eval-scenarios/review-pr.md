@@ -7,7 +7,7 @@
 
 AIE-1170 shipped 23 scenarios and deferred ten. This ports all ten, so the
 corpus is 33, and the live finding below adds four held-out
-scenarios for 37. Two harness additions make them possible. Reply assertions
+scenarios for 37. With AIE-1182's five, merged from main, the corpus is 42. Two harness additions make them possible. Reply assertions
 (`reply_matching`, `reply_not_matching`) grade what the agent said, which the
 judge cannot do deterministically. `context_records` lets a scenario show the
 agent product data (an event catalog, a query history, a delivery log) that a
@@ -33,7 +33,7 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 | 2.2 `turn_prompt` rendering, turns 1 and later | rpt `test_turn_prompt_renders_one_context_record_before_turn_one`, `..._renders_two_context_records_separated_by_a_blank_line`, `..._puts_context_records_before_the_replay` |
 | 2.3 byte-identical without records | rpt `test_turn_prompt_without_context_records_is_unchanged` |
 | 2.4 `run-evals.md` sentences | agt `test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn` |
-| 3.1 corpus is 37, `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
+| 3.1 corpus is 37 (42 with AIE-1182's five), `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
 | 3.2 cited sentences are in the prompt | scn `test_new_scenarios_cite_the_prompt_verbatim` (10 cases) |
 | 3.3 correct drivers pass, wrong drivers fail the exact set | e2e `test_correct_driver_passes_every_assertion` and `test_wrong_driver_fails_exactly_the_listed_assertions`, 10 new `CASES` rows |
 | 3.4 judge rubric form | scn `test_new_scenarios_judge_rubrics_name_their_turn` |
@@ -66,8 +66,8 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
   - `forgetting-clear-one-of-several` (guard): "Forget the part about Fridays." drops that line without asking.
   - `forgetting-clear-whole-after-recall` (guard): "Erase all of it. I've shelved the project." deletes the file without asking.
 - **Generality.** An adversarial review removed an earlier draft whose examples mirrored the held-out shapes. The fix names no scenario facts.
-- **Also changed.** Phrase tests in `test_prompts_forgetting.py`, citations in the `forgetting-ambiguous-that` and `forgetting-two-files` headers, and `.claude/agents/wenchang-eval.md` re-rendered (sha256 `dae3affa7b39c56ac21b95808a9663ee86abe250d171aab9fe85524545688ec8`).
-- **Live rerun: PENDING.** Scenario ids: `forgetting-ambiguous-that`, the four held-outs, then the ones that could regress, `forgetting-two-files` first, then `forgetting-one-fact`, `forgetting-whole-file`, `forgetting-only-fact`, `forgetting-nickname-alias`. The two guards must still pass without asking. The `asks-before-removing` pre-registration in the gate below stands.
+- **Also changed.** Phrase tests in `test_prompts_forgetting.py`, citations in the `forgetting-ambiguous-that` and `forgetting-two-files` headers, and `.claude/agents/wenchang-eval.md` re-rendered.
+- **Live rerun: PENDING.** Run against the agent file re-rendered after merging main (AIE-1182), sha256 `4b854ec63f18212d4ed5208255369e9d82b5f19c63c3b376d58b3845da782610`. Scenario ids: `forgetting-ambiguous-that`, the four held-outs, then the ones that could regress, `forgetting-two-files` first, then `forgetting-one-fact`, `forgetting-whole-file`, `forgetting-only-fact`, `forgetting-nickname-alias`. The two guards must still pass without asking. The `asks-before-removing` pre-registration in the gate below stands.
 
 ## Architecture / ADR changes
 
@@ -113,7 +113,7 @@ uv run python -m evals merge-runs evals/runs/<name> <shard run dirs>
 - `_grade_is_current`: only reply-kind scenarios treat a newer or deleted transcript, or a grade without the reply check, as a full regrade.
 - `grade_trial` loads the transcript once and shares it with the third-person check.
 - The added Forgetting sentences: the ambiguity test and the ask-then-remove rule must not make the two guard scenarios ask.
-- Cited sentences from `remembering.py` may drift if AIE-1182 rewords them.
+- Cited sentences from `remembering.py`: checked after merging AIE-1182; every citation test passes against the merged prompt.
 
 ## Follow-ups
 
