@@ -43,3 +43,7 @@ assertions:
     id: no-new-file
     tool: write_file
     args: {scope: project}
+  - kind: line_absent
+    id: acronym-not-in-user
+    pattern: "CRX"
+    scope: user

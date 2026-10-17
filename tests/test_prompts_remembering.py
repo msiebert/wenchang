@@ -7,8 +7,9 @@ import re
 
 import pytest
 
+from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.file_format import ConfidenceLabel
-from wenchang.prompts import remembering
+from wenchang.prompts import build_memory_prompt, remembering
 
 pytestmark = pytest.mark.unit
 
@@ -185,12 +186,12 @@ def test_fact_line_pattern_counts_multiple_lines() -> None:
     "phrase",
     [
         "Write facts as they arise",
-        "before you ask a follow-up",
+        "before you answer or ask a follow-up",
         "conversation may end",
     ],
 )
 def test_body_describes_write_timing(phrase: str) -> None:
-    """AIE-1050, US6; AIE-1165: BODY says to write facts as they arise."""
+    """AIE-1050, US6; AIE-1165; AIE-1182: BODY says to write facts as they arise."""
     assert phrase in _flat(remembering.BODY)
 
 
@@ -199,3 +200,76 @@ def test_body_leaves_privacy_override_to_privacy_section(phrase: str) -> None:
     """AIE-1050, US6; AIE-1165: BODY leaves the refusal override to the privacy section."""
     assert remembering.BODY.strip() != ""
     assert phrase not in _flat(remembering.BODY)
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "Check every user message for facts worth saving",
+        "whatever its form",
+        "a question or request can carry one",
+        "do not offer to save it later",
+        "ask in that same reply",
+    ],
+)
+def test_body_checks_every_user_message(phrase: str) -> None:
+    """AIE-1182, US1.1: BODY says to check every user message, whatever its form."""
+    assert phrase in _flat(remembering.BODY)
+
+
+FINAL_PARAGRAPH = (
+    "Check every user message for facts worth saving, whatever its form: a question or request"
+    " can carry one as readily as a statement. Write facts as they arise, before you answer or"
+    " ask a follow-up question, because the conversation may end first. Save a fact then; do not"
+    " offer to save it later. When a fact needs the user's go-ahead first, ask in that same"
+    " reply instead."
+)
+
+MENTIONED_SENTENCE = (
+    "What the user mentions about themselves or how they work while asking for something else"
+    " counts as much as what they set out to tell you."
+)
+
+
+def test_final_paragraph_is_pinned() -> None:
+    """AIE-1182, US1.1: the final BODY paragraph matches the agreed text exactly."""
+    paragraphs = [_flat(p).strip() for p in remembering.BODY.strip().split("\n\n")]
+    assert paragraphs[-1] == FINAL_PARAGRAPH
+
+
+def test_save_criterion_ends_with_mentioned_in_passing_sentence() -> None:
+    """AIE-1182, US1.5: the save-criterion paragraph carries the in-passing sentence."""
+    matches = [p for p in remembering.BODY.split("\n\n") if "Save a fact only if" in p]
+    assert len(matches) == 1
+    assert _flat(matches[0]).strip().endswith(MENTIONED_SENTENCE)
+    assert MENTIONED_SENTENCE in _flat(remembering.BODY)
+
+
+def test_new_prose_has_no_label_formatting() -> None:
+    """AIE-1182, US1.4: the check rule and in-passing sentence use no code or bracket syntax."""
+    checks = [p for p in remembering.BODY.split("\n\n") if "Check every user message" in p]
+    assert len(checks) == 1
+    flat = _flat(remembering.BODY)
+    start = flat.find("What the user mentions about themselves")
+    assert start != -1
+    end = flat.index(". ", start)
+    sentence = flat[start:end]
+    for text in (checks[0], sentence):
+        assert not any(ch in text for ch in "`[]")
+
+
+def test_check_rule_precedes_write_timing_in_one_paragraph() -> None:
+    """AIE-1182, US1.2: the check-every-message rule precedes the write-timing sentence."""
+    timing = "Write facts as they arise"
+    matches = [p for p in remembering.BODY.split("\n\n") if timing in p]
+    assert len(matches) == 1
+    flat = _flat(matches[0])
+    assert "Check every user message" in flat
+    assert flat.index("Check every user message") < flat.index(timing)
+
+
+def test_assembled_prompt_carries_check_rule() -> None:
+    """AIE-1182, US1.3: the assembled remembering section includes the check-every-message rule."""
+    prompt = build_memory_prompt(REFERENCE_SLOTS)
+    section = prompt.split("## Deciding what to remember", 1)[1].split("\n## ", 1)[0]
+    assert "Check every user message for facts worth saving" in _flat(section)
