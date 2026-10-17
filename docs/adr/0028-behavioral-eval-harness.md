@@ -233,7 +233,7 @@ slow and nondeterministic.
     reply, and a missing reply is a `fail`. The remaining deferred
     scenarios are listed in the spec.
 
-    **Amended (2026-10-16) by ADR 0032.** The corpus is 37 scenarios.
+    **Amended (2026-10-16) by ADR 0032.** The corpus is 42 scenarios.
 
 12. **Parallel runs are sharded across sessions (2026-10-14).** Trials
     inside one runner session stay serial. One eval server holds one

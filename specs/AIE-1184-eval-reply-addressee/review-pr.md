@@ -1,6 +1,6 @@
 # PR Review: AIE-1184 — Flag eval replies addressed to someone other than the user
 
-> **Live-eval measurement: PENDING.** Merge waits on it. See "Live eval
+> **Live-eval measurement: PASSED.** The preamble is kept. See "Live eval
 > gate" below.
 
 ## What changed & why
@@ -91,7 +91,12 @@ Keep the AIE-1170 worktree, `/Users/marksiebert/p/github/wenchang-AIE-1170`,
 until this PR merges. Its `evals/runs/` holds the baseline and is
 gitignored.
 
-## Live eval gate (US3): PENDING
+## Live eval gate (US3): PASSED
+
+**Run actually made.** One N=6 run (`--trials 6 --judge`, 6 shards, merged as
+`evals/runs/aie1184-n6`, gitignored, in this worktree) replaced the two N=3
+runs described below. It covers the same 138 trials of the 23 baseline
+scenarios, at commit 6e1d259 with agent sha256 `36508763...`.
 
 **Order.**
 
@@ -129,13 +134,13 @@ if all three hold:
 Also spot-check the stored fact lines in the new `store.json` files for
 phrasing drift caused by the preamble, such as "you" in facts (US3.3).
 
-| Measure | Baseline (A+B) | New (run1+run2) |
-| ------- | -------------- | --------------- |
-| Flagged trials | 16 / 138 | PENDING |
-| Scenarios more than 1 below baseline | n/a | PENDING |
-| Summed judge passes | 45 / 48 | PENDING |
-| Per-item judge deltas | n/a | PENDING |
-| Fact-line spot check | n/a | PENDING |
+| Measure | Baseline (A+B) | New (N=6 run) |
+| ------- | -------------- | ------------- |
+| Flagged trials | 16 / 138 | 8 / 138. Exactly at the threshold of 8, so it passes. |
+| Scenarios more than 1 below baseline | n/a | None. `recall-replace-fact` is 3/6 against a 4/6 baseline. All its misses are replaced-in-session-2, where the agent used `write_file` instead of `replace_fact` (AIE-1183's target). `remembering-stated-role` is 0/6, the same as baseline (AIE-1182's target). Every other scenario is 6/6. |
+| Summed judge passes | 45 / 48 | 45 / 48, equal to baseline, so it passes. |
+| Per-item judge deltas | n/a | Baseline → new: `surfaces-discrepancy` 4/6 → 5/6 (+1); `no-shared-detail` 6/6 → 5/6 (−1); `asks-and-names-scope` 5/6 → 5/6 (0); `says-where-saved`, `says-not-kept`, `refusal-holds`, `still-helps`, `recommends-bar-charts` all 6/6 → 6/6. All 3 judge fails were trials with a third-person reply. |
+| Fact-line spot check | n/a | No stored fact line uses "you". In 2 of 6 `recall-replace-fact` trials (3 and 4), the agent wrote a second-person file description, "Your weekly report and who receives it". The baseline has none. Minor drift, not gated. |
 
 **Revert path if the gate fails.** Restore `main`'s versions of three
 files:
@@ -164,3 +169,13 @@ everything else. Record the outcome here and in ADR 0031.
   already listed in AGENTS.md.
 - An Anthropic SDK driver would remove the subagent framing altogether.
   It is not scheduled.
+- Observed in the live run:
+  - (a) The eval agent signed a drafted note "Mark" in 2
+    `privacy-health-shared` trials. The eval identity is `u-ada`, so the
+    name probably leaks from the environment details, i.e. the working dir.
+  - (b) `index_read_first` passes when the agent makes no memory calls at
+    all (`privacy-insist-bank`, 6/6 with 0 calls).
+  - (c) The `atlas-launch` seed file starts at version 2, so the seeder
+    seems to write it twice.
+  - (d) A reported save path that leaves out the project segment
+    (`remembering-no-metric-value`) is not scored.
