@@ -918,8 +918,8 @@ def test_report_drops_the_check_when_the_transcript_is_gone(tmp_path: Path) -> N
 
 
 def test_report_leaves_a_current_check_alone(tmp_path: Path) -> None:
-    """A current grade.json that already has the check is neither recomputed
-    nor rewritten (AIE-1184, US2.17).
+    """A current grade.json whose check is unchanged is recomputed but not
+    rewritten (AIE-1184, US2.17; AIE-1199, US3.2).
     """
     run_dir, (trial,) = _reply_trial(tmp_path)
     _dump(trial, leak=False)
@@ -1287,3 +1287,58 @@ def test_turn_prompt_without_context_records_is_unchanged(tmp_path: Path) -> Non
         "[Earlier in this conversation]\nUser: first\nAssistant: reply one\n\n"
         "[Newest message]\nsecond"
     )
+
+
+def test_report_replaces_a_stale_check_of_a_current_grade(tmp_path: Path) -> None:
+    """A current grade.json whose recorded check differs from the grader's
+    fresh value gets the fresh value, keeping results and passed (AIE-1199, US3.1).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, SECOND_PERSON)
+    graded = grade_trial(trial)
+    graded["results"][0]["detail"] = "kept"
+    graded["third_person_replies"] = [{"session": 1, "turn": 1, "phrase": "the user asked"}]
+    (trial / "grade.json").write_text(json.dumps(graded))
+    for name in ("store.json", "trace.json", "transcript.json"):
+        _age(trial / name, 30)
+    _age(trial / "grade.json", 10)
+
+    _, report = build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert refreshed["third_person_replies"] == []
+    assert refreshed["results"] == graded["results"]
+    assert refreshed["passed"] == graded["passed"]
+    (alpha,) = report["scenarios"]
+    assert alpha["third_person_trials"] == []
+    assert report["third_person"] == {"flagged_trials": 0, "checked_trials": 1}
+
+
+def test_report_replaces_a_recorded_transcript_error_once_the_transcript_is_valid(
+    tmp_path: Path,
+) -> None:
+    """A current grade.json that records a transcript_error gets the fresh
+    third_person_replies and loses the error once transcript.json is valid
+    (AIE-1199, US4.1 limits).
+    """
+    run_dir, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, THIRD_PERSON)
+    graded = grade_trial(trial)
+    graded.pop("third_person_replies", None)
+    graded["transcript_error"] = "cannot read /old/path/transcript.json: no such file"
+    (trial / "grade.json").write_text(json.dumps(graded))
+    for name in ("store.json", "trace.json", "transcript.json"):
+        _age(trial / name, 30)
+    _age(trial / "grade.json", 10)
+
+    build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert "transcript_error" not in refreshed
+    assert refreshed["third_person_replies"] == [
+        {"session": 1, "turn": 1, "phrase": "the user asked"}
+    ]
+    assert refreshed["results"] == graded["results"]
+    assert refreshed["passed"] == graded["passed"]

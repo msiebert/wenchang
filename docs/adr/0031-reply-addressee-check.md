@@ -62,10 +62,9 @@ honest preamble, to be kept only if a measurement showed it helps.
    - If `transcript.json` is deleted after a check was recorded, the check
      is dropped and the trial counts as unchecked.
    - `results` and `passed` are unchanged.
-   - A `grade.json` that is current for the store and trace, but lacks the
-     check or is older than the transcript, gets only the check recomputed.
-     Its results are kept, so old runs pick up the check without being
-     silently regraded.
+   - A `grade.json` that is current for the store and trace gets only the
+     check recomputed. Its results are kept, so old runs pick up the check
+     without being silently regraded. The refresh rule is amended below.
    - The report adds, per scenario, `third_person_trials`,
      `addressee_unchecked_trials`, and `judge_third_person_fails`, and a
      run-level `third_person` total. The markdown judge table gains a
@@ -108,10 +107,107 @@ honest preamble, to be kept only if a measurement showed it helps.
   - The pattern misses phrasings like "they asked me to", so the count is
     a lower bound.
   - Future analytics scenarios may add noisy hits, such as "where the user
-    drops off", "the user ID", "the user property", or "the user profile".
-    "user-facing" is never a match, because it has no "the". The check
-    never fails a trial, so the noise stays in the count.
+    drops off". "the user ID", "the user property", and "the user profile"
+    are no longer matches (amendment below). "user-facing" is never a
+    match, because it has no "the". The check never fails a trial, so the
+    noise stays in the count.
   - Two quoting forms are not stripped:
     - a fence opened and closed on one line, such as ```` ```the user``` ````;
     - straight-quote inch marks (`5" wide ... "the user`), which can pair
       with the wrong quote and hide or expose text.
+
+## Amendment (AIE-1199)
+
+Date: 2026-10-16
+
+### Problem
+
+The check flagged "the user" where it names a data row or product
+vocabulary:
+
+- AIE-1185 `applying-relevant-only` trials 1 and 3 ("whether the user has at
+  least one Purchase event", in an SQL turn).
+- AIE-1182 `filing-project-fact-in-question` trials 2 to 6 ("the user ID"
+  twice, "the User Profile" twice, "the user taps the button") and
+  `remembering-preference-mid-task` trial 4 ("use the user property").
+
+### Rules
+
+1. **SQL turns.** A turn is an SQL turn when its raw reply, or any raw user
+   text of its session up to that turn, holds an SQL statement:
+   `select ... from <ident>` then `join <ident> [alias] on` or
+   `where <ident> <comparison>`; or `insert into <ident> (`/`values`/`select`,
+   `update <ident> set <ident> =`, `delete from <ident> where`, `create table
+   <ident> (`. Statements are split at blank lines and `;`, and the scan is
+   linear time. In an SQL turn, a non-possessive "the user" followed directly
+   by a data verb (has, have, had, is, are, was, were, with, who, whose, did,
+   does, exists) is skipped, unless:
+   - an addressee word ends the text before it (ask, tell, remind, inform
+     forms; check with; confirm with; wait or waiting for; reply to; respond
+     to), or
+   - a speech verb follows the data verb. One adverb or "been" may sit
+     between, only whitespace separates them, and punctuation ends the
+     look-ahead.
+
+   Rejected: requiring a speech verb everywhere, which loses 3 of the 8
+   AIE-1184 true positives that have none ("the user can post", "for the user
+   to post", "gave the user a draft"); skipping every match near SQL, which
+   loses "the user asked" in SQL turns; and "group by"/"order by" as SQL
+   markers, which are prose.
+2. **Vocabulary, any turn.** A non-possessive "the user" followed (spaces,
+   tabs, NBSP, or one dash) by a data noun (id, profile, property, table,
+   row, record, column, attribute, and plurals) or an interface verb (taps,
+   tapped, clicks, clicked, swipes, swiped, scrolls, scrolled, presses,
+   pressed, hovers, hovered) is not a match. Possessives and "the caller" are
+   unchanged.
+3. **Re-report.** This replaces Decision 2's "older than the transcript"
+   refresh. `build_report` recomputes the reply check of every current
+   `grade.json` whose transcript exists, and rewrites `grade.json` only when
+   the check fields changed. `results` and `passed` are never touched. The
+   cost is one transcript parse per current trial.
+
+### Measurement
+
+Manual review of the flags:
+
+- AIE-1184 N=6 (8) and AIE-1185 N=3 (2): 8 true positives (all AIE-1184) and
+  2 false positives.
+- AIE-1182 N=6 (12): 6 true, 6 false.
+- AIE-1183 N=6 (6): all true.
+
+Re-report of `cp -Rp` copies, with the originals unchanged by file hash.
+`trials_run`, `passed_trials`, `assertions`, and `judge` are identical to the
+originals. The AIE-1184 copy was re-reported from the AIE-1199 branch, which
+contains AIE-1184, with its scenario paths left at the AIE-1184 worktree. The
+AIE-1182, AIE-1183, and AIE-1185 copies were re-reported on scratch worktrees
+at their run commits with the AIE-1199 evals diff applied and scenario paths
+pinned there.
+
+| Run | Flagged before | Flagged after |
+| --- | -------------- | ------------- |
+| AIE-1184 `aie1184-n6` | 8/138 | 8/138 |
+| AIE-1185 `aie1185-n3` | 2/30 | 0/30 |
+| AIE-1182 `aie1182-n6` | 12/168 | 6/168 |
+| AIE-1183 `aie1183-n6` | 6/168 | 6/168 |
+| Total | 28 | 20 |
+
+All 8 removed flags are the false positives above. No true positive is
+removed and no new flag appears.
+
+### Limits
+
+- In an SQL turn, third-person uses after a data verb with no cue are missed
+  ("the user has a draft", "the user has to approve").
+- A quoted span removed between "the user" and a data verb lets the
+  exemption apply.
+- SQL with a blank line inside, or a `;` inside a string literal, may not be
+  recognized, which errs toward flagging.
+- Non-SQL code does not make an SQL turn.
+- In an SQL turn, cue words outside the speech-verb list after a data verb
+  are missed ("the user has decided").
+- Data uses after other verbs ("the user made the order") or possessives
+  ("the user's email") are still flagged.
+- "the caller" is never exempt.
+- A data noun or interface verb used of the addressee is missed.
+- A `transcript_error` that names an absolute path is rewritten once after a
+  run dir is copied.
