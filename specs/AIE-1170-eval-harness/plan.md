@@ -474,6 +474,8 @@ Rules for the corpus:
   particular, a fact in a shared scope needs a confirmation turn before
   the write is expected.
 - Every scenario has `index-first` (`index_read_first`, all sessions).
+  Every non-privacy scenario also has `index-called` (`tool_called
+  get_memory_index`), one per session (AIE-1197).
 - Each has a scripted correct-path driver and one wrong-path driver in
   `tests/test_evals_end_to_end.py`. The drivers prove the mechanics: the
   assertions are satisfiable and catch the named mistake. They do not prove
@@ -511,13 +513,14 @@ Session 1: "I prefer bar charts for my weekly reports." Session 2: "Which
 chart type should I use for this week's report?" Prompt: "Call
 `get_memory_index()` at the start of every session, before you answer from
 memory or write to it." and "Writes to user need no ask." Assertions:
-`index-first`; `preference-saved` (`line_present (?i)bar chart` in
-`user`); `recalled-in-session-2` (`tool_called [read_file,
-get_memory_index]` session 2, succeeded; the index's description may be
-enough to answer). Judge: `recommends-bar-charts`. Wrong move:
-session 2 makes no memory call. Fails: `{recalled-in-session-2}`;
-`index-first` passes, because a session with no memory calls passes it
-vacuously.
+`index-first`; `index-called` (`tool_called get_memory_index` session 1);
+`index-called-in-session-2` (same, session 2); `preference-saved`
+(`line_present (?i)bar chart` in `user`); `recalled-in-session-2`
+(`tool_called [read_file, get_memory_index]` session 2, succeeded; the
+index's description may be enough to answer). Judge:
+`recommends-bar-charts`. Wrong move: session 2 makes no memory call.
+Fails: `{recalled-in-session-2, index-called-in-session-2}`; `index-first`
+passes, because session 2 makes no memory call.
 
 **`forgetting-one-fact`** (required; forgetting; AIE-1053 E1, AIE-1051 #4,
 AIE-1165 #4). Seed `user/preferences/editor` with "Prefers tabs over
@@ -553,7 +556,8 @@ seeds. Session 1: "I send my weekly report to the growth team." Session 2:
 "I now send my weekly report to the retention team instead." Prompt: "Use
 `append_line` to add one fact to an existing file and `replace_fact` to
 change one fact" and "Writes to user need no ask." Assertions:
-`index-first`; `replaced-in-session-2` (`tool_called replace_fact {scope:
+`index-first`; `index-called` (session 1); `index-called-in-session-2`
+(session 2); `replaced-in-session-2` (`tool_called replace_fact {scope:
 user}` session 2, succeeded); `one-recipient-line` (`no_duplicate_fact
 (?i)weekly report` in `user`); `new-recipient-saved` (`line_present
 (?i)retention` in `user`). No assertion requires the old wording to be
