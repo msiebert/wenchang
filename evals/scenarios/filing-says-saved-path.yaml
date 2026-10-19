@@ -1,0 +1,30 @@
+# Prompt: "Memory is short markdown files that outlast this conversation, each
+# addressed by a scope, an area in that scope, and a name." and "Writes to user
+# need no ask."
+id: filing-says-saved-path
+title: Names the full stored path when asked where a new fact went
+category: filing
+source: specs/AIE-1198-reply-paths-quote/spec.md
+sessions:
+  - turns:
+      - "I export every query result as CSV with a header row, never as Excel. Keep that in mind for me, and tell me which file it ended up in."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_present
+    id: csv-saved
+    pattern: '(?i)\bcsv\b'
+    scope: user
+  - kind: reply_matching
+    id: names-full-path
+    pattern: '(?<![\w.-])/?user/u-ada/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*'
+    session: 1
+    turn: 1
+  - kind: reply_not_matching
+    id: no-rebuilt-path
+    pattern: '(?<![\w.-])/?user/(?!u-ada/)(?!(?:project|organization|org)(?![\w-]))[a-z0-9][a-z0-9-]*/[a-z0-9]'
+    session: 1
+    turn: 1

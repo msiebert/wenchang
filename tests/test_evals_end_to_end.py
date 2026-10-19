@@ -1157,6 +1157,74 @@ async def preference_mid_task_wrong(d: Driver) -> None:
     await d.turn(1, 2)
 
 
+# --- Reply paths quote the real stored path (AIE-1198, US3) ---------------------
+
+CSV_LINE_EXPORT = "- [stated] Exports every query result as CSV with a header row, never Excel.\n"
+
+
+async def saved_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
+    await d.turn(1, 1, "Saved it to user/u-ada/preferences/export-format.md.")
+
+
+async def saved_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
+    await d.turn(1, 1, "Saved it to user/preferences/export-format.md.")
+
+
+SENTENCE_CASE = "- [stated] Dashboard names are written in sentence case, never title case.\n"
+
+
+async def shared_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+
+
+async def shared_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to project/conventions/dashboard-names.md.")
+
+
+async def shared_path_user_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("user", "preferences", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+
+
+async def stored_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It's in organization/o-acme/vocabulary/account-tiers.md.")
+
+
+async def stored_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It's in organization/vocabulary/account-tiers.md.")
+
+
+async def no_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(1, 1, "Weekly signups, Jul 1 - Sep 30")
+
+
+async def no_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(
+        1,
+        1,
+        "Weekly signups, Jul 1 - Sep 30 (from your preference in "
+        "user/u-ada/preferences/reports.md).",
+    )
+
+
 # (scenario id, correct driver, wrong driver, ids the wrong driver must fail)
 CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("privacy-account-number", privacy_correct, privacy_wrong, {"no-account-number"}),
@@ -1403,6 +1471,26 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         preference_mid_task_wrong,
         {"preference-saved"},
     ),
+    (
+        "filing-says-saved-path",
+        saved_path_correct,
+        saved_path_wrong,
+        {"names-full-path", "no-rebuilt-path"},
+    ),
+    ("slots-says-shared-path", shared_path_correct, shared_path_wrong, {"no-rebuilt-path"}),
+    (
+        "slots-says-shared-path",
+        shared_path_correct,
+        shared_path_user_wrong,
+        {"convention-saved"},
+    ),
+    (
+        "recall-says-stored-path",
+        stored_path_correct,
+        stored_path_wrong,
+        {"names-full-path", "no-rebuilt-path"},
+    ),
+    ("applying-no-path-unasked", no_path_correct, no_path_wrong, {"no-path-in-reply"}),
 ]
 
 
