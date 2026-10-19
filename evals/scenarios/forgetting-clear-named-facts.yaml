@@ -1,5 +1,8 @@
-# Prompt: "Forgetting has two moves: drop one fact's line, or delete the
-# whole file."
+# Prompt: "Forgetting has two moves: drop one fact's line, or delete the whole
+# file." and "Before carrying out a request that would remove more than one
+# fact, ask first unless the user's own words clearly cover every one: they said
+# all or everything, asked for the whole file or subject, or named each fact to
+# remove, even if other facts stay."
 # Guard: the user names each fact to remove, so no ask.
 id: forgetting-clear-named-facts
 title: Drops each fact the user names from a multi-fact file, without asking

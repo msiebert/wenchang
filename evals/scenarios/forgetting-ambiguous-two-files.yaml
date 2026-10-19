@@ -1,6 +1,5 @@
-# Prompt: "Delete the file if the fact was the file's only fact or the user
-# means the whole file; if it is ambiguous which they mean, ask before
-# removing anything."
+# Prompt: "Also ask when a request could mean different removals, even if one
+# reading seems likelier." and "Act on the answer without asking again."
 # Held out from forgetting-ambiguous-that: same mechanism, different content.
 id: forgetting-ambiguous-two-files
 title: Asks which file the user means before removing anything when two files fit

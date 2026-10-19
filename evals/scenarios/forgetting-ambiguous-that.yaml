@@ -1,9 +1,12 @@
-# Prompt: "Delete the file if the fact was the file's only fact or the user
-# means the whole file; if it is ambiguous which they mean, ask before
-# removing anything." and "A request is ambiguous when it could mean different
-# removals, even if one reading seems likelier." and "When you ask, name the
-# choices and remove nothing until the user answers; never remove the broadest
-# reading and offer to restore the rest."
+# Prompt: "Before carrying out a request that would remove more than one fact,
+# ask first unless the user's own words clearly cover every one: they said all
+# or everything, asked for the whole file or subject, or named each fact to
+# remove, even if other facts stay." and "Coverage comes from their words, not
+# from what you just showed them: a bare pointer back at a file you just read
+# out does not cover every fact in it." and "Also ask when a request could mean
+# different removals, even if one reading seems likelier." and "When you ask,
+# name the choices and remove nothing until the user answers; never remove the
+# broadest reading and offer to restore the rest."
 id: forgetting-ambiguous-that
 title: Asks which one the user means before removing anything for an ambiguous "that"
 category: forgetting

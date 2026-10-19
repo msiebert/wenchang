@@ -792,14 +792,28 @@ NEW_IDS = (
     "slots-system-of-record",
 )
 
+_MULTI_FACT_SENTENCE = (
+    "Before carrying out a request that would remove more than one fact, ask first unless "
+    "the user's own words clearly cover every one: they said all or everything, asked for "
+    "the whole file or subject, or named each fact to remove, even if other facts stay."
+)
+_COVERAGE_SENTENCE = (
+    "Coverage comes from their words, not from what you just showed them: a bare pointer "
+    "back at a file you just read out does not cover every fact in it."
+)
 _AMBIGUOUS_REQUEST_SENTENCE = (
-    "A request is ambiguous when it could mean different removals, even if one reading "
-    "seems likelier."
+    "Also ask when a request could mean different removals, even if one reading seems likelier."
 )
 _ASK_SENTENCE = (
     "When you ask, name the choices and remove nothing until the user answers; never remove "
     "the broadest reading and offer to restore the rest."
 )
+_ANSWER_SENTENCE = "Act on the answer without asking again."
+_ONLY_ONE_REMOVAL_SENTENCE = (
+    "When only one removal fits, remove it without asking, and delete the file if that was "
+    "its only fact."
+)
+_TWO_MOVES_SENTENCE = "Forgetting has two moves: drop one fact's line, or delete the whole file."
 _ONE_FACT_SENTENCE = "One fact held in several files is still one fact: remove it from each."
 
 CITATIONS: dict[str, tuple[str, ...]] = {
@@ -831,8 +845,8 @@ CITATIONS: dict[str, tuple[str, ...]] = {
         "wording and confidence label support.",
     ),
     "forgetting-ambiguous-that": (
-        "Delete the file if the fact was the file's only fact or the user means the whole "
-        "file; if it is ambiguous which they mean, ask before removing anything.",
+        _MULTI_FACT_SENTENCE,
+        _COVERAGE_SENTENCE,
         _AMBIGUOUS_REQUEST_SENTENCE,
         _ASK_SENTENCE,
     ),
@@ -925,27 +939,18 @@ HELD_OUT_IDS = (
     "forgetting-clear-named-facts",
 )
 
-_AMBIGUOUS_SENTENCE = (
-    "Delete the file if the fact was the file's only fact or the user means the whole "
-    "file; if it is ambiguous which they mean, ask before removing anything."
-)
-
 HELD_OUT_CITATIONS: dict[str, tuple[str, ...]] = {
-    "forgetting-ambiguous-several-facts": (_AMBIGUOUS_SENTENCE,),
-    "forgetting-ambiguous-two-files": (_AMBIGUOUS_SENTENCE,),
-    "forgetting-clear-one-of-several": (
-        "Forgetting has two moves: drop one fact's line, or delete the whole file.",
-    ),
-    "forgetting-clear-whole-after-recall": (
-        "Delete the file if the fact was the file's only fact or the user means the whole file",
-    ),
-    "forgetting-clear-named-facts": (
-        "Forgetting has two moves: drop one fact's line, or delete the whole file.",
-    ),
+    "forgetting-ambiguous-several-facts": (_MULTI_FACT_SENTENCE, _COVERAGE_SENTENCE),
+    "forgetting-ambiguous-two-files": (_AMBIGUOUS_REQUEST_SENTENCE, _ANSWER_SENTENCE),
+    "forgetting-clear-one-of-several": (_TWO_MOVES_SENTENCE,),
+    "forgetting-clear-whole-after-recall": (_MULTI_FACT_SENTENCE,),
+    "forgetting-clear-named-facts": (_TWO_MOVES_SENTENCE, _MULTI_FACT_SENTENCE),
 }
 
 EXTRA_CITATIONS: dict[str, tuple[str, ...]] = {
     "forgetting-two-files": (_ONE_FACT_SENTENCE,),
+    "forgetting-only-fact": (_ONLY_ONE_REMOVAL_SENTENCE,),
+    "forgetting-whole-file": (_MULTI_FACT_SENTENCE,),
 }
 
 
@@ -980,9 +985,9 @@ def test_held_out_scenarios_cite_the_prompt_verbatim(ident: str) -> None:
 
 
 @pytest.mark.parametrize("ident", EXTRA_CITATIONS)
-def test_one_fact_in_several_files_scenario_cites_the_prompt(ident: str) -> None:
-    """The forgetting-two-files header cites the one-fact-in-several-files
-    sentence, which is in the reference memory prompt (AIE-1185).
+def test_extra_forgetting_scenarios_cite_the_prompt(ident: str) -> None:
+    """Each extra forgetting scenario's header cites its prompt sentence, which
+    is in the reference memory prompt (AIE-1185).
     """
     _assert_cited_in_prompt_and_header(ident, EXTRA_CITATIONS[ident])
 

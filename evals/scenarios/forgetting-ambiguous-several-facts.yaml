@@ -1,6 +1,9 @@
-# Prompt: "Delete the file if the fact was the file's only fact or the user
-# means the whole file; if it is ambiguous which they mean, ask before
-# removing anything."
+# Prompt: "Before carrying out a request that would remove more than one fact,
+# ask first unless the user's own words clearly cover every one: they said all
+# or everything, asked for the whole file or subject, or named each fact to
+# remove, even if other facts stay." and "Coverage comes from their words, not
+# from what you just showed them: a bare pointer back at a file you just read
+# out does not cover every fact in it."
 # Held out from forgetting-ambiguous-that: same mechanism, different content.
 id: forgetting-ambiguous-several-facts
 title: Asks which fact the user means before removing anything after a recall of several facts
