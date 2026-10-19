@@ -1005,6 +1005,26 @@ async def clear_named_correct(d: Driver) -> None:
     await d.turn(1, 2, "Done, I removed the camera and before-noon notes.")
 
 
+AGENDA_LINE = "- [stated] Wants an agenda sent a day ahead.\n"
+
+
+async def clear_named_write_correct(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "preferences", "meetings"))["version"]
+    await d.turn(1, 1)
+    await d.call(
+        "write_file",
+        scope="user",
+        area="preferences",
+        name="meetings",
+        content=AGENDA_LINE,
+        description="How the user likes meetings run",
+        aliases=["meetings", "meeting-style"],
+        expected_version=version,
+    )
+    await d.turn(1, 2, "Done, I removed the camera and before-noon notes.")
+
+
 async def clear_named_wrong(d: Driver) -> None:
     await d.index()
     await d.read("user", "preferences", "meetings")
@@ -1337,6 +1357,12 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
     (
         "forgetting-clear-named-facts",
         clear_named_correct,
+        clear_named_wrong,
+        {"dropped-without-asking", "camera-gone", "noon-gone"},
+    ),
+    (
+        "forgetting-clear-named-facts",
+        clear_named_write_correct,
         clear_named_wrong,
         {"dropped-without-asking", "camera-gone", "noon-gone"},
     ),
