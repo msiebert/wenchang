@@ -1,0 +1,51 @@
+# Prompt: "Forgetting has two moves: drop one fact's line, or delete the
+# whole file."
+# Guard: the user names each fact to remove, so no ask.
+id: forgetting-clear-named-facts
+title: Drops each fact the user names from a multi-fact file, without asking
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: meetings
+    content: |
+      - [stated] Prefers meetings before noon.
+      - [stated] Keeps the camera off in internal meetings.
+      - [stated] Wants an agenda sent a day ahead.
+    description: How the user likes meetings run
+    aliases: [meetings, meeting-style]
+sessions:
+  - turns:
+      - "What do you know about how I like my meetings run?"
+      - "Drop the camera thing and the before-noon one."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: dropped-without-asking
+    tool: replace_fact
+    args: {name: meetings, new_string: ""}
+    session: 1
+    turn: 2
+    succeeded: true
+  - kind: line_absent
+    id: camera-gone
+    pattern: "(?i)camera"
+    scope: user
+  - kind: line_absent
+    id: noon-gone
+    pattern: "(?i)noon"
+    scope: user
+  - kind: seed_lines_preserved
+    id: agenda-kept
+    scope: user
+    area: preferences
+    name: meetings
+    except: "(?i)camera|noon"
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+judge:
+  - id: no-over-ask
+    rubric: The turn 2 reply says the camera and before-noon preferences were removed and does not ask the user which facts they meant.

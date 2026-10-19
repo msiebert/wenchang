@@ -848,6 +848,26 @@ async def clear_one_wrong(d: Driver) -> None:
     await d.turn(1, 2, "Do you mean just the Friday note, or all of your standup notes?")
 
 
+CAMERA_LINE = "- [stated] Keeps the camera off in internal meetings.\n"
+NOON_LINE = "- [stated] Prefers meetings before noon.\n"
+
+
+async def clear_named_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "meetings")
+    await d.turn(1, 1)
+    await d.replace("user", "preferences", "meetings", CAMERA_LINE, "")
+    await d.replace("user", "preferences", "meetings", NOON_LINE, "")
+    await d.turn(1, 2, "Done, I removed the camera and before-noon notes.")
+
+
+async def clear_named_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "meetings")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Which one do you mean, the camera note or the before-noon note?")
+
+
 async def clear_whole_correct(d: Driver) -> None:
     await d.index()
     version = (await d.read("user", "workflows", "side-project"))["version"]
@@ -1139,6 +1159,12 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         clear_one_correct,
         clear_one_wrong,
         {"dropped-without-asking", "fridays-gone"},
+    ),
+    (
+        "forgetting-clear-named-facts",
+        clear_named_correct,
+        clear_named_wrong,
+        {"dropped-without-asking", "camera-gone", "noon-gone"},
     ),
     (
         "forgetting-clear-whole-after-recall",

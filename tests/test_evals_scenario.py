@@ -600,6 +600,7 @@ CORPUS = {
     "remembering-transient-in-question",
     "filing-project-fact-in-question",
     "remembering-preference-mid-task",
+    "forgetting-clear-named-facts",
 }
 
 
@@ -921,6 +922,7 @@ HELD_OUT_IDS = (
     "forgetting-ambiguous-two-files",
     "forgetting-clear-one-of-several",
     "forgetting-clear-whole-after-recall",
+    "forgetting-clear-named-facts",
 )
 
 _AMBIGUOUS_SENTENCE = (
@@ -936,6 +938,9 @@ HELD_OUT_CITATIONS: dict[str, tuple[str, ...]] = {
     ),
     "forgetting-clear-whole-after-recall": (
         "Delete the file if the fact was the file's only fact or the user means the whole file",
+    ),
+    "forgetting-clear-named-facts": (
+        "Forgetting has two moves: drop one fact's line, or delete the whole file.",
     ),
 }
 
@@ -959,7 +964,7 @@ def _assert_cited_in_prompt_and_header(ident: str, sentences: tuple[str, ...]) -
 
 
 def test_held_out_scenarios_are_in_the_corpus() -> None:
-    """The four held-out forgetting scenarios load from the shipped directory
+    """The five held-out forgetting scenarios load from the shipped directory
     (AIE-1185).
     """
     assert set(HELD_OUT_IDS) <= {s.id for s in load_all()}
