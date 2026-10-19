@@ -1,0 +1,47 @@
+# Prompt: "Forgetting has two moves: drop one fact's line, or delete the whole
+# file."
+# Guard for forgetting-ambiguous-that: the reference is unambiguous, so no ask.
+id: forgetting-clear-one-of-several
+title: Drops the one fact the user names after a recall of several, without asking
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: standup
+    content: |
+      - [stated] Runs standup at 9:30.
+      - [stated] Posts standup notes in the team channel.
+      - [stated] Skips standup on Fridays.
+    description: The user's daily standup routine
+    aliases: [standup]
+sessions:
+  - turns:
+      - "What have you got on my standup routine?"
+      - "Forget the part about Fridays."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: dropped-without-asking
+    tool: replace_fact
+    args: {name: standup, new_string: ""}
+    session: 1
+    turn: 2
+    succeeded: true
+  - kind: line_absent
+    id: fridays-gone
+    pattern: "(?i)friday"
+    scope: user
+  - kind: seed_lines_preserved
+    id: others-kept
+    scope: user
+    area: workflows
+    name: standup
+    except: "(?i)friday"
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+judge:
+  - id: no-over-ask
+    rubric: The turn 2 reply says the Friday fact was removed and does not ask the user which fact they meant.

@@ -45,16 +45,14 @@ def test_build_memory_prompt_ends_with_forgetting_section() -> None:
             id="US2.1-US2.3-two-moves",
         ),
         pytest.param("whole file", id="US2.3-whole-file"),
-        pytest.param(
-            "Delete the file if the fact was the file's only fact", id="US2.6-files-only-fact"
-        ),
+        pytest.param("delete the file if that was its only fact", id="US2.6-files-only-fact"),
         pytest.param("Removal is total", id="US3.1-removal-is-total"),
         pytest.param("leave no note that the fact was ever true", id="US3.2-leave-no-note"),
         pytest.param("solely", id="US3.3-solely"),
         pytest.param("`[inferred]`", id="US3.4-inferred"),
         pytest.param("description text or aliases", id="US3.5-description-text-or-aliases"),
         pytest.param("exist only because of it", id="US3.5-exist-only-because"),
-        pytest.param("ambiguous which they mean", id="US4.1-ambiguous"),
+        pytest.param("ask first", id="US4.1-ask-first"),
         pytest.param("end date", id="US5.1-end-date"),
         pytest.param("candidate", id="US5.1-candidate"),
         pytest.param("not to be removed automatically", id="US5.2-not-automatically"),
@@ -67,10 +65,54 @@ def test_build_memory_prompt_ends_with_forgetting_section() -> None:
         ),
         pytest.param("drop it only if it no longer holds", id="AIE-1165-drop-only-if-stale"),
         pytest.param("say you cannot", id="AIE-1165-say-you-cannot"),
+        pytest.param(
+            "could mean different removals",
+            id="AIE-1185-ambiguous-different-removals",
+        ),
+        pytest.param(
+            "even if one reading seems likelier",
+            id="AIE-1185-ambiguous-despite-likelier-reading",
+        ),
+        pytest.param(
+            "One fact held in several files is still one fact",
+            id="AIE-1185-one-fact-several-files",
+        ),
+        pytest.param(
+            "remove nothing until the user answers",
+            id="AIE-1185-remove-nothing-until-answer",
+        ),
+        pytest.param(
+            "never remove the broadest reading",
+            id="AIE-1185-never-broadest-reading",
+        ),
+        pytest.param(
+            "remove it without asking",
+            id="AIE-1185-remove-without-asking",
+        ),
+        pytest.param(
+            "would remove more than one fact",
+            id="AIE-1185-multi-fact-confirm",
+        ),
+        pytest.param(
+            "the user's own words clearly cover every one",
+            id="AIE-1185-multi-fact-words-cover",
+        ),
+        pytest.param(
+            "Coverage comes from their words, not from what you just showed them",
+            id="AIE-1185-coverage-from-words",
+        ),
+        pytest.param(
+            "Act on the answer without asking again",
+            id="AIE-1185-act-on-answer",
+        ),
+        pytest.param(
+            "count as part of the fact they rest on",
+            id="AIE-1185-dependents-part-of-fact",
+        ),
     ],
 )
 def test_forgetting_body_contains_phrase(phrase: str) -> None:
-    """AIE-1053, US2-US6; AIE-1165: forgetting.BODY contains each required phrase."""
+    """AIE-1053, US2-US6; AIE-1165; AIE-1185: forgetting.BODY contains each required phrase."""
     assert phrase in _flat(forgetting.BODY)
 
 

@@ -18,13 +18,22 @@ from typing import Any, Final, cast
 import evals.agent
 from evals.graders import (
     GradeInputError,
+    TranscriptTurn,
     find_third_person_replies,
     grade,
     load_store_dump,
     load_trace,
     load_transcript,
 )
-from evals.scenario import RUNS_DIR, Scenario, ScenarioError, assertion_kind, load_scenario
+from evals.scenario import (
+    RUNS_DIR,
+    ReplyMatching,
+    ReplyNotMatching,
+    Scenario,
+    ScenarioError,
+    assertion_kind,
+    load_scenario,
+)
 
 __all__ = [
     "MODEL_ALIASES",
@@ -37,6 +46,7 @@ __all__ = [
     "parse_shard",
     "shard_scenarios",
     "turn_prompt",
+    "uses_reply_kinds",
 ]
 
 MODEL_ALIASES: Final[frozenset[str]] = frozenset({"sonnet", "opus", "haiku", "fable", "inherit"})
@@ -196,8 +206,12 @@ def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
     turns = scenario.sessions[session - 1].turns
     if not 1 <= turn <= len(turns):
         raise GradeInputError(f"{trial_dir}: session {session} has no turn {turn}")
+    context = "".join(
+        f"[From the product's {r.system}]\n{r.content.rstrip('\n')}\n\n"
+        for r in scenario.context_records
+    )
     if turn == 1:
-        return turns[0]
+        return f"{context}[Newest message]\n{turns[0]}" if context else turns[0]
     recorded = {(t.session, t.turn): t for t in load_transcript(trial_dir / "transcript.json")}
     lines = ["[Earlier in this conversation]"]
     for earlier in range(1, turn):
@@ -210,28 +224,46 @@ def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
             lines.append("")
         lines += [f"User: {exchange.user}", f"Assistant: {exchange.reply}"]
     lines += ["", "[Newest message]", turns[turn - 1]]
-    return "\n".join(lines)
+    return context + "\n".join(lines)
 
 
 _REPLY_CHECK_KEYS: Final = ("third_person_replies", "transcript_error")
 
 
-def _reply_check(trial_dir: Path, scenario: Scenario) -> dict[str, Any]:
+def uses_reply_kinds(scenario: Scenario) -> bool:
+    """Whether any assertion grades the transcript's replies."""
+    return any(isinstance(a, (ReplyMatching, ReplyNotMatching)) for a in scenario.assertions)
+
+
+def _load_transcript(trial_dir: Path) -> tuple[Sequence[TranscriptTurn], str | None]:
+    """The trial's transcript, empty when absent or malformed, and the load error."""
+    path = trial_dir / "transcript.json"
+    if not path.exists():
+        return (), None
+    try:
+        return load_transcript(path), None
+    except GradeInputError as exc:
+        return (), str(exc)
+    except (ValueError, RecursionError) as exc:
+        # Undecodable bytes or nesting too deep for the JSON parser.
+        return (), f"{path}: cannot parse: {type(exc).__name__}"
+
+
+def _reply_check(
+    trial_dir: Path,
+    scenario: Scenario,
+    transcript: Sequence[TranscriptTurn],
+    error: str | None,
+) -> dict[str, Any]:
     """The reply check's grade.json fields; empty without a transcript.
 
     A malformed transcript is recorded, never raised, so it cannot block
     deterministic grading.
     """
-    path = trial_dir / "transcript.json"
-    if not path.exists():
+    if error is not None:
+        return {"transcript_error": error}
+    if not (trial_dir / "transcript.json").exists():
         return {}
-    try:
-        transcript = load_transcript(path)
-    except GradeInputError as exc:
-        return {"transcript_error": str(exc)}
-    except (ValueError, RecursionError) as exc:
-        # Undecodable bytes or nesting too deep for the JSON parser.
-        return {"transcript_error": f"{path}: cannot parse: {type(exc).__name__}"}
     return {
         "third_person_replies": [
             {"session": f.session, "turn": f.turn, "phrase": f.phrase}
@@ -247,7 +279,8 @@ def grade_trial(trial_dir: Path) -> dict[str, Any]:
     scenario, trial = _trial_scenario(trial_dir)
     store = load_store_dump(trial_dir / "store.json")
     trace = load_trace(trial_dir / "trace.json")
-    results = grade(scenario, store, trace)
+    transcript, error = _load_transcript(trial_dir)
+    results = grade(scenario, store, trace, transcript)
     graded: dict[str, Any] = {
         "scenario": scenario.id,
         "trial": trial,
@@ -255,7 +288,7 @@ def grade_trial(trial_dir: Path) -> dict[str, Any]:
             {"id": r.id, "kind": r.kind, "passed": r.passed, "detail": r.detail} for r in results
         ],
         "passed": all(r.passed for r in results),
-        **_reply_check(trial_dir, scenario),
+        **_reply_check(trial_dir, scenario, transcript, error),
     }
     _write_json(trial_dir / "grade.json", graded)
     return graded
@@ -273,7 +306,7 @@ def _refresh_reply_check(trial_dir: Path, scenario: Scenario, graded: dict[str, 
                 graded.pop(key, None)
             _write_json(trial_dir / "grade.json", graded)
         return
-    fresh = _reply_check(trial_dir, scenario)
+    fresh = _reply_check(trial_dir, scenario, *_load_transcript(trial_dir))
     recorded = {key: graded[key] for key in _REPLY_CHECK_KEYS if key in graded}
     if recorded == fresh:
         return
@@ -368,11 +401,18 @@ def _load_grade(path: Path) -> dict[str, Any]:
     return graded
 
 
-def _grade_is_current(trial_dir: Path) -> bool:
+def _grade_is_current(trial_dir: Path, scenario: Scenario) -> bool:
     grade_path = trial_dir / "grade.json"
     if not grade_path.exists():
         return False
     dumps = [trial_dir / "store.json", trial_dir / "trace.json"]
+    if uses_reply_kinds(scenario):
+        transcript = trial_dir / "transcript.json"
+        graded = _read_json(grade_path)
+        has_check = isinstance(graded, dict) and any(k in graded for k in _REPLY_CHECK_KEYS)
+        if transcript.exists() != has_check:
+            return False
+        dumps.append(transcript)
     newest = max((p.stat().st_mtime for p in dumps if p.exists()), default=0.0)
     return grade_path.stat().st_mtime >= newest
 
@@ -397,7 +437,7 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
             trial_dir = run_dir / ident / f"trial-{k}"
             scenario, _ = _trial_scenario(trial_dir)
             dumped = (trial_dir / "store.json").exists() and (trial_dir / "trace.json").exists()
-            if _grade_is_current(trial_dir):
+            if _grade_is_current(trial_dir, scenario):
                 current = _load_grade(trial_dir / "grade.json")
                 _refresh_reply_check(trial_dir, scenario, current)
             elif dumped:

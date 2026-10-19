@@ -1,0 +1,45 @@
+# Prompt: "Removal is total: leave no note that the fact was ever true." and
+# "Also drop each `[inferred]` line that rested solely on it, delete any file
+# derived solely from it, and remove description text or aliases that exist
+# only because of it."
+id: forgetting-nickname-alias
+title: Removes a nickname fact and the alias that exists only because of it
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: weekly-review
+    content: |
+      - [observed] Reviews the checkout funnel every Monday.
+      - [stated] Calls the weekly funnel review "the Monday grind".
+    description: Weekly funnel review routine
+    aliases: [monday-review, monday-grind]
+sessions:
+  - turns:
+      - "Forget that I call it the Monday grind."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: line_absent
+    id: line-dropped
+    pattern: "(?i)grind"
+    scope: user
+  - kind: no_content_matching
+    id: no-grind-left
+    pattern: "(?i)grind"
+  - kind: seed_lines_preserved
+    id: review-kept
+    scope: user
+    area: workflows
+    name: weekly-review
+    except: "(?i)grind"
+  - kind: alias_present
+    id: other-alias-kept
+    scope: user
+    area: workflows
+    name: weekly-review
+    alias: monday-review
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file

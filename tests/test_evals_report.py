@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 import evals.agent
+import evals.report
 from evals.__main__ import main
 from evals.graders import (
     GradeInputError,
@@ -23,6 +24,7 @@ from evals.graders import (
     transcript_to_json,
 )
 from evals.report import (
+    _grade_is_current,  # pyright: ignore[reportPrivateUsage]
     build_report,
     grade_trial,
     merge_runs,
@@ -30,6 +32,7 @@ from evals.report import (
     parse_shard,
     shard_scenarios,
     turn_prompt,
+    uses_reply_kinds,
 )
 from evals.scenario import Scenario, load_scenario
 
@@ -932,6 +935,358 @@ def test_report_leaves_a_current_check_alone(tmp_path: Path) -> None:
 
     assert (trial / "grade.json").stat().st_mtime == before
     assert _json(trial / "grade.json")["third_person_replies"] == graded["third_person_replies"]
+
+
+# --- reply kinds in grading and the report (AIE-1185, US1) ----------------------
+
+REPLY_SCENARIO = """\
+id: {id}
+title: {id}
+category: privacy
+source: AIE-1170
+sessions:
+  - turns: ["first", "second"]
+  - turns: ["third"]
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: reply_not_matching
+    id: no-banned
+    pattern: banned
+    session: 1
+    turn: 1
+  - kind: reply_matching
+    id: says-done
+    pattern: "(?i)done"
+    session: 1
+    turn: 2
+"""
+
+
+def _reply_scenario_trial(tmp_path: Path, template: str = REPLY_SCENARIO) -> tuple[Path, Path]:
+    directory = tmp_path / "scenarios"
+    directory.mkdir(exist_ok=True)
+    path = directory / "alpha.yaml"
+    path.write_text(template.format(id="alpha"))
+    run_dir, _ = new_run(
+        [load_scenario(path)], model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW
+    )
+    return run_dir, run_dir / "alpha" / "trial-1"
+
+
+def _outcomes(graded: dict[str, Any]) -> dict[str, bool]:
+    return {r["id"]: r["passed"] for r in graded["results"]}
+
+
+def test_uses_reply_kinds(tmp_path: Path) -> None:
+    """A scenario uses reply kinds when any assertion is one (AIE-1185, US1.6)."""
+    directory = tmp_path / "scenarios"
+    directory.mkdir()
+    plain = directory / "plain.yaml"
+    plain.write_text(SCENARIO.format(id="plain"))
+    replying = directory / "replying.yaml"
+    replying.write_text(REPLY_SCENARIO.format(id="replying"))
+
+    assert uses_reply_kinds(load_scenario(plain)) is False
+    assert uses_reply_kinds(load_scenario(replying)) is True
+
+
+def test_grade_trial_without_a_transcript_fails_reply_kinds(tmp_path: Path) -> None:
+    """A trial dir without transcript.json grades with an empty transcript, so
+    reply kinds fail with "no reply recorded" (AIE-1185, US1.5).
+    """
+    _, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+
+    graded = grade_trial(trial)
+
+    assert _outcomes(graded) == {"index-first": True, "no-banned": False, "says-done": False}
+    assert graded["passed"] is False
+    assert all("no reply recorded" in r["detail"] for r in graded["results"][1:])
+    assert "transcript_error" not in graded
+
+
+def test_grade_trial_grades_replies_from_the_transcript(tmp_path: Path) -> None:
+    """A valid transcript.json feeds the reply kinds and the third-person check
+    (AIE-1185, US1.5).
+    """
+    _, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, "All fine.")
+
+    clean = grade_trial(trial)
+    _reply_transcript(trial, "That is banned. The user asked.")
+    dirty = grade_trial(trial)
+
+    assert _outcomes(clean) == {"index-first": True, "no-banned": True, "says-done": True}
+    assert clean["passed"] is True
+    assert _outcomes(dirty) == {"index-first": True, "no-banned": False, "says-done": True}
+    assert dirty["passed"] is False
+    assert dirty["third_person_replies"] == [{"session": 1, "turn": 1, "phrase": "the user asked"}]
+    assert _json(trial / "grade.json") == dirty
+
+
+def test_grade_trial_loads_the_transcript_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """grade_trial reads transcript.json one time for grade and the reply check
+    (AIE-1185, US1.5).
+    """
+    _, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, "All fine.")
+    loaded: list[Path] = []
+    original = evals.report.load_transcript
+
+    def counting(path: Path) -> tuple[TranscriptTurn, ...]:
+        loaded.append(path)
+        return original(path)
+
+    monkeypatch.setattr(evals.report, "load_transcript", counting)
+
+    grade_trial(trial)
+
+    assert loaded == [trial / "transcript.json"]
+
+
+def test_grade_trial_survives_a_malformed_transcript(tmp_path: Path) -> None:
+    """A malformed transcript.json does not raise: transcript_error is recorded,
+    reply kinds fail with "no reply recorded", other kinds grade normally
+    (AIE-1185, US1.5).
+    """
+    _, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+    (trial / "transcript.json").write_text("not json")
+
+    graded = grade_trial(trial)
+
+    assert "transcript.json" in graded["transcript_error"]
+    assert _outcomes(graded) == {"index-first": True, "no-banned": False, "says-done": False}
+    assert all("no reply recorded" in r["detail"] for r in graded["results"][1:])
+    assert "third_person_replies" not in graded
+
+
+def test_grade_trial_survives_an_undecodable_transcript(tmp_path: Path) -> None:
+    """A transcript.json with invalid UTF-8 does not raise: transcript_error is
+    recorded, the reply assertion fails, and a non-reply assertion still passes
+    (AIE-1185, US1.5).
+    """
+    _, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+    (trial / "transcript.json").write_bytes(b'{"turns": [\xff]}')
+
+    graded = grade_trial(trial)
+
+    assert "transcript.json" in graded["transcript_error"]
+    assert _json(trial / "grade.json")["transcript_error"] == graded["transcript_error"]
+    outcomes = _outcomes(graded)
+    assert outcomes["says-done"] is False
+    assert outcomes["index-first"] is True
+    assert graded["passed"] is False
+
+
+def test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_newer(
+    tmp_path: Path,
+) -> None:
+    """A transcript newer than grade.json regrades a reply-kind scenario in
+    full, so results change (AIE-1185, US1.6).
+    """
+    run_dir, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, "All fine.")
+    assert grade_trial(trial)["passed"] is True
+    _age(trial / "store.json", 20)
+    _age(trial / "trace.json", 20)
+    _age(trial / "grade.json", 10)
+    _reply_transcript(trial, "That is banned.")
+
+    _, report = build_report(run_dir)
+
+    assert _outcomes(_json(trial / "grade.json")) == {
+        "index-first": True,
+        "no-banned": False,
+        "says-done": True,
+    }
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+    assert {a["id"]: a["passes"] for a in alpha["assertions"]}["no-banned"] == 0
+
+
+def test_report_fully_regrades_a_reply_scenario_when_the_transcript_is_gone(
+    tmp_path: Path,
+) -> None:
+    """A reply-kind scenario whose transcript.json disappears after grading is
+    regraded in full once, so reply assertions fail and the reply check is
+    dropped, and later reports do not regrade again (AIE-1185, US1.6).
+    """
+    run_dir, trial = _reply_scenario_trial(tmp_path)
+    _dump(trial, leak=False)
+    _reply_transcript(trial, "All fine. The user asked.")
+    assert grade_trial(trial)["passed"] is True
+    assert "third_person_replies" in _json(trial / "grade.json")
+    build_report(run_dir)
+    assert _outcomes(_json(trial / "grade.json"))["says-done"] is True
+
+    (trial / "transcript.json").unlink()
+    _, report = build_report(run_dir)
+
+    graded = _json(trial / "grade.json")
+    assert _outcomes(graded) == {"index-first": True, "no-banned": False, "says-done": False}
+    assert "third_person_replies" not in graded
+    assert "transcript_error" not in graded
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+    assertion_passes = {a["id"]: a["passes"] for a in alpha["assertions"]}
+    assert assertion_passes["says-done"] == 0
+    assert assertion_passes["no-banned"] == 0
+
+    _age(trial / "store.json", 20)
+    _age(trial / "trace.json", 20)
+    _age(trial / "grade.json", 10)
+    before = (trial / "grade.json").stat().st_mtime
+    build_report(run_dir)
+    assert (trial / "grade.json").stat().st_mtime == before
+
+
+def test_report_regrades_a_reply_scenario_whose_grade_lacks_the_reply_check(
+    tmp_path: Path,
+) -> None:
+    """A reply-kind grade.json with a transcript but none of the reply-check
+    keys is not current, and the report regrades it (AIE-1185, US1.6).
+    """
+    run_dir, trial = _reply_scenario_trial(tmp_path)
+    scenario = load_scenario(tmp_path / "scenarios" / "alpha.yaml")
+    _dump(trial, leak=False)
+    _reply_transcript(trial, "All fine. The user asked.")
+    graded = grade_trial(trial)
+    assert "third_person_replies" in graded
+    stripped = {k: v for k, v in _json(trial / "grade.json").items() if k != "third_person_replies"}
+    stripped.pop("transcript_error", None)
+    (trial / "grade.json").write_text(json.dumps(stripped))
+    _age(trial / "store.json", 20)
+    _age(trial / "trace.json", 20)
+    _age(trial / "transcript.json", 20)
+
+    assert _grade_is_current(trial, scenario) is False
+
+    build_report(run_dir)
+
+    assert "third_person_replies" in _json(trial / "grade.json")
+
+
+def test_grade_is_current_watches_the_transcript_only_for_reply_scenarios(
+    tmp_path: Path,
+) -> None:
+    """transcript.json joins the freshness set only for scenarios that use a
+    reply kind (AIE-1185, US1.6).
+    """
+    directory = tmp_path / "scenarios"
+    directory.mkdir()
+    plain_path, replying_path = directory / "plain.yaml", directory / "replying.yaml"
+    plain_path.write_text(SCENARIO.format(id="plain"))
+    replying_path.write_text(REPLY_SCENARIO.format(id="replying"))
+    plain, replying = load_scenario(plain_path), load_scenario(replying_path)
+    run_dir, _ = new_run(
+        [plain, replying], model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW
+    )
+    trials = {s.id: run_dir / s.id / "trial-1" for s in (plain, replying)}
+    for scenario, trial in ((plain, trials["plain"]), (replying, trials["replying"])):
+        _dump(trial, leak=False)
+        _reply_transcript(trial, "Done.")
+        grade_trial(trial)
+        assert _grade_is_current(trial, scenario)
+        _age(trial / "store.json", 20)
+        _age(trial / "trace.json", 20)
+        _age(trial / "grade.json", 10)
+        _reply_transcript(trial, "Done again.")
+
+    assert _grade_is_current(trials["plain"], plain) is True
+    assert _grade_is_current(trials["replying"], replying) is False
+
+
+# --- context records in turn_prompt (AIE-1185, US2) -----------------------------
+
+CONTEXT_SCENARIO = (
+    SCENARIO
+    + """context_records:
+  - system: event catalog
+    content: "Purchase Completed: fires when the payment is authorized.\\n\\n"
+  - system: query history
+    content: "One churn query."
+"""
+)
+ONE_RECORD = (
+    "[From the product's event catalog]\nPurchase Completed: fires when the payment is authorized."
+)
+TWO_RECORDS = ONE_RECORD + "\n\n[From the product's query history]\nOne churn query."
+
+
+def _context_trial(tmp_path: Path, records: int) -> Path:
+    directory = tmp_path / "scenarios"
+    directory.mkdir(exist_ok=True)
+    path = directory / "alpha.yaml"
+    text = CONTEXT_SCENARIO.format(id="alpha")
+    if records == 1:
+        text = text.split("  - system: query history")[0]
+    path.write_text(text)
+    run_dir, _ = new_run(
+        [load_scenario(path)], model="sonnet", trials=1, runs_dir=tmp_path / "runs", now=NOW
+    )
+    trial = run_dir / "alpha" / "trial-1"
+    _transcript(trial, TranscriptTurn(1, 1, "first", "reply one", "a1"))
+    return trial
+
+
+def test_turn_prompt_renders_one_context_record_before_turn_one(tmp_path: Path) -> None:
+    """Turn 1 starts with the record block, a blank line, then the newest
+    message; trailing newlines of the content are stripped (AIE-1185, US2.2).
+    """
+    trial = _context_trial(tmp_path, records=1)
+
+    assert turn_prompt(trial, 1, 1) == f"{ONE_RECORD}\n\n[Newest message]\nfirst"
+    assert turn_prompt(trial, 2, 1) == f"{ONE_RECORD}\n\n[Newest message]\nthird"
+
+
+def test_turn_prompt_renders_two_context_records_separated_by_a_blank_line(
+    tmp_path: Path,
+) -> None:
+    """Blocks are separated by a blank line and a blank line follows the last
+    (AIE-1185, US2.2).
+    """
+    trial = _context_trial(tmp_path, records=2)
+
+    assert turn_prompt(trial, 1, 1) == f"{TWO_RECORDS}\n\n[Newest message]\nfirst"
+
+
+def test_turn_prompt_puts_context_records_before_the_replay(tmp_path: Path) -> None:
+    """A later turn carries the context blocks first, then the unchanged
+    earlier-conversation replay (AIE-1185, US2.2).
+    """
+    trial = _context_trial(tmp_path, records=2)
+
+    assert turn_prompt(trial, 1, 2) == (
+        f"{TWO_RECORDS}\n\n"
+        "[Earlier in this conversation]\n"
+        "User: first\n"
+        "Assistant: reply one\n"
+        "\n"
+        "[Newest message]\n"
+        "second"
+    )
+
+
+def test_turn_prompt_without_context_records_is_unchanged(tmp_path: Path) -> None:
+    """Without context_records the prompt is byte-identical to the plain
+    rendering (AIE-1185, US2.3).
+    """
+    trial = _trial(tmp_path)
+    _transcript(trial, TranscriptTurn(1, 1, "first", "reply one", "a1"))
+
+    assert turn_prompt(trial, 1, 1) == "first"
+    assert turn_prompt(trial, 1, 2) == (
+        "[Earlier in this conversation]\nUser: first\nAssistant: reply one\n\n"
+        "[Newest message]\nsecond"
+    )
 
 
 def test_report_replaces_a_stale_check_of_a_current_grade(tmp_path: Path) -> None:
