@@ -576,6 +576,11 @@ CORPUS = {
     "filing-ambiguous-match",
     "filing-capped-area",
     "write-correct-seeded-fact",
+    "write-superseded-tool",
+    "recall-superseded-definition",
+    "write-added-not-superseded",
+    "write-superseded-kept-on-request",
+    "write-superseded-shared-fact",
     "write-new-subject",
     "curated-correction",
     "curated-shared-conflict",
@@ -1029,3 +1034,18 @@ def test_no_double_firing_pattern_ignores_deduplicate(text: str, should_match: b
     ]
 
     assert (re.search(assertion.pattern, text) is not None) is should_match
+
+
+def test_recall_replace_fact_header_cites_the_supersession_sentences() -> None:
+    """AIE-1183, US2.4: the recall-replace-fact header quotes the prompt sentences about
+    a changed fact's old value being gone and about replace_fact for one-fact changes.
+    """
+    header: list[str] = []
+    for line in (ROOT / "evals/scenarios/recall-replace-fact.yaml").read_text().splitlines():
+        if not line.startswith("#"):
+            break
+        header.append(line[1:])
+    text = re.sub(r"\s+", " ", " ".join(header))
+
+    assert "When a fact in a file you can write changes, its old value is gone too" in text
+    assert "Changing one fact is still `replace_fact` when it is the file's only line" in text

@@ -15,6 +15,7 @@ import pytest
 from mcp.client import Client
 from mcp.types import CallToolResult
 
+from evals.graders import load_store_dump
 from evals.report import build_report, grade_trial, new_run
 from evals.scenario import SCENARIO_DIR, load_scenario
 from evals.server import EvalState, build_eval_server
@@ -244,6 +245,44 @@ async def replace_wrong(d: Driver) -> None:
     await d.turn(1, 1)
     await d.index()
     await d.append("user", "workflows", "weekly-report", RETENTION)
+    await d.turn(2, 1)
+
+
+async def replace_overwrite_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "workflows", "weekly-report", f"{GROWTH}\n", "Weekly report routine")
+    await d.turn(1, 1)
+    await d.index()
+    version = (await d.read("user", "workflows", "weekly-report"))["version"]
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-report",
+        content="- [stated] Sends the weekly report to the retention team"
+        " (previously sent to the growth team).\n",
+        description="Weekly report routine",
+        aliases=[],
+        expected_version=version,
+    )
+    await d.turn(2, 1)
+
+
+async def replace_with_stale_metadata(d: Driver) -> None:
+    await d.index()
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-report",
+        content=f"{GROWTH}\n",
+        description="Weekly report to the growth team",
+        aliases=["growth report"],
+        expected_version=None,
+    )
+    await d.turn(1, 1)
+    await d.index()
+    await d.replace("user", "workflows", "weekly-report", GROWTH, RETENTION)
     await d.turn(2, 1)
 
 
@@ -488,6 +527,111 @@ async def correct_fact_correct(d: Driver) -> None:
 async def correct_fact_wrong(d: Driver) -> None:
     await d.index()
     await d.append("user", "preferences", "report-format", SLIDES)
+    await d.turn(1, 1)
+
+
+NOTION_LINE = "- [stated] Keeps standup notes in Notion."
+CONFLUENCE_LINE = "- [stated] Keeps standup notes in Confluence."
+
+
+async def superseded_tool_correct(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "standup-notes", NOTION_LINE, CONFLUENCE_LINE)
+    await d.turn(1, 1)
+
+
+async def superseded_tool_wrong(d: Driver) -> None:
+    await d.index()
+    await d.append("user", "workflows", "standup-notes", CONFLUENCE_LINE)
+    await d.turn(1, 1)
+
+
+WINDOW_7 = "- [stated] Uses a 7-day window for activation analysis."
+WINDOW_14 = "- [stated] Uses a 14-day window for activation analysis."
+
+
+async def superseded_definition_session_1(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user", "workflows", "activation-analysis", f"{WINDOW_7}\n", "Activation analysis settings"
+    )
+    await d.turn(1, 1)
+
+
+async def superseded_definition_correct(d: Driver) -> None:
+    await superseded_definition_session_1(d)
+    await d.index()
+    await d.replace("user", "workflows", "activation-analysis", WINDOW_7, WINDOW_14)
+    await d.turn(2, 1)
+
+
+async def superseded_definition_wrong(d: Driver) -> None:
+    await superseded_definition_session_1(d)
+    await d.index()
+    await d.append("user", "workflows", "activation-analysis", WINDOW_14)
+    await d.turn(2, 1)
+
+
+DESIGN_AUDIENCE = "- [stated] Shares the checkout funnel dashboard with the design team."
+SALES_AUDIENCE = "- [stated] Shares the checkout funnel dashboard with the sales team."
+
+
+async def added_audience_correct(d: Driver) -> None:
+    await d.index()
+    await d.append("user", "workflows", "funnel-dashboard", SALES_AUDIENCE)
+    await d.turn(1, 1)
+
+
+async def added_audience_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "funnel-dashboard", DESIGN_AUDIENCE, SALES_AUDIENCE)
+    await d.turn(1, 1)
+
+
+JENKINS_LINE = "- [stated] Deploys with Jenkins."
+ACTIONS_LINE = "- [stated] Deploys with GitHub Actions."
+JENKINS_RECORD = (
+    "- [stated] Deployed with Jenkins before GitHub Actions; old runbooks still reference it."
+)
+
+
+async def kept_on_request_correct(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "deploys", JENKINS_LINE, ACTIONS_LINE)
+    await d.append("user", "workflows", "deploys", JENKINS_RECORD)
+    await d.turn(1, 1)
+
+
+async def kept_on_request_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "deploys", JENKINS_LINE, ACTIONS_LINE)
+    await d.turn(1, 1)
+
+
+async def kept_on_request_append_only(d: Driver) -> None:
+    await d.index()
+    await d.append(
+        "user",
+        "workflows",
+        "deploys",
+        "- [stated] Deploys with GitHub Actions; used Jenkins before,"
+        " and old runbooks still reference it.",
+    )
+    await d.turn(1, 1)
+
+
+EVERY_TWO_WEEKS = "- [stated] This project ships a release every two weeks."
+EVERY_WEEK = "- [stated] This project ships a release every week."
+
+
+async def shared_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
+async def shared_fact_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("project", "conventions", "release-cadence", EVERY_TWO_WEEKS, EVERY_WEEK)
     await d.turn(1, 1)
 
 
@@ -1020,7 +1164,7 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "recall-replace-fact",
         replace_correct,
         replace_wrong,
-        {"replaced-in-session-2", "one-recipient-line"},
+        {"replaced-in-session-2", "one-recipient-line", "old-recipient-gone"},
     ),
     (
         "forgetting-whole-file",
@@ -1064,7 +1208,37 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "write-correct-seeded-fact",
         correct_fact_correct,
         correct_fact_wrong,
-        {"replaced-quoting-old", "one-format-line"},
+        {"replaced-quoting-old", "one-format-line", "old-format-gone"},
+    ),
+    (
+        "write-superseded-tool",
+        superseded_tool_correct,
+        superseded_tool_wrong,
+        {"replaced-tool-line", "old-tool-gone", "one-notes-line"},
+    ),
+    (
+        "recall-superseded-definition",
+        superseded_definition_correct,
+        superseded_definition_wrong,
+        {"replaced-in-session-2", "one-window-line", "old-window-gone"},
+    ),
+    (
+        "write-added-not-superseded",
+        added_audience_correct,
+        added_audience_wrong,
+        {"design-kept"},
+    ),
+    (
+        "write-superseded-kept-on-request",
+        kept_on_request_correct,
+        kept_on_request_wrong,
+        {"old-tool-recorded"},
+    ),
+    (
+        "write-superseded-shared-fact",
+        shared_fact_correct,
+        shared_fact_wrong,
+        {"no-shared-write-before-ask", "old-fact-kept"},
     ),
     (
         "write-new-subject",
@@ -1274,6 +1448,46 @@ def test_wrong_driver_fails_exactly_the_listed_assertions(
     graded, report = _run_trial(tmp_path, scenario_id, wrong)
 
     assert _failed(graded) == fails, graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+def test_recall_replace_fact_flags_a_previously_clause(tmp_path: Path) -> None:
+    """Overwriting with a "previously" note fails the replace and old-recipient
+    assertions (AIE-1183).
+    """
+    graded, report = _run_trial(tmp_path, "recall-replace-fact", replace_overwrite_wrong)
+
+    assert _failed(graded) == {"replaced-in-session-2", "old-recipient-gone"}, graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+def test_recall_replace_fact_ignores_stale_metadata(tmp_path: Path) -> None:
+    """Stale description and aliases that mention the old recipient do not fail
+    the scenario (AIE-1183).
+    """
+    graded, report = _run_trial(tmp_path, "recall-replace-fact", replace_with_stale_metadata)
+
+    assert _failed(graded) == set(), graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (1, 1)
+    (store_path,) = (tmp_path / "runs").glob("**/store.json")
+    kept = load_store_dump(store_path).get("user", "workflows", "weekly-report")
+    assert kept is not None
+    assert "growth report" in kept.aliases
+    assert kept.description == "Weekly report to the growth team"
+
+
+def test_kept_on_request_flags_an_unchanged_old_line(tmp_path: Path) -> None:
+    """Appending the new tool without replacing the old line fails only the
+    old-line-changed assertion (AIE-1183, US1).
+    """
+    graded, report = _run_trial(
+        tmp_path, "write-superseded-kept-on-request", kept_on_request_append_only
+    )
+
+    assert _failed(graded) == {"old-line-changed"}, graded
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
 
