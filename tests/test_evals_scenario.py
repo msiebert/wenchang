@@ -634,6 +634,89 @@ def test_corpus_is_the_planned_set() -> None:
         assert any(isinstance(a, IndexReadFirst) and a.id == "index-first" for a in s.assertions)
 
 
+INDEX_TOOLS = frozenset({"get_memory_index"})
+SHIPPED_IDS = sorted(p.stem for p in SCENARIO_DIR.glob("*.yaml"))
+NON_PRIVACY_IDS = [i for i in SHIPPED_IDS if not i.startswith("privacy-")]
+PRIVACY_IDS = [i for i in SHIPPED_IDS if i.startswith("privacy-")]
+
+
+def _index_called(scenario: Scenario) -> list[ToolCalled]:
+    """The plain "the index was called at least once" assertions of a scenario."""
+    return [
+        a
+        for a in scenario.assertions
+        if isinstance(a, ToolCalled)
+        and a.call.tools == INDEX_TOOLS
+        and not a.call.args
+        and a.call.turn is None
+        and a.call.succeeded is None
+        and a.min == 1
+        and a.max is None
+    ]
+
+
+def _expected_index_called(scenario: Scenario) -> dict[int | None, str]:
+    """Expected session to assertion id: no session for a single-session scenario."""
+    count = len(scenario.sessions)
+    if count == 1:
+        return {None: "index-called"}
+    return {
+        n: "index-called" if n == 1 else f"index-called-in-session-{n}" for n in range(1, count + 1)
+    }
+
+
+@pytest.mark.parametrize("ident", NON_PRIVACY_IDS)
+def test_non_privacy_scenarios_assert_the_index_was_called(ident: str) -> None:
+    """Every non-privacy scenario requires a get_memory_index call in each
+    session, as a tool_called assertion that accepts no other tool (AIE-1197, US1).
+    """
+    scenario = load_scenario(SCENARIO_DIR / f"{ident}.yaml")
+
+    found = {a.call.session for a in _index_called(scenario)}
+    expected = set(_expected_index_called(scenario))
+
+    assert found >= expected, f"{ident}: missing index-called session(s) {expected - found}"
+
+
+@pytest.mark.parametrize("ident", NON_PRIVACY_IDS)
+def test_index_called_assertions_are_named_by_session(ident: str) -> None:
+    """The index assertion is `index-called` in session 1 (or the only session)
+    and `index-called-in-session-N` after (AIE-1197, US1).
+    """
+    scenario = load_scenario(SCENARIO_DIR / f"{ident}.yaml")
+
+    by_session = {a.call.session: a.id for a in _index_called(scenario)}
+    expected = _expected_index_called(scenario)
+
+    assert {s: by_session.get(s) for s in expected} == expected
+
+
+@pytest.mark.parametrize("ident", PRIVACY_IDS)
+def test_privacy_scenarios_do_not_require_the_index(ident: str) -> None:
+    """Privacy scenarios have no tool_called assertion that accepts
+    get_memory_index (AIE-1197, US2).
+    """
+    scenario = load_scenario(SCENARIO_DIR / f"{ident}.yaml")
+
+    offenders = [
+        a.id
+        for a in scenario.assertions
+        if isinstance(a, ToolCalled) and "get_memory_index" in a.call.tools
+    ]
+    assert offenders == []
+
+
+def test_privacy_scenarios_are_the_five_known() -> None:
+    """The privacy exemption covers exactly the five shipped privacy scenarios (AIE-1197)."""
+    assert set(PRIVACY_IDS) == {
+        "privacy-account-number",
+        "privacy-insist-bank",
+        "privacy-minor",
+        "privacy-health-shared",
+        "privacy-sensitive-private",
+    }
+
+
 def test_judge_rubrics_name_their_turn() -> None:
     """Every judge rubric starts by naming the reply it grades (AIE-1170, US9.6)."""
     offenders = [

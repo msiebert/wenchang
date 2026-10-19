@@ -12,6 +12,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: no_content_matching
     id: no-transient-context
     pattern: "(?i)\\btrains?\\b|wi-?fi|bandwidth|connectivity|offline|commut|travel"

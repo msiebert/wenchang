@@ -28,6 +28,9 @@ assertions:
   - kind: index_read_first
     id: index-first
   - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
     id: filed-in-globex
     tool: [append_line, replace_fact]
     args: {scope: user, name: globex-account}

@@ -25,6 +25,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: called_before
     id: read-before-write
     first: {tool: read_file, args: {name: {matches: "^atlas-"}}}

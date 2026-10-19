@@ -23,6 +23,9 @@ assertions:
   - kind: index_read_first
     id: index-first
   - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
     id: replaced-quoting-old
     tool: replace_fact
     args: {name: report-format, old_string: {matches: "(?i)pdf"}}

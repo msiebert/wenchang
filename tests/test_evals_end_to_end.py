@@ -1170,7 +1170,7 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "recall-across-sessions",
         recall_correct,
         recall_wrong,
-        {"recalled-in-session-2"},
+        {"recalled-in-session-2", "index-called-in-session-2"},
     ),
     (
         "forgetting-one-fact",
@@ -1516,6 +1516,33 @@ def test_kept_on_request_flags_an_unchanged_old_line(tmp_path: Path) -> None:
     assert _failed(graded) == {"old-line-changed"}, graded
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+NON_PRIVACY_IDS = sorted(
+    p.stem for p in SCENARIO_DIR.glob("*.yaml") if not p.stem.startswith("privacy-")
+)
+
+
+@pytest.mark.parametrize("scenario_id", NON_PRIVACY_IDS)
+def test_session_without_memory_calls_fails_index_called(tmp_path: Path, scenario_id: str) -> None:
+    """An agent that never calls the index fails index-called (and
+    index-called-in-session-N for later sessions) but not index-first (AIE-1197, US3).
+    """
+    scenario = load_scenario(SCENARIO_DIR / f"{scenario_id}.yaml")
+
+    async def silent(d: Driver) -> None:
+        for s, session in enumerate(scenario.sessions, start=1):
+            for t in range(1, len(session.turns) + 1):
+                await d.turn(s, t)
+
+    graded, _ = _run_trial(tmp_path, scenario_id, silent)
+
+    failed = _failed(graded)
+    expected = {"index-called"} | {
+        f"index-called-in-session-{n}" for n in range(2, len(scenario.sessions) + 1)
+    }
+    assert expected <= failed, graded
+    assert "index-first" not in failed, graded
 
 
 def test_every_shipped_scenario_has_scripted_drivers() -> None:

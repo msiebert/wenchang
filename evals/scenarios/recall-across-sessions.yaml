@@ -12,6 +12,14 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+    session: 1
+  - kind: tool_called
+    id: index-called-in-session-2
+    tool: get_memory_index
+    session: 2
   - kind: line_present
     id: preference-saved
     pattern: "(?i)bar chart"
