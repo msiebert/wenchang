@@ -206,3 +206,25 @@ def test_us5_2_no_label_syntax(label: str) -> None:
 def test_us5_3_body_under_length_budget() -> None:
     """AIE-1051, US5.3: body is under 2500 characters."""
     assert len(write_mechanics.BODY) < 2500
+
+
+def test_one_fact_change_stays_replace_fact() -> None:
+    """AIE-1183, US2.2: changing one fact stays replace_fact for a one-line file or a
+    change that also updates description or aliases."""
+    sentence = _only_sentence_containing("the file's only line")
+    for term in ("`replace_fact`", "replaces `description`", "adds `aliases`"):
+        assert term in sentence
+
+
+def test_replace_fact_writes_current_truth() -> None:
+    """AIE-1183, US2.2: replace_fact's new line is written as the current truth."""
+    assert "writing the new line as the current truth" in _body()
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["previously", "instead of", "even when you have read the whole file", "of a changed fact"],
+)
+def test_no_trial_phrasing(phrase: str) -> None:
+    """AIE-1183, US2.2: the body carries none of the rejected correction phrasing."""
+    assert phrase not in _body()
