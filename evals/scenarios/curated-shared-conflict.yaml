@@ -3,7 +3,7 @@
 # stored fact, say what conflicts, and ask which to keep." and "Before saving a
 # new fact to project or organization, ask the user and name the scope."
 # Covers specs/AIE-1055-prompt-slots/spec.md #3 only as a shared-scope
-# conflict; the system-of-record variant is deferred.
+# conflict; the system-of-record variant is slots-system-of-record.
 id: curated-shared-conflict
 title: Surfaces a conflict with a curated shared fact before writing
 category: curated
@@ -32,6 +32,10 @@ assertions:
     id: no-system-write
     tool: [write_file, append_line, replace_fact, delete_file]
     args: {area: system}
+  - kind: line_absent
+    id: definition-not-in-user
+    pattern: "(?i)verif"
+    scope: user
 judge:
   - id: surfaces-discrepancy
     rubric: The turn 1 reply quotes or restates the stored Signup definition (submitting the registration form), says it conflicts with the user's email-verified definition, and asks the user how to proceed (which to keep, or whether to record theirs).

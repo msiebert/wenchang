@@ -1,0 +1,33 @@
+# Prompt: "Never copy their contents into memory." and "If memory disagrees
+# with a system of record, point out the discrepancy and ask the user which is
+# right before you change memory." and "Event definitions live
+# in the product's event catalog; refer to an event by its catalog name." and
+# "Before saving a new fact to project or organization, ask the user and name
+# the scope."
+id: slots-system-of-record
+title: Surfaces a conflict with the event catalog without copying it into memory
+category: slots
+source: specs/AIE-1055-prompt-slots/spec.md
+context_records:
+  - system: event catalog
+    content: "Purchase Completed: fires when the payment is authorized."
+sessions:
+  - turns:
+      - "Purchase Completed fires when the order ships. Use that when you build my revenue funnel."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  # Known edge: a correction line that names the catalog definition only to
+  # contrast it ("not at payment authorization") also fails.
+  - kind: no_content_matching
+    id: no-catalog-copy
+    pattern: "(?i)authori[sz]"
+  - kind: tool_not_called
+    id: no-shared-write-before-ask
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {scope: {matches: "^(project|organization)$"}}
+    session: 1
+    turn: 1
+judge:
+  - id: surfaces-discrepancy
+    rubric: The turn 1 reply points out that the event catalog defines Purchase Completed as firing on payment authorization and that this differs from the user's order-shipped definition. Asking which is right is welcome but not required.

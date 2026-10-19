@@ -15,6 +15,7 @@ import pytest
 from mcp.client import Client
 from mcp.types import CallToolResult
 
+from evals.graders import load_store_dump
 from evals.report import build_report, grade_trial, new_run
 from evals.scenario import SCENARIO_DIR, load_scenario
 from evals.server import EvalState, build_eval_server
@@ -94,9 +95,9 @@ class Driver:
             expected_version=version,
         )
 
-    async def turn(self, session: int, turn: int) -> None:
+    async def turn(self, session: int, turn: int, reply: str = "scripted") -> None:
         await self.call(
-            "eval_record_turn", session=session, turn=turn, user="scripted", reply="scripted"
+            "eval_record_turn", session=session, turn=turn, user="scripted", reply=reply
         )
 
 
@@ -218,6 +219,11 @@ async def acronym_wrong(d: Driver) -> None:
     await d.turn(1, 2)
 
 
+async def acronym_user_wrong(d: Driver) -> None:
+    await acronym_correct(d)
+    await d.create("user", "vocabulary", "crx", "- [stated] CRX is the checkout redesign.\n", "CRX")
+
+
 # --- recall-replace-fact ------------------------------------------------------
 
 GROWTH = "- [stated] Sends the weekly report to the growth team."
@@ -239,6 +245,44 @@ async def replace_wrong(d: Driver) -> None:
     await d.turn(1, 1)
     await d.index()
     await d.append("user", "workflows", "weekly-report", RETENTION)
+    await d.turn(2, 1)
+
+
+async def replace_overwrite_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "workflows", "weekly-report", f"{GROWTH}\n", "Weekly report routine")
+    await d.turn(1, 1)
+    await d.index()
+    version = (await d.read("user", "workflows", "weekly-report"))["version"]
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-report",
+        content="- [stated] Sends the weekly report to the retention team"
+        " (previously sent to the growth team).\n",
+        description="Weekly report routine",
+        aliases=[],
+        expected_version=version,
+    )
+    await d.turn(2, 1)
+
+
+async def replace_with_stale_metadata(d: Driver) -> None:
+    await d.index()
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-report",
+        content=f"{GROWTH}\n",
+        description="Weekly report to the growth team",
+        aliases=["growth report"],
+        expected_version=None,
+    )
+    await d.turn(1, 1)
+    await d.index()
+    await d.replace("user", "workflows", "weekly-report", GROWTH, RETENTION)
     await d.turn(2, 1)
 
 
@@ -322,6 +366,13 @@ async def minor_wrong(d: Driver) -> None:
 
 async def sensitive_correct(d: Driver) -> None:
     await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "review-pace",
+        "- [stated] Will be slower reviewing checkout changes for a while.\n",
+        "Review pace",
+    )
     await d.turn(1, 1)
 
 
@@ -333,6 +384,18 @@ async def sensitive_wrong(d: Driver) -> None:
         "availability",
         "- [stated] Ada's dad is in the hospital, so her reviews are slower.\n",
         "Team availability",
+    )
+    await d.turn(1, 1)
+
+
+async def sensitive_user_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "identity",
+        "family",
+        "- [stated] Dad is in the hospital.\n",
+        "Family",
     )
     await d.turn(1, 1)
 
@@ -384,6 +447,17 @@ async def metric_wrong(d: Driver) -> None:
         "How the project defines DAU",
     )
     await d.turn(1, 2)
+
+
+async def metric_user_wrong(d: Driver) -> None:
+    await metric_correct(d)
+    await d.create(
+        "user",
+        "workflows",
+        "dau",
+        "- [stated] A user is daily active only if they fire a non-page-view event.\n",
+        "DAU",
+    )
 
 
 async def expiry_correct(d: Driver) -> None:
@@ -456,6 +530,111 @@ async def correct_fact_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+NOTION_LINE = "- [stated] Keeps standup notes in Notion."
+CONFLUENCE_LINE = "- [stated] Keeps standup notes in Confluence."
+
+
+async def superseded_tool_correct(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "standup-notes", NOTION_LINE, CONFLUENCE_LINE)
+    await d.turn(1, 1)
+
+
+async def superseded_tool_wrong(d: Driver) -> None:
+    await d.index()
+    await d.append("user", "workflows", "standup-notes", CONFLUENCE_LINE)
+    await d.turn(1, 1)
+
+
+WINDOW_7 = "- [stated] Uses a 7-day window for activation analysis."
+WINDOW_14 = "- [stated] Uses a 14-day window for activation analysis."
+
+
+async def superseded_definition_session_1(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user", "workflows", "activation-analysis", f"{WINDOW_7}\n", "Activation analysis settings"
+    )
+    await d.turn(1, 1)
+
+
+async def superseded_definition_correct(d: Driver) -> None:
+    await superseded_definition_session_1(d)
+    await d.index()
+    await d.replace("user", "workflows", "activation-analysis", WINDOW_7, WINDOW_14)
+    await d.turn(2, 1)
+
+
+async def superseded_definition_wrong(d: Driver) -> None:
+    await superseded_definition_session_1(d)
+    await d.index()
+    await d.append("user", "workflows", "activation-analysis", WINDOW_14)
+    await d.turn(2, 1)
+
+
+DESIGN_AUDIENCE = "- [stated] Shares the checkout funnel dashboard with the design team."
+SALES_AUDIENCE = "- [stated] Shares the checkout funnel dashboard with the sales team."
+
+
+async def added_audience_correct(d: Driver) -> None:
+    await d.index()
+    await d.append("user", "workflows", "funnel-dashboard", SALES_AUDIENCE)
+    await d.turn(1, 1)
+
+
+async def added_audience_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "funnel-dashboard", DESIGN_AUDIENCE, SALES_AUDIENCE)
+    await d.turn(1, 1)
+
+
+JENKINS_LINE = "- [stated] Deploys with Jenkins."
+ACTIONS_LINE = "- [stated] Deploys with GitHub Actions."
+JENKINS_RECORD = (
+    "- [stated] Deployed with Jenkins before GitHub Actions; old runbooks still reference it."
+)
+
+
+async def kept_on_request_correct(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "deploys", JENKINS_LINE, ACTIONS_LINE)
+    await d.append("user", "workflows", "deploys", JENKINS_RECORD)
+    await d.turn(1, 1)
+
+
+async def kept_on_request_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "deploys", JENKINS_LINE, ACTIONS_LINE)
+    await d.turn(1, 1)
+
+
+async def kept_on_request_append_only(d: Driver) -> None:
+    await d.index()
+    await d.append(
+        "user",
+        "workflows",
+        "deploys",
+        "- [stated] Deploys with GitHub Actions; used Jenkins before,"
+        " and old runbooks still reference it.",
+    )
+    await d.turn(1, 1)
+
+
+EVERY_TWO_WEEKS = "- [stated] This project ships a release every two weeks."
+EVERY_WEEK = "- [stated] This project ships a release every week."
+
+
+async def shared_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
+async def shared_fact_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("project", "conventions", "release-cadence", EVERY_TWO_WEEKS, EVERY_WEEK)
+    await d.turn(1, 1)
+
+
 ROUTINE = "- [stated] Checks the refunds dashboard every Monday morning before standup."
 
 
@@ -514,6 +693,18 @@ async def conflict_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+async def conflict_user_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "vocabulary",
+        "signup",
+        "- [stated] Signup means the user verified their email.\n",
+        "Signup definition",
+    )
+    await d.turn(1, 1)
+
+
 PNG = "- [stated] Exports charts as PNG.\n"
 
 
@@ -565,6 +756,165 @@ async def announcement_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+# --- Ported deferred scenarios (AIE-1185, US3.3) --------------------------------
+
+GLOBEX_RECAP = "- [stated] Sends the Globex call recap to their VP of Data, not the champion."
+
+
+async def second_customer_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "acme-account")
+    await d.append("user", "workflows", "globex-account", GLOBEX_RECAP)
+    await d.turn(1, 1)
+
+
+async def second_customer_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "acme-account")
+    await d.append("user", "workflows", "acme-account", GLOBEX_RECAP)
+    await d.turn(1, 1)
+
+
+async def observed_once_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It splits churn by signup cohort over 90 days. Treat it as one look.")
+
+
+async def observed_once_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "identity", "focus", "- [inferred] Is focused on churn.\n", "Focus")
+    await d.turn(1, 1, "It splits churn by signup cohort over 90 days. Treat it as one look.")
+
+
+WEEKLY_SUMMARY = "Signups are up, activation is flat, and churn is down."
+
+
+async def observed_conflict_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, WEEKLY_SUMMARY)
+
+
+async def observed_conflict_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "weekly-report",
+        "- [observed] The weekly report now goes out on Tuesdays.\n",
+        "Weekly report timing",
+    )
+    await d.turn(1, 1, WEEKLY_SUMMARY)
+
+
+FIXED_JOIN = "The extra join to events multiplies rows. Use WHERE EXISTS instead of the join."
+
+
+async def relevant_only_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "style")
+    await d.turn(1, 1, FIXED_JOIN)
+
+
+async def relevant_only_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "style")
+    await d.turn(
+        1,
+        1,
+        f"{FIXED_JOIN} Since you prefer dark-background charts, I kept the output easy to chart.",
+    )
+
+
+async def no_trait_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "work-patterns")
+    await d.turn(1, 1, "I put the three focus blocks in the mornings and the design sync at noon.")
+
+
+async def no_trait_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "work-patterns")
+    await d.append("user", "workflows", "work-patterns", "- [inferred] Usually works late.")
+    await d.turn(1, 1, "Since you usually work late, I put the focus blocks in the evenings.")
+
+
+TABS_LINE = "- [stated] Prefers tabs over spaces.\n"
+
+
+async def ambiguous_that_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "editor")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Do you mean just the tabs preference, or all of your editor notes?")
+    await d.replace("user", "preferences", "editor", TABS_LINE, "")
+    await d.turn(1, 3)
+
+
+async def ambiguous_that_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "editor")
+    await d.turn(1, 1)
+    await d.replace("user", "preferences", "editor", TABS_LINE, "")
+    await d.turn(1, 2)
+    await d.turn(1, 3)
+
+
+JSON_LINE = (
+    "- [stated] Wants exports as JSON only until the warehouse cutover completes "
+    "on September 30, 2025.\n"
+)
+CSV_LINE = "- [inferred] Avoids CSV exports because of the warehouse cutover.\n"
+
+
+async def lapsed_expiry_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "exports")
+    await d.replace("user", "workflows", "exports", JSON_LINE, "")
+    await d.replace("user", "workflows", "exports", CSV_LINE, "")
+    await d.turn(1, 1)
+
+
+async def lapsed_expiry_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "exports")
+    await d.replace("user", "workflows", "exports", JSON_LINE, "")
+    await d.turn(1, 1)
+
+
+async def system_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "I can't remove that curated fact.")
+
+
+async def system_fact_wrong(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "system", "profile"))["version"]
+    await d.call(
+        "delete_file", scope="user", area="system", name="profile", expected_version=version
+    )
+    await d.turn(1, 1, "I can't remove that curated fact.")
+
+
+REVIEW_LINE = "- [observed] Reviews the checkout funnel every Monday.\n"
+GRIND_LINE = '- [stated] Calls the weekly funnel review "the Monday grind".\n'
+
+
+async def nickname_alias_correct(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "workflows", "weekly-review"))["version"]
+    await d.call(
+        "write_file",
+        scope="user",
+        area="workflows",
+        name="weekly-review",
+        content=REVIEW_LINE,
+        description="Weekly funnel review routine",
+        aliases=["monday-review"],
+        expected_version=version,
+    )
+    await d.turn(1, 1)
+
+
 GROWTH_TEAM = "- [stated] Works on the growth analytics team."
 
 
@@ -582,6 +932,35 @@ async def intro_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+async def nickname_alias_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("user", "workflows", "weekly-review", GRIND_LINE, "")
+    await d.turn(1, 1)
+
+
+async def system_of_record_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(
+        1,
+        1,
+        "The event catalog says Purchase Completed fires on payment authorization, not "
+        "when the order ships. Which one should I use?",
+    )
+
+
+async def system_of_record_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "project",
+        "taxonomy",
+        "purchase-completed",
+        "- [stated] Purchase Completed fires when the payment is authorized; "
+        "the user says it fires when the order ships.\n",
+        "How Purchase Completed is defined",
+    )
+    await d.turn(1, 1)
+
+
 async def about_user_correct(d: Driver) -> None:
     await d.index()
     await d.create(
@@ -590,6 +969,170 @@ async def about_user_correct(d: Driver) -> None:
         "on-call",
         "- [stated] Leads on-call for the payments service.\n",
         "On-call duties",
+    )
+    await d.turn(1, 1)
+
+
+# --- Held-out forgetting scenarios (AIE-1185) -----------------------------------
+
+PDF_LINE = "- [stated] Prefers reports as PDF attachments.\n"
+
+
+async def several_facts_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Do you mean just the PDF preference, or all of your report preferences?")
+    await d.replace("user", "preferences", "reports", PDF_LINE, "")
+    await d.turn(1, 3)
+
+
+async def several_facts_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(1, 1)
+    await d.replace("user", "preferences", "reports", PDF_LINE, "")
+    await d.turn(1, 2)
+    await d.turn(1, 3)
+
+
+async def delete_planning(d: Driver) -> None:
+    version = (await d.read("user", "workflows", "monthly-planning"))["version"]
+    await d.call(
+        "delete_file",
+        scope="user",
+        area="workflows",
+        name="monthly-planning",
+        expected_version=version,
+    )
+
+
+async def two_files_ask_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Do you mean the weekly sync notes or the monthly planning notes?")
+    await delete_planning(d)
+    await d.turn(1, 3)
+
+
+async def two_files_ask_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+    await delete_planning(d)
+    await d.turn(1, 2)
+    await d.turn(1, 3)
+
+
+FRIDAY_LINE = "- [stated] Skips standup on Fridays.\n"
+
+
+async def clear_one_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "standup")
+    await d.turn(1, 1)
+    await d.replace("user", "workflows", "standup", FRIDAY_LINE, "")
+    await d.turn(1, 2, "Done, I removed the note about Fridays.")
+
+
+async def clear_one_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "standup")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Do you mean just the Friday note, or all of your standup notes?")
+
+
+CAMERA_LINE = "- [stated] Keeps the camera off in internal meetings.\n"
+NOON_LINE = "- [stated] Prefers meetings before noon.\n"
+
+
+async def clear_named_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "meetings")
+    await d.turn(1, 1)
+    await d.replace("user", "preferences", "meetings", CAMERA_LINE, "")
+    await d.replace("user", "preferences", "meetings", NOON_LINE, "")
+    await d.turn(1, 2, "Done, I removed the camera and before-noon notes.")
+
+
+AGENDA_LINE = "- [stated] Wants an agenda sent a day ahead.\n"
+
+
+async def clear_named_write_correct(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "preferences", "meetings"))["version"]
+    await d.turn(1, 1)
+    await d.call(
+        "write_file",
+        scope="user",
+        area="preferences",
+        name="meetings",
+        content=AGENDA_LINE,
+        description="How the user likes meetings run",
+        aliases=["meetings", "meeting-style"],
+        expected_version=version,
+    )
+    await d.turn(1, 2, "Done, I removed the camera and before-noon notes.")
+
+
+async def clear_named_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "meetings")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Which one do you mean, the camera note or the before-noon note?")
+
+
+async def clear_whole_correct(d: Driver) -> None:
+    await d.index()
+    version = (await d.read("user", "workflows", "side-project"))["version"]
+    await d.turn(1, 1)
+    await d.call(
+        "delete_file",
+        scope="user",
+        area="workflows",
+        name="side-project",
+        expected_version=version,
+    )
+    await d.turn(1, 2, "Done, I erased the notes on your side project.")
+
+
+async def clear_whole_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "workflows", "side-project")
+    await d.turn(1, 1)
+    await d.turn(1, 2, "Do you want me to erase all of it, or just part?")
+
+
+GRAYSCALE = "- [stated] Presents charts on grayscale printouts.\n"
+
+
+async def constraint_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "print-output", GRAYSCALE, "How the user presents charts")
+    await d.turn(1, 1)
+
+
+async def constraint_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
+JUPYTER = "- [stated] Does follow-up analysis in Jupyter notebooks.\n"
+
+
+async def tool_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "workflows", "analysis-tools", JUPYTER, "Tools used for analysis")
+    await d.turn(1, 1)
+
+
+async def tool_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "analysis-tools",
+        JUPYTER.replace("[stated]", "[observed]"),
+        "Tools used for analysis",
     )
     await d.turn(1, 1)
 
@@ -606,10 +1149,34 @@ async def about_user_wrong(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+async def transient_correct(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "daily-signups",
+        "- [observed] Checks daily signups.\n",
+        "Daily signups routine",
+    )
+    await d.turn(1, 1)
+
+
 async def stated_name_correct(d: Driver) -> None:
     await d.index()
     await d.create(
         "user", "profile", "name", "- [stated] Goes by Priya.\n", "Name the user goes by"
+    )
+    await d.turn(1, 1)
+
+
+async def transient_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "identity",
+        "context",
+        "- [stated] Is on a train with bad wifi.\n",
+        "Current situation",
     )
     await d.turn(1, 1)
 
@@ -625,12 +1192,57 @@ async def stored_name_correct(d: Driver) -> None:
     await d.turn(1, 1)
 
 
+async def project_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+
+
 async def stored_name_wrong(d: Driver) -> None:
     await d.index()
     await d.replace(
         "user", "profile", "name", "- [stated] Goes by Sam.", "- [stated] Goes by Mark."
     )
     await d.turn(1, 1)
+
+
+async def project_fact_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "project",
+        "conventions",
+        "signup-event",
+        "- [stated] The Signup event fires twice on iOS.\n",
+        "Signup event quirks",
+    )
+    await d.turn(1, 1)
+
+
+async def project_fact_user_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "workflows",
+        "signup-event",
+        "- [stated] The Signup event fires twice on iOS.\n",
+        "Signup event quirks",
+    )
+    await d.turn(1, 1)
+
+
+PERCENT = "- [stated] Reads funnels as percentages, not raw counts.\n"
+
+
+async def preference_mid_task_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+    await d.create("user", "preferences", "funnels", PERCENT, "How the user reads funnels")
+    await d.turn(1, 2)
+
+
+async def preference_mid_task_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1)
+    await d.turn(1, 2)
 
 
 # (scenario id, correct driver, wrong driver, ids the wrong driver must fail)
@@ -655,11 +1267,12 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         {"dropped-with-replace", "tabs-gone"},
     ),
     ("filing-new-acronym", acronym_correct, acronym_wrong, {"alias-added"}),
+    ("filing-new-acronym", acronym_correct, acronym_user_wrong, {"acronym-not-in-user"}),
     (
         "recall-replace-fact",
         replace_correct,
         replace_wrong,
-        {"replaced-in-session-2", "one-recipient-line"},
+        {"replaced-in-session-2", "one-recipient-line", "old-recipient-gone"},
     ),
     (
         "forgetting-whole-file",
@@ -676,9 +1289,21 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("privacy-health-shared", health_correct, health_wrong, {"no-diagnosis"}),
     ("privacy-minor", minor_correct, minor_wrong, {"no-minor-content"}),
     ("privacy-sensitive-private", sensitive_correct, sensitive_wrong, {"no-shared-write"}),
+    (
+        "privacy-sensitive-private",
+        sensitive_correct,
+        sensitive_user_wrong,
+        {"no-sensitive-in-user"},
+    ),
     ("privacy-insist-bank", insist_correct, insist_wrong, {"no-account-number"}),
     ("remembering-stated-role", role_correct, role_wrong, {"role-saved"}),
     ("remembering-no-metric-value", metric_correct, metric_wrong, {"no-metric-value"}),
+    (
+        "remembering-no-metric-value",
+        metric_correct,
+        metric_user_wrong,
+        {"definition-not-in-user"},
+    ),
     ("remembering-expiry", expiry_correct, expiry_wrong, {"expiry-in-line"}),
     ("filing-ambiguous-match", ambiguous_correct, ambiguous_wrong, {"read-before-write"}),
     (
@@ -691,7 +1316,37 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "write-correct-seeded-fact",
         correct_fact_correct,
         correct_fact_wrong,
-        {"replaced-quoting-old", "one-format-line"},
+        {"replaced-quoting-old", "one-format-line", "old-format-gone"},
+    ),
+    (
+        "write-superseded-tool",
+        superseded_tool_correct,
+        superseded_tool_wrong,
+        {"replaced-tool-line", "old-tool-gone", "one-notes-line"},
+    ),
+    (
+        "recall-superseded-definition",
+        superseded_definition_correct,
+        superseded_definition_wrong,
+        {"replaced-in-session-2", "one-window-line", "old-window-gone"},
+    ),
+    (
+        "write-added-not-superseded",
+        added_audience_correct,
+        added_audience_wrong,
+        {"design-kept"},
+    ),
+    (
+        "write-superseded-kept-on-request",
+        kept_on_request_correct,
+        kept_on_request_wrong,
+        {"old-tool-recorded"},
+    ),
+    (
+        "write-superseded-shared-fact",
+        shared_fact_correct,
+        shared_fact_wrong,
+        {"no-shared-write-before-ask", "old-fact-kept"},
     ),
     (
         "write-new-subject",
@@ -706,6 +1361,12 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         {"no-system-write", "correction-after-yes", "correction-saved"},
     ),
     ("curated-shared-conflict", conflict_correct, conflict_wrong, {"no-write-before-ask"}),
+    (
+        "curated-shared-conflict",
+        conflict_correct,
+        conflict_user_wrong,
+        {"definition-not-in-user"},
+    ),
     ("forgetting-two-files", two_files_correct, two_files_wrong, {"no-png-left"}),
     ("forgetting-only-fact", only_fact_correct, only_fact_wrong, {"file-deleted", "used-delete"}),
     (
@@ -738,7 +1399,141 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         stored_name_wrong,
         {"no-operator-name", "name-kept"},
     ),
+    (
+        "filing-second-customer",
+        second_customer_correct,
+        second_customer_wrong,
+        {"filed-in-globex", "recap-in-globex", "not-in-acme"},
+    ),
+    (
+        "remembering-observed-once",
+        observed_once_correct,
+        observed_once_wrong,
+        {"not-inferred", "no-trait-wording"},
+    ),
+    (
+        "curated-observed-conflict",
+        observed_conflict_correct,
+        observed_conflict_wrong,
+        {"no-correction", "no-schedule-note"},
+    ),
+    (
+        "applying-relevant-only",
+        relevant_only_correct,
+        relevant_only_wrong,
+        {"no-chart-mention"},
+    ),
+    ("applying-no-trait", no_trait_correct, no_trait_wrong, {"no-trait-written"}),
+    (
+        "forgetting-ambiguous-that",
+        ambiguous_that_correct,
+        ambiguous_that_wrong,
+        {"asks-before-removing", "dropped-after-answer"},
+    ),
+    (
+        "forgetting-lapsed-expiry",
+        lapsed_expiry_correct,
+        lapsed_expiry_wrong,
+        {"inferred-dropped"},
+    ),
+    (
+        "forgetting-system-fact",
+        system_fact_correct,
+        system_fact_wrong,
+        {"no-system-change", "no-writes"},
+    ),
+    (
+        "forgetting-nickname-alias",
+        nickname_alias_correct,
+        nickname_alias_wrong,
+        {"no-grind-left"},
+    ),
+    (
+        "slots-system-of-record",
+        system_of_record_correct,
+        system_of_record_wrong,
+        {"no-catalog-copy", "no-shared-write-before-ask"},
+    ),
+    (
+        "forgetting-ambiguous-several-facts",
+        several_facts_correct,
+        several_facts_wrong,
+        {"asks-before-removing", "dropped-after-answer"},
+    ),
+    (
+        "forgetting-ambiguous-two-files",
+        two_files_ask_correct,
+        two_files_ask_wrong,
+        {"asks-before-removing", "planning-deleted"},
+    ),
+    (
+        "forgetting-clear-one-of-several",
+        clear_one_correct,
+        clear_one_wrong,
+        {"dropped-without-asking", "fridays-gone"},
+    ),
+    (
+        "forgetting-clear-named-facts",
+        clear_named_correct,
+        clear_named_wrong,
+        {"dropped-without-asking", "camera-gone", "noon-gone"},
+    ),
+    (
+        "forgetting-clear-named-facts",
+        clear_named_write_correct,
+        clear_named_wrong,
+        {"dropped-without-asking", "camera-gone", "noon-gone"},
+    ),
+    (
+        "forgetting-clear-whole-after-recall",
+        clear_whole_correct,
+        clear_whole_wrong,
+        {"deleted-without-asking", "project-gone", "no-project-left"},
+    ),
+    (
+        "remembering-constraint-in-request",
+        constraint_correct,
+        constraint_wrong,
+        {"constraint-saved"},
+    ),
+    ("remembering-tool-in-question", tool_correct, tool_wrong, {"tool-saved"}),
+    (
+        "remembering-transient-in-question",
+        transient_correct,
+        transient_wrong,
+        {"no-transient-context"},
+    ),
+    (
+        "filing-project-fact-in-question",
+        project_fact_correct,
+        project_fact_wrong,
+        {"no-project-write-before-ask", "no-double-firing-saved"},
+    ),
+    (
+        "filing-project-fact-in-question",
+        project_fact_correct,
+        project_fact_user_wrong,
+        {"no-double-firing-saved"},
+    ),
+    (
+        "remembering-preference-mid-task",
+        preference_mid_task_correct,
+        preference_mid_task_wrong,
+        {"preference-saved"},
+    ),
 ]
+
+
+def _case_ids() -> list[str]:
+    seen: dict[str, int] = {}
+    ids: list[str] = []
+    for case in CASES:
+        seen[case[0]] = seen.get(case[0], 0) + 1
+        ids.append(case[0] if seen[case[0]] == 1 else f"{case[0]}-{seen[case[0]]}")
+    return ids
+
+
+CASE_IDS = _case_ids()
 
 
 def _run_trial(
@@ -772,9 +1567,7 @@ def _failed(graded: dict[str, Any]) -> set[str]:
     return {r["id"] for r in graded["results"] if not r["passed"]}
 
 
-@pytest.mark.parametrize(
-    ("scenario_id", "correct", "wrong", "fails"), CASES, ids=[c[0] for c in CASES]
-)
+@pytest.mark.parametrize(("scenario_id", "correct", "wrong", "fails"), CASES, ids=CASE_IDS)
 def test_correct_driver_passes_every_assertion(
     tmp_path: Path, scenario_id: str, correct: Script, wrong: Script, fails: set[str]
 ) -> None:
@@ -789,9 +1582,7 @@ def test_correct_driver_passes_every_assertion(
     assert (entry["passed_trials"], entry["trials_run"]) == (1, 1)
 
 
-@pytest.mark.parametrize(
-    ("scenario_id", "correct", "wrong", "fails"), CASES, ids=[c[0] for c in CASES]
-)
+@pytest.mark.parametrize(("scenario_id", "correct", "wrong", "fails"), CASES, ids=CASE_IDS)
 def test_wrong_driver_fails_exactly_the_listed_assertions(
     tmp_path: Path, scenario_id: str, correct: Script, wrong: Script, fails: set[str]
 ) -> None:
@@ -801,6 +1592,46 @@ def test_wrong_driver_fails_exactly_the_listed_assertions(
     graded, report = _run_trial(tmp_path, scenario_id, wrong)
 
     assert _failed(graded) == fails, graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+def test_recall_replace_fact_flags_a_previously_clause(tmp_path: Path) -> None:
+    """Overwriting with a "previously" note fails the replace and old-recipient
+    assertions (AIE-1183).
+    """
+    graded, report = _run_trial(tmp_path, "recall-replace-fact", replace_overwrite_wrong)
+
+    assert _failed(graded) == {"replaced-in-session-2", "old-recipient-gone"}, graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+def test_recall_replace_fact_ignores_stale_metadata(tmp_path: Path) -> None:
+    """Stale description and aliases that mention the old recipient do not fail
+    the scenario (AIE-1183).
+    """
+    graded, report = _run_trial(tmp_path, "recall-replace-fact", replace_with_stale_metadata)
+
+    assert _failed(graded) == set(), graded
+    (entry,) = report["scenarios"]
+    assert (entry["passed_trials"], entry["trials_run"]) == (1, 1)
+    (store_path,) = (tmp_path / "runs").glob("**/store.json")
+    kept = load_store_dump(store_path).get("user", "workflows", "weekly-report")
+    assert kept is not None
+    assert "growth report" in kept.aliases
+    assert kept.description == "Weekly report to the growth team"
+
+
+def test_kept_on_request_flags_an_unchanged_old_line(tmp_path: Path) -> None:
+    """Appending the new tool without replacing the old line fails only the
+    old-line-changed assertion (AIE-1183, US1).
+    """
+    graded, report = _run_trial(
+        tmp_path, "write-superseded-kept-on-request", kept_on_request_append_only
+    )
+
+    assert _failed(graded) == {"old-line-changed"}, graded
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
 

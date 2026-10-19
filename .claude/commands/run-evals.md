@@ -87,8 +87,10 @@ returns an error. Never edit any file outside `evals/runs/`.
 2. Run each session `s` (1-based), and each turn `t` (1-based) within it:
    - **Build the prompt.** Run `uv run python -m evals turn-prompt
      <trial_dir> <s> <t>` and use its output exactly as the prompt. For
-     turn 1 it is the scripted text. For a later turn it replays the
-     session's earlier exchanges, then the new turn.
+     turn 1 it is the scripted text, after any context blocks. For a later turn it replays the
+     session's earlier exchanges, then the new turn. The `turn-prompt`
+     output, including any `[From the product's ...]` context blocks, is
+     passed unchanged as the whole `Agent` prompt.
    - **Every turn is a new subagent.** Call
      `Agent(subagent_type="wenchang-eval", description="eval <scenario>
      s<s> t<t>", model=<model>, prompt=<that output>)`. Do not continue an
@@ -106,6 +108,8 @@ returns an error. Never edit any file outside `evals/runs/`.
    - **Record the turn.** Call `mcp__wenchang__eval_record_turn(session=s,
      turn=t, user=<the scripted turn text>, reply=<the reply>,
      agent_id=<this subagent's id>)` alone, before the next turn starts.
+     The `user` argument is the scenario's turn text alone, never the
+     rendered prompt with its context blocks or replayed turns.
      Pass the reply verbatim: copy it exactly, and never summarize or trim
      it. Memory calls are assigned to a turn by the timing of this call.
      The call also updates `transcript.json`, which the next turn's prompt

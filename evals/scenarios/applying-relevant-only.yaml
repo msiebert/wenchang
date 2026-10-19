@@ -1,0 +1,40 @@
+# Prompt: "Use a stored fact only if it changes the substance: what you
+# conclude, recommend, or ask." and "A detail that changes nothing reads as
+# surveillance rather than attentiveness."
+id: applying-relevant-only
+title: Does not mention a stored preference that is irrelevant to the answer
+category: applying
+source: specs/AIE-1052-curated-applying/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: style
+    content: |
+      - [stated] Prefers charts with a dark background.
+      - [stated] Writes SQL keywords in lowercase.
+    description: Chart and SQL style preferences
+    aliases: [chart-style, sql-style]
+sessions:
+  - turns:
+      - |-
+        This join returns duplicate rows. Can you fix it?
+
+        SELECT o.id, u.email FROM orders o JOIN users u ON o.user_id = u.id JOIN events e ON e.user_id = u.id WHERE e.name = 'Purchase'
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
+    id: read-seed
+    tool: read_file
+    args: {scope: user, name: style}
+    succeeded: true
+  - kind: reply_not_matching
+    id: no-chart-mention
+    pattern: "(?i)\\bcharts?\\b|dark[- ]background"
+    turn: 1
+judge:
+  - id: fixes-join
+    rubric: The turn 1 reply gives a corrected query that removes the duplicate rows.

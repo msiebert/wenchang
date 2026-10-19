@@ -1,8 +1,8 @@
 """Deterministic graders over a trial's store dump and tool-call trace.
 
-Pure functions of (scenario, store dump, trace). The JSON loaders and writers
-here define the driver contract: any driver that produces store.json,
-trace.json, and transcript.json can be graded.
+Pure functions of the scenario, the store dump, the trace, and the transcript.
+The JSON loaders and writers here define the driver contract: any driver that
+produces store.json, trace.json, and transcript.json can be graded.
 """
 
 import json
@@ -25,6 +25,8 @@ from evals.scenario import (
     LinePresent,
     NoContentMatching,
     NoDuplicateFact,
+    ReplyMatching,
+    ReplyNotMatching,
     Scenario,
     SeedLinesPreserved,
     ToolCalled,
@@ -487,7 +489,53 @@ def _called_before(a: CalledBefore, s: Scenario, trace: Sequence[TraceCall]) -> 
     return None
 
 
-def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCall]) -> str | None:
+def _selected_replies(
+    a: ReplyMatching | ReplyNotMatching, transcript: Sequence[TranscriptTurn]
+) -> list[TranscriptTurn]:
+    chosen = [
+        t
+        for t in transcript
+        if (a.session is None or t.session == a.session) and (a.turn is None or t.turn == a.turn)
+    ]
+    return sorted(chosen, key=lambda t: (t.session, t.turn))
+
+
+def _no_reply(a: ReplyMatching | ReplyNotMatching) -> str:
+    session = "any" if a.session is None else a.session
+    turn = "any" if a.turn is None else a.turn
+    return f"no reply recorded for session {session} turn {turn}"
+
+
+def _reply_matching(a: ReplyMatching, transcript: Sequence[TranscriptTurn]) -> str | None:
+    chosen = _selected_replies(a, transcript)
+    if not chosen:
+        return _no_reply(a)
+    if any(re.search(a.pattern, t.reply) for t in chosen):
+        return None
+    checked = ", ".join(f"session {t.session} turn {t.turn}" for t in chosen)
+    return f"no reply matches {a.pattern!r}; checked {checked}"
+
+
+def _reply_not_matching(a: ReplyNotMatching, transcript: Sequence[TranscriptTurn]) -> str | None:
+    chosen = _selected_replies(a, transcript)
+    if not chosen:
+        return _no_reply(a)
+    for t in chosen:
+        match = re.search(a.pattern, t.reply)
+        if match:
+            start = max(0, match.start() - 40)
+            excerpt = t.reply[start : min(len(t.reply), match.end() + 40)]
+            return f"session {t.session} turn {t.turn} reply matches: {excerpt[:80]}"
+    return None
+
+
+def _check(
+    a: Assertion,
+    s: Scenario,
+    store: StoreDump,
+    trace: Sequence[TraceCall],
+    transcript: Sequence[TranscriptTurn],
+) -> str | None:
     checks: Mapping[type[object], Callable[[], str | None]] = {
         IndexReadFirst: lambda: _index_read_first(cast(IndexReadFirst, a), s, trace),
         FileAbsent: lambda: _file_absent(cast(FileAbsent, a), store),
@@ -500,18 +548,23 @@ def _check(a: Assertion, s: Scenario, store: StoreDump, trace: Sequence[TraceCal
         ToolNotCalled: lambda: _tool_not_called(cast(ToolNotCalled, a), trace),
         AliasPresent: lambda: _alias_present(cast(AliasPresent, a), store),
         CalledBefore: lambda: _called_before(cast(CalledBefore, a), s, trace),
+        ReplyMatching: lambda: _reply_matching(cast(ReplyMatching, a), transcript),
+        ReplyNotMatching: lambda: _reply_not_matching(cast(ReplyNotMatching, a), transcript),
     }
     return checks[type(a)]()
 
 
 def grade(
-    scenario: Scenario, store: StoreDump, trace: Sequence[TraceCall]
+    scenario: Scenario,
+    store: StoreDump,
+    trace: Sequence[TraceCall],
+    transcript: Sequence[TranscriptTurn] = (),
 ) -> tuple[AssertionResult, ...]:
     """One result per scenario assertion, in order; the trace may be in any order."""
     ordered = sorted(trace, key=order_key)
     results: list[AssertionResult] = []
     for a in scenario.assertions:
-        failure = _check(a, scenario, store, ordered)
+        failure = _check(a, scenario, store, ordered, transcript)
         results.append(AssertionResult(a.id, assertion_kind(a), failure is None, failure or "ok"))
     return tuple(results)
 
@@ -519,12 +572,103 @@ def grade(
 # --- reply check --------------------------------------------------------------
 
 _APOSTROPHES: Final = "'\u2019\u02bc"
+_DATA_NOUNS: Final = "ids?|profiles?|propert(?:y|ies)|tables?|rows?|records?|columns?|attributes?"
+_INTERFACE_VERBS: Final = (
+    "taps|tapped|clicks|clicked|swipes|swiped|scrolls|scrolled|presses|pressed|hovers|hovered"
+)
 # "the user" or "the caller", but not the user scope ("the user's scope" included)
-# and not "the users". The possessive quantifier keeps "'s" from backtracking.
+# and not "the users". A non-possessive "the user" also skips data nouns and
+# interface verbs ("the user id", "the user taps").
 THIRD_PERSON_PATTERN: Final[re.Pattern[str]] = re.compile(
-    rf"\bthe\s+user(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
+    rf"\bthe\s+user(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
+    rf"(?!(?:[ \t\u00a0]+|[ \t]*[-\u2013\u2014][ \t]*)(?:{_DATA_NOUNS}|{_INTERFACE_VERBS})\b)"
+    rf"|\bthe\s+user[{_APOSTROPHES}]s(?![\w{_APOSTROPHES}])(?![-\u2013\u2014\s]+scopes?\b)"
     rf"|\bthe\s+caller(?:[{_APOSTROPHES}]s)?+(?![\w{_APOSTROPHES}])",
     re.IGNORECASE,
+)
+_STATEMENT_SPLIT: Final = re.compile(r"\n[ \t]*\n|;")
+_SELECT: Final = re.compile(r"\bselect\b", re.I)
+_FROM: Final = re.compile(r"\bfrom\s+[a-z_][\w.]*", re.I)
+_SELECT_CLAUSE: Final = re.compile(
+    r"\bjoin\s+[a-z_][\w.]*(?:\s+(?:as\s+)?[a-z_]\w*)?\s+on\b"
+    r"|\bwhere\s+[a-z_][\w.]*\s*(?:=|<>|!=|<=|>=|<|>)",
+    re.I,
+)
+_SQL_WRITE: Final = re.compile(
+    r"\binsert\s+into\s+[a-z_][\w.]*\s*(?:\(|values\b|select\b)"
+    r"|\bupdate\s+[a-z_][\w.]*\s+set\s+[a-z_][\w.]*\s*="
+    r"|\bdelete\s+from\s+[a-z_][\w.]*\s+where\b"
+    r"|\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?[a-z_][\w.]*\s*\(",
+    re.I,
+)
+_ADDRESSEE_END: Final = re.compile(
+    rf"(?<![\w{_APOSTROPHES}])(?:(?:asks?|asked|asking|tells?|told|telling|reminds?|reminded"
+    r"|informs?|informed)|(?:check|confirm)\s+with|(?:wait|waiting)\s+for"
+    r"|(?:reply|respond)\s+to)$",
+    re.I,
+)
+_DATA_VERBS: Final = frozenset(
+    [
+        "has",
+        "have",
+        "had",
+        "is",
+        "are",
+        "was",
+        "were",
+        "with",
+        "who",
+        "whose",
+        "did",
+        "does",
+        "exists",
+    ]
+)
+_ADVERBS: Final = frozenset(["also", "already", "just", "explicitly", "previously", "not", "never"])
+_SPEECH_VERBS: Final = frozenset(
+    [
+        "ask",
+        "asked",
+        "asking",
+        "say",
+        "said",
+        "saying",
+        "tell",
+        "told",
+        "telling",
+        "mention",
+        "mentioned",
+        "mentioning",
+        "request",
+        "requested",
+        "requesting",
+        "state",
+        "stated",
+        "explain",
+        "explained",
+        "confirm",
+        "confirmed",
+        "want",
+        "wanted",
+        "wanting",
+        "write",
+        "wrote",
+        "written",
+        "share",
+        "shared",
+        "paste",
+        "pasted",
+        "prefer",
+        "preferred",
+        "reply",
+        "replied",
+        "answer",
+        "answered",
+        "clarify",
+        "clarified",
+        "note",
+        "noted",
+    ]
 )
 _FENCED_BLOCK: Final = re.compile(r"^[ \t]*```.*?(?:^[ \t]*```[^\n]*$|\Z)", re.M | re.S)
 _QUOTE_LINE: Final = re.compile(r"^[ \t]*>.*$", re.M)
@@ -566,6 +710,31 @@ def _is_echo(phrase: str, rest: str | None, context: Sequence[str]) -> bool:
     return any(re.search(pattern, text) for text in context)
 
 
+def _has_sql(text: str) -> bool:
+    for statement in _STATEMENT_SPLIT.split(text):
+        if _SQL_WRITE.search(statement):
+            return True
+        select = _SELECT.search(statement)
+        source = _FROM.search(statement, select.end()) if select else None
+        if source and _SELECT_CLAUSE.search(statement, source.end()):
+            return True
+    return False
+
+
+def _is_data_use(reply: str, match: re.Match[str]) -> bool:
+    """Whether a non-possessive "the user" is the subject of a data verb."""
+    phrase = match.group().lower()
+    if not phrase.endswith("user") or _ADDRESSEE_END.search(reply[: match.start()].rstrip()):
+        return False
+    following = _NEXT_WORD.match(reply, match.end())
+    if following is None or following.group().strip().lower() not in _DATA_VERBS:
+        return False
+    after = _NEXT_WORD.match(reply, following.end())
+    if after is not None and after.group().strip().lower() in _ADVERBS | {"been"}:
+        after = _NEXT_WORD.match(reply, after.end())
+    return after is None or after.group().strip().lower() not in _SPEECH_VERBS
+
+
 def find_third_person_replies(
     scenario: Scenario, transcript: Sequence[TranscriptTurn]
 ) -> tuple[ThirdPersonReply, ...]:
@@ -579,13 +748,21 @@ def find_third_person_replies(
         for f in scenario.seed_files
         for part in (f.content, f.description, *f.aliases)
     ]
+    user_sql = {(u.session, u.turn): _has_sql(u.user) for u in transcript}
     flags: list[ThirdPersonReply] = []
     for t in transcript:
         users = [
             _normalize(u.user) for u in transcript if u.session == t.session and u.turn <= t.turn
         ]
         reply = _unquoted(t.reply)
+        sql_turn = _has_sql(t.reply) or any(
+            has
+            for (session, turn), has in user_sql.items()
+            if session == t.session and turn <= t.turn
+        )
         for match in THIRD_PERSON_PATTERN.finditer(reply):
+            if sql_turn and _is_data_use(reply, match):
+                continue
             following = _NEXT_WORD.match(reply, match.end())
             end = following.end() if following else match.end()
             phrase = _normalize(reply[match.start() : end])
