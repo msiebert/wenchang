@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from evals.graders import (
+    PATH_ROOTS,
     AssertionResult,
     GradeInputError,
     StoredFile,
@@ -20,7 +21,9 @@ from evals.graders import (
     ThirdPersonReply,
     TraceCall,
     TranscriptTurn,
+    UnmatchedReplyPath,
     find_third_person_replies,
+    find_unmatched_reply_paths,
     grade,
     load_store_dump,
     load_trace,
@@ -30,7 +33,7 @@ from evals.graders import (
     trace_to_json,
     transcript_to_json,
 )
-from evals.reference_adopter import MEMBER_IDENTITY, SeedFile
+from evals.reference_adopter import MEMBER_IDENTITY, REFERENCE_SCOPES, SeedFile
 from evals.scenario import (
     SCENARIO_DIR,
     AliasPresent,
@@ -55,6 +58,7 @@ from evals.scenario import (
     ToolNotCalled,
     load_scenario,
 )
+from wenchang.identity import Identity, ScopeGrant
 
 pytestmark = pytest.mark.unit
 
@@ -1692,3 +1696,353 @@ def test_reply_check_vocabulary_applies_in_an_sql_turn() -> None:
 def test_reply_check_vocabulary_never_exempts_the_caller() -> None:
     """ "the caller" before a data noun is still flagged (AIE-1199, US1.9)."""
     assert _flags(_turns("The caller ID is 5.")) == (ThirdPersonReply(1, 1, "the caller id"),)
+
+
+# --- reply paths (AIE-1198, US2) -----------------------------------------------
+
+NOTE = "user/u-ada/notes/a.md"
+
+
+def _result_call(
+    seq: int,
+    result: object,
+    *,
+    tool: str = "write_file",
+    session: int = 1,
+    turn: int = 1,
+    is_error: bool = False,
+) -> TraceCall:
+    return replace(
+        _call(seq, tool, session=session, turn=turn, is_error=is_error),
+        result=result,
+    )
+
+
+def _wrote(
+    path: str, seq: int = 1, *, session: int = 1, turn: int = 1, is_error: bool = False
+) -> TraceCall:
+    return _result_call(
+        seq, {"path": path, "version": "1"}, session=session, turn=turn, is_error=is_error
+    )
+
+
+def _paths(
+    reply: str,
+    trace: Sequence[TraceCall] = (),
+    *,
+    user: str = "hello",
+    scenario: Scenario | None = None,
+) -> tuple[UnmatchedReplyPath, ...]:
+    return find_unmatched_reply_paths(
+        scenario or _scenario(IndexReadFirst("i")),
+        trace,
+        _turns(reply, user=user),
+    )
+
+
+def _flag(
+    token: str, kind: str = "unmatched", session: int = 1, turn: int = 1
+) -> tuple[object, ...]:
+    return (UnmatchedReplyPath(session, turn, token, kind),)
+
+
+def test_path_roots_are_the_reference_scopes_plus_org_and_system() -> None:
+    """AIE-1198, US2.1: the default roots."""
+    assert frozenset(REFERENCE_SCOPES) | {"org", "system"} == PATH_ROOTS
+
+
+def test_reply_path_exact_match_is_not_flagged() -> None:
+    """AIE-1198, US2.2: a path written earlier matches exactly."""
+    assert _paths(f"Saved {NOTE} for you", [_wrote(NOTE)]) == ()
+
+
+def test_reply_path_missing_md_extension_matches() -> None:
+    """AIE-1198, US2.2: T matches when T.md is known."""
+    assert _paths("Saved user/u-ada/notes/a now", [_wrote(NOTE)]) == ()
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        f"`{NOTE}`",
+        f"({NOTE})",
+        f"**{NOTE}**",
+        f"'{NOTE}'",
+        f'"{NOTE}"',
+        f"/{NOTE}",
+        f"{NOTE}.",
+        f"{NOTE},",
+        f"{NOTE};",
+        f"{NOTE}:",
+        f"{NOTE}!",
+        f"{NOTE}?",
+        f"see {NOTE}.\nnext line",
+    ],
+)
+def test_reply_path_delimiters_and_trailing_punctuation_are_stripped(reply: str) -> None:
+    """AIE-1198, US2.2: delimiters, leading slash and trailing punctuation are stripped."""
+    assert _paths(reply, [_wrote(NOTE)]) == ()
+
+
+def test_reply_path_token_is_normalized_in_the_output() -> None:
+    """AIE-1198, US2.2: the flagged token has no slash, delimiter or punctuation."""
+    assert _paths("**/user/u-ada/notes/zzz.md**.") == _flag("user/u-ada/notes/zzz.md")
+
+
+def test_reply_path_segments_before_the_first_root_are_dropped() -> None:
+    """AIE-1198, US2.2: only root onward is kept."""
+    assert _paths("see wenchang/mem/user/u-ada/notes/zzz.md") == _flag("user/u-ada/notes/zzz.md")
+
+
+def test_reply_path_directory_reference_matches_a_known_directory() -> None:
+    """AIE-1198, US2.2: every directory prefix of a known location is known."""
+    trace = [_wrote("user/u-ada/preferences/editor.md")]
+    assert _paths("See user/u-ada/preferences/ for it", trace) == ()
+    assert _paths("See `user/u-ada`", trace) == ()
+
+
+def test_reply_path_system_suffix_matches_a_scoped_location() -> None:
+    """AIE-1198, US2.2: a known location ending with /candidate matches."""
+    trace = [_wrote("organization/o-acme/system/fiscal-calendar.md")]
+    assert _paths("Read system/fiscal-calendar for it", trace) == ()
+
+
+def test_reply_path_entity_omitted_kind() -> None:
+    """AIE-1198, US2.3: dropping the entity id from a written path is entity_omitted."""
+    trace = [_wrote("project/p-checkout/metrics/dau.md")]
+    assert _paths("Wrote project/metrics/dau.md", trace) == _flag(
+        "project/metrics/dau.md", "entity_omitted"
+    )
+
+
+def test_reply_path_wrong_name_is_unmatched() -> None:
+    """AIE-1198, US2.3: a wrong file name is unmatched."""
+    trace = [_wrote("project/p-checkout/metrics/dau.md")]
+    assert _paths("Wrote project/metrics/daily-active-users.md", trace) == _flag(
+        "project/metrics/daily-active-users.md"
+    )
+
+
+def test_reply_path_two_segment_entity_omitted_against_an_index_entry() -> None:
+    """AIE-1198, US2.3: user/preferences is entity_omitted when a directory beneath exists."""
+    index = _result_call(
+        1,
+        {"entries": [{"path": "user/u-ada/preferences/x.md"}]},
+        tool="get_memory_index",
+    )
+    assert _paths("Look in user/preferences", [index]) == _flag(
+        "user/preferences", "entity_omitted"
+    )
+
+
+def test_reply_path_known_only_from_a_later_turn_is_flagged() -> None:
+    """AIE-1198, US2.4: a location written after the reply's turn does not count."""
+    transcript = _turns(f"Saved {NOTE}", "later")
+    trace = [_wrote(NOTE, turn=2)]
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), trace, transcript) == (
+        UnmatchedReplyPath(1, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_known_in_the_same_turn_counts() -> None:
+    """AIE-1198, US2.4: calls in the reply's own turn count."""
+    assert _paths(f"Saved {NOTE}", [_wrote(NOTE, turn=1)]) == ()
+
+
+def test_reply_path_earlier_session_counts_and_later_session_does_not() -> None:
+    """AIE-1198, US2.4: session < s counts; session > s does not."""
+    transcript = (TranscriptTurn(2, 1, "hi", f"Saved {NOTE}", None),)
+    scenario = _scenario(IndexReadFirst("i"), sessions=3)
+    earlier = [_wrote(NOTE, session=1, turn=5)]
+    later = [_wrote(NOTE, session=3, turn=1)]
+    assert find_unmatched_reply_paths(scenario, earlier, transcript) == ()
+    assert find_unmatched_reply_paths(scenario, later, transcript) == (
+        UnmatchedReplyPath(2, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_same_session_later_turn_does_not_count_across_sessions() -> None:
+    """AIE-1198, US2.4: in the reply's session only turn <= t counts."""
+    transcript = (TranscriptTurn(2, 1, "hi", f"Saved {NOTE}", None),)
+    scenario = _scenario(IndexReadFirst("i"), sessions=2)
+    trace = [_wrote(NOTE, session=2, turn=2)]
+    assert find_unmatched_reply_paths(scenario, trace, transcript) == (
+        UnmatchedReplyPath(2, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_untagged_session_zero_call_counts() -> None:
+    """AIE-1198, US2.4: session 0 (seeding) calls count."""
+    assert _paths(f"Saved {NOTE}", [_wrote(NOTE, session=0, turn=0)]) == ()
+
+
+def test_reply_path_failed_call_result_counts() -> None:
+    """AIE-1198, US2.4: an is_error result path is known."""
+    assert _paths(f"Saved {NOTE}", [_wrote(NOTE, is_error=True)]) == ()
+
+
+def test_reply_path_arguments_never_count() -> None:
+    """AIE-1198, US2.4: a path only in the call arguments is not known."""
+    call = _call(1, "write_file", path=NOTE, content="x")
+    assert _paths(f"Saved {NOTE}", [call]) == _flag(NOTE)
+
+
+def test_reply_path_nested_index_entries_and_capped_prefixes_count() -> None:
+    """AIE-1198, US2.4: path/prefix at any depth in a get_memory_index result."""
+    result = {
+        "scopes": {
+            "user": {
+                "entries": [{"path": "user/u-ada/notes/a.md"}],
+                "capped": [{"prefix": "user/u-ada/preferences/"}],
+            }
+        }
+    }
+    trace = [_result_call(1, result, tool="get_memory_index")]
+    assert _paths("`user/u-ada/notes/a.md` and user/u-ada/preferences/", trace) == ()
+
+
+def test_reply_path_list_prefix_entries_count() -> None:
+    """AIE-1198, US2.4: list_prefix entries are known locations."""
+    result = {"entries": [{"path": "project/p-checkout/metrics/dau.md"}]}
+    trace = [_result_call(1, result, tool="list_prefix")]
+    assert _paths("project/p-checkout/metrics/dau.md", trace) == ()
+
+
+def test_reply_path_nesting_beyond_32_levels_is_ignored() -> None:
+    """AIE-1198, US2.4: paths deeper than 32 levels are not known."""
+    deep: object = {"path": NOTE}
+    for _ in range(40):
+        deep = {"x": deep}
+    shallow: object = {"a": {"b": {"path": "user/u-ada/notes/b.md"}}}
+    trace = [_result_call(1, deep), _result_call(2, shallow)]
+    assert _paths(f"{NOTE} user/u-ada/notes/b.md", trace) == _flag(NOTE)
+
+
+def test_reply_path_known_location_edge_slashes_are_stripped() -> None:
+    """AIE-1198, US2.4: a leading or trailing slash on a known location is ignored."""
+    assert _paths(NOTE, [_wrote(f"/{NOTE}/")]) == ()
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "https://x.com/user/u-ada/a/b",
+        "see //user/u-ada/a/b",
+        "www.x.com/user/y/z",
+        "user/",
+        "user/project",
+        "user/session",
+        "a/b",
+    ],
+)
+def test_reply_path_non_paths_are_skipped(reply: str) -> None:
+    """AIE-1198, US2.5: URLs, protocol-relative runs, hosts and degenerate tokens are skipped."""
+    assert _paths(reply) == ()
+
+
+def test_reply_path_after_a_colon_and_space_is_checked() -> None:
+    """AIE-1198, US2.5: only an immediately adjacent scheme exempts."""
+    assert _paths("Saved to: user/u-ada/notes/zzz.md") == _flag("user/u-ada/notes/zzz.md")
+
+
+def test_reply_path_two_segments_with_a_known_area_are_checked() -> None:
+    """AIE-1198, US2.5: user/preferences names a known area."""
+    assert _paths("see user/preferences") == _flag("user/preferences")
+
+
+def test_reply_path_two_segments_with_a_known_entity_id_are_checked() -> None:
+    """AIE-1198, US2.5: user/u-ada names a known entity id."""
+    assert _paths("see user/u-ada") == _flag("user/u-ada")
+
+
+def test_reply_path_two_segments_with_a_scenario_area_are_checked() -> None:
+    """AIE-1198, US2.5: scenario seed areas are known areas."""
+    seed = SeedFile("user", "gardening", "beds", "- [stated] x\n", "Beds", ())
+    scenario = _scenario(IndexReadFirst("i"), seeds=(seed,))
+    assert _paths("see user/gardening", scenario=scenario) == _flag("user/gardening")
+
+
+def test_reply_path_two_segments_with_a_third_segment_area_are_checked() -> None:
+    """AIE-1198, US2.5: the 3rd segment of a known location is a known area."""
+    trace = [_wrote("user/u-ada/hobbies/chess.md")]
+    assert _paths("see user/hobbies", trace) == _flag("user/hobbies", "entity_omitted")
+
+
+def test_reply_path_echo_of_the_users_text_is_skipped() -> None:
+    """AIE-1198, US2.5: a token the user typed this session is not flagged."""
+    assert _paths(f"Yes, {NOTE} it is", user=f"please use {NOTE}") == ()
+
+
+def test_reply_path_user_text_from_a_later_turn_does_not_exempt() -> None:
+    """AIE-1198, US2.5: only turn <= t user text exempts."""
+    transcript = (
+        TranscriptTurn(1, 1, "hello", f"Saved {NOTE}", None),
+        TranscriptTurn(1, 2, f"is {NOTE} there?", "yes", None),
+    )
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), transcript) == (
+        UnmatchedReplyPath(1, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_user_text_from_another_session_does_not_exempt() -> None:
+    """AIE-1198, US2.5: the echo exemption is per session."""
+    transcript = (
+        TranscriptTurn(1, 1, f"use {NOTE}", "ok", None),
+        TranscriptTurn(2, 1, "hello", f"Saved {NOTE}", None),
+    )
+    scenario = _scenario(IndexReadFirst("i"), sessions=2)
+    assert find_unmatched_reply_paths(scenario, (), transcript) == (
+        UnmatchedReplyPath(2, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_echo_from_an_earlier_turn_of_the_session_exempts() -> None:
+    """AIE-1198, US2.5: user text from turn <= t in the same session exempts."""
+    transcript = (
+        TranscriptTurn(1, 1, f"use {NOTE}", "ok", None),
+        TranscriptTurn(1, 2, "again", f"Saved {NOTE}", None),
+    )
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), transcript) == ()
+
+
+def test_reply_path_custom_root_from_an_identity_grant_is_checked() -> None:
+    """AIE-1198, US2.1: grant keys of the scenario identity are roots; others are not."""
+    identity = Identity(
+        grants={
+            "user": ScopeGrant("u-ada", "owner"),
+            "team": ScopeGrant("t-core", "member"),
+        }
+    )
+    custom = replace(_scenario(IndexReadFirst("i")), identity=identity)
+    reply = "see team/t-core/notes/a.md"
+    assert _paths(reply, scenario=custom) == _flag("team/t-core/notes/a.md")
+    assert _paths(reply) == ()
+
+
+def test_reply_path_roots_are_case_sensitive() -> None:
+    """AIE-1198, US2.1: User/u-ada/notes/a.md has no root."""
+    assert _paths("see User/u-ada/notes/a.md") == ()
+
+
+def test_reply_path_duplicate_token_is_reported_once() -> None:
+    """AIE-1198, US2.5: one result per distinct token per reply."""
+    assert _paths(f"{NOTE} and again `{NOTE}`.") == _flag(NOTE)
+
+
+def test_reply_path_output_order_follows_replies_then_first_appearance() -> None:
+    """AIE-1198, US2.5: transcript order, then first appearance within a reply."""
+    b, c, d = "user/u-ada/notes/b.md", "user/u-ada/notes/c.md", "user/u-ada/notes/d.md"
+    transcript = (
+        TranscriptTurn(1, 2, "x", f"{d} then {b}", None),
+        TranscriptTurn(1, 1, "y", f"{c}", None),
+    )
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), transcript) == (
+        UnmatchedReplyPath(1, 2, d, "unmatched"),
+        UnmatchedReplyPath(1, 2, b, "unmatched"),
+        UnmatchedReplyPath(1, 1, c, "unmatched"),
+    )
+
+
+def test_reply_path_empty_transcript_gives_no_results() -> None:
+    """AIE-1198, US2.5: nothing to check."""
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), ()) == ()
