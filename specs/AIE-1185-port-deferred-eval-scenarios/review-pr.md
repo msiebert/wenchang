@@ -6,8 +6,8 @@
 ## What changed & why
 
 AIE-1170 shipped 23 scenarios and deferred ten. This ports all ten, so the
-corpus is 33, and the live finding below adds four held-out
-scenarios for 37. With AIE-1182's five, merged from main, the corpus is 42. Two harness additions make them possible. Reply assertions
+corpus is 33, and the live finding below adds five held-out
+scenarios for 38. With AIE-1182's five, merged from main, the corpus is 43. Two harness additions make them possible. Reply assertions
 (`reply_matching`, `reply_not_matching`) grade what the agent said, which the
 judge cannot do deterministically. `context_records` lets a scenario show the
 agent product data (an event catalog, a query history, a delivery log) that a
@@ -33,7 +33,7 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
 | 2.2 `turn_prompt` rendering, turns 1 and later | rpt `test_turn_prompt_renders_one_context_record_before_turn_one`, `..._renders_two_context_records_separated_by_a_blank_line`, `..._puts_context_records_before_the_replay` |
 | 2.3 byte-identical without records | rpt `test_turn_prompt_without_context_records_is_unchanged` |
 | 2.4 `run-evals.md` sentences | agt `test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn` |
-| 3.1 corpus is 37 (42 with AIE-1182's five), `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
+| 3.1 corpus is 38 (43 with AIE-1182's five), `applying` category | scn `test_corpus_is_the_planned_set`, `test_categories_gain_applying`, `test_new_scenarios_are_in_the_corpus` |
 | 3.2 cited sentences are in the prompt | scn `test_new_scenarios_cite_the_prompt_verbatim` (10 cases) |
 | 3.3 correct drivers pass, wrong drivers fail the exact set | e2e `test_correct_driver_passes_every_assertion` and `test_wrong_driver_fails_exactly_the_listed_assertions`, 10 new `CASES` rows |
 | 3.4 judge rubric form | scn `test_new_scenarios_judge_rubrics_name_their_turn` |
@@ -67,7 +67,18 @@ Modules: `scn` = `tests/test_evals_scenario.py`, `grd` =
   - `forgetting-clear-whole-after-recall` (guard): "Erase all of it. I've shelved the project." deletes the file without asking.
 - **Generality.** An adversarial review removed an earlier draft whose examples mirrored the held-out shapes. The fix names no scenario facts.
 - **Also changed.** Phrase tests in `test_prompts_forgetting.py`, citations in the `forgetting-ambiguous-that` and `forgetting-two-files` headers, and `.claude/agents/wenchang-eval.md` re-rendered.
-- **Live rerun: PENDING.** Run against the agent file re-rendered after merging main (AIE-1182), sha256 `4b854ec63f18212d4ed5208255369e9d82b5f19c63c3b376d58b3845da782610`. Scenario ids: `forgetting-ambiguous-that`, the four held-outs, then the ones that could regress, `forgetting-two-files` first, then `forgetting-one-fact`, `forgetting-whole-file`, `forgetting-only-fact`, `forgetting-nickname-alias`. The two guards must still pass without asking. The `asks-before-removing` pre-registration in the gate below stands.
+- **Round-1 live rerun: done** (`evals/runs/aie1185-fix-n6`, gitignored, N=6). `forgetting-ambiguous-two-files` 6/6, `forgetting-ambiguous-that` 2/6, `forgetting-ambiguous-several-facts` 0/6. Every guard and other forgetting scenario 6/6, except `forgetting-lapsed-expiry` 5/6: the miss is a leftover "no longer applies" note, which is AIE-1183's domain, not this fix's.
+
+### Round 2 (final round under the miss policy)
+
+- **Finding.** Round 1 fixed `-two-files` but not `-ambiguous-that` (2/6) or `-ambiguous-several-facts` (0/6).
+- **Diagnosis.** After the agent reads a whole file back, "Forget that." looks unambiguous because "that" seems to mean all of it. It deletes the file and offers to rebuild it. The "could mean different removals" rule never fires, because the agent sees one reading.
+- **Stance (human's choice).** Before a removal that would take out more than one of the user's facts, confirm first, unless the user's own words clearly cover all of them.
+- **New first paragraph** (replaces round 1's "Delete the file if the fact was the file's only fact or the user means the whole file; ..." and "A request is ambiguous when..." sentences): "Forgetting has two moves: drop one fact's line, or delete the whole file. Before carrying out a request that would remove more than one fact, ask first unless the user's own words clearly cover every one: they said all or everything, asked for the whole file or subject, or named each fact to remove, even if other facts stay. Coverage comes from their words, not from what you just showed them: a bare pointer back at a file you just read out does not cover every fact in it. Also ask when a request could mean different removals, even if one reading seems likelier. When you ask, name the choices and remove nothing until the user answers; never remove the broadest reading and offer to restore the rest. Act on the answer without asking again. When only one removal fits, remove it without asking, and delete the file if that was its only fact. One fact held in several files is still one fact: remove it from each. The dependents described below count as part of the fact they rest on."
+- **New held-out guard**, committed in 678caf5 before the prompt edit, with correct and wrong drivers: `forgetting-clear-named-facts`. It seeds a three-fact meetings file; after a recall the user says "Drop the camera thing and the before-noon one." Expected: two `replace_fact` calls at turn 2 without asking, and the agenda line kept. The corpus is now 38 scenarios (43 with AIE-1182's five).
+- **Reviews.** An adversarial generality review found no scenario facts and no mirrored examples; it reworded the coverage sentence from a symptom-shaped one to the general principle. An over-trigger review walked all 12 forgetting scenarios and led to three changes: the rule is scoped to requests, so lapsed-date maintenance is not caught; "Act on the answer without asking again" was added for the `-two-files` turn 3; the dependents sentence was added, so cascades are not counted as extra facts.
+- **Also changed.** Phrase tests in `test_prompts_forgetting.py`; citation maps in `test_evals_scenario.py`; `# Prompt:` headers of `-ambiguous-that`, `-ambiguous-several-facts`, `-ambiguous-two-files`, `-clear-whole-after-recall`, `-clear-named-facts`, `-only-fact`, `-whole-file`; `.claude/agents/wenchang-eval.md` re-rendered, sha256 `9f01eb612667e131db44dea0529140ce9cd7595e10dd84b5e716b944aa896399`. No scenario's correct behavior changed, so no assertion changed. Main (AIE-1199) merged in at 5fa829b.
+- **Round-2 live rerun: PENDING.** Run all 13 `forgetting-*` scenarios (the 12 the over-trigger review walked plus `forgetting-clear-named-facts`) against that sha: `forgetting-ambiguous-that`, `forgetting-ambiguous-several-facts`, `forgetting-ambiguous-two-files`, `forgetting-clear-one-of-several`, `forgetting-clear-whole-after-recall`, `forgetting-clear-named-facts`, `forgetting-lapsed-expiry`, `forgetting-system-fact`, `forgetting-nickname-alias`, `forgetting-two-files`, `forgetting-one-fact`, `forgetting-whole-file`, and `forgetting-only-fact`. The guards must still pass without asking. The `asks-before-removing` pre-registration in the gate below stands.
 
 ## Architecture / ADR changes
 
@@ -112,7 +123,7 @@ uv run python -m evals merge-runs evals/runs/<name> <shard run dirs>
 - `no-catalog-copy`'s known edge: a correction that names the catalog definition only to contrast with it also fails.
 - `_grade_is_current`: only reply-kind scenarios treat a newer or deleted transcript, or a grade without the reply check, as a full regrade.
 - `grade_trial` loads the transcript once and shares it with the third-person check.
-- The added Forgetting sentences: the ambiguity test and the ask-then-remove rule must not make the two guard scenarios ask.
+- The Forgetting sentences: the multi-fact confirm rule must not make the guards ask (`forgetting-clear-one-of-several`, `forgetting-clear-whole-after-recall`, `forgetting-clear-named-facts`, `forgetting-whole-file`, `forgetting-only-fact`).
 - Cited sentences from `remembering.py`: checked after merging AIE-1182; every citation test passes against the merged prompt.
 
 ## Follow-ups

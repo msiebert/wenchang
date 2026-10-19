@@ -132,7 +132,7 @@ Terms are as in AIE-1170. In this spec:
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 3.1 | `evals/scenarios/` | `load_all()` | it holds exactly the 23 AIE-1170 scenarios, the 10 below, and the 4 held-outs of US6, and `CATEGORIES` gains `applying` |
+| 3.1 | `evals/scenarios/` | `load_all()` | it holds exactly the 23 AIE-1170 scenarios, the 10 below, and the 5 held-outs of US6, and `CATEGORIES` gains `applying` |
 | 3.2 | each new scenario | its cited sentences are checked | a `CITATIONS` table in the tests maps each new scenario id to its cited sentences. With whitespace collapsed in both, each sentence is a substring of `build_memory_prompt(REFERENCE_SLOTS)`. Each YAML's `# Prompt:` header comment quotes the same sentences |
 | 3.3 | each new scenario | its correct and wrong scripted drivers run | the correct driver passes every assertion and the report shows 1/1. The wrong driver fails exactly the listed set and the report shows 0/1 |
 | 3.4 | every judge rubric in the new scenarios | loaded | each starts with "The turn N reply" or "The session S turn N reply", as AIE-1170 US9.6 requires |
@@ -202,6 +202,51 @@ The added Forgetting text:
 > fact held in several files is still one fact: remove it from each.
 
 The sentence cited by `forgetting-ambiguous-that` (below) is unchanged.
+
+**Round 2.** The round-1 rerun (`evals/runs/aie1185-fix-n6`, gitignored, N=6)
+scored `forgetting-ambiguous-two-files` 6/6, `forgetting-ambiguous-that` 2/6,
+and `forgetting-ambiguous-several-facts` 0/6. Every guard and other
+forgetting scenario scored 6/6, except `forgetting-lapsed-expiry` 5/6; that
+miss is a leftover "no longer applies" note, which belongs to AIE-1183.
+After reading a whole file back, the agent treats "Forget that." as
+unambiguous because "that" seems to mean all of it, so it deletes the file and
+offers to rebuild it. The "could mean different removals" rule never fires
+because the agent sees one reading. The human chose the stance: before a
+removal that would take out more than one of the user's facts, confirm first,
+unless the user's own words clearly cover all of them. This is the final round
+under the miss policy.
+
+| # | Given | When | Then |
+| - | ----- | ---- | ---- |
+| 6.11 | `forgetting-clear-named-facts` (guard, held-out) | run live | a three-fact meetings file is seeded and recalled; "Drop the camera thing and the before-noon one." makes two `replace_fact` calls at turn 2 without asking and keeps the agenda line. It was committed with correct and wrong drivers (678caf5) before the prompt edit |
+| 6.12 | `src/wenchang/prompts/forgetting.py` | read | the first Forgetting paragraph is the round-2 text below, which replaces round 1's "Delete the file if the fact was the file's only fact or the user means the whole file; ..." and "A request is ambiguous when..." sentences, and names no scenario fact |
+| 6.13 | the rule | read | it applies to requests only, so lapsed-date maintenance is not caught; "Act on the answer without asking again" covers the two-files turn 3; the dependents sentence stops cascades counting as extra facts |
+| 6.14 | `tests/test_prompts_forgetting.py`, the citation maps in `tests/test_evals_scenario.py`, and the `# Prompt:` headers of `forgetting-ambiguous-that`, `-ambiguous-several-facts`, `-ambiguous-two-files`, `-clear-whole-after-recall`, `-clear-named-facts`, `-only-fact`, and `-whole-file` | run / read | the phrase tests pin the new sentences and the headers cite them. No scenario's correct behavior changed, so no assertion changed |
+| 6.15 | `.claude/agents/wenchang-eval.md` | read | it is re-rendered from the prompt (sha256 `9f01eb612667e131db44dea0529140ce9cd7595e10dd84b5e716b944aa896399`), with main (AIE-1199) merged in at 5fa829b |
+| 6.16 | the live rerun | reported (PENDING) | all 13 `forgetting-*` scenarios, including `forgetting-clear-named-facts`, run against that sha meet the US5.2 floor, and the guards still pass without asking |
+
+The round-2 first paragraph:
+
+> Forgetting has two moves: drop one fact's line, or delete the whole file.
+> Before carrying out a request that would remove more than one fact, ask
+> first unless the user's own words clearly cover every one: they said all or
+> everything, asked for the whole file or subject, or named each fact to
+> remove, even if other facts stay. Coverage comes from their words, not from
+> what you just showed them: a bare pointer back at a file you just read out
+> does not cover every fact in it. Also ask when a request could mean
+> different removals, even if one reading seems likelier. When you ask, name
+> the choices and remove nothing until the user answers; never remove the
+> broadest reading and offer to restore the rest. Act on the answer without
+> asking again. When only one removal fits, remove it without asking, and
+> delete the file if that was its only fact. One fact held in several files is
+> still one fact: remove it from each. The dependents described below count as
+> part of the fact they rest on.
+
+Two reviews shaped the text. An adversarial generality review found no
+scenario facts and no mirrored examples, and reworded the coverage sentence
+from a symptom-shaped one to the general principle. An over-trigger review
+walked all 12 forgetting scenarios and led to the request scoping, the
+"Act on the answer" sentence, and the dependents sentence.
 
 ## Scenarios
 
