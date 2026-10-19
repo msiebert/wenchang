@@ -21,6 +21,9 @@ assertions:
   - kind: index_read_first
     id: index-first
   - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
     id: created-file
     tool: write_file
     args: {scope: user}

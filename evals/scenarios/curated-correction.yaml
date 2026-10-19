@@ -23,6 +23,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: tool_not_called
     id: no-system-write
     tool: [write_file, append_line, replace_fact, delete_file]
