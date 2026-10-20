@@ -17,6 +17,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   # Known edge: a correction line that names the catalog definition only to
   # contrast it ("not at payment authorization") also fails.
   - kind: no_content_matching
