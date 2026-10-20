@@ -85,6 +85,18 @@ the environment that runs the evals, so it must be resolved at grade time.
    drafts are where leaks happen), the final store (content, description,
    aliases), and the persisted arguments of write calls (`SCANNED_TOOLS` x
    `SCANNED_ARGUMENTS`), so a name written and then removed still counts.
+   - The scanned reply is `transcript.json`'s `reply`, which holds every
+     assistant text block from the subagent's transcript
+     ([ADR 0035](0035-eval-sessions-dontask.md)), so a name in an early
+     block that the Agent result dropped is still seen.
+   - `agent_result` is not scanned. It is the runner's copy of the Agent
+     result: the subject's last text block, which `reply` already contains
+     (the recording rejects a turn otherwise), plus the host's hand-back
+     frame and anything the runner added. The frame and runner text are not
+     the subject's output, and the runner sees host-injected identity, so
+     scanning them would fail the subject for text it did not write. Older
+     runs without `agent_result` recorded the runner's text as `reply` and
+     are scanned as they are.
 
 8. **Recording.** `grade.json` gains `operator_identity`: `hits` (`{where:
    reply|store|write, session, turn, path, field, token:

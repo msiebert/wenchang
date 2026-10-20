@@ -5,7 +5,7 @@ act as the active scenario's reference identity. Three harness tools, which
 the eval agent's allowlist excludes, let the runner reset and seed the store,
 record each turn, and dump the store, trace, and transcript as JSON.
 
-Run over stdio: python -m evals.server [--runs-root PATH]
+Run over stdio: python -m evals.server [--runs-root PATH] [--transcripts-root PATH]
 """
 
 import argparse
@@ -42,6 +42,13 @@ from evals.reference_adopter import (
     seed_path,
 )
 from evals.scenario import RUNS_DIR, Scenario, ScenarioError, load_scenario
+from evals.subagent_transcript import (
+    PermanentTranscriptError,
+    SubagentTranscriptError,
+    default_projects_root,
+    find_subagent_transcript,
+    text_blocks_from_transcript,
+)
 from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex, MemoryStore
 from wenchang.file_format import FileMetadata
 from wenchang.identity import Identity
@@ -94,6 +101,10 @@ def _new_store(index_max_bytes: int | None = None) -> MemoryStore:
     )
 
 
+def _squash(text: str) -> str:
+    return " ".join(text.split())
+
+
 class EvalState:
     """The active trial: client, identity, trace, transcript, and trial dir.
 
@@ -102,8 +113,14 @@ class EvalState:
     """
 
     def __init__(
-        self, runs_root: Path = RUNS_DIR, clock: Callable[[], float] = time.monotonic
+        self,
+        runs_root: Path = RUNS_DIR,
+        clock: Callable[[], float] = time.monotonic,
+        transcripts_root: Path | None = None,
+        transcript_retry_s: float = 2.0,
     ) -> None:
+        self._transcripts_root = transcripts_root
+        self._transcript_retry_s = transcript_retry_s
         self._lock = threading.Lock()
         self._clock = clock
         self._baseline = clock()
@@ -165,6 +182,11 @@ class EvalState:
             self._records = []
             self._boundaries = []
             self._turns = []
+        self._write_transcript(resolved, ())
+
+    def _write_transcript(self, trial_dir: Path, turns: Sequence[TranscriptTurn]) -> None:
+        trial_dir.mkdir(parents=True, exist_ok=True)
+        (trial_dir / "transcript.json").write_text(json.dumps(transcript_to_json(turns), indent=2))
 
     def record_call(self, record: ToolCallRecord) -> None:
         """The on_call observer: stamp the record and append it to the trace.
@@ -189,16 +211,47 @@ class EvalState:
     ) -> None:
         """Close the time window for (session, turn), keep the exchange, and
         rewrite transcript.json so the runner can build the next turn's prompt.
+
+        With a transcripts root, the recorded reply is the subagent's full text
+        from its transcript and reply is kept as agent_result. Raises
+        SubagentTranscriptError, recording nothing, if that text is unavailable
+        or its last block is not in reply.
         """
+        at_ms = self._now_ms()
+        recorded = TranscriptTurn(session, turn, user, reply, agent_id)
+        if self._transcripts_root is not None:
+            if agent_id is None or not agent_id.strip():
+                raise SubagentTranscriptError("agent_id is required: pass the token after agentId:")
+            normalized = agent_id.strip().split()[0]
+            full = self._read_full_reply(self._transcripts_root, normalized, reply)
+            recorded = TranscriptTurn(session, turn, user, full, normalized, reply)
         with self._lock:
-            self._boundaries.append(_Boundary(self._now_ms(), session, turn))
-            self._turns.append(TranscriptTurn(session, turn, user, reply, agent_id))
+            self._boundaries.append(_Boundary(at_ms, session, turn))
+            self._turns.append(recorded)
             trial_dir, turns = self._trial_dir, tuple(self._turns)
         if trial_dir is not None:
-            trial_dir.mkdir(parents=True, exist_ok=True)
-            (trial_dir / "transcript.json").write_text(
-                json.dumps(transcript_to_json(turns), indent=2)
-            )
+            self._write_transcript(trial_dir, turns)
+
+    def _read_full_reply(self, root: Path, agent_id: str, agent_result: str) -> str:
+        """The transcript's reply, re-read until its last block is in agent_result."""
+        deadline = time.monotonic() + self._transcript_retry_s
+        wanted = _squash(agent_result)
+        while True:
+            try:
+                blocks = text_blocks_from_transcript(find_subagent_transcript(root, agent_id))
+                if _squash(blocks[-1]) in wanted:
+                    return "\n\n".join(blocks)
+                error = SubagentTranscriptError(
+                    f"the last text in the transcript for agent_id {agent_id} was not in the "
+                    "Agent result; pass the Agent result verbatim"
+                )
+            except PermanentTranscriptError:
+                raise
+            except SubagentTranscriptError as exc:
+                error = exc
+            if time.monotonic() >= deadline:
+                raise error
+            time.sleep(0.1)
 
     def _snapshot(self) -> "_Snapshot":
         with self._lock:
@@ -443,7 +496,10 @@ def build_eval_server(state: EvalState | None = None) -> MCPServer:
     def eval_record_turn(
         session: int, turn: int, user: str, reply: str, agent_id: str | None = None
     ) -> CallToolResult:
-        state.record_turn(session, turn, user, reply, agent_id)
+        try:
+            state.record_turn(session, turn, user, reply, agent_id)
+        except SubagentTranscriptError as exc:
+            return _error(str(exc))
         return _ok({"session": session, "turn": turn})
 
     def eval_dump() -> CallToolResult:
@@ -465,8 +521,10 @@ def build_eval_server(state: EvalState | None = None) -> MCPServer:
         eval_record_turn,
         name="eval_record_turn",
         description=(
-            "Harness only. Record one turn's user message and the agent's verbatim reply. "
-            "Memory calls started before this call belong to this turn."
+            "Harness only. Record one turn's user message and the Agent result. The server "
+            "reads the subagent's full reply from its Claude Code transcript by agent_id "
+            "(required) and keeps the passed text as agent_result. Memory calls started "
+            "before this call belong to this turn."
         ),
     )
     server.add_tool(
@@ -483,8 +541,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     """Serve the eval server over stdio."""
     parser = argparse.ArgumentParser(prog="python -m evals.server")
     parser.add_argument("--runs-root", type=Path, default=RUNS_DIR)
+    parser.add_argument("--transcripts-root", type=Path, default=default_projects_root())
     args = parser.parse_args(argv)
-    build_eval_server(EvalState(runs_root=args.runs_root)).run("stdio")
+    state = EvalState(runs_root=args.runs_root, transcripts_root=args.transcripts_root)
+    build_eval_server(state).run("stdio")
 
 
 if __name__ == "__main__":

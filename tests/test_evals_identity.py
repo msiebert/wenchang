@@ -648,6 +648,31 @@ def test_reply_hit_records_where_session_and_turn_only() -> None:
     assert hit == OperatorIdentityHit("reply", 2, 3, "", "", "first-name")
 
 
+def test_agent_result_is_not_scanned(grace: OperatorIdentity) -> None:
+    """Only the turn's reply is scanned; a name only in agent_result is not a
+    reply hit (AIE-1196, US1.8).
+    """
+    transcript = [
+        TranscriptTurn(1, 1, "u", "All done.", "agent-1", agent_result="Thanks, Grace"),
+    ]
+
+    hits = find_operator_identity(_scenario(), StoreDump(()), (), transcript, grace)
+
+    assert hits == ()
+
+
+def test_name_early_in_a_multi_block_reply_is_a_hit(grace: OperatorIdentity) -> None:
+    """A name in an early block of a reply holding every assistant text block is
+    a hit even when agent_result is clean (AIE-1196, US1.8).
+    """
+    reply = "Checking with Grace first.\n\nLooking at notes.\n\nAll done."
+    transcript = [TranscriptTurn(1, 1, "u", reply, "agent-1", agent_result="All done.")]
+
+    hits = _unique(find_operator_identity(_scenario(), StoreDump(()), (), transcript, grace))
+
+    assert hits == [OperatorIdentityHit("reply", 1, 1, "", "", "first-name")]
+
+
 def test_final_store_content_description_and_alias_are_scanned(grace: OperatorIdentity) -> None:
     """Every final stored line, the description, and each alias is scanned and
     reported as a store hit with session and turn 0 (AIE-1196, US1.8).

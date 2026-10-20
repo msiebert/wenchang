@@ -1201,7 +1201,9 @@ imports it. The editable install makes it importable from any directory.
   check, `find_unmatched_reply_paths`, flags scope-rooted paths in replies
   that no tool result named up to that turn
   ([ADR 0033](docs/adr/0033-reply-path-check.md)). Neither check changes an
-  assertion result. A further pure scanner, `find_operator_identity`,
+  assertion result. Recorded replies come from the subagent's transcript
+  ([ADR 0035](docs/adr/0035-eval-sessions-dontask.md)). A further pure
+  scanner, `find_operator_identity`,
   takes the operator's resolved identity as an input and looks for it in
   replies, the final store, and write arguments, on every trial of every
   scenario
@@ -1215,6 +1217,9 @@ imports it. The editable install makes it importable from any directory.
   mounts the seven memory tools with `wenchang.mcp.register_memory_tools`
   over a resettable in-memory store, plus three harness tools:
   `eval_reset`, `eval_record_turn`, and `eval_dump`.
+- **evals.subagent_transcript**: reads the subagent's reply from its Claude
+  Code transcript, by `agent_id`, for `eval_record_turn`
+  ([ADR 0035](docs/adr/0035-eval-sessions-dontask.md)).
 - **evals.agent**: renders `.claude/agents/wenchang-eval.md`, the Claude
   Code eval subagent whose tools are only the seven memory tools.
 - **evals.report** and `python -m evals`: plan a run, grade trials, and

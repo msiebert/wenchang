@@ -149,6 +149,7 @@ class TranscriptTurn:
     user: str
     reply: str
     agent_id: str | None
+    agent_result: str | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,7 @@ def transcript_to_json(turns: Sequence[TranscriptTurn]) -> dict[str, object]:
                 "user": t.user,
                 "reply": t.reply,
                 "agent_id": t.agent_id,
+                **({} if t.agent_result is None else {"agent_result": t.agent_result}),
             }
             for t in turns
         ]
@@ -318,6 +320,9 @@ def load_transcript(path: Path) -> tuple[TranscriptTurn, ...]:
         agent_id: object = item.get("agent_id")
         if agent_id is not None and not isinstance(agent_id, str):
             raise r.fail(f"{where}: field 'agent_id' must be str or null")
+        agent_result: object = item.get("agent_result")
+        if agent_result is not None and not isinstance(agent_result, str):
+            raise r.fail(f"{where}: field 'agent_result' must be str or null")
         turns.append(
             TranscriptTurn(
                 session=r.field(item, "session", int, where),
@@ -325,6 +330,7 @@ def load_transcript(path: Path) -> tuple[TranscriptTurn, ...]:
                 user=r.field(item, "user", str, where),
                 reply=r.field(item, "reply", str, where),
                 agent_id=agent_id,
+                agent_result=agent_result,
             )
         )
     return tuple(turns)
