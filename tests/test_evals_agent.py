@@ -30,10 +30,26 @@ AGENTS = ROOT / ".claude" / "agents"
 EVAL_AGENT = AGENTS / "wenchang-eval.md"
 JUDGE_AGENT = AGENTS / "wenchang-eval-judge.md"
 RUNNER = ROOT / ".claude" / "commands" / "run-evals.md"
-LAUNCH = (
-    "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json "
-    '--strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" '
+_FLAGS = (
+    "--mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "
+    '"Bash(uv run python -m evals *)" "Edit(evals/runs/**)" '
     "--settings '{\"includeGitInstructions\": false}'"
+)
+LAUNCH = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk " + _FLAGS
+SHARD_LAUNCH = (
+    'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 '
+    '--judge --shard 1/3" --permission-mode dontAsk ' + _FLAGS
+)
+PREFLIGHT_PROMPT = (
+    "Call get_memory_index first. After it returns, reply with the exact names of every tool "
+    "you can call, and finish your reply with this line on its own, as the last line: "
+    "WENCHANG-PREFLIGHT-END"
+)
+LAUNCH_DOCS = (
+    "AGENTS.md",
+    "README.md",
+    ".claude/commands/run-evals.md",
+    "docs/adr/0028-behavioral-eval-harness.md",
 )
 GUARDED_AGENT_TYPES = {"test-writer", "implementer", "doc-updater", "explorer", "spec-reviewer"}
 
@@ -211,3 +227,111 @@ def test_runner_doc_passes_context_blocks_unchanged_and_records_the_bare_turn() 
     )
     for needle in needles:
         assert needle in doc, needle
+
+
+def _normalized() -> str:
+    return " ".join(RUNNER.read_text().split())
+
+
+def test_launch_constants_match_the_spec() -> None:
+    """The expected launch strings are the ones AIE-1208 specifies."""
+    assert LAUNCH == (
+        "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk "
+        "--mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "
+        '"Bash(uv run python -m evals *)" "Edit(evals/runs/**)" '
+        "--settings '{\"includeGitInstructions\": false}'"
+    )
+
+
+def test_runner_doc_has_both_launch_commands() -> None:
+    """The runner doc carries the interactive and the shard launch commands
+    verbatim (AIE-1208, AC1, AC2).
+    """
+    doc = RUNNER.read_text()
+    assert LAUNCH in doc
+    assert SHARD_LAUNCH in doc
+
+
+@pytest.mark.parametrize("relative", LAUNCH_DOCS)
+def test_every_launch_line_has_permission_mode_and_edit_rule(relative: str) -> None:
+    """Every documented claude launch line sets dontAsk and allows Edit on
+    evals/runs (AIE-1208, AC3).
+    """
+    lines = [
+        line
+        for line in (ROOT / relative).read_text().splitlines()
+        if "claude " in line and "--mcp-config evals/mcp.json" in line
+    ]
+    assert len(lines) >= 1
+    for line in lines:
+        assert "--permission-mode dontAsk" in line, line
+        assert '"Edit(evals/runs/**)"' in line, line
+
+
+def test_runner_doc_has_the_exact_preflight_prompt() -> None:
+    """The preflight prompt is exact and ordered: index first, tool names, then
+    the end marker (AIE-1208, AC4, AC17).
+    """
+    doc = _normalized()
+    assert PREFLIGHT_PROMPT in doc
+    first = PREFLIGHT_PROMPT.index("get_memory_index first")
+    names = PREFLIGHT_PROMPT.index("exact names of every tool")
+    end = PREFLIGHT_PROMPT.index("WENCHANG-PREFLIGHT-END")
+    assert first < names < end
+
+
+def test_runner_doc_preflight_checks_the_agent_result() -> None:
+    """The preflight verifies seven tools, the end marker on the last non-empty
+    line, and a clean tool result (AIE-1208, AC5).
+    """
+    doc = _normalized()
+    for needle in (
+        "all seven memory tools",
+        "SubagentHandback",
+        '"is_error": false',
+        "WENCHANG-PREFLIGHT-END",
+        "last non-empty line",
+        "transcript.json",
+    ):
+        assert needle in doc, needle
+
+
+def test_runner_doc_tells_a_wrong_session_to_relaunch() -> None:
+    """A session without the right permissions is relaunched (AIE-1208, AC6)."""
+    assert "relaunch with the step 0 command" in _normalized()
+
+
+def test_runner_doc_launch_section_explains_each_part() -> None:
+    """The launch explanation covers the permission mode, SubagentHandback, the
+    Edit rule, and judge.json (AIE-1208, AC7).
+    """
+    doc = RUNNER.read_text()
+    start = doc.index("What each part does")
+    end = doc.index("## 1. Preflight")
+    section = doc[start:end]
+    for needle in (
+        "--permission-mode dontAsk",
+        "SubagentHandback",
+        "Edit(evals/runs/**)",
+        "judge.json",
+    ):
+        assert needle in section, needle
+
+
+def test_runner_doc_stops_on_denials_and_missing_judge_output() -> None:
+    """A denied tool call stops the run, as does a missing judge.json
+    (AIE-1208, AC10).
+    """
+    doc = _normalized()
+    assert "If any tool call is denied, stop" in doc
+    assert "If it is missing, stop" in doc
+
+
+def test_runner_doc_requires_agent_id_for_the_full_reply() -> None:
+    """The turn's agent id is required because the server reads the full reply
+    from the subagent's transcript (AIE-1208, AC17b).
+    """
+    doc = _normalized()
+    assert "agent_id" in doc
+    assert "is required" in doc
+    assert "subagent's transcript" in doc

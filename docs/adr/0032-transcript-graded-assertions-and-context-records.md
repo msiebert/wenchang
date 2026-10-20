@@ -95,7 +95,8 @@ AIE-1170 deferred ten scenarios. Porting them hit two gaps:
   - A miss on `asks-before-removing` in `forgetting-ambiguous-that` is
     registered in advance as a prompt finding.
   - A judge failure caused by a third-person reply is harness noise, not a
-    prompt finding.
+    prompt finding. (2026-10-20: most such replies were auto-mode handback
+    summaries; see ADR 0035.)
 - Reply regexes are narrow by design. They catch the named mistake, and the
   judge covers the meaning.
 - Context blocks add text to every turn of the scenarios that use them, so a

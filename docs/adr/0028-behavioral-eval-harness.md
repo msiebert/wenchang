@@ -175,10 +175,18 @@ slow and nondeterministic.
    root `.mcp.json`. The command is:
 
    ```
-   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" "Edit(evals/runs/**)" --settings '{"includeGitInstructions": false}'
    ```
 
    - Ordinary sessions never see the eval server.
+   - `--permission-mode dontAsk` keeps auto mode from injecting
+     `SubagentHandback` into subagents, so the Agent result is the
+     subagent's own text.
+   - `"Edit(evals/runs/**)"`: `dontAsk` denies anything that would prompt,
+     and the judge writes `judge.json`. Edit rules cover Write.
+
+   **Amended (2026-10-20) by ADR 0035.** The command gained
+   `--permission-mode dontAsk` and the `Edit` rule.
    - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` runs subagents in the
      foreground, which turn tagging needs.
    - `--strict-mcp-config` keeps the tool schemas loaded directly rather
@@ -197,6 +205,9 @@ slow and nondeterministic.
 
    **Amended (2026-10-16) by ADR 0032.** A paraphrased copy now also
    affects the reply assertion kinds, so the live gate spot-checks it.
+
+   **Amended (2026-10-20) by ADR 0035.** The reply is now read from the
+   subagent transcript by `agent_id`.
 
 8. **The judge is optional and separate.** `wenchang-eval-judge` (Read and
    Write, `omitClaudeMd`) writes `judge.json`. The report shows judge
@@ -277,6 +288,8 @@ slow and nondeterministic.
   deterministic reply check that flags such replies separately (16 of the
   138 baseline trials) and tightens the preamble, subject to a measured
   gate.
+  **Amended (2026-10-20) by ADR 0035.** Most of those third-person replies
+  were auto-mode handback summaries.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,
