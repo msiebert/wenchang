@@ -87,7 +87,7 @@ For every trial, `results` and `passed` matched the originals:
   others 3/3).
 - Baseline B = 16, so the gate threshold is floor(16/2) = 8.
 
-Keep the AIE-1170 worktree, `/Users/marksiebert/p/github/wenchang-AIE-1170`,
+Keep the AIE-1170 worktree, `<repos>/wenchang-AIE-1170`,
 until this PR merges. Its `evals/runs/` holds the baseline and is
 gitignored.
 

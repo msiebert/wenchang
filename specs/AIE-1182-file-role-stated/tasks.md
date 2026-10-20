@@ -44,5 +44,5 @@ demonstrate the fix. Draft `review-pr.md` per plan.md F.
 
 ## Gate
 
-`make -C /Users/marksiebert/p/github/wenchang-AIE-1182 check` green after T2, T5,
+`make -C <repos>/wenchang-AIE-1182 check` green after T2, T5,
 T3/T6, and T7. PR merge gated on the human live run (US4).

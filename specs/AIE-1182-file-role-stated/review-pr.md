@@ -86,11 +86,11 @@ Held-outs passing at main do not demonstrate the fix; only a main-fails/branch-p
 
 Run the 5 new scenarios once at main (N=3) to show they fail or pass for the expected reason.
 
-Never use the primary checkout (/Users/marksiebert/p/github/wenchang) for this; use a throwaway worktree. `<scratch-path>` is a new path outside the repo.
+Never use the primary checkout (<repos>/wenchang) for this; use a throwaway worktree. `<scratch-path>` is a new path outside the repo.
 
 ```
-git -C /Users/marksiebert/p/github/wenchang fetch origin
-git -C /Users/marksiebert/p/github/wenchang worktree add --detach <scratch-path> origin/main
+git -C <repos>/wenchang fetch origin
+git -C <repos>/wenchang worktree add --detach <scratch-path> origin/main
 make -C <scratch-path> install
 git -C <scratch-path> checkout origin/AIE-1182-file-stated-role -- evals/scenarios/remembering-constraint-in-request.yaml evals/scenarios/remembering-tool-in-question.yaml evals/scenarios/remembering-transient-in-question.yaml evals/scenarios/filing-project-fact-in-question.yaml evals/scenarios/remembering-preference-mid-task.yaml
 ```
@@ -114,7 +114,7 @@ Main's agent sha256: `36508763a0f914db4fc36e93f0a953217be24b83f17244415049720ac5
 Copy the run report out of `<scratch-path>/evals/runs/` before removing the worktree:
 
 ```
-git -C /Users/marksiebert/p/github/wenchang worktree remove --force <scratch-path>
+git -C <repos>/wenchang worktree remove --force <scratch-path>
 ```
 
 | Scenario | t1 | t2 | t3 | Expected reason / notes |
@@ -174,9 +174,9 @@ Iterations: none.
 
 ```
 Baseline at main (5 new held-outs, N=3; passing at main does not demonstrate the fix).
-Never use the primary checkout (/Users/marksiebert/p/github/wenchang) for this; use a throwaway worktree.
-git -C /Users/marksiebert/p/github/wenchang fetch origin
-git -C /Users/marksiebert/p/github/wenchang worktree add --detach <scratch-path> origin/main
+Never use the primary checkout (<repos>/wenchang) for this; use a throwaway worktree.
+git -C <repos>/wenchang fetch origin
+git -C <repos>/wenchang worktree add --detach <scratch-path> origin/main
 make -C <scratch-path> install
 git -C <scratch-path> checkout origin/AIE-1182-file-stated-role -- evals/scenarios/remembering-constraint-in-request.yaml evals/scenarios/remembering-tool-in-question.yaml evals/scenarios/remembering-transient-in-question.yaml evals/scenarios/filing-project-fact-in-question.yaml evals/scenarios/remembering-preference-mid-task.yaml
 # main's tests/CORPUS won't match; tests are not run there
@@ -184,7 +184,7 @@ git -C <scratch-path> checkout origin/AIE-1182-file-stated-role -- evals/scenari
 /run-evals --model sonnet --trials 3 --judge remembering-constraint-in-request remembering-tool-in-question remembering-transient-in-question filing-project-fact-in-question remembering-preference-mid-task
 shasum -a 256 <scratch-path>/.claude/agents/wenchang-eval.md   # record main's agent sha
 # copy the run report out of <scratch-path>/evals/runs/ before removing
-git -C /Users/marksiebert/p/github/wenchang worktree remove --force <scratch-path>
+git -C <repos>/wenchang worktree remove --force <scratch-path>
 ```
 
 ## Look closely at
