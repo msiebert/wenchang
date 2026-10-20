@@ -20,7 +20,7 @@ Only run this command in a session launched from the repo root, with the
 eval server and nothing else:
 
 ```
-CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" "Edit(evals/runs/**)" --settings '{"includeGitInstructions": false}'
 ```
 
 What each part does:
@@ -28,12 +28,23 @@ What each part does:
 - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` makes subagents run in the
   foreground. Turn tagging depends on each turn finishing before the next
   one starts.
+- `--permission-mode dontAsk` runs the session outside auto mode, which
+  would give every subagent a `SubagentHandback` tool and let the eval
+  agent return a report about its turn instead of its reply. It also denies,
+  without prompting, any call not allowed here.
 - `--strict-mcp-config` keeps every other MCP server out, so the seven
   memory tool schemas load directly instead of behind tool search.
 - `--allowedTools` avoids a permission prompt on every memory call and
   every `uv run python -m evals` command.
+- `"Edit(evals/runs/**)"` lets the judge write `judge.json` (Edit rules
+  cover Write).
 - `includeGitInstructions: false` keeps the git status snapshot out of the
-  eval agent's context.
+  eval agent's context. `--allowedTools` stays followed by `--settings`,
+  because it takes any number of values.
+
+Use Bash only for the `uv run python -m evals ...` commands shown here, with
+no pipes, redirects, or `cd`. If any tool call is denied, stop and tell the
+user to relaunch with the step 0 command.
 
 If the `mcp__wenchang__eval_reset` tool is not available, stop. Tell the
 user to relaunch with that command.
@@ -48,21 +59,24 @@ user to relaunch with that command.
    `evals/runs/preflight/`. With `--shard k/n`, use
    `evals/runs/preflight-<k>of<n>/` instead, so concurrent shards never
    share a preflight dir.
-3. Spawn `Agent(subagent_type="wenchang-eval", description="eval
-   preflight", prompt="List the exact names of every tool you can call,
-   then call get_memory_index.")`. Wait for its reply, following the rule
-   in step 3.2.
-4. Call `mcp__wenchang__eval_dump`, then read `trace.json` in that
-   preflight dir.
-5. Pass only if all three of these hold:
-   - The reply names all seven memory tools: `get_memory_index`,
+3. Spawn `Agent(subagent_type="wenchang-eval", description="eval preflight", prompt="Call get_memory_index first. After it returns, reply with the exact names of every tool you can call, and finish your reply with this line on its own, as the last line: WENCHANG-PREFLIGHT-END")`.
+4. Call `mcp__wenchang__eval_record_turn(session=1, turn=1, user=<that prompt>, reply=<the Agent result>, agent_id=<its agentId>)`, as in step 3.2.
+5. Call `mcp__wenchang__eval_dump`, then read `trace.json` and
+   `transcript.json` in that preflight dir.
+6. Pass only if all of these hold, judged on the reply recorded in
+   `transcript.json`:
+   - (a) The reply names all seven memory tools: `get_memory_index`,
      `read_file`, `list_prefix`, `write_file`, `append_line`,
-     `replace_fact`, and `delete_file`.
-   - The reply names no ToolSearch tool.
-   - The trace has a `get_memory_index` call with `"is_error": false`.
+     `replace_fact`, and `delete_file`, bare or `mcp__wenchang__`-prefixed.
+   - (b) The reply names no other tool, for example `SubagentHandback` or
+     any ToolSearch tool.
+   - (c) The trace has a `get_memory_index` call with `"is_error": false`.
+   - (d) The reply's last non-empty line is exactly
+     `WENCHANG-PREFLIGHT-END`.
 
-   Otherwise stop and report that the tool schemas are deferred or
-   missing.
+   An `eval_record_turn` error also fails the preflight. Otherwise stop,
+   report which check failed, and tell the user to relaunch with the step 0
+   command.
 
 ## 2. Plan the run
 
@@ -106,12 +120,16 @@ returns an error. Never edit any file outside `evals/runs/`.
      background task, wait for its completion notification. Start nothing
      else until then: no other tool call, turn, or trial.
    - **Record the turn.** Call `mcp__wenchang__eval_record_turn(session=s,
-     turn=t, user=<the scripted turn text>, reply=<the reply>,
-     agent_id=<this subagent's id>)` alone, before the next turn starts.
+     turn=t, user=<the scripted turn text>, reply=<the Agent result text>,
+     agent_id=<the token after agentId: in the Agent result, nothing else>)`
+     alone, before the next turn starts. Pass the Agent result verbatim:
+     never summarize or trim it. `agent_id` is required. The server replaces
+     the reply with the subagent's full text from the subagent's transcript,
+     so text written before a tool call is kept, and keeps the passed text
+     as `agent_result`.
      The `user` argument is the scenario's turn text alone, never the
      rendered prompt with its context blocks or replayed turns.
-     Pass the reply verbatim: copy it exactly, and never summarize or trim
-     it. Memory calls are assigned to a turn by the timing of this call.
+     Memory calls are assigned to a turn by the timing of this call.
      The call also updates `transcript.json`, which the next turn's prompt
      is built from.
    - **Sessions start fresh.** Turn 1 of a new session carries no earlier
@@ -121,7 +139,8 @@ returns an error. Never edit any file outside `evals/runs/`.
 5. With `--judge`, spawn `Agent(subagent_type="wenchang-eval-judge",
    description="judge <scenario> trial <k>", prompt="Trial dir:
    <trial_dir>. Scenario: <scenario_path>.")` and wait for it. It writes
-   `<trial_dir>/judge.json`.
+   `<trial_dir>/judge.json`. After it returns, check that the file exists.
+   If it is missing, stop and report that the judge could not write it.
 
 Never answer on the eval agent's behalf. Never send it anything but the
 prompts `turn-prompt` prints. Never touch the store except through the
@@ -138,7 +157,8 @@ Show the user `<run_dir>/report.md`.
 The report also counts trials whose reply referred to the user in the
 third person ("the user said"). These counts are a separate signal and
 never change a pass count. A judge fail in such a trial is co-occurrence,
-not proof the addressee caused it.
+not proof the addressee caused it. Counts from runs before 2026-10-20
+include auto-mode handback summaries (ADR 0035).
 
 ## Parallel shards
 
@@ -152,7 +172,7 @@ its own eval server and runs one shard.
    `--shard k/n` passed through to `new-run`. For example, for 3 shards:
 
    ```
-   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard 1/3" --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p "/run-evals --model sonnet --trials 3 --judge --shard 1/3" --permission-mode dontAsk --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" "Edit(evals/runs/**)" --settings '{"includeGitInstructions": false}'
    ```
 
    Repeat with `--shard 2/3` and `--shard 3/3`. Shard k takes the

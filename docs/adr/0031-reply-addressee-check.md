@@ -211,3 +211,10 @@ removed and no new flag appears.
 - A data noun or interface verb used of the addressee is missed.
 - A `transcript_error` that names an absolute path is rewritten once after a
   run dir is copied.
+
+## Amendment (2026-10-20, ADR 0035)
+
+Third-person counts recorded before this date include auto-mode handback
+summaries: about 16 of the roughly 20 judge fails labelled third-person noise
+were summaries. Counts from the clean baseline after ADR 0035 are the real
+signal.
