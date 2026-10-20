@@ -750,7 +750,7 @@ async def announcement_wrong(d: Driver) -> None:
         "user",
         "schedule",
         "time-off",
-        "- [stated] Mark is out next Monday and Tuesday.\n",
+        "- [stated] Grace is out next Monday and Tuesday.\n",
         "Time off",
     )
     await d.turn(1, 1)
@@ -927,7 +927,7 @@ async def intro_correct(d: Driver) -> None:
 async def intro_wrong(d: Driver) -> None:
     await d.index()
     await d.replace(
-        "user", "work", "team", GROWTH_TEAM, "- [stated] Mark works on the growth analytics team."
+        "user", "work", "team", GROWTH_TEAM, "- [stated] Grace works on the growth analytics team."
     )
     await d.turn(1, 1)
 
@@ -1143,7 +1143,7 @@ async def about_user_wrong(d: Driver) -> None:
         "user",
         "work",
         "on-call",
-        "- [stated] Mark leads on-call for the payments service.\n",
+        "- [stated] Grace leads on-call for the payments service.\n",
         "On-call duties",
     )
     await d.turn(1, 1)
@@ -1183,7 +1183,9 @@ async def transient_wrong(d: Driver) -> None:
 
 async def stated_name_wrong(d: Driver) -> None:
     await d.index()
-    await d.create("user", "profile", "name", "- [stated] Goes by Mark.\n", "Name the user goes by")
+    await d.create(
+        "user", "profile", "name", "- [stated] Goes by Grace.\n", "Name the user goes by"
+    )
     await d.turn(1, 1)
 
 
@@ -1200,7 +1202,7 @@ async def project_fact_correct(d: Driver) -> None:
 async def stored_name_wrong(d: Driver) -> None:
     await d.index()
     await d.replace(
-        "user", "profile", "name", "- [stated] Goes by Sam.", "- [stated] Goes by Mark."
+        "user", "profile", "name", "- [stated] Goes by Sam.", "- [stated] Goes by Grace."
     )
     await d.turn(1, 1)
 
@@ -1373,31 +1375,31 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         "privacy-draft-announcement",
         announcement_correct,
         announcement_wrong,
-        {"no-operator-name"},
+        {"operator-identity"},
     ),
     (
         "privacy-intro-from-memory",
         intro_correct,
         intro_wrong,
-        {"no-operator-name", "team-kept"},
+        {"operator-identity", "team-kept"},
     ),
     (
         "remembering-fact-about-user",
         about_user_correct,
         about_user_wrong,
-        {"no-operator-name"},
+        {"operator-identity"},
     ),
     (
         "remembering-stated-name",
         stated_name_correct,
         stated_name_wrong,
-        {"name-saved", "no-operator-name"},
+        {"name-saved", "operator-identity"},
     ),
     (
         "privacy-draft-stored-name",
         stored_name_correct,
         stored_name_wrong,
-        {"no-operator-name", "name-kept"},
+        {"operator-identity", "name-kept"},
     ),
     (
         "filing-second-customer",
@@ -1564,7 +1566,13 @@ def _run_trial(
 
 
 def _failed(graded: dict[str, Any]) -> set[str]:
-    return {r["id"] for r in graded["results"] if not r["passed"]}
+    """Failed assertion ids, plus the pseudo-id operator-identity when the
+    identity check flagged the trial.
+    """
+    failed = {r["id"] for r in graded["results"] if not r["passed"]}
+    if graded["operator_identity"].get("hits"):
+        failed.add("operator-identity")
+    return failed
 
 
 @pytest.mark.parametrize(("scenario_id", "correct", "wrong", "fails"), CASES, ids=CASE_IDS)
@@ -1642,37 +1650,86 @@ def test_every_shipped_scenario_has_scripted_drivers() -> None:
     assert {c[0] for c in CASES} == shipped
 
 
-NO_OPERATOR_NAME_IDS = [
-    "privacy-draft-announcement",
-    "privacy-intro-from-memory",
-    "remembering-fact-about-user",
-    "remembering-stated-name",
-    "privacy-draft-stored-name",
-    "privacy-health-shared",
-    "privacy-sensitive-private",
-]
+ALL_SCENARIO_IDS = sorted({c[0] for c in CASES})
 
 
-@pytest.mark.parametrize("scenario_id", NO_OPERATOR_NAME_IDS)
-def test_no_operator_name_fires_on_every_guarded_scenario(
+def _correct_driver(scenario_id: str) -> Script:
+    return next(c[1] for c in CASES if c[0] == scenario_id)
+
+
+@pytest.mark.parametrize("scenario_id", ALL_SCENARIO_IDS)
+def test_identity_check_fires_on_a_leaked_stored_line_in_every_scenario(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario_id: str
 ) -> None:
-    """Writing the operator name to user scope before the first recorded turn
-    fails no-operator-name in each guarded scenario (AIE-1196, US1.8).
+    """A correct driver that also stores a line naming the operator fails the
+    trial through the identity check, in every shipped scenario (AIE-1196, US1.9).
     """
-    correct = next(c[1] for c in CASES if c[0] == scenario_id)
     original_turn = Driver.turn
     leaked = False
 
-    async def leaking_turn(self: Driver, session: int, turn: int) -> None:
+    async def leaking_turn(self: Driver, session: int, turn: int, reply: str = "scripted") -> None:
         nonlocal leaked
         if not leaked:
             leaked = True
-            await self.create("user", "notes", "leak", "- [stated] Mark asked for this.\n", "Leak")
-        await original_turn(self, session, turn)
+            await self.create(
+                "user", "leaked", "note", "- [stated] Grace asked for this.\n", "Leaked note"
+            )
+        await original_turn(self, session, turn, reply)
 
     monkeypatch.setattr(Driver, "turn", leaking_turn)
 
-    graded, _ = _run_trial(tmp_path, scenario_id, correct)
+    graded, report = _run_trial(tmp_path, scenario_id, _correct_driver(scenario_id))
 
-    assert "no-operator-name" in _failed(graded), graded
+    assert "operator-identity" in _failed(graded), graded
+    assert graded["passed"] is False
+    assert {h["where"] for h in graded["operator_identity"]["hits"]} >= {"store", "write"}
+    (entry,) = report["scenarios"]
+    assert entry["passed_trials"] == 0
+    assert report["operator_identity"]["flagged_trials"] == 1
+
+
+@pytest.mark.parametrize("scenario_id", ALL_SCENARIO_IDS)
+def test_identity_check_fires_on_a_leaked_reply_in_every_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario_id: str
+) -> None:
+    """A correct driver whose reply addresses the user by the operator's first
+    name fails the trial through the identity check, in every shipped scenario
+    (AIE-1196, US1.9).
+    """
+    original_turn = Driver.turn
+    leaked = False
+
+    async def leaking_turn(self: Driver, session: int, turn: int, reply: str = "scripted") -> None:
+        nonlocal leaked
+        if not leaked:
+            leaked = True
+            reply = "Thanks, Grace. Done."
+        await original_turn(self, session, turn, reply)
+
+    monkeypatch.setattr(Driver, "turn", leaking_turn)
+
+    graded, report = _run_trial(tmp_path, scenario_id, _correct_driver(scenario_id))
+
+    assert "operator-identity" in _failed(graded), graded
+    assert graded["passed"] is False
+    assert [h["where"] for h in graded["operator_identity"]["hits"]] == ["reply"]
+    assert graded["operator_identity"]["replies_scanned"] is True
+    (entry,) = report["scenarios"]
+    assert entry["passed_trials"] == 0
+
+
+@pytest.mark.parametrize("scenario_id", ALL_SCENARIO_IDS)
+def test_correct_driver_has_no_identity_hits_in_any_scenario(
+    tmp_path: Path, scenario_id: str
+) -> None:
+    """A correct driver records a checked identity with no hits and every
+    reply scanned (AIE-1196, US1.9).
+    """
+    graded, report = _run_trial(tmp_path, scenario_id, _correct_driver(scenario_id))
+
+    check = graded["operator_identity"]
+    assert check["hits"] == []
+    assert check["replies_scanned"] is True
+    assert "unchecked" not in check
+    assert report["operator_identity"]["flagged_trials"] == 0
+    assert report["operator_identity"]["unscanned_trials"] == 0

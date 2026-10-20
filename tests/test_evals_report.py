@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from evals.graders import (
     trace_to_json,
     transcript_to_json,
 )
+from evals.identity import resolve_operator_identity
 from evals.report import (
     _grade_is_current,  # pyright: ignore[reportPrivateUsage]
     build_report,
@@ -1342,3 +1344,573 @@ def test_report_replaces_a_recorded_transcript_error_once_the_transcript_is_vali
     ]
     assert refreshed["results"] == graded["results"]
     assert refreshed["passed"] == graded["passed"]
+
+
+# --- operator-identity check in grade.json and the report (AIE-1196, US1.8-1.10) --
+
+LEAK_REPLY = "Thanks, Grace. Saved."
+LEAK_LINE = "- [stated] Grace is out Monday.\n"
+NAME_TEXTS = ("Grace", "Hopper", "ghopper")
+
+
+def _store_content(trial_dir: Path, content: str) -> None:
+    """Replace the dumped store with one file holding content."""
+    store = StoreDump(
+        (
+            StoredFile(
+                "user/u-ada/notes/n.md",
+                "user",
+                "notes",
+                "n",
+                content,
+                "Notes",
+                (),
+                ("reference-agent",),
+                "3",
+            ),
+        )
+    )
+    (trial_dir / "store.json").write_text(json.dumps(store_dump_to_json(store)))
+
+
+def _identity_trial(tmp_path: Path, reply: str = SECOND_PERSON, trials: int = 1) -> Path:
+    run_dir, dirs = _reply_trial(tmp_path, trials)
+    for trial in dirs:
+        _dump(trial, leak=False)
+        _reply_transcript(trial, reply)
+    return run_dir
+
+
+def _stale_current_grade(trial: Path, check: dict[str, Any] | None) -> dict[str, Any]:
+    """Write a grade.json that is current for the dumps, with stale results."""
+    for name in ("store.json", "trace.json", "transcript.json"):
+        if (trial / name).exists():
+            _age(trial / name, 30)
+    graded: dict[str, Any] = {
+        "scenario": "alpha",
+        "trial": 1,
+        "results": [
+            {"id": "index-first", "kind": "index_read_first", "passed": True, "detail": "old"},
+            {"id": "no-secret", "kind": "no_content_matching", "passed": True, "detail": "old"},
+        ],
+        "passed": True,
+    }
+    if check is not None:
+        graded["operator_identity"] = check
+    (trial / "grade.json").write_text(json.dumps(graded))
+    _age(trial / "grade.json", 10)
+    return graded
+
+
+REPLY_HIT = {
+    "where": "reply",
+    "session": 1,
+    "turn": 1,
+    "path": "",
+    "field": "",
+    "token": "first-name",
+}
+
+
+def test_grade_records_a_clean_operator_identity_check(tmp_path: Path) -> None:
+    """A clean trial records no hits, the contributing sources, and scanned
+    replies (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+
+    graded = grade_trial(trial)
+
+    check = graded["operator_identity"]
+    assert check["hits"] == []
+    assert check["replies_scanned"] is True
+    assert check["sources"][:3] == ["git user.name", "git user.email", "$USER"]
+    assert "unchecked" not in check
+    assert graded["passed"] is True
+    assert _json(trial / "grade.json") == graded
+
+
+def test_grade_records_a_reply_hit_and_fails_the_trial(tmp_path: Path) -> None:
+    """A reply naming the operator is recorded by kind and location, fails
+    `passed`, and leaves `results` unchanged (AIE-1196, US1.8).
+    """
+    (tmp_path / "clean").mkdir()
+    (tmp_path / "leak").mkdir()
+    clean_dir = _identity_trial(tmp_path / "clean")
+    leak_dir = _identity_trial(tmp_path / "leak", LEAK_REPLY)
+    clean = grade_trial(next((clean_dir / "alpha").iterdir()))
+    trial = next((leak_dir / "alpha").iterdir())
+
+    graded = grade_trial(trial)
+
+    assert graded["operator_identity"]["hits"] == [REPLY_HIT]
+    assert graded["passed"] is False
+    assert graded["results"] == clean["results"]
+    assert all(r["passed"] for r in graded["results"])
+
+
+def test_grade_records_a_store_hit_and_fails_the_trial(tmp_path: Path) -> None:
+    """A stored line naming the operator is a store hit with session and turn
+    0 (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    _store_content(trial, LEAK_LINE)
+
+    graded = grade_trial(trial)
+
+    hits = graded["operator_identity"]["hits"]
+    assert hits == [
+        {
+            "where": "store",
+            "session": 0,
+            "turn": 0,
+            "path": "user/u-ada/notes/n.md",
+            "field": "content",
+            "token": "first-name",
+        }
+    ]
+    assert graded["passed"] is False
+    assert all(r["passed"] for r in graded["results"])
+
+
+def test_grade_records_a_write_hit_for_a_removed_name(tmp_path: Path) -> None:
+    """A name written and then removed from the store is a write hit
+    (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    calls = [
+        _call(1, "get_memory_index", 1),
+        _call(2, "append_line", 1, line="- [stated] Grace likes tea."),
+    ]
+    (trial / "trace.json").write_text(json.dumps(trace_to_json(calls)))
+
+    graded = grade_trial(trial)
+
+    (hit,) = graded["operator_identity"]["hits"]
+    assert (hit["where"], hit["session"], hit["turn"], hit["field"]) == ("write", 1, 1, "line")
+    assert graded["passed"] is False
+
+
+@pytest.mark.parametrize("target", ["grade.json", "report.json", "report.md"])
+def test_recorded_files_never_carry_the_name(tmp_path: Path, target: str) -> None:
+    """grade.json, report.json and report.md omit the matched text and every
+    token (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path, "Thanks, Grace Hopper (ghopper)")
+    (trial,) = (run_dir / "alpha").iterdir()
+    _store_content(trial, LEAK_LINE)
+    build_report(run_dir)
+
+    path = trial / target if target == "grade.json" else run_dir / target
+    text = path.read_text()
+
+    assert path.exists()
+    for name in NAME_TEXTS:
+        assert name.lower() not in text.lower()
+
+
+def test_hit_path_containing_a_token_is_redacted_in_grade_json(tmp_path: Path) -> None:
+    """A store path that contains a token is written as "<redacted>"
+    (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    store = StoreDump(
+        (
+            StoredFile(
+                "user/u-ada/people/ghopper.md",
+                "user",
+                "people",
+                "ghopper",
+                LEAK_LINE,
+                "Notes",
+                (),
+                ("reference-agent",),
+                "3",
+            ),
+        )
+    )
+    (trial / "store.json").write_text(json.dumps(store_dump_to_json(store)))
+
+    graded = grade_trial(trial)
+
+    assert {h["path"] for h in graded["operator_identity"]["hits"]} == {"<redacted>"}
+    assert "ghopper" not in (trial / "grade.json").read_text()
+
+
+def test_missing_transcript_still_scans_the_store(tmp_path: Path) -> None:
+    """Without transcript.json the check records replies_scanned false, keeps
+    the key, and a store hit still fails the trial (AIE-1196, US1.8).
+    """
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _store_content(trial, LEAK_LINE)
+
+    graded = grade_trial(trial)
+
+    check = graded["operator_identity"]
+    assert check["replies_scanned"] is False
+    assert [h["where"] for h in check["hits"]] == ["store"]
+    assert graded["passed"] is False
+    assert "third_person_replies" not in graded
+
+
+def test_missing_transcript_without_a_hit_passes(tmp_path: Path) -> None:
+    """A clean trial without a transcript records replies_scanned false and
+    still passes (AIE-1196, US1.8).
+    """
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+
+    graded = grade_trial(trial)
+
+    assert graded["operator_identity"]["replies_scanned"] is False
+    assert graded["operator_identity"]["hits"] == []
+    assert graded["passed"] is True
+
+
+def test_malformed_transcript_still_scans_the_store(tmp_path: Path) -> None:
+    """A malformed transcript.json records replies_scanned false next to the
+    transcript error, and the store scan still runs (AIE-1196, US1.8).
+    """
+    _, (trial,) = _reply_trial(tmp_path)
+    _dump(trial, leak=False)
+    _store_content(trial, LEAK_LINE)
+    (trial / "transcript.json").write_text("not json")
+
+    graded = grade_trial(trial)
+
+    assert "transcript.json" in graded["transcript_error"]
+    assert graded["operator_identity"]["replies_scanned"] is False
+    assert [h["where"] for h in graded["operator_identity"]["hits"]] == ["store"]
+    assert graded["passed"] is False
+
+
+def test_unchecked_identity_records_unchecked_and_does_not_fail(
+    tmp_path: Path, set_identity: Any
+) -> None:
+    """With no resolvable identity the check is {"unchecked": true} and the
+    trial is not failed (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY)
+    (trial,) = (run_dir / "alpha").iterdir()
+    _store_content(trial, LEAK_LINE)
+    set_identity()
+
+    graded = grade_trial(trial)
+
+    assert graded["operator_identity"] == {"unchecked": True}
+    assert graded["passed"] is True
+
+
+def test_grade_trial_uses_a_given_identity(tmp_path: Path, set_identity: Any) -> None:
+    """grade_trial(trial_dir, identity=...) checks that identity instead of
+    resolving one (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path, "Thanks, Priya. Saved.")
+    (trial,) = (run_dir / "alpha").iterdir()
+    set_identity(name="Priya Rao")
+    other = resolve_operator_identity()
+    set_identity(name="Grace Hopper", email="grace.hopper@example.com", user="ghopper")
+
+    graded = grade_trial(trial, identity=other)
+
+    assert graded["operator_identity"]["hits"] == [REPLY_HIT]
+    assert graded["operator_identity"]["sources"] == ["git user.name"]
+    assert grade_trial(trial)["operator_identity"]["hits"] == []
+
+
+def test_grade_trial_resolves_the_identity_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without an identity argument grade_trial runs the resolver's git calls
+    once (AIE-1196, US1.8).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    real_run: Callable[..., Any] = subprocess.run
+    counts = {"git": 0}
+
+    def counting(args: Any, *a: Any, **kw: Any) -> Any:
+        if args and args[0] == "git":
+            counts["git"] += 1
+        return real_run(args, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", counting)
+    resolve_operator_identity()
+    baseline, counts["git"] = counts["git"], 0
+
+    grade_trial(trial)
+
+    assert baseline > 0
+    assert counts["git"] == baseline
+
+
+def test_report_resolves_the_identity_once_per_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """build_report runs the resolver's git calls once however many trials it
+    grades (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, trials=3)
+    real_run: Callable[..., Any] = subprocess.run
+    counts = {"git": 0}
+
+    def counting(args: Any, *a: Any, **kw: Any) -> Any:
+        if args and args[0] == "git":
+            counts["git"] += 1
+        return real_run(args, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", counting)
+    resolve_operator_identity()
+    baseline, counts["git"] = counts["git"], 0
+
+    build_report(run_dir)
+
+    assert baseline > 0
+    assert counts["git"] == baseline
+
+
+def test_build_report_uses_a_given_identity(tmp_path: Path, set_identity: Any) -> None:
+    """build_report(run_dir, identity=...) checks that identity (AIE-1196, US1.10)."""
+    run_dir = _identity_trial(tmp_path, "Thanks, Priya. Saved.")
+    set_identity(name="Priya Rao")
+    other = resolve_operator_identity()
+    set_identity(name="Grace Hopper", email="grace.hopper@example.com", user="ghopper")
+
+    _, report = build_report(run_dir, identity=other)
+
+    assert report["operator_identity"]["flagged_trials"] == 1
+    assert report["operator_identity"]["sources"] == ["git user.name"]
+
+
+# --- schema ---
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        "yes",
+        [],
+        {"hits": "none", "sources": [], "replies_scanned": True},
+        {"hits": [], "sources": "git", "replies_scanned": True},
+        {"hits": [], "sources": [1], "replies_scanned": True},
+        {"hits": [], "sources": [], "replies_scanned": "yes"},
+        {"hits": ["x"], "sources": [], "replies_scanned": True},
+        {"hits": [{"where": "reply"}], "sources": [], "replies_scanned": True},
+        {"hits": [{**REPLY_HIT, "session": "1"}], "sources": [], "replies_scanned": True},
+        {"hits": [{**REPLY_HIT, "token": 3}], "sources": [], "replies_scanned": True},
+        {"unchecked": "yes"},
+        {"unchecked": False},
+    ],
+)
+def test_report_rejects_a_malformed_operator_identity(tmp_path: Path, check: object) -> None:
+    """A current grade.json whose operator_identity breaks the schema raises
+    GradeInputError naming grade.json (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    _stale_current_grade(trial, check)  # type: ignore[arg-type]
+
+    with pytest.raises(GradeInputError, match=r"grade\.json"):
+        build_report(run_dir)
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        {"hits": [], "sources": ["git user.name"], "replies_scanned": True},
+        {"hits": [REPLY_HIT], "sources": [], "replies_scanned": False},
+        {"unchecked": True},
+    ],
+)
+def test_report_accepts_a_well_formed_operator_identity(
+    tmp_path: Path, check: dict[str, Any]
+) -> None:
+    """A well-formed operator_identity loads without error (AIE-1196, US1.10)."""
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    _stale_current_grade(trial, check)
+
+    _, report = build_report(run_dir)
+
+    assert report["run"]["run_id"]
+
+
+# --- refresh ---
+
+
+def test_report_computes_the_check_for_a_grade_without_it(tmp_path: Path) -> None:
+    """A current grade.json lacking operator_identity gets it on first report,
+    and a hit fails `passed` while `results` stays as recorded (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY)
+    (trial,) = (run_dir / "alpha").iterdir()
+    old = _stale_current_grade(trial, None)
+
+    _, report = build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert refreshed["operator_identity"]["hits"] == [REPLY_HIT]
+    assert refreshed["results"] == old["results"]
+    assert refreshed["passed"] is False
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+
+
+def test_report_clears_a_stale_hit_and_restores_passed(tmp_path: Path) -> None:
+    """A recorded hit the fresh check no longer finds is dropped and `passed`
+    follows the results again (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path)
+    (trial,) = (run_dir / "alpha").iterdir()
+    stale = {"hits": [REPLY_HIT], "sources": ["git user.name"], "replies_scanned": True}
+    old = _stale_current_grade(trial, stale)
+    old["passed"] = False
+    (trial / "grade.json").write_text(json.dumps(old))
+    _age(trial / "grade.json", 10)
+
+    build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert refreshed["operator_identity"]["hits"] == []
+    assert refreshed["passed"] is True
+    assert refreshed["results"] == old["results"]
+
+
+def test_report_leaves_a_current_identity_check_alone(tmp_path: Path) -> None:
+    """A current grade.json whose operator_identity is unchanged is not
+    rewritten (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY)
+    (trial,) = (run_dir / "alpha").iterdir()
+    for name in ("store.json", "trace.json", "transcript.json"):
+        _age(trial / name, 30)
+    grade_trial(trial)
+    _age(trial / "grade.json", 10)
+    before = (trial / "grade.json").stat().st_mtime_ns
+
+    build_report(run_dir)
+
+    assert (trial / "grade.json").stat().st_mtime_ns == before
+
+
+def test_report_keeps_recorded_hits_when_no_identity_resolves(
+    tmp_path: Path, set_identity: Any
+) -> None:
+    """A refresh with no resolvable identity keeps the recorded check, hits
+    included, and the trial stays failed (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY)
+    (trial,) = (run_dir / "alpha").iterdir()
+    for name in ("store.json", "trace.json", "transcript.json"):
+        _age(trial / name, 30)
+    recorded = grade_trial(trial)
+    _age(trial / "grade.json", 10)
+    set_identity()
+
+    _, report = build_report(run_dir)
+
+    refreshed = _json(trial / "grade.json")
+    assert refreshed["operator_identity"] == recorded["operator_identity"]
+    assert refreshed["passed"] is False
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+    assert report["operator_identity"]["flagged_trials"] == 1
+
+
+def test_report_grades_a_missing_grade_with_the_identity_check(tmp_path: Path) -> None:
+    """A trial with dumps and no grade.json is graded with the check, so a
+    hit fails the trial (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY)
+
+    _, report = build_report(run_dir)
+
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 0
+    assert report["operator_identity"]["flagged_trials"] == 1
+
+
+# --- report fields ---
+
+
+def test_report_lists_operator_identity_trials_and_totals(tmp_path: Path) -> None:
+    """The report names flagged trials with their hit locations, counts
+    unscanned trials, and totals the run (AIE-1196, US1.10).
+    """
+    run_dir, (t1, t2, t3) = _reply_trial(tmp_path, trials=3)
+    for trial in (t1, t2, t3):
+        _dump(trial, leak=False)
+    _reply_transcript(t1, LEAK_REPLY)
+    _reply_transcript(t2, SECOND_PERSON)
+
+    markdown, report = build_report(run_dir)
+
+    (alpha,) = report["scenarios"]
+    assert alpha["operator_identity_trials"] == [{"trial": 1, "hits": [REPLY_HIT]}]
+    assert alpha["unscanned_trials"] == [3]
+    assert alpha["passed_trials"] == 2
+    totals = report["operator_identity"]
+    assert (totals["flagged_trials"], totals["checked_trials"], totals["unscanned_trials"]) == (
+        1,
+        3,
+        1,
+    )
+    assert totals["sources"][:3] == ["git user.name", "git user.email", "$USER"]
+    assert _json(run_dir / "report.json")["operator_identity"] == totals
+    assert markdown == (run_dir / "report.md").read_text()
+
+
+def test_report_without_an_identity_counts_no_checked_trials(
+    tmp_path: Path, set_identity: Any
+) -> None:
+    """With no resolvable identity no trial is checked and nothing is flagged
+    (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY, trials=2)
+    set_identity()
+
+    _, report = build_report(run_dir)
+
+    assert report["operator_identity"] == {
+        "flagged_trials": 0,
+        "checked_trials": 0,
+        "unscanned_trials": 0,
+        "sources": [],
+    }
+    (alpha,) = report["scenarios"]
+    assert alpha["operator_identity_trials"] == []
+    assert alpha["passed_trials"] == 2
+
+
+def test_report_markdown_summarizes_the_check_and_lists_hits(tmp_path: Path) -> None:
+    """report.md has a run summary line and a per-scenario hit line with kind
+    and location only (AIE-1196, US1.10).
+    """
+    run_dir = _identity_trial(tmp_path, LEAK_REPLY)
+
+    markdown, _ = build_report(run_dir)
+
+    lines = markdown.splitlines()
+    identity_lines = [line for line in lines if "identity" in line.lower()]
+    hit_lines = [line for line in identity_lines if "first-name" in line]
+    assert len(identity_lines) >= 2
+    assert len(hit_lines) == 1
+    assert "trial 1" in hit_lines[0]
+    assert "reply" in hit_lines[0]
+    for name in NAME_TEXTS:
+        assert name.lower() not in markdown.lower()
+
+
+def test_report_markdown_omits_hit_lines_when_clean(tmp_path: Path) -> None:
+    """A clean scenario has no hit line, only the run summary (AIE-1196, US1.10)."""
+    run_dir = _identity_trial(tmp_path)
+
+    markdown, _ = build_report(run_dir)
+
+    lines = markdown.splitlines()
+    assert not [line for line in lines if "first-name" in line]
+    assert [line for line in lines if "identity" in line.lower()]

@@ -7,7 +7,8 @@ import re
 
 import pytest
 
-from test_evals_scenario import OPERATOR_PATTERN
+from evals.identity import resolve_operator_identity
+from test_evals_identity import reply_hits
 from wenchang.prompts import applying_memory
 
 pytestmark = pytest.mark.unit
@@ -89,4 +90,4 @@ def test_body_names_no_tested_fact_or_operator() -> None:
     body = applying_memory.BODY
     assert [w for w in forbidden if re.search(w, body, re.IGNORECASE)] == []
     assert re.search(r"\bSam\b", body) is None
-    assert re.search(OPERATOR_PATTERN, body) is None
+    assert reply_hits(resolve_operator_identity(), body) == ()

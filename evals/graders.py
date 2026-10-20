@@ -7,12 +7,14 @@ produces store.json, trace.json, and transcript.json can be graded.
 
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final, cast
+from typing import Any, Final, Protocol, cast
 
+from evals.reference_adopter import MEMBER_IDENTITY
 from evals.scenario import (
     AliasPresent,
     Assertion,
@@ -40,16 +42,21 @@ __all__ = [
     "THIRD_PERSON_PATTERN",
     "AssertionResult",
     "GradeInputError",
+    "IdentityTokens",
+    "OperatorIdentityHit",
+    "OperatorToken",
     "StoreDump",
     "StoredFile",
     "ThirdPersonReply",
     "TraceCall",
     "TranscriptTurn",
+    "find_operator_identity",
     "find_third_person_replies",
     "grade",
     "load_store_dump",
     "load_trace",
     "load_transcript",
+    "nfkc",
     "order_key",
     "store_dump_to_json",
     "trace_to_json",
@@ -771,3 +778,201 @@ def find_third_person_replies(
                 flags.append(ThirdPersonReply(t.session, t.turn, phrase))
                 break
     return tuple(flags)
+
+
+# --- operator identity check ----------------------------------------------------
+
+FIRST_NAME: Final = "first-name"
+LAST_NAME: Final = "last-name"
+LOGIN: Final = "login"
+
+# A first-name match that starts a sentence and precedes one of these lowercase
+# words reads as a verb ("Grant access to ..."), not as the name.
+_VERB_OBJECTS: Final = frozenset(
+    [
+        "it",
+        "this",
+        "that",
+        "these",
+        "those",
+        "them",
+        "the",
+        "a",
+        "an",
+        "as",
+        "all",
+        "each",
+        "every",
+        "both",
+        "my",
+        "your",
+        "our",
+        "their",
+        "its",
+        "one",
+        "any",
+        "some",
+        "you",
+        "we",
+        "they",
+        "he",
+        "she",
+        "there",
+        "access",
+        "be",
+        "not",
+        "have",
+    ]
+)
+_WINDOW: Final = 64
+_SENTENCE_START: Final = re.compile(
+    r"(?:(?:\A|\n)[ \t]*(?:(?:[-*+\u2022]|\d+[.)])[ \t]+)?"
+    r"|[.!?:][\"')\]*_\u201d\u2019]*\s+)[>#*\"'\u201c\u2018`_ \t]*\Z"
+)
+_NEXT_TOKEN: Final = re.compile(r"\s+([^\W_]+)")
+_APOSTROPHE_CHARS: Final = ("'", "\u2019")
+_REDACTED: Final = "<redacted>"
+
+
+@dataclass(frozen=True)
+class OperatorToken:
+    """One thing to look for: the surface forms of a name or login.
+
+    kind is first-name, last-name or login. A case-sensitive token matches
+    its forms exactly; otherwise any casing matches. Forms are NFKC-normalized.
+    """
+
+    kind: str
+    forms: tuple[str, ...]
+    case_sensitive: bool
+
+
+class IdentityTokens(Protocol):
+    """A resolved operator identity, as the check needs it."""
+
+    @property
+    def tokens(self) -> Sequence[OperatorToken]: ...
+
+
+@dataclass(frozen=True)
+class OperatorIdentityHit:
+    """Where the operator's identity appears; never the matched text."""
+
+    where: str
+    session: int
+    turn: int
+    path: str
+    field: str
+    token: str
+
+
+def nfkc(text: str) -> str:
+    return unicodedata.normalize("NFKC", text)
+
+
+def _form_pattern(token: OperatorToken) -> re.Pattern[str]:
+    alternatives = "|".join(
+        re.escape(nfkc(f) if token.case_sensitive else nfkc(f).lower()) for f in token.forms
+    )
+    return re.compile(
+        rf"(?<![^\W_])(?:{alternatives})(?![^\W_])", 0 if token.case_sensitive else re.IGNORECASE
+    )
+
+
+def _is_verb_use(text: str, match: re.Match[str]) -> bool:
+    start = match.start()
+    # A longer prefix is cut to a window; the sentinel keeps the cut from reading as text start.
+    window = text[start - _WINDOW : start] if start > _WINDOW else text[:start]
+    if start > _WINDOW:
+        window = "\x00" + window
+    if not _SENTENCE_START.search(window):
+        return False
+    following = _NEXT_TOKEN.match(text, match.end())
+    if following is None or text[following.end() : following.end() + 1] in _APOSTROPHE_CHARS:
+        return False
+    return following.group(1) in _VERB_OBJECTS or following.group(1) == "I"
+
+
+def _context_texts(scenario: Scenario) -> list[str]:
+    texts = [turn for session in scenario.sessions for turn in session.turns]
+    for seed in scenario.seed_files:
+        texts += [seed.content, seed.description, *seed.aliases]
+    texts += [record.content for record in scenario.context_records]
+    return [nfkc(t) for t in texts]
+
+
+def _identity_id_pieces() -> frozenset[str]:
+    """The reference member's entity ids and their pieces, which every scenario's
+    seeds and paths use."""
+    pieces: set[str] = set()
+    for grant in MEMBER_IDENTITY.grants.values():
+        entity = nfkc(grant.entity_id).lower()
+        pieces.add(entity)
+        pieces.update(p for p in re.split(r"[-_]", entity) if p)
+    return frozenset(pieces)
+
+
+def _active_tokens(
+    scenario: Scenario, identity: IdentityTokens
+) -> list[tuple[OperatorToken, re.Pattern[str]]]:
+    """The tokens not exempted by the scenario's own context."""
+    context = _context_texts(scenario)
+    ids = _identity_id_pieces()
+    active: list[tuple[OperatorToken, re.Pattern[str]]] = []
+    for token in identity.tokens:
+        pattern = _form_pattern(token)
+        if nfkc(token.forms[0]).lower() in ids:
+            continue
+        if any(pattern.search(text) for text in context):
+            continue
+        active.append((token, pattern))
+    return active
+
+
+def _mentioned_kinds(
+    active: Sequence[tuple[OperatorToken, re.Pattern[str]]], text: str
+) -> list[str]:
+    text = nfkc(text)
+    kinds: list[str] = []
+    for token, pattern in active:
+        for match in pattern.finditer(text):
+            if token.kind == FIRST_NAME and _is_verb_use(text, match):
+                continue
+            kinds.append(token.kind)
+            break
+    return kinds
+
+
+def find_operator_identity(
+    scenario: Scenario,
+    store: StoreDump,
+    trace: Sequence[TraceCall],
+    transcript: Sequence[TranscriptTurn],
+    identity: IdentityTokens,
+) -> tuple[OperatorIdentityHit, ...]:
+    """Where replies, final stored text, or persisted write arguments carry the
+    operator's identity, without repeats and without the matched text.
+    """
+    active = _active_tokens(scenario, identity)
+    if not active:
+        return ()
+    hits: dict[OperatorIdentityHit, None] = {}
+
+    def record(where: str, session: int, turn: int, path: str, field: str, text: str) -> None:
+        for kind in _mentioned_kinds(active, text):
+            hits[OperatorIdentityHit(where, session, turn, path, field, kind)] = None
+
+    for t in transcript:
+        record("reply", t.session, t.turn, "", "", t.reply)
+    for f in store.files:
+        path = _REDACTED if _mentioned_kinds(active, f.path) else f.path
+        record("store", 0, 0, path, "content", f.content)
+        record("store", 0, 0, path, "description", f.description)
+        for alias in f.aliases:
+            record("store", 0, 0, path, "alias", alias)
+    for call in sorted(trace, key=order_key):
+        if call.tool not in SCANNED_TOOLS:
+            continue
+        for key, text in _scanned_values(call):
+            record("write", call.session, call.turn, "", key, text)
+    return tuple(hits)

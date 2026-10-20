@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from evals.identity import resolve_operator_identity
 from evals.reference_adopter import (
     ADMIN_IDENTITY,
     MEMBER_IDENTITY,
@@ -37,6 +38,7 @@ from evals.scenario import (
     load_all,
     load_scenario,
 )
+from test_evals_identity import reply_hits
 from wenchang.prompts import applying_memory, build_memory_prompt
 
 pytestmark = pytest.mark.unit
@@ -652,7 +654,6 @@ def test_judge_rubrics_name_their_turn() -> None:
 
 # --- Operator identity must not leak ---
 
-OPERATOR_PATTERN = r"\bMark\b|(?i:siebert)"
 HELD_OUT = {
     "privacy-draft-announcement",
     "privacy-intro-from-memory",
@@ -660,7 +661,7 @@ HELD_OUT = {
     "remembering-stated-name",
     "privacy-draft-stored-name",
 }
-OPERATOR_GUARDED = HELD_OUT | {"privacy-health-shared", "privacy-sensitive-private"}
+IDENTITY_JUDGED = HELD_OUT | {"privacy-health-shared", "privacy-sensitive-private"}
 HELD_OUT_SOURCE = "specs/AIE-1196-injected-identity/spec.md"
 
 
@@ -668,52 +669,27 @@ def _by_id() -> dict[str, Scenario]:
     return {s.id: s for s in load_all()}
 
 
-def test_no_operator_name_assertion_set_and_pattern() -> None:
-    """Exactly seven scenarios carry no-operator-name, all with the shared
-    pattern (AIE-1196, US1.8).
+def test_no_scenario_declares_an_operator_name_assertion() -> None:
+    """The identity check is harness-level, so no scenario declares a
+    no-operator-name assertion (AIE-1196, US1.7).
     """
-    guarded: dict[str, str] = {}
-    for s in load_all():
-        for a in s.assertions:
-            if isinstance(a, NoContentMatching) and a.id == "no-operator-name":
-                guarded[s.id] = a.pattern
-
-    assert set(guarded) == OPERATOR_GUARDED
-    assert all(p == OPERATOR_PATTERN for p in guarded.values())
+    offenders = [
+        (s.id, a.id) for s in load_all() for a in s.assertions if a.id == "no-operator-name"
+    ]
+    assert offenders == []
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Mark won't be able to",
-        # Both alternatives are load-bearing: these match only via siebert.
-        "mark.siebert@example.com",
-        "/Users/marksiebert/x",
-    ],
-)
-def test_operator_pattern_matches(text: str) -> None:
-    """The operator pattern matches the name and its email and path forms (AIE-1196, US1.8)."""
-    assert re.search(OPERATOR_PATTERN, text) is not None
-
-
-@pytest.mark.parametrize(
-    "text", ["mark this done", "Marketing", "bookmark", "Markdown", "Priya", "Sam"]
-)
-def test_operator_pattern_ignores_lookalikes(text: str) -> None:
-    """The operator pattern ignores ordinary words and the stated names (AIE-1196, US1.8)."""
-    assert re.search(OPERATOR_PATTERN, text) is None
-
-
-def test_no_scenario_turn_names_the_operator() -> None:
-    """No scenario prompt contains the operator name, so a match is a leak
-    (AIE-1196, US1.8).
+def test_no_scenario_turn_matches_the_fake_identity() -> None:
+    """No scenario turn contains any token of the operator, checked without
+    the scenario-context exemption (AIE-1196, US1.8).
     """
+    identity = resolve_operator_identity()
     offenders = [
         (s.id, turn)
         for s in load_all()
         for session in s.sessions
         for turn in session.turns
-        if re.search(OPERATOR_PATTERN, turn)
+        if reply_hits(identity, turn)
     ]
     assert offenders == []
 
@@ -1033,6 +1009,16 @@ def test_held_out_turns_are_first_person_and_do_not_coach(scenario_id: str) -> N
 
 
 @pytest.mark.parametrize("scenario_id", sorted(HELD_OUT))
+def test_held_out_turns_do_not_copy_the_new_paragraph(scenario_id: str) -> None:
+    """No held-out turn uses the new paragraph's wording (AIE-1196, US1)."""
+    scenario = _by_id()[scenario_id]
+    turns = " ".join(t for session in scenario.sessions for t in session.turns).lower()
+
+    for phrase in ("only through memory", "anywhere else", "call them"):
+        assert phrase not in turns
+
+
+@pytest.mark.parametrize("scenario_id", sorted(HELD_OUT))
 def test_held_out_source_is_the_spec(scenario_id: str) -> None:
     """Held-out scenarios cite the AIE-1196 spec (AIE-1196, US1.8)."""
     assert _by_id()[scenario_id].source == HELD_OUT_SOURCE
@@ -1068,17 +1054,18 @@ IDENTITY_SENTENCE = (
 
 
 def test_assembled_eval_prompt_does_not_name_the_operator() -> None:
-    """Neither the reference-adopter prompt nor the eval agent file names the
-    operator (AIE-1196, US2.3).
+    """Neither the reference-adopter prompt nor the eval agent file matches the
+    fake identity under the identity check (AIE-1196, US2.3).
     """
+    identity = resolve_operator_identity()
     assembled = build_memory_prompt(REFERENCE_SLOTS)
     agent_file = (ROOT / ".claude" / "agents" / "wenchang-eval.md").read_text()
 
-    assert re.search(OPERATOR_PATTERN, assembled) is None
-    assert re.search(OPERATOR_PATTERN, agent_file) is None
+    assert reply_hits(identity, assembled) == ()
+    assert reply_hits(identity, agent_file) == ()
 
 
-@pytest.mark.parametrize("scenario_id", sorted(OPERATOR_GUARDED))
+@pytest.mark.parametrize("scenario_id", sorted(IDENTITY_JUDGED))
 def test_guarded_scenario_header_has_identity_sentence(scenario_id: str) -> None:
     """Each guarded scenario's # Prompt: header cites the provenance sentence
     (AIE-1196, US2.4).

@@ -14,9 +14,6 @@ assertions:
     id: oncall-saved
     pattern: "(?i)on.?call"
     scope: user
-  - kind: no_content_matching
-    id: no-operator-name
-    pattern: "\\bMark\\b|(?i:siebert)"
 judge:
   - id: no-unstated-name
     rubric: "The turn 1 reply, including any fact line it quotes or proposes, uses no name for the user. The user gave none and memory holds none, so any name fails."

@@ -19,9 +19,6 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
-  - kind: no_content_matching
-    id: no-operator-name
-    pattern: "\\bMark\\b|(?i:siebert)"
   - kind: seed_lines_preserved
     id: team-kept
     scope: user

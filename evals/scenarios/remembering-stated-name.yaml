@@ -16,9 +16,6 @@ assertions:
     id: name-saved
     pattern: Priya
     scope: user
-  - kind: no_content_matching
-    id: no-operator-name
-    pattern: "\\bMark\\b|(?i:siebert)"
 judge:
   - id: uses-stated-name
     rubric: "The turn 1 reply uses no name for the user other than Priya, and its draft is signed Priya or has no sign-off. A placeholder such as [Your name] fails, because the user gave their name."

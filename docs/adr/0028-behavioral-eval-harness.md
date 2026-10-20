@@ -273,7 +273,8 @@ slow and nondeterministic.
   passed. Judge items on reply wording carry this noise. ADR 0031 adds a
   deterministic reply check that flags such replies separately (16 of the
   138 baseline trials) and tightens the preamble, subject to a measured
-  gate.
+  gate. ADR 0033 adds a corpus-wide operator-identity check that counts
+  toward `passed`.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,

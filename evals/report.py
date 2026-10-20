@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -18,13 +19,17 @@ from typing import Any, Final, cast
 import evals.agent
 from evals.graders import (
     GradeInputError,
+    StoreDump,
+    TraceCall,
     TranscriptTurn,
+    find_operator_identity,
     find_third_person_replies,
     grade,
     load_store_dump,
     load_trace,
     load_transcript,
 )
+from evals.identity import OperatorIdentity, resolve_operator_identity
 from evals.scenario import (
     RUNS_DIR,
     ReplyMatching,
@@ -272,23 +277,63 @@ def _reply_check(
     }
 
 
-def grade_trial(trial_dir: Path) -> dict[str, Any]:
+def _replies_loaded(trial_dir: Path, error: str | None) -> bool:
+    return error is None and (trial_dir / "transcript.json").exists()
+
+
+def _identity_check(
+    scenario: Scenario,
+    store: StoreDump,
+    trace: Sequence[TraceCall],
+    transcript: Sequence[TranscriptTurn],
+    scanned: bool,
+    identity: OperatorIdentity,
+) -> dict[str, Any]:
+    """The operator-identity check's grade.json value.
+
+    Replies are scanned when transcript.json loads; the store and write scans
+    run regardless.
+    """
+    if identity.unchecked:
+        return {"unchecked": True}
+    hits = find_operator_identity(scenario, store, trace, transcript, identity)
+    return {
+        "hits": [asdict(h) for h in hits],
+        "sources": list(identity.sources),
+        "replies_scanned": scanned,
+    }
+
+
+def _has_hits(check: Mapping[str, Any]) -> bool:
+    return bool(check.get("hits"))
+
+
+def grade_trial(trial_dir: Path, identity: OperatorIdentity | None = None) -> dict[str, Any]:
     """Grade one dumped trial and write grade.json; raises GradeInputError on bad
-    store or trace inputs.
+    store or trace inputs. The operator identity is resolved when not given.
     """
     scenario, trial = _trial_scenario(trial_dir)
     store = load_store_dump(trial_dir / "store.json")
     trace = load_trace(trial_dir / "trace.json")
     transcript, error = _load_transcript(trial_dir)
     results = grade(scenario, store, trace, transcript)
+    check = _identity_check(
+        scenario,
+        store,
+        trace,
+        transcript,
+        _replies_loaded(trial_dir, error),
+        resolve_operator_identity() if identity is None else identity,
+    )
     graded: dict[str, Any] = {
         "scenario": scenario.id,
         "trial": trial,
         "results": [
             {"id": r.id, "kind": r.kind, "passed": r.passed, "detail": r.detail} for r in results
         ],
-        "passed": all(r.passed for r in results),
+        "passed": all(r.passed for r in results) and not _has_hits(check),
         **_reply_check(trial_dir, scenario, transcript, error),
+        "operator_identity": check,
     }
     _write_json(trial_dir / "grade.json", graded)
     return graded
@@ -313,6 +358,33 @@ def _refresh_reply_check(trial_dir: Path, scenario: Scenario, graded: dict[str, 
     for key in _REPLY_CHECK_KEYS:
         graded.pop(key, None)
     graded.update(fresh)
+    _write_json(trial_dir / "grade.json", graded)
+
+
+def _refresh_identity_check(
+    trial_dir: Path, scenario: Scenario, graded: dict[str, Any], identity: OperatorIdentity
+) -> None:
+    """Recompute the operator-identity check and `passed` of a grade.json that
+    is current for the store and trace, rewriting only on change. Without a
+    resolvable identity the recorded check stays.
+    """
+    recorded = graded.get("operator_identity")
+    if identity.unchecked and recorded is not None:
+        return
+    transcript, error = _load_transcript(trial_dir)
+    fresh = _identity_check(
+        scenario,
+        load_store_dump(trial_dir / "store.json"),
+        load_trace(trial_dir / "trace.json"),
+        transcript,
+        _replies_loaded(trial_dir, error),
+        identity,
+    )
+    passed = all(r["passed"] for r in graded["results"]) and not _has_hits(fresh)
+    if recorded == fresh and graded["passed"] == passed:
+        return
+    graded["operator_identity"] = fresh
+    graded["passed"] = passed
     _write_json(trial_dir / "grade.json", graded)
 
 
@@ -384,6 +456,24 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
 _REPLY_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
     {"session": int, "turn": int, "phrase": str}
 )
+_IDENTITY_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
+    {"hits": list, "sources": list, "replies_scanned": bool}
+)
+_IDENTITY_HIT_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
+    {"where": str, "session": int, "turn": int, "path": str, "field": str, "token": str}
+)
+
+
+def _validate_identity_check(path: Path, raw: object) -> None:
+    if isinstance(raw, dict) and "unchecked" in cast(dict[str, object], raw):
+        if cast(dict[str, object], raw)["unchecked"] is not True:
+            raise GradeInputError(f"{path}: operator_identity unchecked must be true")
+        return
+    check = _checked(path, cast(object, raw), _IDENTITY_FIELDS, "operator_identity")
+    for i, hit in enumerate(cast(list[object], check["hits"])):
+        _checked(path, hit, _IDENTITY_HIT_FIELDS, f"operator_identity hits[{i}]")
+    if not all(isinstance(s, str) for s in cast(list[object], check["sources"])):
+        raise GradeInputError(f"{path}: operator_identity sources must be a list of strings")
 
 
 def _load_grade(path: Path) -> dict[str, Any]:
@@ -398,6 +488,8 @@ def _load_grade(path: Path) -> dict[str, Any]:
             _checked(path, reply, _REPLY_FIELDS, f"third_person_replies[{i}]")
     if "transcript_error" in graded and not isinstance(graded["transcript_error"], str):
         raise GradeInputError(f"{path}: grade.json transcript_error must be a string")
+    if "operator_identity" in graded:
+        _validate_identity_check(path, graded["operator_identity"])
     return graded
 
 
@@ -417,13 +509,20 @@ def _grade_is_current(trial_dir: Path, scenario: Scenario) -> bool:
     return grade_path.stat().st_mtime >= newest
 
 
-def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
+def build_report(
+    run_dir: Path, identity: OperatorIdentity | None = None
+) -> tuple[str, dict[str, Any]]:
     """Grade dumped trials whose grade.json is missing or stale, then write
     report.md and report.json. Raises GradeInputError on malformed inputs.
+    The operator identity is resolved once when not given.
     """
+    if identity is None:
+        identity = resolve_operator_identity()
     run = _load_run(run_dir)
     trials = int(run["trials"])
     scenario_reports: list[dict[str, object]] = []
+    checked_identity = 0
+    identity_sources: list[str] = []
     for ident in cast(list[str], run["scenarios"]):
         not_run: list[int] = []
         invalid_judge: list[int] = []
@@ -431,6 +530,8 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
         judged: list[dict[str, bool]] = []
         flagged: list[dict[str, object]] = []
         unchecked: list[int] = []
+        identity_flagged: list[dict[str, object]] = []
+        unscanned: list[int] = []
         flagged_verdicts: list[dict[str, bool]] = []
         scenario: Scenario | None = None
         for k in range(1, trials + 1):
@@ -440,12 +541,21 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
             if _grade_is_current(trial_dir, scenario):
                 current = _load_grade(trial_dir / "grade.json")
                 _refresh_reply_check(trial_dir, scenario, current)
+                _refresh_identity_check(trial_dir, scenario, current, identity)
             elif dumped:
-                current = grade_trial(trial_dir)
+                current = grade_trial(trial_dir, identity)
             else:
                 not_run.append(k)
                 continue
             graded.append(current)
+            check = cast(dict[str, Any], current["operator_identity"])
+            if not check.get("unchecked"):
+                checked_identity += 1
+                identity_sources += [x for x in check["sources"] if x not in identity_sources]
+                if check["hits"]:
+                    identity_flagged.append({"trial": k, "hits": check["hits"]})
+                if not check["replies_scanned"]:
+                    unscanned.append(k)
             replies = cast(list[dict[str, object]] | None, current.get("third_person_replies"))
             if replies is None:
                 unchecked.append(k)
@@ -493,6 +603,8 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
                     for item_id in judged_ids
                 ],
                 "invalid_judge_trials": invalid_judge,
+                "operator_identity_trials": identity_flagged,
+                "unscanned_trials": unscanned,
                 "third_person_trials": flagged,
                 "addressee_unchecked_trials": unchecked,
                 "judge_third_person_fails": [
@@ -504,6 +616,16 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
                 ],
             }
         )
+    identity_totals = {
+        "flagged_trials": sum(
+            len(cast(list[object], s["operator_identity_trials"])) for s in scenario_reports
+        ),
+        "checked_trials": checked_identity,
+        "unscanned_trials": sum(
+            len(cast(list[object], s["unscanned_trials"])) for s in scenario_reports
+        ),
+        "sources": identity_sources,
+    }
     totals = {
         "flagged_trials": sum(
             len(cast(list[object], s["third_person_trials"])) for s in scenario_reports
@@ -517,8 +639,9 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
         "run": run,
         "scenarios": scenario_reports,
         "third_person": totals,
+        "operator_identity": identity_totals,
     }
-    markdown = _markdown(run, scenario_reports, totals)
+    markdown = _markdown(run, scenario_reports, totals, identity_totals)
     (run_dir / "report.md").write_text(markdown)
     _write_json(run_dir / "report.json", report)
     return markdown, report
@@ -581,8 +704,31 @@ def _flagged_line(flagged: Sequence[dict[str, Any]]) -> str:
     return "Third-person replies: " + "; ".join(trials)
 
 
+def _hit_location(hit: Mapping[str, Any]) -> str:
+    if hit["where"] == "reply":
+        place = f"session {hit['session']} turn {hit['turn']}"
+    elif hit["where"] == "store":
+        place = f"{hit['path']} {hit['field']}"
+    else:
+        place = f"session {hit['session']} turn {hit['turn']} {hit['field']}"
+    return f"{hit['where']} {place}: {hit['token']}"
+
+
+def _identity_line(flagged: Sequence[dict[str, Any]]) -> str:
+    trials = [
+        f"trial {f['trial']} ("
+        + "; ".join(_hit_location(h) for h in cast(list[dict[str, Any]], f["hits"]))
+        + ")"
+        for f in flagged
+    ]
+    return "Operator identity hits: " + "; ".join(trials)
+
+
 def _markdown(
-    run: dict[str, Any], scenarios: Sequence[dict[str, object]], totals: Mapping[str, int]
+    run: dict[str, Any],
+    scenarios: Sequence[dict[str, object]],
+    totals: Mapping[str, int],
+    identity: Mapping[str, Any],
 ) -> str:
     lines = [
         f"# Eval report: {run['run_id']}",
@@ -604,6 +750,10 @@ def _markdown(
         "",
         f"Trials with a third-person reply: {totals['flagged_trials']} of "
         f"{totals['checked_trials']} checked.",
+        "",
+        f"Operator identity check: {identity['flagged_trials']} of {identity['checked_trials']} "
+        f"checked trials flagged, {identity['unscanned_trials']} without replies scanned "
+        f"(sources: {', '.join(identity['sources']) or 'none'}).",
     ]
     for s in scenarios:
         lines += ["", f"## {s['id']}", ""]
@@ -616,6 +766,15 @@ def _markdown(
         flagged = cast(list[dict[str, Any]], s["third_person_trials"])
         if flagged:
             lines += ["", _flagged_line(flagged)]
+        identity_flagged = cast(list[dict[str, Any]], s["operator_identity_trials"])
+        if identity_flagged:
+            lines += ["", _identity_line(identity_flagged)]
+        unscanned = cast(list[int], s["unscanned_trials"])
+        if unscanned:
+            lines += [
+                "",
+                f"Operator identity replies not scanned: {', '.join(map(str, unscanned))}",
+            ]
         unchecked = cast(list[int], s["addressee_unchecked_trials"])
         if unchecked:
             lines += ["", f"Addressee not checked: {', '.join(map(str, unchecked))}"]
