@@ -781,8 +781,9 @@ def find_third_person_replies(
 
 # The scenario identity's grant keys are added per call.
 PATH_ROOTS: Final[frozenset[str]] = frozenset(REFERENCE_SCOPES) | {"org", "system"}
-_PATH_RUN: Final = re.compile(r"[A-Za-z0-9_.~/-]*/[A-Za-z0-9_.~/-]*")
+_PATH_RUN: Final = re.compile(r"[A-Za-z0-9_.~/-]+")
 _URL_SCHEME_END: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:$")
+_URL_SCHEME_LOOKBEHIND: Final = 64
 _LOCATION_KEYS: Final = frozenset({"path", "prefix"})
 _MAX_RESULT_DEPTH: Final = 32
 
@@ -805,6 +806,8 @@ def _result_locations(value: object, depth: int = 1) -> Iterator[str]:
         for key, item in cast(Mapping[object, object], value).items():
             if key in _LOCATION_KEYS and isinstance(item, str):
                 yield item
+            elif key in _LOCATION_KEYS and isinstance(item, list):
+                yield from (i for i in cast(list[object], item) if isinstance(i, str))
             else:
                 yield from _result_locations(item, depth + 1)
     elif isinstance(value, list):
@@ -831,8 +834,13 @@ def _path_tokens(
     """Distinct normalized scope-rooted path tokens in first-appearance order."""
     tokens: dict[str, None] = {}
     for run in _PATH_RUN.finditer(text):
+        if "/" not in run.group():
+            continue
         raw = run.group().rstrip(".,;:!?")
-        if raw.startswith("//") or _URL_SCHEME_END.search(text[: run.start()]):
+        start = run.start()
+        if raw.startswith("//") or _URL_SCHEME_END.search(
+            text, max(0, start - _URL_SCHEME_LOOKBEHIND), start
+        ):
             continue
         segments = [s for s in raw.split("/") if s]
         root = next((i for i, s in enumerate(segments) if s in roots), None)
@@ -862,7 +870,7 @@ def find_unmatched_reply_paths(
     returned up to the reply's turn. A token the user typed in the session so far
     is not flagged.
     """
-    roots = PATH_ROOTS | scenario.identity.grants.keys()
+    roots = frozenset(PATH_ROOTS | scenario.identity.grants.keys())
     seed_areas = {a for areas in SEED_AREAS_BY_SCOPE.values() for a in areas} | {"system"}
     seed_areas.update(f.area for f in scenario.seed_files)
     grant_entities = {g.entity_id for g in scenario.identity.grants.values()}

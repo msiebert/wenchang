@@ -2046,3 +2046,31 @@ def test_reply_path_output_order_follows_replies_then_first_appearance() -> None
 def test_reply_path_empty_transcript_gives_no_results() -> None:
     """AIE-1198, US2.5: nothing to check."""
     assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), ()) == ()
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["a" * 200_000, "x user/a/b " * 20_000],
+    ids=["no-slash-path-chars", "many-near-paths"],
+)
+def test_reply_path_scan_is_linear_time(reply: str) -> None:
+    """AIE-1198, US2.2: tokenizing a very long reply finishes in well under a second."""
+    start = time.perf_counter()
+    _paths(reply, [_wrote(NOTE)])
+    assert time.perf_counter() - start < 1.0
+
+
+def test_reply_path_list_valued_path_makes_each_string_known() -> None:
+    """AIE-1198, US2.3: a result `path` that is a list of strings makes each string known."""
+    result = _result_call(1, {"path": ["user/u-ada/preferences/charts.md"]})
+    assert _paths("See user/u-ada/preferences/charts.md", [result]) == ()
+
+
+def test_reply_path_list_valued_prefix_makes_each_string_known() -> None:
+    """AIE-1198, US2.3: an entry `prefix` that is a list of strings makes each string known."""
+    result = _result_call(
+        1,
+        {"entries": [{"prefix": ["user/u-ada/preferences/"]}]},
+        tool="get_memory_index",
+    )
+    assert _paths("See user/u-ada/preferences/", [result]) == ()

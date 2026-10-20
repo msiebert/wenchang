@@ -433,6 +433,8 @@ def _grade_is_current(trial_dir: Path, scenario: Scenario) -> bool:
     if uses_reply_kinds(scenario):
         transcript = trial_dir / "transcript.json"
         graded = _read_json(grade_path)
+        # Keys on these fields only: a grade.json lacking unmatched_reply_paths stays
+        # current and gains the field on refresh instead of being regraded.
         has_check = isinstance(graded, dict) and any(
             k in graded for k in ("third_person_replies", "transcript_error")
         )
