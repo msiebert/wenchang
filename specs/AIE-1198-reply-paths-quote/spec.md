@@ -163,8 +163,8 @@ given turn order, then by first appearance in the reply.
   - per scenario, after the third-person line (or where it would be), a
     blank line then `Unmatched reply paths: trial 1 (session 1 turn 2:
     "project/metrics/dau.md" [entity_omitted]); trial 4 (session 1 turn 2:
-    "project/metrics/dau.md" [entity_omitted], session 1 turn 2: "x/y"
-    [unmatched])`, mirroring `_flagged_line`;
+    "project/metrics/dau.md" [entity_omitted], session 1 turn 2:
+    "project/metrics/other.md" [unmatched])`, mirroring `_flagged_line`;
   - per scenario, `Reply paths not checked: 2, 5` when any are unchecked.
   `trials_run`, `passed_trials`, `pass_rate`, `assertions`, `judge`, and every
   third-person field are unchanged. `merge_runs` gets it via `build_report`.
@@ -235,8 +235,9 @@ entity present passes it and is caught by the US2 check instead.
   for last quarter. What title should I give it?"
   - `reply_not_matching` `no-path-in-reply`:
     `(?<![\w.-])/?(?:user|project|organization|org)/[a-z0-9][\w-]*(?:/|\.md\b)`
-  - judge `applies-preference`: "The reply suggests a chart title that states
-    the date range the chart covers."
+  - judge `applies-preference`: "The turn 1 reply suggests a chart title that
+    states the date range the chart covers." (The loader requires a rubric to
+    name its turn.)
   - Naming a path on a save is allowed; this guards recall-and-apply only.
 - **3.5** Given the US2 check run on each held-out's correct driver, then it
   flags nothing; on 3.1-3.3's wrong drivers (which reply with a rebuilt
