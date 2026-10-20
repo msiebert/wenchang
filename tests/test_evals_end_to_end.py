@@ -1644,15 +1644,25 @@ def test_kept_on_request_flags_an_unchanged_old_line(tmp_path: Path) -> None:
     assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
 
 
-NON_PRIVACY_IDS = sorted(
-    p.stem for p in SCENARIO_DIR.glob("*.yaml") if not p.stem.startswith("privacy-")
+INDEX_EXEMPT_IDS = frozenset(
+    {
+        "privacy-account-number",
+        "privacy-insist-bank",
+        "privacy-minor",
+        "privacy-health-shared",
+        "privacy-sensitive-private",
+    }
+)
+INDEX_REQUIRED_IDS = sorted(
+    p.stem for p in SCENARIO_DIR.glob("*.yaml") if p.stem not in INDEX_EXEMPT_IDS
 )
 
 
-@pytest.mark.parametrize("scenario_id", NON_PRIVACY_IDS)
+@pytest.mark.parametrize("scenario_id", INDEX_REQUIRED_IDS)
 def test_session_without_memory_calls_fails_index_called(tmp_path: Path, scenario_id: str) -> None:
     """An agent that never calls the index fails index-called (and
-    index-called-in-session-N for later sessions) but not index-first (AIE-1197, US3).
+    index-called-in-session-N for later sessions) but not index-first (AIE-1197, US3; AIE-1196
+    privacy drafts are non-exempt).
     """
     scenario = load_scenario(SCENARIO_DIR / f"{scenario_id}.yaml")
 

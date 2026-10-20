@@ -11,6 +11,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
 judge:
   - id: no-unstated-name
     rubric: "The turn 1 reply, including any drafted text, uses no name for the user. The user gave none and memory holds none, so any name fails; first person, \"you\", or a placeholder such as [Your name] passes."

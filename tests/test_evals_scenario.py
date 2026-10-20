@@ -643,8 +643,19 @@ def test_corpus_is_the_planned_set() -> None:
 
 INDEX_TOOLS = frozenset({"get_memory_index"})
 SHIPPED_IDS = sorted(p.stem for p in SCENARIO_DIR.glob("*.yaml"))
-NON_PRIVACY_IDS = [i for i in SHIPPED_IDS if not i.startswith("privacy-")]
-PRIVACY_IDS = [i for i in SHIPPED_IDS if i.startswith("privacy-")]
+INDEX_EXEMPT_IDS = [
+    "privacy-account-number",
+    "privacy-insist-bank",
+    "privacy-minor",
+    "privacy-health-shared",
+    "privacy-sensitive-private",
+]
+INDEX_REQUIRED_PRIVACY_IDS = [
+    "privacy-draft-announcement",
+    "privacy-intro-from-memory",
+    "privacy-draft-stored-name",
+]
+INDEX_REQUIRED_IDS = [i for i in SHIPPED_IDS if i not in INDEX_EXEMPT_IDS]
 
 
 def _index_called(scenario: Scenario) -> list[ToolCalled]:
@@ -672,10 +683,11 @@ def _expected_index_called(scenario: Scenario) -> dict[int | None, str]:
     }
 
 
-@pytest.mark.parametrize("ident", NON_PRIVACY_IDS)
-def test_non_privacy_scenarios_assert_the_index_was_called(ident: str) -> None:
-    """Every non-privacy scenario requires a get_memory_index call in each
-    session, as a tool_called assertion that accepts no other tool (AIE-1197, US1).
+@pytest.mark.parametrize("ident", INDEX_REQUIRED_IDS)
+def test_non_exempt_scenarios_assert_the_index_was_called(ident: str) -> None:
+    """Every non-exempt scenario requires a get_memory_index call in each
+    session, as a tool_called assertion that accepts no other tool (AIE-1197, US1;
+    AIE-1196 privacy drafts included).
     """
     scenario = load_scenario(SCENARIO_DIR / f"{ident}.yaml")
 
@@ -685,7 +697,7 @@ def test_non_privacy_scenarios_assert_the_index_was_called(ident: str) -> None:
     assert found >= expected, f"{ident}: missing index-called session(s) {expected - found}"
 
 
-@pytest.mark.parametrize("ident", NON_PRIVACY_IDS)
+@pytest.mark.parametrize("ident", INDEX_REQUIRED_IDS)
 def test_index_called_assertions_are_named_by_session(ident: str) -> None:
     """The index assertion is `index-called` in session 1 (or the only session)
     and `index-called-in-session-N` after (AIE-1197, US1).
@@ -698,9 +710,9 @@ def test_index_called_assertions_are_named_by_session(ident: str) -> None:
     assert {s: by_session.get(s) for s in expected} == expected
 
 
-@pytest.mark.parametrize("ident", PRIVACY_IDS)
-def test_privacy_scenarios_do_not_require_the_index(ident: str) -> None:
-    """Privacy scenarios have no tool_called assertion that accepts
+@pytest.mark.parametrize("ident", INDEX_EXEMPT_IDS)
+def test_exempt_scenarios_do_not_require_the_index(ident: str) -> None:
+    """Exempt (refusal) scenarios have no tool_called assertion that accepts
     get_memory_index (AIE-1197, US2).
     """
     scenario = load_scenario(SCENARIO_DIR / f"{ident}.yaml")
@@ -713,15 +725,36 @@ def test_privacy_scenarios_do_not_require_the_index(ident: str) -> None:
     assert offenders == []
 
 
-def test_privacy_scenarios_are_the_five_known() -> None:
-    """The privacy exemption covers exactly the five shipped privacy scenarios (AIE-1197)."""
-    assert set(PRIVACY_IDS) == {
+def test_index_exempt_set_is_the_five_refusal_scenarios() -> None:
+    """The exemption is exactly the five refusal scenarios, each a shipped
+    privacy-* scenario (AIE-1197).
+    """
+    assert set(INDEX_EXEMPT_IDS) == {
         "privacy-account-number",
         "privacy-insist-bank",
         "privacy-minor",
         "privacy-health-shared",
         "privacy-sensitive-private",
     }
+    assert all(i in SHIPPED_IDS and i.startswith("privacy-") for i in INDEX_EXEMPT_IDS)
+
+
+def test_privacy_drafting_scenarios_are_not_exempt() -> None:
+    """The three drafting privacy scenarios read memory, so they are shipped and
+    not exempt (AIE-1196).
+    """
+    assert set(INDEX_REQUIRED_PRIVACY_IDS) <= set(SHIPPED_IDS)
+    assert not set(INDEX_REQUIRED_PRIVACY_IDS) & set(INDEX_EXEMPT_IDS)
+    assert set(INDEX_REQUIRED_PRIVACY_IDS) <= set(INDEX_REQUIRED_IDS)
+
+
+def test_every_privacy_scenario_has_an_explicit_index_decision() -> None:
+    """A new privacy-* scenario must be added to the exempt set or
+    INDEX_REQUIRED_PRIVACY_IDS (AIE-1197, AIE-1196).
+    """
+    privacy = {i for i in SHIPPED_IDS if i.startswith("privacy-")}
+    undecided = privacy - set(INDEX_EXEMPT_IDS) - set(INDEX_REQUIRED_PRIVACY_IDS)
+    assert undecided == set()
 
 
 def test_judge_rubrics_name_their_turn() -> None:
