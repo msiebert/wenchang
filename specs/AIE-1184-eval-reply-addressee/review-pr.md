@@ -170,7 +170,7 @@ everything else. Record the outcome here and in ADR 0031.
 - An Anthropic SDK driver would remove the subagent framing altogether.
   It is not scheduled.
 - Observed in the live run:
-  - (a) The eval agent signed a drafted note "Mark" in 2
+  - (a) The eval agent signed a drafted note with the operator's first name in 2
     `privacy-health-shared` trials. The eval identity is `u-ada`, so the
     name probably leaks from the environment details, i.e. the working dir.
   - (b) `index_read_first` passes when the agent makes no memory calls at

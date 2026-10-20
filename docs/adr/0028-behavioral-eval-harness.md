@@ -88,7 +88,10 @@ slow and nondeterministic.
        memory at all is left to the scenario's other assertions.
        Scenarios that need a lookup pair `index_read_first` with a
        `tool_called get_memory_index` check, one per session; only the
-       `privacy-*` refusals omit it (AIE-1197).
+       five refusal scenarios (`privacy-account-number`,
+       `privacy-insist-bank`, `privacy-minor`, `privacy-health-shared`,
+       `privacy-sensitive-private`) omit it, as an explicit set rather than
+       the `privacy-` prefix (AIE-1197).
    - **Scanned writes.** `no_content_matching` scans only `content`,
      `line`, `new_string`, `description`, `aliases`, `area`, and `name`,
      and only on `write_file`, `append_line`, and `replace_fact`. Version

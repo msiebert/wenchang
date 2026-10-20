@@ -32,23 +32,25 @@ operator's real name; tests use the fake identity Grace Hopper.
   `build_report` refresh and report fields. `make check` green.
 - [x] T005 [implementer] Add the five YAMLs, edit the two originals, and
   remove the `no-operator-name` assertion from all seven YAMLs
-  (US1.1-1.7) per plan.md. `make check` green.
+  (US1.1-1.7) per plan.md. After merging AIE-1197, the five YAMLs also carry
+  `index-called` and the index exemption is the explicit set of five refusal
+  scenarios, not the `privacy-` prefix. `make check` green.
 - [x] T006 [doc-updater] ADR 0033 (operator-identity check, cross-referencing
   ADR 0028 and 0031) and ARCHITECTURE.md `evals.graders` and `evals.report`
   bullets, for the same commit as the code.
-- [ ] T007 [orchestrator] Commit the identity check, docs and held-out
+- [x] T007 [orchestrator] Commit the identity check, docs and held-out
   evidence.
 
 ## Phase 2: Prompt (US2)
 
-- [ ] T008 [test-writer] In `tests/test_prompts_applying_memory.py`: US2.1
+- [x] T008 [test-writer] In `tests/test_prompts_applying_memory.py`: US2.1
   phrases and US2.2 forbidden terms. In `tests/test_evals_scenario.py`: US2.3
   (assembled prompt and agent file free of the fake identity) and US2.4
   (headers cite the new sentence).
-- [ ] T009 [implementer] Add the paragraph to `applying_memory.BODY`, update
+- [x] T009 [implementer] Add the paragraph to `applying_memory.BODY`, update
   the seven headers, run `uv run python -m evals render-agent`. `make check`
   green.
-- [ ] T010 [orchestrator] Commit the prompt change.
+- [x] T010 [orchestrator] Commit the prompt change.
 
 ## Phase 3: Verification, review and PR
 
@@ -57,10 +59,11 @@ operator's real name; tests use the fake identity Grace Hopper.
   exactly `privacy-health-shared` trials 1 and 5 and
   `privacy-sensitive-private` trial 6. Record counts and the baseline
   numbers and exceptions list for `aie1184-n6`, `aie1182-n6`, `aie1183-n6`
-  and `aie1185-r2-n6`.
-- [ ] T012 [orchestrator] Final one-off check, recorded in `review-pr.md` and
+  and `aie1185-r2-n6`. Re-verified after the code-review fixes on fresh
+  copies with the same counts.
+- [x] T012 [orchestrator] Final one-off check, recorded in `review-pr.md` and
   not a pytest test: no tracked file contains any resolved identity token.
-- [ ] T013 [doc-updater] Regenerate `review-pr.md`, scrubbed of any identity
+- [x] T013 [doc-updater] Regenerate `review-pr.md`, scrubbed of any identity
   token, with final text, held-out list, AC-to-test table, agent sha256
   (recheck against the sha in spec.md), historical counts, and the live gate.
 - [ ] T014 [reviewers] spec-reviewer, code reviewer, generality reviewer;
