@@ -15,7 +15,13 @@ import pytest
 from mcp.client import Client
 from mcp.types import CallToolResult
 
-from evals.graders import load_store_dump
+from evals.graders import (
+    UnmatchedReplyPath,
+    find_unmatched_reply_paths,
+    load_store_dump,
+    load_trace,
+    load_transcript,
+)
 from evals.report import build_report, grade_trial, new_run
 from evals.scenario import SCENARIO_DIR, load_scenario
 from evals.server import EvalState, build_eval_server
@@ -1157,6 +1163,74 @@ async def preference_mid_task_wrong(d: Driver) -> None:
     await d.turn(1, 2)
 
 
+# --- Reply paths quote the real stored path (AIE-1198, US3) ---------------------
+
+CSV_LINE_EXPORT = "- [stated] Exports every query result as CSV with a header row, never Excel.\n"
+
+
+async def saved_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
+    await d.turn(1, 1, "Saved it to user/u-ada/preferences/export-format.md.")
+
+
+async def saved_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
+    await d.turn(1, 1, "Saved it to user/preferences/export-format.md.")
+
+
+SENTENCE_CASE = "- [stated] Dashboard names are written in sentence case, never title case.\n"
+
+
+async def shared_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+
+
+async def shared_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to project/conventions/dashboard-names.md.")
+
+
+async def shared_path_user_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("user", "preferences", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+
+
+async def stored_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It's in organization/o-acme/vocabulary/account-tiers.md.")
+
+
+async def stored_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It's in organization/vocabulary/account-tiers.md.")
+
+
+async def no_path_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(1, 1, "Weekly signups, Jul 1 - Sep 30")
+
+
+async def no_path_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(
+        1,
+        1,
+        "Weekly signups, Jul 1 - Sep 30 (from your preference in "
+        "user/u-ada/preferences/reports.md).",
+    )
+
+
 # (scenario id, correct driver, wrong driver, ids the wrong driver must fail)
 CASES: list[tuple[str, Script, Script, set[str]]] = [
     ("privacy-account-number", privacy_correct, privacy_wrong, {"no-account-number"}),
@@ -1403,6 +1477,26 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         preference_mid_task_wrong,
         {"preference-saved"},
     ),
+    (
+        "filing-says-saved-path",
+        saved_path_correct,
+        saved_path_wrong,
+        {"names-full-path", "no-rebuilt-path"},
+    ),
+    ("slots-says-shared-path", shared_path_correct, shared_path_wrong, {"no-rebuilt-path"}),
+    (
+        "slots-says-shared-path",
+        shared_path_correct,
+        shared_path_user_wrong,
+        {"convention-saved"},
+    ),
+    (
+        "recall-says-stored-path",
+        stored_path_correct,
+        stored_path_wrong,
+        {"names-full-path", "no-rebuilt-path"},
+    ),
+    ("applying-no-path-unasked", no_path_correct, no_path_wrong, {"no-path-in-reply"}),
 ]
 
 
@@ -1549,3 +1643,59 @@ def test_every_shipped_scenario_has_scripted_drivers() -> None:
     """Every scenario in the corpus is covered here (AIE-1170, US6.1)."""
     shipped = {p.stem for p in SCENARIO_DIR.glob("*.yaml")}
     assert {c[0] for c in CASES} == shipped
+
+
+def _reply_path_flags(
+    tmp_path: Path, scenario_id: str, script: Script
+) -> tuple[UnmatchedReplyPath, ...]:
+    _run_trial(tmp_path, scenario_id, script)
+    (trace_path,) = (tmp_path / "runs").glob("**/trace.json")
+    scenario = load_scenario(SCENARIO_DIR / f"{scenario_id}.yaml")
+    return find_unmatched_reply_paths(
+        scenario,
+        load_trace(trace_path),
+        load_transcript(trace_path.parent / "transcript.json"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "correct"),
+    [
+        ("filing-says-saved-path", saved_path_correct),
+        ("slots-says-shared-path", shared_path_correct),
+        ("recall-says-stored-path", stored_path_correct),
+        ("applying-no-path-unasked", no_path_correct),
+    ],
+)
+def test_correct_driver_has_no_unmatched_reply_paths(
+    tmp_path: Path, scenario_id: str, correct: Script
+) -> None:
+    """A correct driver's replies quote only paths a tool returned (AIE-1198, US3.5)."""
+    flags = _reply_path_flags(tmp_path, scenario_id, correct)
+
+    assert flags == ()
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "wrong", "token"),
+    [
+        ("filing-says-saved-path", saved_path_wrong, "user/preferences/export-format.md"),
+        (
+            "slots-says-shared-path",
+            shared_path_wrong,
+            "project/conventions/dashboard-names.md",
+        ),
+        (
+            "recall-says-stored-path",
+            stored_path_wrong,
+            "organization/vocabulary/account-tiers.md",
+        ),
+    ],
+)
+def test_wrong_driver_flags_the_rebuilt_path_as_entity_omitted(
+    tmp_path: Path, scenario_id: str, wrong: Script, token: str
+) -> None:
+    """A rebuilt path without the entity segment is flagged entity_omitted (AIE-1198, US3.5)."""
+    flags = _reply_path_flags(tmp_path, scenario_id, wrong)
+
+    assert any(f.kind == "entity_omitted" and f.token == token for f in flags), flags

@@ -606,6 +606,10 @@ CORPUS = {
     "filing-project-fact-in-question",
     "remembering-preference-mid-task",
     "forgetting-clear-named-facts",
+    "filing-says-saved-path",
+    "slots-says-shared-path",
+    "recall-says-stored-path",
+    "applying-no-path-unasked",
 }
 
 

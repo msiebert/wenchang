@@ -1197,8 +1197,11 @@ imports it. The editable install makes it importable from any directory.
   ([ADR 0032](docs/adr/0032-transcript-graded-assertions-and-context-records.md)).
   A separate reply check scans the
   transcript for replies that refer to the user in the third person
-  ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). It never changes
-  an assertion result.
+  ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). A second reply
+  check, `find_unmatched_reply_paths`, flags scope-rooted paths in replies
+  that no tool result named up to that turn
+  ([ADR 0033](docs/adr/0033-reply-path-check.md)). Neither check changes an
+  assertion result.
 - **evals.server**: a stdio MCP server, `python -m evals.server`. It
   mounts the seven memory tools with `wenchang.mcp.register_memory_tools`
   over a resettable in-memory store, plus three harness tools:
@@ -1208,7 +1211,9 @@ imports it. The editable install makes it importable from any directory.
 - **evals.report** and `python -m evals`: plan a run, grade trials, and
   write the per-run report. `grade.json` and the report carry the reply
   check's flags, unchecked trials, and judge fails in flagged trials
-  separately from the pass counts.
+  separately from the pass counts. `grade.json` also records
+  `unmatched_reply_paths`, and the report adds reply-path counts, apart from
+  the pass counts ([ADR 0033](docs/adr/0033-reply-path-check.md)).
 
 The runner workflow is `.claude/commands/run-evals.md`. It runs in a
 session launched with `evals/mcp.json`. Live runs never run in

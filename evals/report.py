@@ -18,8 +18,10 @@ from typing import Any, Final, cast
 import evals.agent
 from evals.graders import (
     GradeInputError,
+    TraceCall,
     TranscriptTurn,
     find_third_person_replies,
+    find_unmatched_reply_paths,
     grade,
     load_store_dump,
     load_trace,
@@ -227,7 +229,7 @@ def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
     return context + "\n".join(lines)
 
 
-_REPLY_CHECK_KEYS: Final = ("third_person_replies", "transcript_error")
+_REPLY_CHECK_KEYS: Final = ("third_person_replies", "unmatched_reply_paths", "transcript_error")
 
 
 def uses_reply_kinds(scenario: Scenario) -> bool:
@@ -254,8 +256,11 @@ def _reply_check(
     scenario: Scenario,
     transcript: Sequence[TranscriptTurn],
     error: str | None,
+    trace: Sequence[TraceCall] | None,
 ) -> dict[str, Any]:
     """The reply check's grade.json fields; empty without a transcript.
+
+    Without a trace, unmatched_reply_paths is omitted.
 
     A malformed transcript is recorded, never raised, so it cannot block
     deterministic grading.
@@ -264,12 +269,18 @@ def _reply_check(
         return {"transcript_error": error}
     if not (trial_dir / "transcript.json").exists():
         return {}
-    return {
+    check: dict[str, Any] = {
         "third_person_replies": [
             {"session": f.session, "turn": f.turn, "phrase": f.phrase}
             for f in find_third_person_replies(scenario, transcript)
         ]
     }
+    if trace is not None:
+        check["unmatched_reply_paths"] = [
+            {"session": p.session, "turn": p.turn, "token": p.token, "kind": p.kind}
+            for p in find_unmatched_reply_paths(scenario, trace, transcript)
+        ]
+    return check
 
 
 def grade_trial(trial_dir: Path) -> dict[str, Any]:
@@ -288,7 +299,7 @@ def grade_trial(trial_dir: Path) -> dict[str, Any]:
             {"id": r.id, "kind": r.kind, "passed": r.passed, "detail": r.detail} for r in results
         ],
         "passed": all(r.passed for r in results),
-        **_reply_check(trial_dir, scenario, transcript, error),
+        **_reply_check(trial_dir, scenario, transcript, error, trace),
     }
     _write_json(trial_dir / "grade.json", graded)
     return graded
@@ -306,7 +317,11 @@ def _refresh_reply_check(trial_dir: Path, scenario: Scenario, graded: dict[str, 
                 graded.pop(key, None)
             _write_json(trial_dir / "grade.json", graded)
         return
-    fresh = _reply_check(trial_dir, scenario, *_load_transcript(trial_dir))
+    try:
+        trace: Sequence[TraceCall] | None = load_trace(trial_dir / "trace.json")
+    except (GradeInputError, ValueError, RecursionError, FileNotFoundError):
+        trace = None
+    fresh = _reply_check(trial_dir, scenario, *_load_transcript(trial_dir), trace)
     recorded = {key: graded[key] for key in _REPLY_CHECK_KEYS if key in graded}
     if recorded == fresh:
         return
@@ -384,6 +399,9 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
 _REPLY_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
     {"session": int, "turn": int, "phrase": str}
 )
+_REPLY_PATH_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
+    {"session": int, "turn": int, "token": str, "kind": str}
+)
 
 
 def _load_grade(path: Path) -> dict[str, Any]:
@@ -396,6 +414,12 @@ def _load_grade(path: Path) -> dict[str, Any]:
             raise GradeInputError(f"{path}: grade.json third_person_replies must be a list")
         for i, reply in enumerate(cast(list[object], replies)):
             _checked(path, reply, _REPLY_FIELDS, f"third_person_replies[{i}]")
+    if "unmatched_reply_paths" in graded:
+        paths: object = graded["unmatched_reply_paths"]
+        if not isinstance(paths, list):
+            raise GradeInputError(f"{path}: grade.json unmatched_reply_paths must be a list")
+        for i, flag in enumerate(cast(list[object], paths)):
+            _checked(path, flag, _REPLY_PATH_FIELDS, f"unmatched_reply_paths[{i}]")
     if "transcript_error" in graded and not isinstance(graded["transcript_error"], str):
         raise GradeInputError(f"{path}: grade.json transcript_error must be a string")
     return graded
@@ -409,7 +433,11 @@ def _grade_is_current(trial_dir: Path, scenario: Scenario) -> bool:
     if uses_reply_kinds(scenario):
         transcript = trial_dir / "transcript.json"
         graded = _read_json(grade_path)
-        has_check = isinstance(graded, dict) and any(k in graded for k in _REPLY_CHECK_KEYS)
+        # Keys on these fields only: a grade.json lacking unmatched_reply_paths stays
+        # current and gains the field on refresh instead of being regraded.
+        has_check = isinstance(graded, dict) and any(
+            k in graded for k in ("third_person_replies", "transcript_error")
+        )
         if transcript.exists() != has_check:
             return False
         dumps.append(transcript)
@@ -431,6 +459,8 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
         judged: list[dict[str, bool]] = []
         flagged: list[dict[str, object]] = []
         unchecked: list[int] = []
+        path_flagged: list[dict[str, object]] = []
+        path_unchecked: list[int] = []
         flagged_verdicts: list[dict[str, bool]] = []
         scenario: Scenario | None = None
         for k in range(1, trials + 1):
@@ -451,6 +481,11 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
                 unchecked.append(k)
             elif replies:
                 flagged.append({"trial": k, "replies": replies})
+            paths = cast(list[dict[str, object]] | None, current.get("unmatched_reply_paths"))
+            if paths is None:
+                path_unchecked.append(k)
+            elif paths:
+                path_flagged.append({"trial": k, "paths": paths})
             if (trial_dir / "judge.json").exists():
                 verdicts = _judge_verdicts(trial_dir, scenario)
                 if verdicts is None:
@@ -495,6 +530,8 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
                 "invalid_judge_trials": invalid_judge,
                 "third_person_trials": flagged,
                 "addressee_unchecked_trials": unchecked,
+                "reply_path_trials": path_flagged,
+                "reply_path_unchecked_trials": path_unchecked,
                 "judge_third_person_fails": [
                     {
                         "id": item_id,
@@ -513,12 +550,28 @@ def build_report(run_dir: Path) -> tuple[str, dict[str, Any]]:
             for s in scenario_reports
         ),
     }
+    path_totals = {
+        "flagged_trials": sum(
+            len(cast(list[object], s["reply_path_trials"])) for s in scenario_reports
+        ),
+        "checked_trials": sum(
+            cast(int, s["trials_run"]) - len(cast(list[object], s["reply_path_unchecked_trials"]))
+            for s in scenario_reports
+        ),
+        "entity_omitted_trials": sum(
+            1
+            for s in scenario_reports
+            for t in cast(list[dict[str, Any]], s["reply_path_trials"])
+            if any(p["kind"] == "entity_omitted" for p in t["paths"])
+        ),
+    }
     report: dict[str, Any] = {
         "run": run,
         "scenarios": scenario_reports,
         "third_person": totals,
+        "reply_paths": path_totals,
     }
-    markdown = _markdown(run, scenario_reports, totals)
+    markdown = _markdown(run, scenario_reports, totals, path_totals)
     (run_dir / "report.md").write_text(markdown)
     _write_json(run_dir / "report.json", report)
     return markdown, report
@@ -581,8 +634,24 @@ def _flagged_line(flagged: Sequence[dict[str, Any]]) -> str:
     return "Third-person replies: " + "; ".join(trials)
 
 
+def _paths_line(flagged: Sequence[dict[str, Any]]) -> str:
+    trials = [
+        f"trial {f['trial']} ("
+        + ", ".join(
+            f'session {p["session"]} turn {p["turn"]}: "{p["token"]}" [{p["kind"]}]'
+            for p in cast(list[dict[str, object]], f["paths"])
+        )
+        + ")"
+        for f in flagged
+    ]
+    return "Unmatched reply paths: " + "; ".join(trials)
+
+
 def _markdown(
-    run: dict[str, Any], scenarios: Sequence[dict[str, object]], totals: Mapping[str, int]
+    run: dict[str, Any],
+    scenarios: Sequence[dict[str, object]],
+    totals: Mapping[str, int],
+    path_totals: Mapping[str, int],
 ) -> str:
     lines = [
         f"# Eval report: {run['run_id']}",
@@ -604,6 +673,9 @@ def _markdown(
         "",
         f"Trials with a third-person reply: {totals['flagged_trials']} of "
         f"{totals['checked_trials']} checked.",
+        f"Trials with an unmatched reply path: {path_totals['flagged_trials']} of "
+        f"{path_totals['checked_trials']} checked "
+        f"({path_totals['entity_omitted_trials']} with an omitted entity segment).",
     ]
     for s in scenarios:
         lines += ["", f"## {s['id']}", ""]
@@ -616,9 +688,15 @@ def _markdown(
         flagged = cast(list[dict[str, Any]], s["third_person_trials"])
         if flagged:
             lines += ["", _flagged_line(flagged)]
+        path_flagged = cast(list[dict[str, Any]], s["reply_path_trials"])
+        if path_flagged:
+            lines += ["", _paths_line(path_flagged)]
         unchecked = cast(list[int], s["addressee_unchecked_trials"])
         if unchecked:
             lines += ["", f"Addressee not checked: {', '.join(map(str, unchecked))}"]
+        path_unchecked = cast(list[int], s["reply_path_unchecked_trials"])
+        if path_unchecked:
+            lines += ["", f"Reply paths not checked: {', '.join(map(str, path_unchecked))}"]
         judge = cast(list[dict[str, object]], s["judge"])
         fails = {
             cast(str, f["id"]): f["fails"]
