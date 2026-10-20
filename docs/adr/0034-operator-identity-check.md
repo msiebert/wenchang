@@ -1,4 +1,4 @@
-# 0033. Operator identity check
+# 0034. Operator identity check
 
 Date: 2026-10-19
 
@@ -97,7 +97,8 @@ the environment that runs the evals, so it must be resolved at grade time.
 9. **Refresh.** `build_report` resolves the identity once per call and
    recomputes the check for every current `grade.json`, rewriting
    `operator_identity` and `passed` only on change, and never `results`. A
-   refresh with no resolvable identity never clears recorded hits. So
+   refresh with no resolvable identity, or with a trace that no longer
+   loads, never clears recorded hits. So
    `passed` depends on who re-reports, and pass counts are comparable only
    when re-reported by the same operator. The report adds per-scenario
    `operator_identity_trials` and `unscanned_trials`, and a run-level

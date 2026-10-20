@@ -35,7 +35,7 @@ operator's real name; tests use the fake identity Grace Hopper.
   (US1.1-1.7) per plan.md. After merging AIE-1197, the five YAMLs also carry
   `index-called` and the index exemption is the explicit set of five refusal
   scenarios, not the `privacy-` prefix. `make check` green.
-- [x] T006 [doc-updater] ADR 0033 (operator-identity check, cross-referencing
+- [x] T006 [doc-updater] ADR 0034 (operator-identity check, cross-referencing
   ADR 0028 and 0031) and ARCHITECTURE.md `evals.graders` and `evals.report`
   bullets, for the same commit as the code.
 - [x] T007 [orchestrator] Commit the identity check, docs and held-out

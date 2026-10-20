@@ -1,0 +1,30 @@
+# Prompt: "Use a stored fact only if it changes the substance: what you
+# conclude, recommend, or ask." and "A detail that changes nothing reads as
+# surveillance rather than attentiveness."
+id: applying-no-path-unasked
+title: Applies a stored preference without volunteering where it is stored
+category: applying
+source: specs/AIE-1198-reply-paths-quote/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: reports
+    content: |
+      - [stated] Wants every chart titled with the date range it covers.
+    description: Report and chart preferences
+    aliases: [charts]
+sessions:
+  - turns:
+      - "I'm putting together a chart of weekly signups for last quarter. What title should I give it?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: reply_not_matching
+    id: no-path-in-reply
+    pattern: '(?<![\w.-])/?(?:user|project|organization|org)/[a-z0-9][\w-]*(?:/|\.md\b)'
+judge:
+  - id: applies-preference
+    rubric: The turn 1 reply suggests a chart title that states the date range the chart covers.

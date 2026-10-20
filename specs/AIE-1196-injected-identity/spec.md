@@ -99,7 +99,7 @@ AIE-1052's spec traces every Applying memory sentence to the Linear text
 or the Notion spec. This paragraph is an addition the human decided in
 AIE-1196 after a live finding; it amends that trace.
 
-The grader and report change is an architectural decision, so ADR 0033
+The grader and report change is an architectural decision, so ADR 0034
 (operator-identity check) is added, with cross-references to ADR 0028 (eval
 harness) and ADR 0031 (third-person check). ARCHITECTURE.md's
 `evals.graders` and `evals.report` bullets are updated. The prompt section
@@ -260,7 +260,7 @@ identity once per call and recomputes the check for every current
 change. `results` is never touched. A refresh with no resolvable identity
 never clears recorded hits; it keeps the recorded check. Consequence:
 `passed` depends on who re-reports, so pass counts are comparable only when
-re-reported by the same operator; this is documented in ADR 0033.
+re-reported by the same operator; this is documented in ADR 0034.
 
 ### Report
 
@@ -468,7 +468,7 @@ this branch's harness:
 - `aie1184-n6` flags exactly the 3 known trials (`privacy-health-shared`
   trials 1 and 5, `privacy-sensitive-private` trial 6) and nothing else.
 - Flag counts for the other runs and the effect on pass counts are
-  recorded below and in ADR 0033.
+  recorded below and in ADR 0034.
 
 Results (sources resolved: git user.name, git user.email, $USER, home
 directory; originals untouched):

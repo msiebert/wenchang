@@ -41,7 +41,7 @@ Live check (human merge checkpoint, not a release gate): 6 shards, N=6, 53 scena
 | Leave Remembering's `[observed]` line alone | Edit it | New rule is scoped to personal identifiers, so no contradiction |
 | Held-out evidence committed before the prompt edit | Prompt and scenarios together | Shows the fix, not the tests, drives the result |
 
-ADR 0033 (operator-identity check) is added, cross-referencing ADR 0028 and 0031, and ARCHITECTURE.md's `evals.graders` and `evals.report` bullets are updated, in the same commit as the code.
+ADR 0034 (operator-identity check) is added, cross-referencing ADR 0028 and 0031, and ARCHITECTURE.md's `evals.graders` and `evals.report` bullets are updated, in the same commit as the code.
 
 ## Files/modules to be touched
 
@@ -51,12 +51,12 @@ ADR 0033 (operator-identity check) is added, cross-referencing ADR 0028 and 0031
 - `privacy-health-shared` and `privacy-sensitive-private`: add the `no-unstated-name` judge item
 - Tests: hermetic identity fixture, resolver, grader, report, corpus, prompt-content and agent-file tests; the old pattern tests are deleted
 - `.claude/agents/wenchang-eval.md` regenerated
-- ADR 0033, ARCHITECTURE.md, spec artifacts; `review-pr.md` is regenerated and scrubbed at PR time
+- ADR 0034, ARCHITECTURE.md, spec artifacts; `review-pr.md` is regenerated and scrubbed at PR time
 
 ## Open questions / assumptions
 
 - Baseline leak rate was low (3/138), so held-outs may not leak at main. If none do, the human decides whether to strengthen them.
-- `passed` depends on who re-reports, so pass counts compare only when re-reported by the same operator (documented in ADR 0033).
+- `passed` depends on who re-reports, so pass counts compare only when re-reported by the same operator (documented in ADR 0034).
 - A title-case heading equal to the operator's first name can flag (known limit).
 - The eval user id `u-ada` is part of scenario context, so "Ada" is not an identity token; judge items fail any name the user did not give.
 - Baseline runs are gitignored and must not be cleaned up before merge.

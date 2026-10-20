@@ -5,7 +5,7 @@ Date: 2026-10-16
 ## Status
 
 Accepted. The preamble part passed the measurement under Consequences.
-[ADR 0033](0033-operator-identity-check.md) adds a second reply check that,
+[ADR 0034](0034-operator-identity-check.md) adds an operator-identity check that,
 unlike this one, counts toward `passed`.
 
 ## Context

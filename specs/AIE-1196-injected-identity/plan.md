@@ -159,7 +159,7 @@ corpus-wide leak test (spec US1.9).
   `tests/test_prompts_applying_memory.py`, the grader, report and resolver
   tests, and the hermetic-identity fixture — test-writer. Removes
   `OPERATOR_PATTERN` and the pattern tests from `tests/test_evals_scenario.py`.
-- `specs/AIE-1196-injected-identity/`, `docs/adr/0033-*.md` (operator-identity
+- `specs/AIE-1196-injected-identity/`, `docs/adr/0034-*.md` (operator-identity
   check, cross-referencing ADR 0028 and 0031), ARCHITECTURE.md
   (`evals.graders` and `evals.report` bullets) — doc-updater.
 
@@ -179,7 +179,7 @@ unchanged.
 
 1. Spec artifacts.
 2. Identity-check tests, then implementation, held-out tests and scenarios
-   (US1), with ADR 0033 and ARCHITECTURE.md in the same commit as the code.
+   (US1), with ADR 0034 and ARCHITECTURE.md in the same commit as the code.
    `make check` green.
 3. Prompt tests, prompt paragraph, headers, re-rendered agent (US2).
    `make check` green.
