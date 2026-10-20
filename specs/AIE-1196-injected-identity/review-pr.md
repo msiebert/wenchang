@@ -151,8 +151,8 @@ This is the human's merge checkpoint and not a release gate (ADR 0028). The agen
 
 **Identity of the run.**
 
-- Code head to run at: `46f7680` (the merge of main after AIE-1198). Later commits are docs-only. Record the run's `git_commit` as whatever HEAD is when run, and require `git diff 46f7680 HEAD -- src evals .claude` to be empty.
-- Agent file sha256 `b7bb5956322c3c5170b8fbf8f540f186400074e97e7eb6c29e66007eceb38f9b` (re-rendered after merging AIE-1198's `overview` sentence). Each `run.json` must match it and the HEAD above.
+- Code head to run at: `cc07a15` (the merge of main after AIE-1208). Later commits are docs-only. Record the run's `git_commit` as whatever HEAD is when run, and require `git diff cc07a15 HEAD -- src evals .claude` to be empty.
+- Agent file sha256 `b7bb5956322c3c5170b8fbf8f540f186400074e97e7eb6c29e66007eceb38f9b` (re-rendered after merging AIE-1208; unchanged since AIE-1198's `overview` sentence). Each `run.json` must match it and the HEAD above.
 - Corpus: 57 scenarios (52 on main plus this branch's five held-outs). N=6 gives 342 trials.
 - The operator who runs the gate must be the operator who re-reports the baselines (pass counts depend on who re-reports).
 
