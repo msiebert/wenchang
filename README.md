@@ -6,6 +6,9 @@ virtual filesystem of markdown files stored in GCS, exposed as tools
 `delete_file`, `get_memory_index`) with optimistic concurrency, scope-based
 authorization, and a transport-agnostic tool layer.
 
+Website: <https://msiebert.github.io/wenchang/>. For agents:
+<https://msiebert.github.io/wenchang/llms.txt>.
+
 ## Quickstart
 
 ```
@@ -184,6 +187,11 @@ CLAUDE.md, auto memory, or, with this launch, the git status snapshot.
 Those details and Claude Code's agent loop still differ from an adopter's
 host. Treat results as signal for prompt iteration, not as release gates. See
 [ADR 0028](docs/adr/0028-behavioral-eval-harness.md).
+
+## Website
+
+The project website in `site/` is generated from `site-src/` by
+`uv run scripts/build_site.py`. Edit the sources, regenerate, and commit both.
 
 ## Docs
 
