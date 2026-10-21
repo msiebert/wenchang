@@ -8,7 +8,7 @@ before any grader or report code. Every task runs the same loop:
 1. test-writer writes failing tests, with "AIE-1185, USx.y" in each
    docstring, and confirms they fail for the right reason.
 2. implementer makes them pass.
-3. Run `make -C /Users/marksiebert/p/github/wenchang-AIE-1185 check` and
+3. Run `make -C <repos>/wenchang-AIE-1185 check` and
    get it green.
 
 ## T1: Reply assertion kinds

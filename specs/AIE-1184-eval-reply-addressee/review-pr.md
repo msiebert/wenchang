@@ -87,7 +87,7 @@ For every trial, `results` and `passed` matched the originals:
   others 3/3).
 - Baseline B = 16, so the gate threshold is floor(16/2) = 8.
 
-Keep the AIE-1170 worktree, `/Users/marksiebert/p/github/wenchang-AIE-1170`,
+Keep the AIE-1170 worktree, `<repos>/wenchang-AIE-1170`,
 until this PR merges. Its `evals/runs/` holds the baseline and is
 gitignored.
 
@@ -170,7 +170,7 @@ everything else. Record the outcome here and in ADR 0031.
 - An Anthropic SDK driver would remove the subagent framing altogether.
   It is not scheduled.
 - Observed in the live run:
-  - (a) The eval agent signed a drafted note "Mark" in 2
+  - (a) The eval agent signed a drafted note with the operator's first name in 2
     `privacy-health-shared` trials. The eval identity is `u-ada`, so the
     name probably leaks from the environment details, i.e. the working dir.
   - (b) `index_read_first` passes when the agent makes no memory calls at

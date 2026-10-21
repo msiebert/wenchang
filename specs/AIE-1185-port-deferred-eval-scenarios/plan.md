@@ -14,9 +14,9 @@
   transcript argument that the reply kinds need.
 - **Rebase.**
   - Branch `AIE-1185-deferred-eval-scenarios` starts from `main` at
-    abe49c9, in the worktree `/Users/marksiebert/p/github/wenchang-AIE-1185`.
+    abe49c9, in the worktree `<repos>/wenchang-AIE-1185`.
   - When the coordinator says AIE-1184 has committed, the branch is rebased
-    with `git -C /Users/marksiebert/p/github/wenchang-AIE-1185 rebase
+    with `git -C <repos>/wenchang-AIE-1185 rebase
     AIE-1184-eval-reply-addressee`, or onto `main` if AIE-1184 has merged.
 - **Before the rebase**, this branch may commit only:
   - spec artifacts;
@@ -269,7 +269,7 @@ Every new test docstring names "AIE-1185, USx.y".
 
 ### Offline regression check (US5.7, not in `make check`)
 
-1. Copy `/Users/marksiebert/p/github/wenchang-AIE-1170/evals/runs/20261014-225317-sonnet`
+1. Copy `<repos>/wenchang-AIE-1170/evals/runs/20261014-225317-sonnet`
    and `.../20261014-231845-sonnet-merged` under
    `<worktree>/evals/runs/regression-*`.
 2. In each copied `trial.json`, rewrite `scenario_path` to the same file

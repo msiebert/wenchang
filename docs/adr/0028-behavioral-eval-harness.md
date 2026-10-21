@@ -88,7 +88,10 @@ slow and nondeterministic.
        memory at all is left to the scenario's other assertions.
        Scenarios that need a lookup pair `index_read_first` with a
        `tool_called get_memory_index` check, one per session; only the
-       `privacy-*` refusals omit it (AIE-1197).
+       five refusal scenarios (`privacy-account-number`,
+       `privacy-insist-bank`, `privacy-minor`, `privacy-health-shared`,
+       `privacy-sensitive-private`) omit it, as an explicit set rather than
+       the `privacy-` prefix (AIE-1197).
    - **Scanned writes.** `no_content_matching` scans only `content`,
      `line`, `new_string`, `description`, `aliases`, `area`, and `name`,
      and only on `write_file`, `append_line`, and `replace_fact`. Version
@@ -287,7 +290,8 @@ slow and nondeterministic.
   passed. Judge items on reply wording carry this noise. ADR 0031 adds a
   deterministic reply check that flags such replies separately (16 of the
   138 baseline trials) and tightens the preamble, subject to a measured
-  gate.
+  gate. ADR 0034 adds a corpus-wide operator-identity check that counts
+  toward `passed`.
   **Amended (2026-10-20) by ADR 0035.** Most of those third-person replies
   were auto-mode handback summaries.
 - Strict `index_read_first` grades execution order as the server saw it.

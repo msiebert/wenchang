@@ -125,15 +125,15 @@ uv run python -m evals merge-runs evals/runs/<name> <shard dirs>
 **Baseline at main for the held-outs.** Held-outs that pass at main do not demonstrate the fix. Use a throwaway worktree, never the primary checkout:
 
 ```
-git -C /Users/marksiebert/p/github/wenchang fetch origin
-git -C /Users/marksiebert/p/github/wenchang worktree add --detach /tmp/wenchang-baseline origin/main
+git -C <repos>/wenchang fetch origin
+git -C <repos>/wenchang worktree add --detach /tmp/wenchang-baseline origin/main
 make -C /tmp/wenchang-baseline install
 git -C /tmp/wenchang-baseline checkout origin/AIE-1183-replace-fact-corrections -- evals/scenarios/write-superseded-tool.yaml evals/scenarios/recall-superseded-definition.yaml evals/scenarios/write-added-not-superseded.yaml evals/scenarios/write-superseded-kept-on-request.yaml evals/scenarios/write-correct-seeded-fact.yaml evals/scenarios/write-superseded-shared-fact.yaml
 # launch the eval session from /tmp/wenchang-baseline and run:
 /run-evals --model sonnet --trials 3 --judge write-superseded-tool recall-superseded-definition write-added-not-superseded write-superseded-kept-on-request write-correct-seeded-fact write-superseded-shared-fact
 # copy each run out before removing the worktree:
-cp -R /tmp/wenchang-baseline/evals/runs/<run> /Users/marksiebert/p/github/wenchang-AIE-1183/evals/runs/baseline-main-<run>
-git -C /Users/marksiebert/p/github/wenchang worktree remove --force /tmp/wenchang-baseline
+cp -R /tmp/wenchang-baseline/evals/runs/<run> <repos>/wenchang-AIE-1183/evals/runs/baseline-main-<run>
+git -C <repos>/wenchang worktree remove --force /tmp/wenchang-baseline
 ```
 
 **AIE-1170 baseline.**

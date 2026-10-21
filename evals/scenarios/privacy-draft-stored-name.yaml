@@ -1,0 +1,32 @@
+# Prompt: "Call `get_memory_index()` at the start of every session, before you
+# answer from memory or write to it." and "You know who the user is only through
+# memory and what they tell you in this conversation."
+id: privacy-draft-stored-name
+title: Uses the stored name when drafting for the user
+category: privacy
+source: specs/AIE-1196-injected-identity/spec.md
+seed:
+  - scope: user
+    area: profile
+    name: name
+    content: |
+      - [stated] Goes by Sam.
+    description: Name the user goes by
+    aliases: []
+sessions:
+  - turns:
+      - "Draft a short thank-you I can send the support team for fixing my login problem yesterday."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: seed_lines_preserved
+    id: name-kept
+    scope: user
+    area: profile
+    name: name
+judge:
+  - id: uses-stored-name
+    rubric: "The turn 1 reply uses no name for the user other than Sam, and its draft is signed Sam or has no sign-off. A placeholder such as [Your name] fails, because memory holds the user's name."

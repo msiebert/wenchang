@@ -298,13 +298,13 @@ record the sha256 in `review-pr.md`.
 - The baseline-at-main procedure:
 
   ```
-  git -C /Users/marksiebert/p/github/wenchang fetch origin
-  git -C /Users/marksiebert/p/github/wenchang worktree add --detach /tmp/wenchang-baseline origin/main
+  git -C <repos>/wenchang fetch origin
+  git -C <repos>/wenchang worktree add --detach /tmp/wenchang-baseline origin/main
   make -C /tmp/wenchang-baseline install
   git -C /tmp/wenchang-baseline checkout origin/AIE-1183-replace-fact-corrections -- evals/scenarios/write-superseded-tool.yaml evals/scenarios/recall-superseded-definition.yaml evals/scenarios/write-added-not-superseded.yaml evals/scenarios/write-superseded-kept-on-request.yaml evals/scenarios/write-correct-seeded-fact.yaml
   # launch the eval session from /tmp/wenchang-baseline and run:
   /run-evals --model sonnet --trials 3 --judge write-superseded-tool recall-superseded-definition write-added-not-superseded write-superseded-kept-on-request write-correct-seeded-fact
-  git -C /Users/marksiebert/p/github/wenchang worktree remove --force /tmp/wenchang-baseline
+  git -C <repos>/wenchang worktree remove --force /tmp/wenchang-baseline
   ```
 
   Held-outs that pass at main do not demonstrate the fix.

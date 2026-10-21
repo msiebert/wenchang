@@ -92,5 +92,5 @@ slots for US4, including the main baseline step (spec 4.6).
 
 ## Gate
 
-`make -C /Users/marksiebert/p/github/wenchang-AIE-1182 check` green. The PR
+`make -C <repos>/wenchang-AIE-1182 check` green. The PR
 stays gated on the human live run (US4).

@@ -158,7 +158,7 @@ Terms are as in AIE-1170. In this spec:
 | 5.4 | judge verdicts in the live run | reported | a judge failure caused by a third-person reply ("I asked the user whether...") is labelled harness noise, as ADR 0028 records, and is not counted as a prompt finding |
 | 5.5 | `review-pr.md` | read | for `applying-relevant-only` and `applying-no-trait`, it reports how many of the 3 trials called `read_file` on the seeded style file or work-patterns file. Both scenarios also assert that read deterministically (`read-seed`), so a trial that never consulted memory fails |
 | 5.6 | `review-pr.md` | read | it records a verbatim spot-check: for at least one trial per shard, the reply the runner recorded in `transcript.json` matches the subagent's actual reply |
-| 5.7 | copies of the AIE-1170 N=3 baseline runs (`/Users/marksiebert/p/github/wenchang-AIE-1170/evals/runs/20261014-225317-sonnet` and `20261014-231845-sonnet-merged`) | regraded offline with this branch's `report`, after each `trial.json` path is pointed at this worktree's scenarios and the old `grade.json` files are removed | every one of the 23 existing scenarios has the same per-assertion pass counts as in the original reports. `review-pr.md` records the result |
+| 5.7 | copies of the AIE-1170 N=3 baseline runs (`<repos>/wenchang-AIE-1170/evals/runs/20261014-225317-sonnet` and `20261014-231845-sonnet-merged`) | regraded offline with this branch's `report`, after each `trial.json` path is pointed at this worktree's scenarios and the old `grade.json` files are removed | every one of the 23 existing scenarios has the same per-assertion pass counts as in the original reports. `review-pr.md` records the result |
 
 ### US6 — Live finding on `forgetting-ambiguous-that` and its prompt fix
 
