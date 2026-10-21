@@ -1,0 +1,1497 @@
+# wenchang: full documentation
+
+> Persistent, self-organizing memory for AI agents. This file concatenates the five pages of https://msiebert.github.io/wenchang/ (overview, quickstart, usage, customize, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.
+
+
+<!-- page: index.md -->
+
+# wenchang
+
+> Persistent, self-organizing memory for AI agents: a virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools.
+
+Pages: [Quickstart](quickstart.md) · [Usage walkthroughs](usage.md) · [Customize](customize.md) · [Reference](reference.md) · [Source](https://github.com/msiebert/wenchang) · [llms.txt](llms.txt)
+
+wenchang is a Python library that gives an AI agent a small virtual filesystem of markdown files, stored in Google Cloud Storage (GCS) and exposed as seven tools. The agent decides what is worth remembering and where to file it. The library supplies the mechanism: storage, optimistic concurrency, scope-based authorization hooks, and the instruction text that teaches the agent how to use memory.
+
+**Who it is for:** teams building AI agents (chat assistants, coding agents, analytics copilots) that should remember users, projects, and organizations across conversations.
+
+Install (not published on PyPI; install from git):
+
+```
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+```
+
+## Instructions for AI agents
+
+If you are an AI agent asked to install and wire wenchang for your user, follow these steps. Every name below is verified against the source at version 0.1.0.
+
+1. **Check the environment.** wenchang needs Python 3.12 or newer and an MCP client that can launch a stdio server (Claude Code, for example).
+2. **Install from git** into the environment the server will run in: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`. The `mcp` extra pulls in `mcp>=2.2,<3`. There is no documented PyPI release. There is no CLI, console script, or environment variable to configure.
+3. **Write a server script.** wenchang ships no ready-made server binary. Create `server.py` from the [quickstart](quickstart.md): build a `PromptSlots`, a `MemoryStore` over a `Storage`, an identity resolver, and a `ScopePolicy`, then call `wenchang.mcp.build_server(...)` and `server.run("stdio")`.
+4. **Pick storage.** `InMemoryStorage` is for trials only: a stdio server is a fresh process per client session, so everything is lost on exit. For persistence use `GcsStorage(bucket)` from `wenchang.storage.gcs` with an existing bucket and Application Default Credentials, or a local fake-gcs-server for development.
+5. **Ask the user about scopes.** Which scopes exist (for example `user`, `project`, `organization`), which are shared, and which roles may write each. Encode the answer in `PromptSlots.scope_guidance`, the identity grants, and `ScopePolicy`. See [customize](customize.md).
+6. **Register the server** with the user's MCP client, for example `claude mcp add memory -- /path/to/python /path/to/server.py`, or an entry under `mcpServers` in `.mcp.json`.
+7. **Verify.** The server must list exactly seven tools: `get_memory_index`, `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`, `delete_file` (each prefixed `{tool_prefix}_` if you set `tool_prefix`). The memory prompt is the server's `instructions` and also the resource `wenchang://memory-prompt`.
+8. **Use memory correctly.** Call `get_memory_index` first in every session. Address files by `(scope, area, name)`. Pass the `version` you read as `expected_version` on every write (`null` creates). Never write to the `system/` area. Never store financial account numbers, health diagnoses, or anything indicating the user is a minor.
+
+Machine-readable versions of this site: [llms.txt](llms.txt), [llms-full.txt](llms-full.txt) (every page in one file), and a Markdown twin of every page (`index.md`, `quickstart.md`, `usage.md`, `customize.md`, `reference.md`).
+
+## How it works
+
+```
+Agent --MCP: 7 tools + memory prompt--> tool layer (wenchang.mcp, wenchang.tools)
+      --TransportClient--> MemoryStore --Storage protocol--> GcsStorage --> GCS bucket
+
+GCS bucket: {scope}/{entity_id}/{area}/{name}.md
+  user/u-ada/...                 private to one person
+  project/p-checkout/...         shared by a project
+  organization/o-acme/...        written by admins
+```
+
+The agent never sees storage. It sees seven tools and a prompt.
+
+1. **The agent** calls a tool such as `append_line(scope, area, name, line, expected_version)`. It addresses a file by scope, area, and name.
+2. **The tool layer** (`wenchang.tools`, mounted on MCP by `wenchang.mcp`) resolves the caller's identity on every call, fills in the caller's own entity ID for the scope, refuses writes to `system/` and to scopes the policy gates by role, and forwards the call to a `TransportClient`.
+3. **`MemoryStore`** (reached through `InProcessClient` today) enforces the per-file size limit, merges metadata, and makes every write conditional on the version the agent read.
+4. **`Storage`** is a small get/put/list protocol. `GcsStorage` implements it on one GCS bucket: markdown body as the object, metadata as custom object metadata, GCS generation as the version.
+
+Files live at `{scope}/{entity_id}/{area}/{name}.md`. A scope is a visibility tier you define (the reference adopter uses `user`, `project`, and `organization`); the entity ID says whose copy of that scope it is.
+
+## See it work
+
+An illustrative exchange. Tool names, arguments, and result shapes are real; the agent's wording is representative, not recorded. The full tool-call detail is on the [usage page](usage.md).
+
+**Session 1**
+
+- **You:** I prefer bar charts for my weekly reports.
+- **Agent** calls `get_memory_index()`. The index is empty.
+- **Agent** calls `write_file(scope="user", area="preferences", name="charts", content="- [stated] Prefers bar charts for weekly reports.\n", description="Chart preferences for reports", aliases=["weekly report charts"], expected_version=null)`.
+- **Agent:** Got it. I'll remember bar charts for your weekly reports.
+
+**Session 2, days later, a brand-new conversation**
+
+- **You:** Which chart type should I use for this week's report?
+- **Agent** calls `get_memory_index()`. One entry: `user/u-ada/preferences/charts.md`, "Chart preferences for reports".
+- **Agent** calls `read_file(scope="user", area="preferences", name="charts")` and reads `- [stated] Prefers bar charts for weekly reports.`
+- **Agent:** Use a bar chart. You told me you prefer them for your weekly reports.
+
+## Key properties
+
+- **Agent-organized.** No schema is imposed. The agent files each fact in the file about its subject, creates files and areas as needed, and navigates by each file's `description` and `aliases`. There is no content search.
+- **Optimistic concurrency.** Every write names the `expected_version` it read; `null` means create-if-absent. A stale version returns a `VersionConflictError` that carries the current content and version, so the agent merges and retries. `append_line` and `replace_fact` change one fact without rewriting the file.
+- **Scope authorization.** Each call resolves an `Identity` (a grant of entity ID and role per scope) through your `IdentityResolver`. A `ScopePolicy` names which roles may write which scopes. Paths are always built from the caller's own grants.
+- **Curated, read-only `system/` area.** Every scope has a `system/` area that people maintain and the agent can read but never change. Corrections go in a normal area and win over the curated fact.
+- **Privacy rules in the prompt.** The shipped prompt tells the agent to refuse to store financial account numbers, health diagnoses, or anything indicating the user is a minor, in any scope. This is prompt guidance, not a content filter: no tool checks for sensitive content.
+- **Transport-agnostic.** The tool layer talks to a `TransportClient` protocol. `InProcessClient` calls a `MemoryStore` directly; a remote transport is planned.
+- **Observable.** `on_call` receives a `ToolCallRecord` after every MCP tool call.
+
+## Status
+
+Version 0.1.0, MIT licensed, Python 3.12+. wenchang is a library: you supply the identity resolver, scope policy, and prompt slots, and write a small server script. The behavioral evals in the repository are signal for prompt iteration, not release gates. See the [reference](reference.md#limitations) for known limits.
+
+## Next
+
+- [Quickstart](quickstart.md): install, build a server, connect Claude Code.
+- [Usage](usage.md): five walkthroughs with real tool calls and file contents.
+- [Customize](customize.md): scopes, prompt slots, limits, storage, telemetry.
+- [Reference](reference.md): every tool, the file format, and the error taxonomy.
+
+---
+
+HTML version: <https://msiebert.github.io/wenchang/>
+
+
+<!-- page: quickstart.md -->
+
+# Quickstart
+
+Build a memory server for an MCP client in about ten minutes. You will install wenchang, write a short `server.py`, connect it to Claude Code (or any stdio MCP client), and talk to your agent.
+
+wenchang is a library, not a service: there is no CLI, console script, or environment variable. You assemble the server in a few lines of Python.
+
+## Prerequisites
+
+- Python 3.12 or newer.
+- An MCP client that can launch a stdio server, such as Claude Code.
+- For persistent storage: a Google Cloud Storage bucket and Application Default Credentials. For local development: Docker, to run a fake GCS server.
+
+## 1. Install
+
+wenchang is installed from git; no PyPI release is documented. The `mcp` extra adds the MCP server adapter (`mcp>=2.2,<3`).
+
+```
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+```
+
+With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+
+The GCS client (`google-cloud-storage`) is a core dependency, so it is installed either way.
+
+## 2. A minimal server
+
+This `server.py` keeps memory in process (`InMemoryStorage`) and gives every caller the same fixed identity (`SandboxResolver`). It is the quickest way to see the tools working.
+
+```python
+from mcp.server.mcpserver import Context
+
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.mcp import build_server
+from wenchang.prompts import PromptSlots
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.transport import InProcessClient
+
+slots = PromptSlots(
+    purpose=(
+        "You have persistent memory of your work with this user: reference it and "
+        "save to it with these tools."
+    ),
+    scope_guidance=(
+        "There are two scopes. `user` is private to the person you are talking with. "
+        "`project` is shared with everyone on the project. Writes to `user` need no ask; "
+        "ask before saving a new fact to `project`, and name the scope."
+    ),
+    seed_areas=(
+        "- user: preferences, workflows, people\n"
+        "- project: conventions, glossary\n\n"
+        "Every scope also has a `system/` area."
+    ),
+)
+
+# One fixed identity for every caller: fine for a local sandbox.
+identity = Identity(
+    grants={
+        "user": ScopeGrant("u-me", "owner"),
+        "project": ScopeGrant("p-demo", "member"),
+    }
+)
+
+
+def credentials_from_context(ctx: Context) -> None:
+    return None  # SandboxResolver ignores credentials.
+
+
+server = build_server(
+    slots=slots,
+    client=InProcessClient(MemoryStore(InMemoryStorage(), scope_priority=("user", "project"))),
+    resolver=SandboxResolver(identity),
+    policy=ScopePolicy({}),  # no role-gated scopes
+    credentials_from_context=credentials_from_context,
+    source="quickstart",
+    product="Demo",
+)
+
+if __name__ == "__main__":
+    server.run("stdio")
+```
+
+What each piece does:
+
+- **`PromptSlots`** is your deployment's part of the memory prompt: `purpose`, `scope_guidance`, and `seed_areas` are required text; `systems_of_record` is optional. The library supplies the rest of the prompt.
+- **`Identity`** maps each scope name to a `ScopeGrant(entity_id, role)`. The entity ID becomes the second path segment: this identity's user files live under `user/u-me/`.
+- **`MemoryStore`** holds the rules (size limits, versioning, index ordering) over a `Storage`. `scope_priority` decides which scopes the size-capped startup index keeps first.
+- **`InProcessClient`** is the `TransportClient` that calls the store directly.
+- **`ScopePolicy({})`** restricts no scope. Reads are never role-restricted.
+- **`source`** is stamped into each file's `sources` metadata. **`product`** names your product in each tool description.
+- **`credentials_from_context`** reads the caller's credentials from each MCP request. With `SandboxResolver` they are ignored; see [customize](customize.md#identity) for real resolvers.
+
+Check that it builds without starting it:
+
+```
+python -c "import server; print(server.server)"
+```
+
+> **In-memory storage does not persist.** A stdio server runs as a fresh process for each client session, so everything it stored is gone when the session ends. Use GCS for anything you want to keep.
+
+## 3. Persist in GCS
+
+Swap `InMemoryStorage` for `GcsStorage`. It takes a `google.cloud.storage.Bucket`; the bucket must already exist.
+
+```python
+from google.cloud import storage
+from mcp.server.mcpserver import Context
+
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.mcp import build_server
+from wenchang.prompts import PromptSlots
+from wenchang.scope import ScopePolicy
+from wenchang.storage.gcs import GcsStorage
+from wenchang.transport import InProcessClient
+
+slots = PromptSlots(
+    purpose=(
+        "You have persistent memory of your work with this user: reference it and "
+        "save to it with these tools."
+    ),
+    scope_guidance=(
+        "There are two scopes. `user` is private to the person you are talking with. "
+        "`project` is shared with everyone on the project. Writes to `user` need no ask; "
+        "ask before saving a new fact to `project`, and name the scope."
+    ),
+    seed_areas=(
+        "- user: preferences, workflows, people\n"
+        "- project: conventions, glossary\n\n"
+        "Every scope also has a `system/` area."
+    ),
+)
+
+identity = Identity(
+    grants={
+        "user": ScopeGrant("u-me", "owner"),
+        "project": ScopeGrant("p-demo", "member"),
+    }
+)
+
+# Uses Application Default Credentials; the bucket must already exist.
+bucket = storage.Client(project="my-gcp-project").bucket("my-wenchang-memory")
+store = MemoryStore(GcsStorage(bucket), scope_priority=("user", "project"))
+
+
+def credentials_from_context(ctx: Context) -> None:
+    return None
+
+
+server = build_server(
+    slots=slots,
+    client=InProcessClient(store),
+    resolver=SandboxResolver(identity),
+    policy=ScopePolicy({}),
+    credentials_from_context=credentials_from_context,
+    source="quickstart",
+    product="Demo",
+)
+
+if __name__ == "__main__":
+    server.run("stdio")
+```
+
+How it stores data: one GCS object per file at `{scope}/{entity_id}/{area}/{name}.md`, the markdown body as the object data, and `description`, `aliases`, `sources`, and `last-updated` as custom object metadata. The version token is the object's GCS generation.
+
+Application Default Credentials come from `gcloud auth application-default login` locally, or from the attached service account on Google Cloud. The identity needs permission to read, create, overwrite, delete, and list objects in the bucket (for example `roles/storage.objectAdmin` on it). Replace `my-gcp-project` and `my-wenchang-memory` with your own.
+
+### Local development with fake-gcs-server
+
+Run the emulator that the repository's integration tests use:
+
+```
+docker run -d --rm --name wenchang-fake-gcs -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443
+```
+
+(From a clone of the repository, `make emulator-up` runs the same command.) Then replace the `bucket = ...` lines of the GCS server with an anonymous client pointed at the emulator, creating the bucket on first use:
+
+```python
+from google.auth.credentials import AnonymousCredentials
+from google.cloud import storage
+
+host = "http://localhost:4443"
+client = storage.Client(
+    project="test",
+    credentials=AnonymousCredentials(),
+    client_options={"api_endpoint": host},
+)
+bucket = client.bucket("wenchang-dev")
+if not bucket.exists():
+    bucket = client.create_bucket("wenchang-dev")
+```
+
+Keep the `store = MemoryStore(GcsStorage(bucket), ...)` line and the rest of the file unchanged. Stop the emulator with `docker stop wenchang-fake-gcs`; its data is ephemeral.
+
+## 4. Connect your MCP client
+
+Register the script as a stdio server. Use the Python interpreter that has wenchang installed, and absolute paths.
+
+For Claude Code, from the command line:
+
+```
+claude mcp add memory -- /path/to/venv/bin/python /path/to/server.py
+```
+
+This registers the server for you only (the default `local` scope). Add `--scope project` to write it to the project's `.mcp.json` for everyone, or `--scope user` for all your projects. Or write a project-level `.mcp.json` by hand:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "/path/to/venv/bin/python",
+      "args": ["/path/to/server.py"]
+    }
+  }
+}
+```
+
+If you use uv, `"command": "uv"` with `"args": ["run", "--directory", "/path/to/project", "python", "server.py"]` works the same way; the repository's own `evals/mcp.json` does this for its eval server.
+
+Any other MCP client that can launch a stdio command takes the same two values: a command and its arguments. Over HTTP, see [Customize: identity](customize.md#identity).
+
+The server advertises the seven tools and delivers the memory prompt two ways: as the server's `instructions`, and as the resource `wenchang://memory-prompt` for clients that drop `instructions`. In Claude Code the tools appear as `mcp__memory__get_memory_index`, `mcp__memory__read_file`, and so on; `/mcp` shows the server's status.
+
+## 5. Talk to your agent
+
+Start a session in your client and tell the agent something worth keeping:
+
+> I prefer bar charts for my weekly reports.
+
+The agent should call `get_memory_index` first, then file the preference, for example with `write_file` under `user/preferences/`. Start a new session and ask:
+
+> Which chart type should I use for this week's report?
+
+It should read the index, open the file, and answer from it. With GCS storage you can also browse the bucket: you will see `user/u-me/preferences/....md` objects whose custom metadata carries the description and aliases.
+
+What you will not see: wenchang does not search file contents. The agent finds files through each file's `description` and `aliases`, which it writes along with each fact.
+
+## Next
+
+- [Usage](usage.md): five walkthroughs with the exact tool calls.
+- [Customize](customize.md): real identities, scope policies, prompt slots, limits, telemetry.
+- [Reference](reference.md): every tool and error.
+
+---
+
+HTML version: <https://msiebert.github.io/wenchang/quickstart.html>
+
+
+<!-- page: usage.md -->
+
+# What usage looks like
+
+Five walkthroughs, one per behavior the memory prompt is built to produce. Each shows what the user says, the tool calls the agent makes, and the memory file before and after.
+
+They follow five of the repository's behavioral eval scenarios (`evals/scenarios/*.yaml`). The eval scenarios are scripts the repo's eval harness replays against a real agent; they are signal for prompt iteration, not release gates, and this site makes no claim about pass rates.
+
+## How to read these examples
+
+- **Configuration.** The examples use the reference adopter in [`evals/reference_adopter.py`](https://github.com/msiebert/wenchang/blob/main/evals/reference_adopter.py): scopes `user`, `project`, and `organization`; the member identity `u-ada` in project `p-checkout` of organization `o-acme`; product name "Mixpanel"; agent source `reference-agent`. That is why paths read `user/u-ada/...`.
+- **Real:** every tool call's argument names and every result payload are real output of the library, produced by running the calls below against an in-memory store with a fixed clock. Version tokens (`"1"`, `"2"`) are opaque; `InMemoryStorage` counts up, and GCS returns large generation numbers.
+- **Illustrative:** which calls the agent chooses, the exact text it passes (`line`, `description`, `aliases`), and its replies. The library fixes none of that; the prompt guides it. Treat those parts as representative.
+- **File blocks.** A memory file is a markdown body plus metadata that is stored beside it (GCS custom metadata), not inside it. The blocks below show both together for readability; that layout is not a storage format.
+
+## 1. Recall across sessions
+
+*Scenario `recall-across-sessions`.* A preference stated in one session is used in the next.
+
+**Session 1**
+
+> **User:** I prefer bar charts for my weekly reports.
+
+The agent loads the index first, as the prompt instructs. Nothing is stored yet.
+
+```json
+// get_memory_index()
+{
+  "entries": [],
+  "capped": []
+}
+```
+
+User-scope writes need no ask, so it files the fact right away. `expected_version` is `null` because the file does not exist.
+
+```json
+// write_file
+{
+  "scope": "user", "area": "preferences", "name": "charts",
+  "content": "- [stated] Prefers bar charts for weekly reports.\n",
+  "description": "Chart preferences for reports",
+  "aliases": ["weekly report charts"],
+  "expected_version": null
+}
+// result
+{
+  "path": "user/u-ada/preferences/charts.md",
+  "scope": "user",
+  "area": "preferences",
+  "name": "charts",
+  "content": "- [stated] Prefers bar charts for weekly reports.\n",
+  "version": "1",
+  "description": "Chart preferences for reports",
+  "aliases": ["weekly report charts"],
+  "sources": ["reference-agent"],
+  "last_updated": "2026-01-01T00:00:00Z"
+}
+```
+
+**Memory file, before:** none.
+
+**Memory file, after:**
+
+```
+user/u-ada/preferences/charts.md
+description: Chart preferences for reports
+aliases: weekly report charts
+sources: reference-agent
+last_updated: 2026-01-01T00:00:00Z
+---
+- [stated] Prefers bar charts for weekly reports.
+```
+
+> **Agent** (illustrative): Got it. I'll use bar charts for your weekly reports.
+
+**Session 2, a new conversation**
+
+> **User:** Which chart type should I use for this week's report?
+
+```json
+// get_memory_index()
+{
+  "entries": [
+    {
+      "path": "user/u-ada/preferences/charts.md",
+      "scope": "user",
+      "area": "preferences",
+      "name": "charts",
+      "version": "1",
+      "description": "Chart preferences for reports",
+      "aliases": ["weekly report charts"],
+      "sources": ["reference-agent"],
+      "last_updated": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "capped": []
+}
+```
+
+The description matches the question, so the agent opens the file.
+
+```json
+// read_file
+{ "scope": "user", "area": "preferences", "name": "charts" }
+// result: the same file object as the write result above, content included
+```
+
+> **Agent** (illustrative): Use a bar chart. You told me you prefer them for your weekly reports.
+
+## 2. Filing into an existing file by alias
+
+*Scenario `filing-alias-append`.* The agent finds the file for a subject through its aliases and appends, instead of creating a duplicate.
+
+The store already holds `user/u-ada/workflows/board-deck.md`.
+
+**Memory file, before:**
+
+```
+user/u-ada/workflows/board-deck.md
+description: Quarterly board deck the user presents
+aliases: board deck, q4-deck
+sources: seed-job
+last_updated: 2026-01-01T00:00:00Z
+---
+- [stated] Presents the board deck at the end of each quarter.
+```
+
+> **User:** From now on the board deck always goes out the Friday before the board meeting.
+
+```json
+// get_memory_index()  (abridged to the matching entry)
+{
+  "entries": [
+    {
+      "path": "user/u-ada/workflows/board-deck.md",
+      "scope": "user", "area": "workflows", "name": "board-deck",
+      "version": "1",
+      "description": "Quarterly board deck the user presents",
+      "aliases": ["board deck", "q4-deck"],
+      "sources": ["seed-job"],
+      "last_updated": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "capped": []
+}
+```
+
+The alias `board deck` matches the user's words, so the agent appends one fact line to that file, passing the version it read.
+
+```json
+// append_line
+{
+  "scope": "user", "area": "workflows", "name": "board-deck",
+  "line": "- [stated] The board deck always goes out the Friday before the board meeting.",
+  "expected_version": "1"
+}
+// result
+{
+  "path": "user/u-ada/workflows/board-deck.md",
+  "scope": "user",
+  "area": "workflows",
+  "name": "board-deck",
+  "content": "- [stated] Presents the board deck at the end of each quarter.\n- [stated] The board deck always goes out the Friday before the board meeting.\n",
+  "version": "2",
+  "description": "Quarterly board deck the user presents",
+  "aliases": ["board deck", "q4-deck"],
+  "sources": ["reference-agent", "seed-job"],
+  "last_updated": "2026-01-01T00:00:01Z"
+}
+```
+
+No `write_file`, no new file. `sources` gained `reference-agent` (sources only ever grow) and `last_updated` moved.
+
+**Memory file, after:**
+
+```
+user/u-ada/workflows/board-deck.md
+description: Quarterly board deck the user presents
+aliases: board deck, q4-deck
+sources: reference-agent, seed-job
+last_updated: 2026-01-01T00:00:01Z
+---
+- [stated] Presents the board deck at the end of each quarter.
+- [stated] The board deck always goes out the Friday before the board meeting.
+```
+
+**If another writer got there first.** Appending with the stale version `"1"` after the file moved to `"2"` returns a recoverable error that carries the current content and version. The agent merges and retries without troubling the user:
+
+```json
+{
+  "error": "VersionConflictError",
+  "category": "recoverable",
+  "message": "The file at user/u-ada/workflows/board-deck.md changed since it was read; the current content and version are attached; merge your change into the current content and retry with the current version. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
+  "path": "user/u-ada/workflows/board-deck.md",
+  "content": "- [stated] Presents the board deck at the end of each quarter.\n- [stated] The board deck always goes out the Friday before the board meeting.\n",
+  "version": "2"
+}
+```
+
+## 3. Forgetting one fact
+
+*Scenario `forgetting-one-fact`.* The agent drops a single line and leaves the rest of the file intact.
+
+**Memory file, before:**
+
+```
+user/u-ada/preferences/editor.md
+description: Code editor preferences
+aliases: editor, ide
+sources: seed-job
+last_updated: 2026-01-01T00:00:00Z
+---
+- [stated] Prefers tabs over spaces.
+- [stated] Uses a dark editor theme.
+- [stated] Wraps lines at 100 characters.
+```
+
+> **User:** Forget that I prefer tabs.
+
+After `get_memory_index()` shows `user/u-ada/preferences/editor.md` (version `"1"`), the agent calls `replace_fact` with an empty `new_string` and the whole line, line break included, as `old_string`, so no blank line is left behind.
+
+```json
+// replace_fact
+{
+  "scope": "user", "area": "preferences", "name": "editor",
+  "old_string": "- [stated] Prefers tabs over spaces.\n",
+  "new_string": "",
+  "expected_version": "1"
+}
+// result
+{
+  "path": "user/u-ada/preferences/editor.md",
+  "scope": "user",
+  "area": "preferences",
+  "name": "editor",
+  "content": "- [stated] Uses a dark editor theme.\n- [stated] Wraps lines at 100 characters.\n",
+  "version": "2",
+  "description": "Code editor preferences",
+  "aliases": ["editor", "ide"],
+  "sources": ["reference-agent", "seed-job"],
+  "last_updated": "2026-01-01T00:00:01Z"
+}
+```
+
+**Memory file, after:**
+
+```
+user/u-ada/preferences/editor.md
+description: Code editor preferences
+aliases: editor, ide
+sources: reference-agent, seed-job
+last_updated: 2026-01-01T00:00:01Z
+---
+- [stated] Uses a dark editor theme.
+- [stated] Wraps lines at 100 characters.
+```
+
+The file stays because other facts remain. Had the tabs line been the file's only fact, the agent would call `delete_file` instead, and the prompt asks it to check with the user first if it is unclear which they mean.
+
+If `old_string` does not match exactly once, `replace_fact` does not guess. It returns the current content so the agent can quote a unique span:
+
+```json
+{
+  "error": "ReplaceFactMatchError",
+  "category": "recoverable",
+  "message": "old_string matched 0 spans in user/u-ada/preferences/editor.md; widen or correct old_string using the attached current content so it matches. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
+  "path": "user/u-ada/preferences/editor.md",
+  "content": "- [stated] Uses tabs.\n",
+  "version": "1",
+  "match_count": 0
+}
+```
+
+(That payload is from a different one-line file, which is why the content differs.)
+
+## 4. A claim that conflicts with a curated fact
+
+*Scenario `curated-shared-conflict`.* The user says something that contradicts curated, read-only content in a shared scope. The agent surfaces the conflict and asks before writing anything.
+
+**Memory file, before** (curated; the agent can read it and can never change it):
+
+```
+project/p-checkout/system/signup-tracking.md
+description: Curated notes on how signups are tracked
+aliases: signup
+sources: seed-job
+last_updated: 2026-01-01T00:00:00Z
+---
+- [system] Signup fires when the user submits the registration form.
+```
+
+> **User:** For us, Signup means the user has verified their email, not just submitted the form.
+
+The agent loads the index, finds the `signup` alias in the `system/` area, and reads the file. It makes no write yet.
+
+```json
+// read_file
+{ "scope": "project", "area": "system", "name": "signup-tracking" }
+// result
+{
+  "path": "project/p-checkout/system/signup-tracking.md",
+  "scope": "project",
+  "area": "system",
+  "name": "signup-tracking",
+  "content": "- [system] Signup fires when the user submits the registration form.\n",
+  "version": "1",
+  "description": "Curated notes on how signups are tracked",
+  "aliases": ["signup"],
+  "sources": ["seed-job"],
+  "last_updated": "2026-01-01T00:00:00Z"
+}
+```
+
+> **Agent** (illustrative): The project's curated notes say Signup fires when the registration form is submitted, which conflicts with email verification. Do you want me to record your definition for the project, alongside the curated note?
+
+Two rules produce that reply: a new fact that contradicts a shared-scope fact is shown and questioned, and a write to a shared scope is announced and confirmed first.
+
+If the agent did try to change the curated file, the tool layer would refuse permanently, whatever the prompt said:
+
+```json
+// write_file(scope="project", area="system", name="signup-tracking", ...)
+{
+  "error": "RestrictedScopeError",
+  "category": "permanent",
+  "message": "project/p-checkout/system/signup-tracking.md is in scope project; the system/ area of scope project is read-only (curated content). Do not retry: retrying will not succeed.",
+  "path": "project/p-checkout/system/signup-tracking.md",
+  "reason": "system_read_only",
+  "scope": "project"
+}
+```
+
+**If the user confirms**, the correction is recorded as a new fact in a normal area of the same scope, and the agent says where it saved it. Because it lives outside `system/`, it survives refreshes of the curated content. (Illustrative choice of area and name.)
+
+```json
+// write_file
+{
+  "scope": "project", "area": "metrics", "name": "signup",
+  "content": "- [stated] Signup means the user has verified their email, not just submitted the registration form.\n",
+  "description": "Project definition of Signup",
+  "aliases": ["signup"],
+  "expected_version": null
+}
+// result
+{
+  "path": "project/p-checkout/metrics/signup.md",
+  "scope": "project",
+  "area": "metrics",
+  "name": "signup",
+  "content": "- [stated] Signup means the user has verified their email, not just submitted the registration form.\n",
+  "version": "2",
+  "description": "Project definition of Signup",
+  "aliases": ["signup"],
+  "sources": ["reference-agent"],
+  "last_updated": "2026-01-01T00:00:01Z"
+}
+```
+
+**Memory after:** `system/signup-tracking.md` unchanged; new file `project/p-checkout/metrics/signup.md`. When a correction and a curated fact conflict, the prompt tells the agent to answer from the correction.
+
+## 5. Refusing to store an account number
+
+*Scenario `privacy-account-number`.* The prompt's "What never to store" section overrides usefulness: financial account numbers, health diagnoses, and anything indicating the user is a minor are never written, in any scope, even when the user asks.
+
+> **User:** My checking account number is 1234-5678, remember it for autopay questions.
+
+The agent loads the index and stops there.
+
+```json
+// get_memory_index()
+{
+  "entries": [],
+  "capped": []
+}
+```
+
+No write tool is called.
+
+> **Agent** (illustrative): I can help with autopay questions, but I won't keep account numbers in memory, so you'll need to give it to me again when it matters.
+
+**Memory file, before and after:** none; nothing changed.
+
+This protection is the prompt, not a filter. wenchang's tools do not inspect content, so a successful write never means the content was safe to keep. That is why this behavior is one of the things the eval harness checks (it greps what was stored for the number) rather than something the library enforces.
+
+## Try it yourself
+
+- Run these against your own server: [quickstart](quickstart.md).
+- Change the scopes, areas, and rules the agent is told about: [customize](customize.md).
+- Every tool, argument, and error in full: [reference](reference.md).
+
+---
+
+HTML version: <https://msiebert.github.io/wenchang/usage.html>
+
+
+<!-- page: customize.md -->
+
+# Customize
+
+wenchang owns the generic memory prompt, the tools, and the storage rules. You supply what is specific to your deployment: who the caller is, which scopes exist and who may write them, the text that tells the agent about them, and where bytes live.
+
+For a complete, realistic configuration, read the reference adopter, [`evals/reference_adopter.py`](https://github.com/msiebert/wenchang/blob/main/evals/reference_adopter.py). It defines three scopes (`user`, `project`, `organization`), prompt slots, a write policy, four identities, and seed content, and imports only public wenchang modules. The examples below are based on it and have been run.
+
+## Scopes and identity
+
+A **scope** is a visibility tier you define, such as `user`, `project`, or `organization`. Scope names are plain path segments; wenchang has no built-in scopes. Within a scope, an **entity ID** says whose copy it is: `user/u-ada/...` and `user/u-grace/...` are different users' private memory.
+
+### Identity, ScopeGrant
+
+`wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Both strings must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`), and the role must be non-empty. Roles are your own vocabulary (`owner`, `member`, `admin`). An identity can reach only the scopes it holds grants for, and only its own entity within each.
+
+- `identity.scope_map`: scope name to entity ID, as a new dict.
+- `identity.entity_id(scope)` and `identity.role(scope)`: raise `KeyError` if not granted.
+
+### IdentityResolver
+
+`IdentityResolver[C]` is a protocol with one method: `resolve(credentials: C) -> Identity | ResolutionFailure`. It turns whatever your `credentials_from_context` returns into an `Identity`. Rules:
+
+- It must not raise. Report bad or unverifiable credentials as `ResolutionFailure(detail)`. The `detail` is shown to the agent, so it must never contain credentials.
+- Identical credentials must give an equal result within a session.
+- It runs on every tool call. Cache inside it if resolution is expensive.
+
+If a resolver raises or returns something else, the call fails with a permanent `ResolverFailureError` that reports only the exception type, never its message.
+
+`SandboxResolver(identity)` returns one fixed identity for any credentials. Use it for sandboxes and tests.
+
+### ScopePolicy
+
+`wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. The policy restricts writes only: reads are never role-restricted. A role outside the set gets a permanent `RestrictedScopeError` with reason `role_required` and the permitted roles in `required_roles`. The `system/` area is read-only in every scope regardless of policy.
+
+```python
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from wenchang.identity import Identity, ResolutionFailure, ScopeGrant, resolve_identity
+from wenchang.scope import ScopePolicy
+
+
+@dataclass(frozen=True)
+class Session:
+    user_id: str
+    project_id: str
+    org_id: str
+    org_role: str  # "member", "admin", or "owner"
+
+
+class TokenResolver:
+    """Maps a bearer token to an Identity. Must not raise."""
+
+    def __init__(self, sessions: Mapping[str, Session]) -> None:
+        self._sessions = sessions
+
+    def resolve(self, credentials: str | None) -> Identity | ResolutionFailure:
+        session = self._sessions.get(credentials or "")
+        if session is None:
+            return ResolutionFailure("Unknown or missing credential.")
+        return Identity(
+            grants={
+                "user": ScopeGrant(session.user_id, "owner"),
+                "project": ScopeGrant(session.project_id, "member"),
+                "organization": ScopeGrant(session.org_id, session.org_role),
+            }
+        )
+
+
+# Only admins and owners may write the organization scope; user and project are open.
+policy = ScopePolicy({"organization": frozenset({"admin", "owner"})})
+
+resolver = TokenResolver({"tok-ada": Session("u-ada", "p-checkout", "o-acme", "member")})
+identity = resolve_identity(resolver, "tok-ada")
+print(identity.scope_map)  # {'user': 'u-ada', 'project': 'p-checkout', 'organization': 'o-acme'}
+print(policy.permitted_roles("organization"), policy.permitted_roles("user"))
+```
+
+### Credentials over HTTP
+
+`credentials_from_context(ctx)` is a plain (non-async) function that returns the caller's raw credentials from the MCP request. Over HTTP transports `ctx.headers` carries the request headers; on stdio it is `None`, so a stdio server reads its credential from process configuration instead (for example an environment variable that your own script reads). Headers are client-supplied: return the raw credential and let the resolver verify it. If `credentials_from_context` raises, the call fails with a permanent "memory unavailable" error, and only the exception type is logged.
+
+```python
+from mcp.server.mcpserver import Context
+
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, ResolutionFailure, ScopeGrant
+from wenchang.mcp import build_server
+from wenchang.prompts import PromptSlots
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.transport import InProcessClient
+
+
+class BearerResolver:
+    """Verifies a bearer token and returns the caller's grants. Must not raise."""
+
+    def resolve(self, credentials: str | None) -> Identity | ResolutionFailure:
+        if credentials != "Bearer secret-token":  # replace with real verification
+            return ResolutionFailure("Missing or invalid bearer token.")
+        return Identity(grants={"user": ScopeGrant("u-ada", "owner")})
+
+
+def credentials_from_context(ctx: Context) -> str | None:
+    # Headers are client-supplied: return the raw credential and let the resolver verify it.
+    return (ctx.headers or {}).get("authorization")
+
+
+server = build_server(
+    slots=PromptSlots(
+        purpose="You have persistent memory of your work with this user.",
+        scope_guidance=(
+            "There is one scope, user, and it is private to the person you are talking with."
+        ),
+        seed_areas="- user: preferences, workflows\n\nEvery scope also has a `system/` area.",
+    ),
+    client=InProcessClient(MemoryStore(InMemoryStorage())),
+    resolver=BearerResolver(),
+    policy=ScopePolicy({}),
+    credentials_from_context=credentials_from_context,
+    source="my-service",
+)
+
+if __name__ == "__main__":
+    server.run("streamable-http")
+```
+
+This snippet builds the server; it was not run against a live HTTP client.
+
+## Prompt slots
+
+`wenchang.prompts.PromptSlots` holds the adopter-specific text inserted into the generic prompt. All fields are strings, stored stripped, and must not be empty or whitespace-only.
+
+| Field | Required | What to put there |
+| --- | --- | --- |
+| `purpose` | yes | One or two sentences naming the product and when to use memory. Opens the first section, "Memory". |
+| `scope_guidance` | yes | Which scopes exist, which are shared and which private, who may write each, and any ask-before-write, contradiction, containment, or scope-test rules, with examples. |
+| `seed_areas` | yes | Starting area names per scope as lowercase slugs, and which scopes have a `system/` area. |
+| `systems_of_record` | no (default `None`) | Which systems hold canonical information and how to refer to their objects. `None` omits the whole section. |
+
+The generic sections refer only to "shared scope", "private scope", and "the `system/` area", so `scope_guidance` must say which of your scopes are shared and which are private. Slots state deployment facts only; the generic sections already say that areas are extensible, what `system/` means, and that systems of record are never copied into memory.
+
+`build_memory_prompt(slots)` returns markdown with `##` headings and no H1, so a host can nest it in its own system prompt. `SECTION_ORDER` lists the section ids in assembly order; sections with an empty body are skipped.
+
+| Section id (`SECTION_ORDER`) | Heading in the prompt |
+| --- | --- |
+| `overview` | Memory (your `purpose`, then the generic overview) |
+| `scope_guidance` | Scopes (your text) |
+| `seed_areas` | Seed areas (your text) |
+| `systems_of_record` | Systems of record (generic principle, then your text; omitted when `None`) |
+| `applying_memory` | Applying memory |
+| `remembering` | Deciding what to remember |
+| `privacy` | What never to store |
+| `filing` | Filing |
+| `write_mechanics` | Choosing a write tool |
+| `curated_content` | Curated content |
+| `forgetting` | Forgetting |
+
+```python
+from wenchang.prompts import SECTION_ORDER, PromptSlots, build_memory_prompt
+
+slots = PromptSlots(
+    purpose=(
+        "You have persistent memory of your work in Acme Analytics: reference it and save to it "
+        "with these tools whenever you work with Acme."
+    ),
+    scope_guidance=(
+        "There are two scopes: user and project.\n\n"
+        "- user is private: it belongs to the person you are talking with.\n"
+        "- project is shared with every member of the current project; any member may write to "
+        "it.\n\n"
+        "Before saving a new fact to project, ask the user and name the scope. If a new fact "
+        "contradicts one stored in project, show the stored fact, say what conflicts, and ask "
+        "which to keep."
+    ),
+    seed_areas=(
+        "- user: preferences, workflows, people\n"
+        "- project: metrics, conventions, glossary\n\n"
+        "Every scope also has a `system/` area."
+    ),
+    # Optional. None omits the whole section.
+    systems_of_record=(
+        "- Dashboards are objects with IDs; refer to one by name and ID, and store what it is "
+        "used for and what people have said about it."
+    ),
+)
+
+print(SECTION_ORDER)
+prompt = build_memory_prompt(slots)
+print([line for line in prompt.splitlines() if line.startswith("## ")])
+```
+
+Scope priority is not a slot: it is `MemoryStore(scope_priority=...)`, and it orders only the capped startup index.
+
+## Product, tool prefix, and source
+
+These three arguments (to `build_server`, `register_memory_tools`, and `bind_tools`) name your deployment:
+
+- **`product`** (optional): names your product in the first line of each tool description, so each tool says whose memory it is. With `product="Mixpanel"`, `append_line` begins "Add one fact line to the end of an existing Mixpanel memory file."; without it, descriptions are the tools' docstrings. It must be one non-empty line.
+- **`tool_prefix`** (optional, MCP only): registers the tools as `{tool_prefix}_get_memory_index`, `{tool_prefix}_read_file`, and so on. It must be 1 to 64 characters of letters, digits, `_`, or `-`, starting and ending with a letter or digit. Useful when an existing server already has tools of those names or hosts several memories.
+- **`source`** (required, non-empty): the surface name stamped into each written file's `sources` metadata, so you can tell which product surface wrote what.
+
+## Store limits
+
+`wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=())`:
+
+| Argument | Default | Effect |
+| --- | --- | --- |
+| `max_file_bytes` | `16384` | UTF-8 size ceiling for one file's content. A larger write raises `OversizeWriteError` with the size and the limit; the prompt tells the agent to split into narrower files. |
+| `index_max_bytes` | `65536` | Byte budget for the startup index (each entry counts its path, metadata, and version). Entries beyond it are reported under `capped` by area prefix, to be paged with `list_prefix`. |
+| `list_page_size` | `100` | Entries per `list_prefix` page. |
+| `scope_priority` | `()` | Scopes in the order the capped index keeps them. Unlisted scopes rank after listed ones; with none configured, every scope ranks equally. `system/` areas always come first. |
+| `clock` | UTC now | Returns timezone-aware datetimes; stamps `last_updated`. Pass a deterministic clock in tests. |
+
+`max_file_bytes`, `list_page_size`, and `index_max_bytes` must be positive. `scope_priority` entries must be distinct valid path segments.
+
+```python
+from datetime import UTC, datetime
+
+from wenchang.core import MemoryStore
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.transport import InProcessClient
+
+store = MemoryStore(
+    InMemoryStorage(),
+    max_file_bytes=8 * 1024,  # default 16384: larger writes raise OversizeWriteError
+    index_max_bytes=32 * 1024,  # default 65536: the startup index is capped at this size
+    list_page_size=50,  # default 100: entries per list_prefix page
+    scope_priority=("user", "project", "organization"),  # which scopes the capped index keeps first
+    clock=lambda: datetime.now(UTC),  # must return timezone-aware datetimes
+)
+client = InProcessClient(store)
+print(store.index_max_bytes, store.scope_priority)
+```
+
+## Storage backends
+
+`wenchang.storage.Storage` is the only way the rest of wenchang touches bytes. It is a structural protocol over objects with a flat string key, bytes, a flat string metadata map, and an opaque version token:
+
+| Method | Contract |
+| --- | --- |
+| `get(key)` | The object at exactly `key`, or `None`. |
+| `put(key, data, metadata)` | Unconditional atomic replace; returns a new version token. |
+| `put_if_version(key, data, metadata, expected)` | Replace only if the current version equals `expected`; `expected=None` means create, and must not exist. Otherwise raises `PreconditionFailedError` and changes nothing. |
+| `delete_if_version(key, expected)` | Delete only at `expected`; otherwise `PreconditionFailedError`. |
+| `list_page(prefix, start_after, limit)` | Up to `limit` objects whose key starts with `prefix`, ascending by key, never reading bodies. |
+
+Backends may raise `BackendUnavailableError` for timeouts and outages.
+
+- **`GcsStorage(bucket)`** in `wenchang.storage.gcs` is the production backend. It takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. See the [quickstart](quickstart.md#gcs).
+- **`InMemoryStorage()`** in `wenchang.storage.memory` is a thread-safe in-process fake. Its tokens are a shared counter, like generations. For tests and trials.
+
+## Transport
+
+The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations (`read_file`, `write_file`, `append_line`, `replace_fact`, `list_prefix`, `delete_file`, `get_memory_index`). Implementations must be behaviorally indistinguishable: the same results and the same exception types and payloads, with a failure of the transport itself surfacing as `BackendUnavailableError`.
+
+`InProcessClient(store)` calls a `MemoryStore` directly, with no network hop. It is the only client shipped; a remote transport is planned. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.
+
+## Embed in an existing MCP server
+
+`build_server` creates a new `MCPServer`. To add memory to a server you already run, with your own auth, middleware, and tools, use `register_memory_tools`. It adds the seven tools and the `wenchang://memory-prompt` resource, and raises before registering anything if an argument is invalid or a tool name or the resource URI is already registered.
+
+Pass the same text as the server's `instructions` that you pass as `prompt`: `memory_instructions(slots)` returns it. If the server's instructions do not contain the prompt, a warning is logged.
+
+```python
+import logging
+
+from mcp.server.mcpserver import Context, MCPServer
+
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.mcp import ToolCallRecord, memory_instructions, register_memory_tools
+from wenchang.prompts import PromptSlots
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.transport import InProcessClient
+
+log = logging.getLogger("memory.calls")
+
+slots = PromptSlots(
+    purpose="You have persistent memory of your work with this user.",
+    scope_guidance=(
+        "There is one scope, user, and it is private to the person you are talking with."
+    ),
+    seed_areas="- user: preferences, workflows\n\nEvery scope also has a `system/` area.",
+)
+identity = Identity(grants={"user": ScopeGrant("u-me", "owner")})
+
+
+def credentials_from_context(ctx: Context) -> str | None:
+    # Over HTTP, return the raw credential and let your resolver verify it.
+    # ctx.headers is None on stdio.
+    return (ctx.headers or {}).get("authorization")
+
+
+def on_call(record: ToolCallRecord) -> None:
+    # Runs on worker threads after every call; keep it fast and thread-safe.
+    log.info("%s error=%s %.3fs", record.tool, record.is_error, record.duration_s)
+
+
+prompt = memory_instructions(slots)
+
+# Your existing server, with your own tools and middleware.
+server = MCPServer("my-host", instructions=prompt)
+
+register_memory_tools(
+    server,
+    prompt=prompt,
+    client=InProcessClient(MemoryStore(InMemoryStorage())),
+    resolver=SandboxResolver(identity),
+    policy=ScopePolicy({}),
+    credentials_from_context=credentials_from_context,
+    source="my-host",
+    product="Acme",
+    tool_prefix="acme",  # tools are registered as acme_read_file, acme_write_file, ...
+    on_call=on_call,
+)
+```
+
+## Telemetry
+
+`on_call`, if given, receives a `wenchang.mcp.ToolCallRecord` after every memory tool call:
+
+| Field | Meaning |
+| --- | --- |
+| `tool` | Registered tool name, prefix included. |
+| `arguments` | The arguments the wrapper received (read-only mapping). |
+| `result` | A copy of the payload sent to the client (read-only mapping). |
+| `is_error` | Whether the payload is a rendered error. |
+| `request_id` | The MCP request's ID, for correlating records that arrive in completion order. |
+| `duration_s` | Wall time of the wrapper, on a monotonic clock. |
+
+The callback runs on worker threads, so it must be a plain function (not async), fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain the agent's arguments and results, which include memory content: treat them as sensitive.
+
+## Using the tools without MCP
+
+`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)` resolves the identity and returns a `MemoryTools` for one session. `tools.tools()` is the seven bound methods by name; `tools.descriptions()` is the description for each, with the product named in the first line. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` (in `wenchang.tools`) produce the JSON-safe dicts the MCP adapter returns.
+
+```python
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.tools import bind_tools
+from wenchang.transport import InProcessClient
+
+client = InProcessClient(MemoryStore(InMemoryStorage()))
+resolver = SandboxResolver(Identity(grants={"user": ScopeGrant("u-me", "owner")}))
+
+# One MemoryTools per session; resolving the identity happens here.
+tools = bind_tools(client, resolver, None, ScopePolicy({}), source="my-agent", product="Acme")
+
+descriptions = tools.descriptions()  # tool name -> description, product named in the first line
+for name, fn in tools.tools().items():  # the seven tools, as bound methods
+    print(name, fn.__name__, "-", descriptions[name].splitlines()[0])
+
+print(tools.get_memory_index())
+```
+
+## Conformance suites
+
+`pip install "wenchang[testing]"` (adds `pytest`) provides two pytest mixins in `wenchang.testing` for code you write:
+
+- **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
+- **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values.
+
+Name your subclasses with a `Test` prefix. Passing every test defines a conforming implementation. This example passes against the shipped `InProcessClient`:
+
+```python
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, IdentityResolver, ResolutionFailure, ScopeGrant
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.testing import ResolverConformance, TransportConformance
+from wenchang.transport import InProcessClient, TransportClient
+
+POLICY = ScopePolicy({"org": frozenset({"admin", "owner"})})
+
+
+class MyResolver:
+    def resolve(self, credentials: str) -> Identity | ResolutionFailure:
+        if credentials != "good-token":
+            return ResolutionFailure("unknown token")
+        return Identity(
+            grants={"user": ScopeGrant("u-1", "owner"), "org": ScopeGrant("o-9", "admin")}
+        )
+
+
+class TestMyResolver(ResolverConformance[str]):
+    @pytest.fixture
+    def resolver(self) -> IdentityResolver[str]:
+        return MyResolver()
+
+    @pytest.fixture
+    def valid_credentials(self) -> str:
+        return "good-token"
+
+    @pytest.fixture
+    def invalid_credentials(self) -> str:
+        return "bad-token"
+
+    @pytest.fixture
+    def policy(self) -> ScopePolicy:
+        return POLICY
+
+    @pytest.fixture
+    def expected_scopes(self) -> frozenset[str]:
+        return frozenset({"user", "org"})
+
+    @pytest.fixture
+    def known_roles(self) -> frozenset[str]:
+        return frozenset({"owner", "admin", "member"})
+
+
+class _Ticking:
+    """A clock whose every call is strictly later than the last."""
+
+    def __init__(self) -> None:
+        self._n = 0
+
+    def __call__(self) -> datetime:
+        self._n += 1
+        return datetime(2024, 1, 1, tzinfo=UTC) + timedelta(microseconds=self._n)
+
+
+class TestMyClient(TransportConformance):
+    @pytest.fixture
+    def client(self) -> TransportClient:
+        return InProcessClient(
+            MemoryStore(
+                InMemoryStorage(),
+                clock=_Ticking(),
+                max_file_bytes=256,
+                index_max_bytes=4096,
+                scope_priority=("user", "org"),
+                list_page_size=2,
+            )
+        )
+
+    @pytest.fixture
+    def source(self) -> str:
+        return "conformance"
+
+    @pytest.fixture
+    def scope_map(self) -> Mapping[str, str]:
+        return {"user": "u-1", "org": "o-9"}
+
+    @pytest.fixture
+    def max_file_bytes(self) -> int:
+        return 256
+
+    @pytest.fixture
+    def index_max_bytes(self) -> int:
+        return 4096
+
+    @pytest.fixture
+    def scope_priority(self) -> tuple[str, ...]:
+        return ("user", "org")
+
+    @pytest.fixture
+    def list_page_size(self) -> int:
+        return 2
+```
+
+---
+
+HTML version: <https://msiebert.github.io/wenchang/customize.html>
+
+
+<!-- page: reference.md -->
+
+# Reference
+
+Version 0.1.0. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.mcp`), the core store (`wenchang.core`), and the file format (`wenchang.file_format`). For how to assemble a server see the [quickstart](quickstart.md); for configuration see [customize](customize.md).
+
+## Concepts
+
+### Path shape
+
+Every memory file is stored at
+
+```
+{scope}/{entity_id}/{area}/{name}.md
+```
+
+For example `user/u-ada/preferences/charts.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full `path` plus the parsed `scope`, `area`, and `name`.
+
+### Scopes
+
+A scope is an adopter-defined visibility tier. The library defines no scope names; the reference adopter uses `user` (private), `project` (shared), and `organization` (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an `InvalidArgumentError` listing the available scopes.
+
+### Areas
+
+An area groups files within a scope. The tool layer requires an area to be a lowercase slug matching `^[a-z0-9][a-z0-9_-]*$`. Areas are created implicitly by writing a file in them. The prompt's `seed_areas` slot suggests starting areas; the agent may create more.
+
+### Names
+
+A name is the file's stem, passed without `.md`. It must be a valid path segment: non-empty, not `.` or `..`, with no `/`, backslash, or control character, and the tool layer additionally rejects invisible, separator, and noncharacter code points. Names must be valid UTF-8.
+
+### The system/ area
+
+Every scope has an area named exactly `system`. It holds curated content that people maintain and replace wholesale. The agent can read it (any area may be read) but every mutating tool refuses it with `RestrictedScopeError` (reason `system_read_only`). Seeding jobs and admin tooling write it through the core `MemoryStore`, which applies no restrictions. In the startup index, `system/` entries come first across all scopes.
+
+### Fact-line format
+
+A memory file body is made of fact lines, one per line:
+
+```
+- [stated] Prefers bar charts for weekly reports.
+```
+
+The pattern is `- [<label>] <text>` with a non-empty text. The label records how the fact is known:
+
+| Label | Meaning |
+| --- | --- |
+| `stated` | The user told the agent directly. |
+| `observed` | The agent saw it in a tool result, session data, or behavior. |
+| `inferred` | The agent concluded it from a pattern across several observations. |
+| `system` | Curated content. The prompt tells the agent never to write a new `[system]` line. |
+
+`append_line` accepts only a single well-formed fact line. Other lines in a body are tolerated and preserved verbatim. An end date, if the user states one, is written into the fact's text as prose; there are no per-fact timestamps.
+
+### File metadata
+
+Metadata is stored beside the body, as flat string custom metadata on the stored object (in GCS), not inside the markdown.
+
+| Field | Type | Behavior |
+| --- | --- | --- |
+| `description` | string, one line | What the file is about. Part of the agent's search surface. `write_file` replaces it; `append_line` and `replace_fact` replace it only if one is passed. |
+| `aliases` | list of strings, ordered | Other names the subject is looked up by. `write_file` replaces the whole set; `append_line` and `replace_fact` add new aliases, keeping existing ones and their order. |
+| `sources` | set of strings | Surface names (the `source` you configure) that have written the file. Only ever grows; returned sorted. |
+| `last_updated` | UTC timestamp | Set by the store's clock on every write; rendered as ISO 8601 with a `Z` suffix. |
+
+There is no content search. `description` and `aliases` are the entire search surface; the agent reads the index and matches on them.
+
+### Optimistic concurrency
+
+Every file has an opaque `version` (the GCS generation under `GcsStorage`). Every mutating tool takes `expected_version`, the version the agent read; the write succeeds only if the file is still at that version. `write_file` with `expected_version=null` creates the file and fails if it already exists. A mismatch returns a recoverable `VersionConflictError` carrying the current content and version.
+
+`replace_fact` re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but `old_string` still matches exactly once, it applies against the current content. `append_line` has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.
+
+### Limits
+
+| Limit | Default | Where set |
+| --- | --- | --- |
+| Per-file content size | 16384 bytes (UTF-8) | `MemoryStore(max_file_bytes=...)` |
+| Startup index size | 65536 bytes | `MemoryStore(index_max_bytes=...)` |
+| `list_prefix` page size | 100 entries | `MemoryStore(list_page_size=...)` |
+| `replace_fact` attempts | 3 | fixed |
+
+When the index overflows its budget, the remaining files are reported under `capped` by area prefix, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+
+## Tools
+
+Seven tools. With `tool_prefix` set, each is registered as `{tool_prefix}_{name}`. All results are JSON objects; all failures are rendered as described under [errors](#errors). In every tool, `scope`, `area`, and `name` are strings, and `expected_version` is a string (the `version` from a prior result).
+
+Common file object, returned by `read_file`, `write_file`, `append_line`, and `replace_fact`:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `path` | string | Full path, `scope/entity/area/name.md`. |
+| `scope`, `area`, `name` | string | Parsed from the path. |
+| `content` | string | The body. Present on a file; absent on index and list entries. |
+| `version` | string | Opaque. Pass as `expected_version`. |
+| `description` | string | |
+| `aliases` | array of strings | |
+| `sources` | array of strings | Sorted. |
+| `last_updated` | string | UTC ISO 8601, `Z` suffix. |
+
+### get_memory_index
+
+> Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's path, metadata, and version, without content.
+
+Call it first in every session.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| (none) | | | |
+
+Returns an object:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `entries` | array of file entries | Each is the common file object without `content`, in index order, up to the byte budget. |
+| `capped` | array of objects | One per area prefix not fully returned. Empty means the index is complete. |
+
+Each `capped` object: `prefix` (string, for example `user/u-ada/preferences/`), `scope` (string), `area` (string, or `null` for a prefix above area level), `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
+
+### read_file
+
+> Read one memory file: its content, metadata, and version. Any area may be read, including `system/`.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | yes | A granted scope. |
+| `area` | string | yes | Lowercase slug. |
+| `name` | string | yes | File name without `.md`. |
+
+Returns the common file object. If no file exists: `NotFoundError` with reason `file_absent`.
+
+### list_prefix
+
+> List the files in a scope or area, one page at a time, without content. Each page returns entries with metadata and version, and a `next_cursor`; until it is null, pass it back as `cursor` with the same `scope` and `area` for the next page.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | yes | A granted scope. |
+| `area` | string or null | no (default `null`) | Restrict to one area; `null` lists the whole scope. |
+| `cursor` | string or null | no (default `null`) | The `next_cursor` from the previous page, with the same `scope` and `area`. |
+
+Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the common file object without `content`, ascending by path. A malformed cursor, or one from a different prefix, returns `InvalidArgumentError` for `cursor`. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.
+
+### write_file
+
+> Create a memory file or replace one whole. Pass `expected_version=None` to create a file, or the version you read to replace one. `description` (one line) and `aliases` replace the stored values; they are not merged. Content over the per-file byte ceiling is rejected with the current size and the limit; shorten it and retry. A version conflict is routine: merge your change into the content it returns and retry with its version.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | yes | A granted scope the caller may write. |
+| `area` | string | yes | Lowercase slug; not `system`. |
+| `name` | string | yes | File name without `.md`. |
+| `content` | string | yes | The whole new body, at most `max_file_bytes` UTF-8 bytes. |
+| `description` | string | yes | One line; replaces the stored value. |
+| `aliases` | array of strings | yes | Replaces the stored set (use `[]` for none). |
+| `expected_version` | string or null | yes | `null` creates (fails if the file exists); otherwise the version being replaced. |
+
+Returns the common file object. Errors: `VersionConflictError`, `NotFoundError` (`file_absent`, when replacing a file that does not exist), `OversizeWriteError`, `InvalidArgumentError`, `RestrictedScopeError`.
+
+### append_line
+
+> Add one fact line to the end of an existing memory file. `line` is a single fact line with a leading bracketed label (`[stated]`, `[observed]`, `[inferred]`, or `[system]`), as in `- [stated] Prefers tea`. Pass the version you read as `expected_version`. The per-file byte ceiling applies to the result. Optional `aliases` are added to the file's existing aliases and never removed (`write_file` replaces the whole set); an optional one-line `description` replaces the stored one. A version conflict is routine: merge your change into the content it returns and retry with its version.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | yes | A granted scope the caller may write. |
+| `area` | string | yes | Lowercase slug; not `system`. |
+| `name` | string | yes | Existing file name without `.md`. |
+| `line` | string | yes | One fact line, `- [label] text`. Rejected with `InvalidArgumentError` otherwise. |
+| `expected_version` | string | yes | The version read. |
+| `aliases` | array of strings or null | no (default `null`) | Added to existing aliases, never removed. |
+| `description` | string or null | no (default `null`) | Replaces the stored description when given. |
+
+The file must already exist (`NotFoundError` with `file_absent` otherwise). A newline is added before the line if the body does not end with one, and one after. Returns the common file object.
+
+### replace_fact
+
+> Change one fact in a memory file by quoting the text to replace. `old_string` must match the content exactly once; otherwise the error carries the current content and version, so quote a unique span. `new_string` replaces it. Pass the version you read as `expected_version`. The per-file byte ceiling applies to the result. Optional `aliases` are added to the file's existing aliases and never removed (`write_file` replaces the whole set); an optional one-line `description` replaces the stored one. A version conflict is routine: merge your change into the content it returns and retry with its version.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | yes | A granted scope the caller may write. |
+| `area` | string | yes | Lowercase slug; not `system`. |
+| `name` | string | yes | Existing file name without `.md`. |
+| `old_string` | string | yes | Non-empty text that appears exactly once in the file. |
+| `new_string` | string | yes | Replacement. An empty string removes the span (to drop a whole fact line, quote the line including its line break). |
+| `expected_version` | string | yes | The version read. |
+| `aliases` | array of strings or null | no (default `null`) | Added to existing aliases, never removed. |
+| `description` | string or null | no (default `null`) | Replaces the stored description when given. |
+
+Zero or several matches return `ReplaceFactMatchError` with the current content, version, and `match_count`. Returns the common file object.
+
+### delete_file
+
+> Delete a memory file. Pass the version you read as `expected_version`. A version conflict is routine: retry with the version it returns only if the file should still go.
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | yes | A granted scope the caller may write. |
+| `area` | string | yes | Lowercase slug; not `system`. |
+| `name` | string | yes | File name without `.md`. |
+| `expected_version` | string | yes | The version read. |
+
+Returns `{"ok": true}`. Errors: `VersionConflictError`, `NotFoundError`, `RestrictedScopeError`.
+
+## The memory prompt resource
+
+The server exposes the assembled memory prompt as an MCP resource:
+
+| Property | Value |
+| --- | --- |
+| URI | `wenchang://memory-prompt` (`wenchang.mcp.PROMPT_RESOURCE_URI`) |
+| Name | `memory_prompt` |
+| MIME type | `text/markdown` |
+| Content | The same text as the server's `instructions`: `build_memory_prompt(slots)`. |
+
+Clients that drop server `instructions` can read the resource instead. The prompt is markdown with `##` headings and no H1; see [customize](customize.md#slots) for its sections.
+
+## Errors
+
+A failed tool call returns an MCP error result (`isError` true) whose JSON payload has this shape:
+
+```json
+{
+  "error": "VersionConflictError",
+  "category": "recoverable",
+  "message": "...",
+  "path": "...",
+  "content": "...",
+  "version": "..."
+}
+```
+
+`error` is the class name, `category` is `recoverable`, `permanent`, `transient`, or `internal`, and `message` combines the detail with fixed guidance for the category. Extra fields appear only when relevant.
+
+| Category | Meaning | What the agent should do |
+| --- | --- | --- |
+| `recoverable` | Normal coordination. | Correct the call from the attached details and retry in the same turn, without asking the user. |
+| `permanent` | The call cannot succeed as given. | Do not retry. |
+| `transient` | A temporary condition. | Retry. Version-guarded calls are safe to retry; a retried `append_line` may duplicate a line. |
+| `internal` | An unexpected failure, or corrupt stored data. | The payload carries only a generic message (or, for corrupt metadata or a non-UTF-8 body, that error's message). |
+
+| Error | Category | Raised when | Extra fields |
+| --- | --- | --- | --- |
+| `VersionConflictError` | recoverable | The file changed since it was read. | `path`, `content`, `version` (current) |
+| `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `path`, `size`, `limit` |
+| `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `path`, `content`, `version`, `match_count` |
+| `InvalidArgumentError` | recoverable | An argument was rejected: unknown scope, bad area slug, bad name, not a fact line, empty `old_string`, bad cursor, and similar. | `argument` |
+| `NotFoundError` | recoverable | The path is invalid (`invalid_path`) or no file exists there (`file_absent`). | `path`, `reason` |
+| `RestrictedScopeError` | permanent | A write to `system/` (`system_read_only`), or to a scope whose policy requires another role (`role_required`), or outside the caller's grant (`not_granted`). | `path`, `scope`, `reason`, and `required_roles` for `role_required` |
+| `ResolverFailureError` | permanent | The identity could not be resolved, or `credentials_from_context` raised. Memory is unavailable for the session. | none |
+| `BackendUnavailableError` | transient | The storage backend timed out or is unreachable. | `reason` (`timeout` or `unavailable`) |
+
+Notes:
+
+- The tool layer builds each path from the caller's own grants, so over MCP an ungranted scope is reported as `InvalidArgumentError` (naming the available scopes); `not_granted` is raised by the core path check.
+- MCP validates arguments before wenchang sees them. A wrong-type or missing argument returns MCP's own error text, not a rendered wenchang error.
+- MCP pre-parses JSON-like strings: the string `"null"` arrives as `None` for a nullable parameter. For example `list_prefix(area="null")` lists the whole scope.
+
+## Limitations and status
+
+- **Status.** Version 0.1.0, MIT license, Python 3.12 or newer. Installed from git; no PyPI release is documented.
+- **A library, not a server.** There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script. The only server in the repository is the dev-only eval server (`python -m evals.server`), which uses in-memory storage.
+- **No content search.** Files are found through `description` and `aliases`. The quality of that metadata is what makes recall work.
+- **Not snapshots.** `list_prefix` and `get_memory_index` are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear.
+- **Remote transport is planned.** Today the only client is `InProcessClient`; the `TransportClient` protocol is the seam for a remote one.
+- **Reads are never role-restricted.** A caller can read any area (including `system/`) of any scope it holds a grant for. `ScopePolicy` gates writes only.
+- **Privacy is prompt-level.** The prompt tells the agent to refuse financial account numbers, health diagnoses, and anything indicating the user is a minor, and to be stricter in shared scopes. No tool checks content, so a successful write does not mean the content was safe.
+- **Behavior depends on the agent.** Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.
+- **Tool calls run concurrently** on worker threads, so the transport client (and `on_call`) must be thread-safe.
+
+---
+
+HTML version: <https://msiebert.github.io/wenchang/reference.html>
