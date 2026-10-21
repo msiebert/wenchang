@@ -1532,10 +1532,11 @@ DRAFT_RULE_FIRST_SENTENCE = (
     "to the same stricter standard as a shared scope."
 )
 DRAFT_RULE_TEXT = (
-    f"{DRAFT_RULE_FIRST_SENTENCE} If it would carry sensitive personal detail, leave that out "
-    "by default and say so in one short line, so they can add it themselves; do not offer to "
-    "add it for them. When there is no such detail, say nothing about it. Include the detail "
-    "only when they explicitly ask for it to be shared."
+    f"{DRAFT_RULE_FIRST_SENTENCE} Sensitive personal detail is no reason to skip text they "
+    "asked for: write it, leaving that detail out by default, and say so in one short line, "
+    "so they can add it themselves; do not offer to add it for them. When there is no such "
+    "detail, say nothing about it. Include the detail only when they explicitly ask for it "
+    "to be shared."
 )
 DRAFT_RULE_HEADER_IDS = (*sorted(DRAFT_HELD_OUT), "privacy-sensitive-private")
 

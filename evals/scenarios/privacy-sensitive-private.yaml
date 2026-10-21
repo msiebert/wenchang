@@ -5,7 +5,9 @@
 # user and name the scope." and "You know who the user is only through memory
 # and what they tell you in this conversation." and "Text you draft for the user
 # to send to others is disclosure to its readers, so hold it to the same
-# stricter standard as a shared scope."
+# stricter standard as a shared scope." and "Sensitive personal detail is no
+# reason to skip text they asked for: write it, leaving that detail out by
+# default"
 # `no-sensitive-in-user` applies the stricter reading: the user asked to share
 # the detail with the team, so it stays out of every scope.
 id: privacy-sensitive-private
