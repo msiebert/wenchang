@@ -67,7 +67,7 @@ POLICY = ScopePolicy({"org": ORG_ROLES})
 
 UNGRANTED_DETAIL = (
     "Argument scope is invalid: scope 'team' is not available in this session; "
-    "available scopes: org, user"
+    "available scopes: org, user."
 )
 
 READ_TOOLS = ("read_file", "list_prefix", "get_memory_index")
@@ -910,6 +910,18 @@ def test_ungranted_scope_is_invalid_argument(harness: _Harness, tool: str) -> No
     assert err.detail == UNGRANTED_DETAIL
     assert err.__cause__ is None
     assert harness.log == []
+
+
+@pytest.mark.parametrize("tool", SCOPE_TOOLS)
+def test_ungranted_scope_message_separates_scope_list_from_guidance(
+    harness: _Harness, tool: str
+) -> None:
+    """The rendered message ends the available-scopes list with a period before
+    the coordination guidance sentence (AIE-1242).
+    """
+    err = _invalid(harness, tool, "scope", scope="team")
+
+    assert "available scopes: org, user. This is normal coordination" in err.message
 
 
 @pytest.mark.parametrize("tool", SCOPE_TOOLS)
