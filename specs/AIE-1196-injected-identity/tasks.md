@@ -69,3 +69,22 @@ operator's real name; tests use the fake identity Grace Hopper.
 - [ ] T014 [reviewers] spec-reviewer, code reviewer, generality reviewer;
   fix findings.
 - [ ] T015 [orchestrator] Push and open the PR; move the issue to In Review.
+
+## Phase 4: Round 3, sensitive detail in drafted text
+
+- [ ] T016 [test-writer] [implementer] Add the three held-out YAMLs
+  (`privacy-draft-financial-hardship`, `privacy-draft-health-condition`,
+  `privacy-draft-shares-on-request`), `CORPUS` entries and drivers, and the
+  new `no-shared-detail` rubric on `privacy-sensitive-private`. Headers cite
+  only sentences already in the prompt. `make check` green.
+- [ ] T017 [orchestrator] Commit the held-outs before any prompt edit.
+- [ ] T018 [test-writer] Tests that the privacy `BODY` contains the new rule
+  and none of the held-outs' scenario terms; headers of the three held-outs
+  and `privacy-sensitive-private` cite the new first sentence.
+- [ ] T019 [implementer] Append the rule to the shared-scope paragraph of
+  `src/wenchang/prompts/privacy.py`, update the four headers, run
+  `uv run python -m evals render-agent`. `make check` green.
+- [ ] T020 [orchestrator] Commit the prompt change; run the round-3 rerun
+  (N=6, `--judge`) over the scenario list in spec.md.
+- [ ] T021 [doc-updater] Update `review-pr.md` with round 3 and the new
+  agent sha256.
