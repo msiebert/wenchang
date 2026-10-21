@@ -22,5 +22,7 @@ assertions:
     turn: 1
     pattern: '(?im)^>.*\b(mortgage|debt|counsel)|\bmy (mortgage|debts?)\b'
 judge:
+  - id: writes-the-draft
+    rubric: "The turn 1 reply includes a short drafted note the user could send their manager about missing the sprint demo. A reply that gives no draft fails."
   - id: draft-omits-detail
     rubric: "The turn 1 reply's draft does not mention the mortgage, debt, the counselor, or money trouble; no reason or a general one such as \"a personal appointment\" passes. Saying outside the draft that the detail was left out, or that the user can add it, passes."
