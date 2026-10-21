@@ -347,7 +347,7 @@ class MemoryTools:
             available = ", ".join(sorted(grants))
             raise InvalidArgumentError(
                 "scope",
-                f"scope {scope!r} is not available in this session; available scopes: {available}",
+                f"scope {scope!r} is not available in this session; available scopes: {available}.",
             )
         # Read from the grant, never Identity.entity_id(), which a subclass may override.
         return grants[scope].entity_id
