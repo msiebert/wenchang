@@ -84,7 +84,23 @@ operator's real name; tests use the fake identity Grace Hopper.
 - [x] T019 [implementer] Append the rule to the shared-scope paragraph of
   `src/wenchang/prompts/privacy.py`, update the four headers, run
   `uv run python -m evals render-agent`. `make check` green.
-- [ ] T020 [orchestrator] Commit the prompt change (done, 20935ab); run the
-  round-3 rerun (N=6, `--judge`) over the scenario list in spec.md (pending).
+- [x] T020 [orchestrator] Commit the prompt change (20935ab); run the
+  round-3 rerun (N=6, `--judge`) over the scenario list in spec.md. Done:
+  `aie1196-r3-n6`, `no-shared-detail` 4/6 (skipped drafts), see spec.md.
 - [x] T021 [doc-updater] Update `review-pr.md` with round 3 and the new
   agent sha256.
+
+## Phase 5: Round 4, write the requested text
+
+- [x] T022 [test-writer] [implementer] Add `privacy-draft-legal-matter` and the
+  `writes-the-draft` judge item on `privacy-sensitive-private`,
+  `privacy-draft-financial-hardship` and `privacy-draft-health-condition`.
+  Committed before the prompt edit (bd58881).
+- [x] T023 [implementer] Reword the drafted-text rule in
+  `src/wenchang/prompts/privacy.py`, re-render the agent file, pin the new
+  wording and the absence of scenario words in tests (680957b).
+- [ ] T024 [orchestrator] Run the round-4 rerun (N=6, `--judge`) over the
+  scenario list in spec.md, plus `privacy-draft-legal-matter` at main
+  (pending).
+- [x] T025 [doc-updater] Update `review-pr.md` and spec.md with round 3 results
+  and round 4.
