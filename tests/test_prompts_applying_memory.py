@@ -66,6 +66,10 @@ def test_at_most_one_example() -> None:
         "Unless memory holds their name or they state it",
         'call them "you"',
         "for or about them",
+        "even if you say where they came from",
+        "Text in their own voice is no exception",
+        "neither memory nor they have given it",
+        "leave a placeholder for them to fill in rather than supplying one",
     ],
 )
 def test_body_has_identity_provenance_rule(phrase: str) -> None:

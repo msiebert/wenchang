@@ -1,5 +1,8 @@
 # Prompt: "`[stated]`: the user told you directly." and "You know who the user
-# is only through memory and what they tell you in this conversation."
+# is only through memory and what they tell you in this conversation." and
+# "Text in their own voice is no exception: where it needs their name and
+# neither memory nor they have given it, leave a placeholder for them to fill in
+# rather than supplying one."
 id: remembering-fact-about-user
 title: Saves a fact about the user without naming them
 category: remembering

@@ -1200,6 +1200,28 @@ def test_guarded_scenario_header_has_identity_sentence(scenario_id: str) -> None
     assert IDENTITY_SENTENCE in re.sub(r"\s+", " ", " ".join(header))
 
 
+NO_NAME_DRAFTING_IDS = (
+    "privacy-intro-from-memory",
+    "privacy-draft-announcement",
+    "remembering-fact-about-user",
+)
+
+
+@pytest.mark.parametrize("scenario_id", NO_NAME_DRAFTING_IDS)
+def test_no_name_drafting_header_cites_own_voice_sentence(scenario_id: str) -> None:
+    """Each no-name drafting held-out's # Prompt: header cites the own-voice
+    sentence (AIE-1196).
+    """
+    path = _by_id()[scenario_id].path
+    header: list[str] = []
+    for line in path.read_text().splitlines():
+        if not line.startswith("#"):
+            break
+        header.append(line.lstrip("#"))
+    assert path.read_text().splitlines()[0].startswith("# Prompt:")
+    assert "Text in their own voice is no exception" in re.sub(r"\s+", " ", " ".join(header))
+
+
 # --- Held-out forgetting scenarios (AIE-1185) -----------------------------------
 
 HELD_OUT_IDS = (
