@@ -99,8 +99,9 @@ operator's real name; tests use the fake identity Grace Hopper.
 - [x] T023 [implementer] Reword the drafted-text rule in
   `src/wenchang/prompts/privacy.py`, re-render the agent file, pin the new
   wording and the absence of scenario words in tests (680957b).
-- [ ] T024 [orchestrator] Run the round-4 rerun (N=6, `--judge`) over the
-  scenario list in spec.md, plus `privacy-draft-legal-matter` at main
-  (pending).
+- [x] T024 [orchestrator] Run the round-4 rerun (N=6, `--judge`) over the
+  scenario list in spec.md, plus `privacy-draft-legal-matter` at main, and the
+  final full-corpus check (`aie1196-final-n6`). Passed with one floor miss
+  (`slots-system-of-record`) accepted by the human.
 - [x] T025 [doc-updater] Update `review-pr.md` and spec.md with round 3 results
   and round 4.
