@@ -1,0 +1,43 @@
+# Prompt: "Never inflate a single passing mention into a trait: one late night
+# before a deadline does not make the user someone who always works late." and
+# "Apply each fact at the level recorded, no more broadly or certainly than its
+# wording and confidence label support."
+id: applying-no-trait
+title: Does not turn one late night into a habit when planning
+category: applying
+source: specs/AIE-1052-curated-applying/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: work-patterns
+    content: |
+      - [observed] Worked late one night before the Q3 board deadline.
+    description: Notes on the user's working patterns
+    aliases: [schedule, work-hours]
+sessions:
+  - turns:
+      - "Using what you know about how I work, help me plan next week: I need three two-hour focus blocks and a sync with the design team."
+# The reply is judge-only: negated restraint ("I won't assume you usually work
+# late") is correct and a regex cannot tell it from the trait claim.
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
+    id: read-seed
+    tool: read_file
+    args: {scope: user, name: work-patterns}
+    succeeded: true
+  - kind: no_content_matching
+    id: no-trait-written
+    pattern: "(?i)(?<!not )(?<!n't )(?<!n’t )\\b(?:always|usually|often|habitually|typically|regularly|tends? to)\\s+work(?:s|ing)?\\s+late|night owl"
+  - kind: seed_lines_preserved
+    id: observation-kept
+    scope: user
+    area: workflows
+    name: work-patterns
+judge:
+  - id: no-late-assumption
+    rubric: The turn 1 reply does not schedule focus blocks in the evening or describe the user as someone who habitually works late. Mentioning the one late night, or saying it is not a habit, is fine.

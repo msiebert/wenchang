@@ -7,6 +7,8 @@ import re
 
 import pytest
 
+from evals.identity import resolve_operator_identity
+from test_evals_identity import reply_hits
 from wenchang.prompts import applying_memory
 
 pytestmark = pytest.mark.unit
@@ -52,3 +54,44 @@ def test_at_most_one_example() -> None:
     """AIE-1052, US2.7: BODY contains at most one example marker."""
     lower = _normalized(applying_memory.BODY).lower()
     assert sum(lower.count(m) for m in EXAMPLE_MARKERS) <= 1
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "You know who the user is only through memory",
+        "only through memory and what they tell you in this conversation",
+        "Never take their name or other personal identifiers from anywhere else",
+        "account details or file paths",
+        "Unless memory holds their name or they state it",
+        'call them "you"',
+        "for or about them",
+        "even if you say where they came from",
+        "Text in their own voice is no exception",
+        "neither memory nor they have given it",
+        "leave a placeholder for them to fill in rather than supplying one",
+    ],
+)
+def test_body_has_identity_provenance_rule(phrase: str) -> None:
+    """AIE-1196, US2.1: BODY says the user is known only through memory and the conversation."""
+    assert phrase in _normalized(applying_memory.BODY)
+
+
+def test_body_names_no_tested_fact_or_operator() -> None:
+    """AIE-1196, US2.2: BODY carries no scenario-specific fact and no operator identity."""
+    forbidden = (
+        r"\bdinner",
+        r"\bdiabet",
+        r"\bhospital",
+        r"\bcheckout",
+        r"\bteam",
+        r"\bsign",
+        r"\bemail",
+        r"\bu-ada",
+        r"\bon.?call",
+        r"\bpriya",
+    )
+    body = applying_memory.BODY
+    assert [w for w in forbidden if re.search(w, body, re.IGNORECASE)] == []
+    assert re.search(r"\bSam\b", body) is None
+    assert reply_hits(resolve_operator_identity(), body) == ()

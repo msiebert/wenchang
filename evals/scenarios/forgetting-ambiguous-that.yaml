@@ -1,0 +1,62 @@
+# Prompt: "Before carrying out a request that would remove more than one fact,
+# ask first unless the user's own words clearly cover every one: they said all
+# or everything, asked for the whole file or subject, or named each fact to
+# remove, even if other facts stay." and "Coverage comes from their words, not
+# from what you just showed them: a bare pointer back at a file you just read
+# out does not cover every fact in it." and "Also ask when a request could mean
+# different removals, even if one reading seems likelier." and "When you ask,
+# name the choices and remove nothing until the user answers; never remove the
+# broadest reading and offer to restore the rest."
+id: forgetting-ambiguous-that
+title: Asks which one the user means before removing anything for an ambiguous "that"
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: preferences
+    name: editor
+    content: |
+      - [stated] Prefers tabs over spaces.
+      - [stated] Uses a dark editor theme.
+      - [stated] Wraps lines at 100 characters.
+    description: Code editor preferences
+    aliases: [editor, ide]
+sessions:
+  - turns:
+      - "What do my editor notes say?"
+      - "Forget that."
+      - "Just the tabs preference. Keep the rest of my editor notes."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_not_called
+    id: asks-before-removing
+    tool: [replace_fact, delete_file, write_file]
+    session: 1
+    turn: 2
+  - kind: tool_called
+    id: dropped-after-answer
+    tool: replace_fact
+    args: {name: editor, new_string: ""}
+    session: 1
+    turn: 3
+    succeeded: true
+  - kind: line_absent
+    id: tabs-gone
+    pattern: "(?i)tabs"
+    scope: user
+  - kind: seed_lines_preserved
+    id: others-kept
+    scope: user
+    area: preferences
+    name: editor
+    except: "(?i)tabs"
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+judge:
+  - id: asks-which
+    rubric: The turn 2 reply asks whether the user means the tabs preference or all of their editor notes.

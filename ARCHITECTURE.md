@@ -1186,19 +1186,54 @@ imports it. The editable install makes it importable from any directory.
   It holds the prompt slots, scopes, policy, identities, and seed files,
   shared by the tests and the evals.
 - **evals.scenario**: the YAML scenario format and loader. A scenario has
-  seed files, an optional per-scenario index cap, sessions of scripted user turns, a closed set of eleven
-  assertion kinds, and an optional judge rubric.
-- **evals.graders**: pure deterministic graders over a store dump and a
-  tool-call trace, plus the JSON loaders and writers that form the driver
-  contract. They never import `mcp`.
+  seed files, an optional per-scenario index cap, optional `context_records`
+  (product data rendered above every turn, standing in for lookup tools the
+  eval agent lacks), sessions of scripted user turns, a closed set of
+  thirteen assertion kinds, and an optional judge rubric.
+- **evals.graders**: pure deterministic graders over a store dump, a
+  tool-call trace, and the transcript, plus the JSON loaders and writers
+  that form the driver contract. Grading reads `transcript.json` as well as
+  `store.json` and `trace.json`. They never import `mcp`
+  ([ADR 0032](docs/adr/0032-transcript-graded-assertions-and-context-records.md)).
+  A separate reply check scans the
+  transcript for replies that refer to the user in the third person
+  ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). A second reply
+  check, `find_unmatched_reply_paths`, flags scope-rooted paths in replies
+  that no tool result named up to that turn
+  ([ADR 0033](docs/adr/0033-reply-path-check.md)). Neither check changes an
+  assertion result. Recorded replies come from the subagent's transcript
+  ([ADR 0035](docs/adr/0035-eval-sessions-dontask.md)). A further pure
+  scanner, `find_operator_identity`,
+  takes the operator's resolved identity as an input and looks for it in
+  replies, the final store, and write arguments, on every trial of every
+  scenario
+  ([ADR 0034](docs/adr/0034-operator-identity-check.md)).
+- **evals.identity**: `resolve_operator_identity()` reads the operator's
+  identity at grade time from git `user.name` and `user.email`, `$USER`, and
+  the home directory basename, and returns the tokens to look for and the
+  sources that contributed. Nothing is stored in the repo
+  ([ADR 0034](docs/adr/0034-operator-identity-check.md)).
 - **evals.server**: a stdio MCP server, `python -m evals.server`. It
   mounts the seven memory tools with `wenchang.mcp.register_memory_tools`
   over a resettable in-memory store, plus three harness tools:
   `eval_reset`, `eval_record_turn`, and `eval_dump`.
+- **evals.subagent_transcript**: reads the subagent's reply from its Claude
+  Code transcript, by `agent_id`, for `eval_record_turn`
+  ([ADR 0035](docs/adr/0035-eval-sessions-dontask.md)).
 - **evals.agent**: renders `.claude/agents/wenchang-eval.md`, the Claude
   Code eval subagent whose tools are only the seven memory tools.
 - **evals.report** and `python -m evals`: plan a run, grade trials, and
-  write the per-run report.
+  write the per-run report. `grade.json` and the report carry the reply
+  check's flags, unchecked trials, and judge fails in flagged trials
+  separately from the pass counts. `grade.json` also records
+  `unmatched_reply_paths`, and the report adds reply-path counts, apart from
+  the pass counts ([ADR 0033](docs/adr/0033-reply-path-check.md)).
+  `grade.json` also carries
+  `operator_identity` (hits, sources, `replies_scanned`, or `unchecked`).
+  A hit counts toward `passed` but never changes `results`. The report adds
+  per-scenario `operator_identity_trials` and `unscanned_trials` and a
+  run-level `operator_identity` summary, naming sources and never tokens
+  ([ADR 0034](docs/adr/0034-operator-identity-check.md)).
 
 The runner workflow is `.claude/commands/run-evals.md`. It runs in a
 session launched with `evals/mcp.json`. Live runs never run in

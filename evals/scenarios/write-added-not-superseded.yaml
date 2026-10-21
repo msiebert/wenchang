@@ -1,0 +1,34 @@
+# Prompt: "Use `append_line` to add one fact to an existing file" and "Keep
+# anything with support of its own."
+id: write-added-not-superseded
+title: Adds a second audience without dropping the existing one
+category: write-mechanics
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: funnel-dashboard
+    content: |
+      - [stated] Shares the checkout funnel dashboard with the design team.
+    description: Who the user shares the checkout funnel dashboard with
+    aliases: [funnel-dashboard]
+sessions:
+  - turns:
+      - "I share the checkout funnel dashboard with the sales team too."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_present
+    id: design-kept
+    pattern: "(?i)design"
+    scope: user
+  - kind: line_present
+    id: sales-saved
+    pattern: "(?i)sales"
+    scope: user
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file

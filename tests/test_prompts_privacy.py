@@ -90,3 +90,59 @@ def test_privacy_body_avoids_noncanonical_scope_terms(term: str) -> None:
     """AIE-1054, US5.3: BODY uses no non-canonical scope term."""
     assert privacy.BODY.strip() != ""
     assert term not in _collapsed().lower()
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "Text you draft for the user to send to others is disclosure to its readers",
+        "same stricter standard as a shared scope",
+        "Sensitive personal detail is no reason to skip text they asked for",
+        "write it",
+        "leaving that detail out by default",
+        "say so in one short line",
+        "do not offer to add it for them",
+        "When there is no such detail, say nothing about it",
+        "only when they explicitly ask for it to be shared",
+    ],
+)
+def test_privacy_body_contains_drafted_text_rule(phrase: str) -> None:
+    """AIE-1196: privacy.BODY holds the drafted-text disclosure rule."""
+    assert phrase in _collapsed()
+
+
+@pytest.mark.parametrize(
+    "word",
+    [
+        "hospital",
+        "family",
+        "dad",
+        "father",
+        "parent",
+        "illness",
+        "sick",
+        "surgery",
+        "knee",
+        "mortgage",
+        "debt",
+        "counselor",
+        "therapy",
+        "therapist",
+        "panic",
+        "anxiety",
+        "manager",
+        "custody",
+        "hearing",
+        "court",
+        "legal",
+        "release",
+        "retro",
+        "for example",
+        "e.g.",
+        "such as",
+    ],
+)
+def test_privacy_body_has_no_examples_or_scenario_words(word: str) -> None:
+    """AIE-1196: privacy.BODY names no example detail and uses no example lead-in."""
+    pattern = rf"(?<!\w){re.escape(word)}(?!\w)"
+    assert re.search(pattern, _collapsed(), re.IGNORECASE) is None

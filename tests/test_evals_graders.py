@@ -2,8 +2,10 @@
 
 import json
 import random
+import re
 import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -11,12 +13,17 @@ from pathlib import Path
 import pytest
 
 from evals.graders import (
+    PATH_ROOTS,
     AssertionResult,
     GradeInputError,
     StoredFile,
     StoreDump,
+    ThirdPersonReply,
     TraceCall,
     TranscriptTurn,
+    UnmatchedReplyPath,
+    find_third_person_replies,
+    find_unmatched_reply_paths,
     grade,
     load_store_dump,
     load_trace,
@@ -26,8 +33,9 @@ from evals.graders import (
     trace_to_json,
     transcript_to_json,
 )
-from evals.reference_adopter import MEMBER_IDENTITY, SeedFile
+from evals.reference_adopter import MEMBER_IDENTITY, REFERENCE_SCOPES, SeedFile
 from evals.scenario import (
+    SCENARIO_DIR,
     AliasPresent,
     ArgMatcher,
     Assertion,
@@ -41,12 +49,16 @@ from evals.scenario import (
     LinePresent,
     NoContentMatching,
     NoDuplicateFact,
+    ReplyMatching,
+    ReplyNotMatching,
     Scenario,
     SeedLinesPreserved,
     Session,
     ToolCalled,
     ToolNotCalled,
+    load_scenario,
 )
+from wenchang.identity import Identity, ScopeGrant
 
 pytestmark = pytest.mark.unit
 
@@ -733,3 +745,1332 @@ def test_called_before_honors_then_args() -> None:
     result = _one(_before(then=then), trace=atlas_first)
     assert not result.passed
     assert "seq 1" in result.detail
+
+
+# --- reply check (AIE-1184, US1) ----------------------------------------------
+
+
+def _turns(*replies: str, user: str = "hello", session: int = 1) -> tuple[TranscriptTurn, ...]:
+    return tuple(
+        TranscriptTurn(session=session, turn=t, user=user, reply=r, agent_id=None)
+        for t, r in enumerate(replies, start=1)
+    )
+
+
+def _flags(
+    transcript: Sequence[TranscriptTurn], seeds: tuple[SeedFile, ...] = ()
+) -> tuple[ThirdPersonReply, ...]:
+    return find_third_person_replies(_scenario(IndexReadFirst("i"), seeds=seeds), transcript)
+
+
+def test_reply_check_flags_a_third_person_report() -> None:
+    """A reply about "the user" is flagged with its phrase (AIE-1184, US1.1)."""
+    transcript = _turns(
+        "I haven't saved anything yet. The user asked me to remember that the company "
+        "calls them accounts."
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(session=1, turn=1, phrase="the user asked"),)
+
+
+def test_reply_check_phrases_are_normalized() -> None:
+    """Possessives, curly apostrophes, and "the caller" are flagged with
+    normalized phrases, in transcript order (AIE-1184, US1.2).
+    """
+    transcript = _turns(
+        "I need the user's confirmation before writing there.",
+        "I asked the user whether to save it.",
+        "Waiting for the user\u2019s yes or no.",
+        "(Note for the caller: they said they are 15.)",
+    )
+
+    assert _flags(transcript) == (
+        ThirdPersonReply(1, 1, "the user's confirmation"),
+        ThirdPersonReply(1, 2, "the user whether"),
+        ThirdPersonReply(1, 3, "the user's yes"),
+        ThirdPersonReply(1, 4, "the caller"),
+    )
+
+
+def test_reply_check_passes_second_person_replies() -> None:
+    """A reply addressed to "you" is not flagged (AIE-1184, US1.3)."""
+    transcript = _turns(
+        "You said Signup means verified email. Should I save it to the project scope?"
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_the_user_scope() -> None:
+    """ "the user scope", "user-scope", and "the user's scope" name a scope,
+    not the person (AIE-1184, US1.4).
+    """
+    transcript = _turns(
+        "Saved to your private user scope.",
+        "It belongs in the user scope, or the user-scope fallback.",
+        "It goes in the user's scope.",
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_quoted_text() -> None:
+    """Quotes, backticks, fenced blocks, and > lines are ignored (AIE-1184, US1.5)."""
+    transcript = _turns(
+        'It says: "Signup fires when the user submits the form."',
+        "The file has `the user` in it.",
+        "Here is the file:\n```\n- [stated] The user prefers tabs.\n```\nDone.",
+        "The curated file says:\n> The user said it starts in January.\nI did not edit it.",
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_echoes_of_the_users_text() -> None:
+    """A phrase the user wrote is not flagged when echoed (AIE-1184, US1.6)."""
+    transcript = _turns(
+        "You said Signup means the user has verified their email.",
+        user="Signup means the user has verified their email.",
+    )
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_echoes_of_seed_content() -> None:
+    """A phrase from a seed file's content is not flagged (AIE-1184, US1.7)."""
+    seed = SeedFile(
+        "project",
+        "glossary",
+        "signup",
+        "- [stated] Signup fires when the user submits.\n",
+        "Signup",
+        (),
+    )
+    transcript = _turns("Signup fires when the user submits the form.")
+
+    assert _flags(transcript, (seed,)) == ()
+
+
+@pytest.mark.parametrize(
+    ("description", "aliases"),
+    [("The Atlas migration the user leads", ()), ("Atlas", ("the user leads",))],
+)
+def test_reply_check_ignores_echoes_of_seed_metadata(
+    description: str, aliases: tuple[str, ...]
+) -> None:
+    """Seed descriptions and aliases count as context (AIE-1184, US1.8)."""
+    seed = SeedFile("user", "projects", "atlas", "- [stated] Atlas.\n", description, aliases)
+    transcript = _turns("That is the Atlas migration the user leads.")
+
+    assert _flags(transcript, (seed,)) == ()
+
+
+def test_reply_check_exempts_only_the_echoed_phrase() -> None:
+    """Another third-person phrase in an echoing reply is flagged (AIE-1184, US1.9)."""
+    transcript = _turns(
+        "You said Signup means the user has verified their email. "
+        "The user said that at their company it differs.",
+        user="Signup means the user has verified their email.",
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_context_is_per_session() -> None:
+    """User text from another session does not exempt a reply (AIE-1184, US1.10)."""
+    transcript = (
+        TranscriptTurn(1, 1, "hello", "The user said X.", None),
+        TranscriptTurn(2, 1, "the user said X", "Noted.", None),
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_flags_once_per_reply() -> None:
+    """Only the first qualifying match of a reply is reported (AIE-1184, US1.11)."""
+    transcript = _turns("The user said yes, so I told the user it is saved.")
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_context_match_needs_word_boundaries() -> None:
+    """ "the user a" is not exempted by "the user asked" (AIE-1184, US1.12)."""
+    transcript = _turns("I gave the user a draft.", user="Did the user asked event fire?")
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user a"),)
+
+
+def test_reply_check_context_match_is_not_a_prefix_match() -> None:
+    """ "the users team" does not exempt "the user said" (AIE-1184, US1.13)."""
+    transcript = _turns("The user said yes.", user="Ask the users team.")
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_exempts_a_bounded_echo_without_next_word() -> None:
+    """A bare "the user" echoed at a word boundary is exempt (AIE-1184, US1.14)."""
+    transcript = _turns("Tell the user, then stop.", user="Tell the user, then stop.")
+
+    assert _flags(transcript) == ()
+
+
+def test_reply_check_ignores_the_users() -> None:
+    """The plural "the users" is not a third-person reference (AIE-1184, US1.15)."""
+    assert _flags(_turns("Ask the users which one.")) == ()
+
+
+def test_reply_check_later_user_turns_do_not_exempt_earlier_replies() -> None:
+    """User text from a later turn of the same session does not exempt an
+    earlier reply (AIE-1184, US1.10).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "hello", "The user said X.", None),
+        TranscriptTurn(1, 2, "the user said X", "Noted.", None),
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_bare_echo_needs_the_same_ending() -> None:
+    """A bare "the user" before punctuation is not exempted by the words "the
+    user" elsewhere in a seed (curated-shared-conflict) (AIE-1184, US1.18).
+    """
+    scenario = load_scenario(SCENARIO_DIR / "curated-shared-conflict.yaml")
+    transcript = (TranscriptTurn(1, 1, "hello", "I'll check with the user.", None),)
+
+    assert find_third_person_replies(scenario, transcript) == (ThirdPersonReply(1, 1, "the user"),)
+
+
+def test_reply_check_bare_echo_at_the_end_of_both_texts() -> None:
+    """A bare "the user" ending the reply is exempt only if a context text ends
+    with it too (AIE-1184, US1.18).
+    """
+    assert _flags(_turns("You can tell the user", user="Tell the user")) == ()
+    assert _flags(_turns("You can tell the user", user="Tell the user now")) == (
+        ThirdPersonReply(1, 1, "the user"),
+    )
+
+
+def test_reply_check_caller_possessive() -> None:
+    """ "the caller's" is matched with its possessive (AIE-1184, US1.19)."""
+    assert _flags(_turns("This is the caller\u2019s note.")) == (
+        ThirdPersonReply(1, 1, "the caller's note"),
+    )
+
+
+@pytest.mark.parametrize("gap", ["\n", "\u00a0", "  \t"])
+def test_reply_check_any_whitespace_between_the_and_user(gap: str) -> None:
+    """Newlines, NBSP, and runs of spaces between "the" and "user" still match
+    (AIE-1184, US1.20).
+    """
+    assert _flags(_turns(f"I asked the{gap}user whether to save it.")) == (
+        ThirdPersonReply(1, 1, "the user whether"),
+    )
+
+
+def test_reply_check_modifier_letter_apostrophe() -> None:
+    """U+02BC counts as an apostrophe (AIE-1184, US1.21)."""
+    assert _flags(_turns("I need the user\u02bcs confirmation.")) == (
+        ThirdPersonReply(1, 1, "the user's confirmation"),
+    )
+
+
+@pytest.mark.parametrize("dash", ["\u2013", "\u2014"])
+def test_reply_check_dashes_before_scope(dash: str) -> None:
+    """An en or em dash before "scope" is excluded like a hyphen (AIE-1184, US1.22)."""
+    assert _flags(_turns(f"Saved to the user{dash}scope file.")) == ()
+
+
+# --- reply assertions (AIE-1185, US1) -------------------------------------------
+
+
+def _reply_one(
+    assertion: Assertion, transcript: Sequence[TranscriptTurn], **kwargs: object
+) -> AssertionResult:
+    scenario = _scenario(assertion, **kwargs)  # type: ignore[arg-type]
+    (result,) = grade(scenario, StoreDump(()), (), transcript)
+    return result
+
+
+def _replies(*replies: str, session: int = 1) -> tuple[TranscriptTurn, ...]:
+    return _turns(*replies, session=session)
+
+
+def test_reply_matching_passes_when_some_reply_matches() -> None:
+    """A reply that matches the pattern passes (AIE-1185, US1.2)."""
+    result = _reply_one(ReplyMatching("r", r"(?i)\bsaved\b"), _replies("Nothing yet.", "Saved it."))
+
+    assert result.passed
+    assert result.kind == "reply_matching"
+
+
+def test_reply_matching_fails_and_names_the_turns_checked() -> None:
+    """No matching reply fails, and the detail names the turns it checked (AIE-1185, US1.2)."""
+    result = _reply_one(ReplyMatching("r", "saved"), _replies("Nothing yet.", "Still nothing."))
+
+    assert not result.passed
+    assert "session 1 turn 1" in result.detail
+    assert "session 1 turn 2" in result.detail
+
+
+def test_reply_matching_without_a_recorded_reply_fails() -> None:
+    """No recorded turn at all fails with "no reply recorded" (AIE-1185, US1.2)."""
+    result = _reply_one(ReplyMatching("r", "."), ())
+
+    assert not result.passed
+    assert "no reply recorded" in result.detail
+
+
+def test_reply_matching_honors_session_and_turn_filters() -> None:
+    """Only turns matching the filter are searched; a filter that selects no
+    recorded turn fails with "no reply recorded" (AIE-1185, US1.2).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "u", "alpha", None),
+        TranscriptTurn(1, 2, "u", "beta", None),
+        TranscriptTurn(2, 1, "u", "gamma", None),
+    )
+
+    def run(**filters: int) -> AssertionResult:
+        return _reply_one(
+            ReplyMatching("r", "beta|gamma", **filters),  # type: ignore[arg-type]
+            transcript,
+            sessions=2,
+        )
+
+    assert run().passed
+    assert run(turn=2).passed
+    assert run(session=2).passed
+    assert not run(session=1, turn=1).passed
+    assert run(session=1).passed
+    missing = _reply_one(ReplyMatching("r", ".", session=1, turn=2), transcript[:1], sessions=2)
+    assert not missing.passed
+    assert "no reply recorded" in missing.detail
+
+
+def test_reply_not_matching_passes_when_no_reply_matches() -> None:
+    """A recorded reply that does not match passes (AIE-1185, US1.3)."""
+    result = _reply_one(ReplyNotMatching("r", r"(?i)\bcharts?\b"), _replies("Use a left join."))
+
+    assert result.passed
+    assert result.kind == "reply_not_matching"
+
+
+def test_reply_not_matching_names_the_first_offending_turn() -> None:
+    """A matching reply fails and the detail names the first offending session
+    and turn (AIE-1185, US1.3).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "u", "fine", None),
+        TranscriptTurn(1, 2, "u", "I kept the charts dark.", None),
+        TranscriptTurn(2, 1, "u", "more charts", None),
+    )
+
+    result = _reply_one(ReplyNotMatching("r", "charts"), transcript, sessions=2)
+
+    assert not result.passed
+    assert "session 1 turn 2" in result.detail
+    assert "session 2" not in result.detail
+
+
+def test_reply_not_matching_without_a_recorded_reply_fails() -> None:
+    """A missing reply fails with "no reply recorded", as it does for the
+    judge (AIE-1185, US1.3).
+    """
+    result = _reply_one(ReplyNotMatching("r", "anything"), ())
+
+    assert not result.passed
+    assert "no reply recorded" in result.detail
+
+
+def test_reply_not_matching_honors_session_and_turn_filters() -> None:
+    """A match outside the filter is ignored; a filter that selects no recorded
+    turn fails with "no reply recorded" (AIE-1185, US1.3).
+    """
+    transcript = (
+        TranscriptTurn(1, 1, "u", "bad", None),
+        TranscriptTurn(1, 2, "u", "good", None),
+        TranscriptTurn(2, 1, "u", "good", None),
+    )
+
+    def run(**filters: int) -> AssertionResult:
+        return _reply_one(
+            ReplyNotMatching("r", "bad", **filters),  # type: ignore[arg-type]
+            transcript,
+            sessions=2,
+        )
+
+    assert not run().passed
+    assert not run(turn=1).passed
+    assert run(turn=2).passed
+    assert run(session=2).passed
+    missing = _reply_one(ReplyNotMatching("r", "bad", session=2, turn=2), transcript, sessions=2)
+    assert not missing.passed
+    assert "no reply recorded" in missing.detail
+
+
+def test_reply_kinds_fail_without_a_transcript_and_others_grade_as_before() -> None:
+    """grade without a transcript fails the reply kinds with "no reply recorded"
+    and grades every other kind as before (AIE-1185, US1.4).
+    """
+    scenario = _scenario(
+        IndexReadFirst("index"),
+        ReplyMatching("must", "x"),
+        ReplyNotMatching("must-not", "x"),
+    )
+    trace = [_call(1, "get_memory_index")]
+
+    results = grade(scenario, StoreDump(()), trace)
+
+    assert [(r.id, r.passed) for r in results] == [
+        ("index", True),
+        ("must", False),
+        ("must-not", False),
+    ]
+    assert all("no reply recorded" in r.detail for r in results[1:])
+    assert results == grade(scenario, StoreDump(()), trace, ())
+
+
+def _pattern(scenario_id: str, assertion_id: str) -> str:
+    scenario = load_scenario(SCENARIO_DIR / f"{scenario_id}.yaml")
+    return next(
+        a.pattern
+        for a in scenario.assertions
+        if a.id == assertion_id and isinstance(a, NoContentMatching)
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "matches"),
+    [
+        ("- [inferred] Is focused on churn.", True),
+        ("- [stated] Cares about churn above all.", True),
+        ("- [observed] Ran one Insights query focused on churn by signup cohort.", False),
+    ],
+    ids=["inferred-trait", "stated-trait", "describes-the-query"],
+)
+def test_no_trait_wording_pattern_on_canned_lines(line: str, matches: bool) -> None:
+    """The remembering-observed-once pattern matches trait wording about the
+    user and not a line describing the query (AIE-1185, US1.8).
+    """
+    pattern = _pattern("remembering-observed-once", "no-trait-wording")
+
+    assert bool(re.search(pattern, line)) is matches
+
+
+@pytest.mark.parametrize(
+    ("line", "matches"),
+    [
+        ("- [inferred] Usually works late.", True),
+        ("- [inferred] Often working late before launches.", True),
+        ("- [stated] Doesn't usually work late.", False),
+        ("- [stated] Doesn\u2019t usually work late.", False),
+        ("- [observed] Worked late one night before the Q3 board deadline.", False),
+    ],
+    ids=["usually", "often-working", "straight-negation", "curly-negation", "seed-line"],
+)
+def test_no_trait_written_pattern_on_canned_lines(line: str, matches: bool) -> None:
+    """The applying-no-trait pattern matches a written late-work trait and not
+    a negation or the seeded observation (AIE-1185, US1.8).
+    """
+    pattern = _pattern("applying-no-trait", "no-trait-written")
+
+    assert bool(re.search(pattern, line)) is matches
+
+
+# --- reply check in SQL turns (AIE-1199) --------------------------------------
+
+SQL_USER = "Fix this: select o.id from orders o where o.total > 10"
+
+
+def _exchanges(*pairs: tuple[str, str], session: int = 1) -> tuple[TranscriptTurn, ...]:
+    return tuple(
+        TranscriptTurn(session=session, turn=t, user=u, reply=r, agent_id=None)
+        for t, (u, r) in enumerate(pairs, start=1)
+    )
+
+
+APPLYING_USER = (
+    "This join returns duplicate rows. Can you fix it?\n\n"
+    "SELECT o.id, u.email FROM orders o JOIN users u ON o.user_id = u.id "
+    "JOIN events e ON e.user_id = u.id WHERE e.name = 'Purchase'"
+)
+
+APPLYING_FIX = (
+    "select o.id, u.email\n"
+    "from orders o\n"
+    "join users u on o.user_id = u.id\n"
+    "where exists (\n"
+    "  select 1\n"
+    "  from events e\n"
+    "  where e.user_id = u.id\n"
+    "    and e.name = 'Purchase'\n"
+    ")\n\n"
+)
+
+APPLYING_TRIAL_1 = (
+    "The duplicates come from the join to `events`. A user can have many 'Purchase' "
+    "events, so each order is repeated once per purchase event for that user. The join "
+    "is also on `user_id` only, so it doesn't link a particular event to a particular "
+    "order.\n\nYou only need to know whether the user has at least one Purchase event. "
+    "An `exists` check does that without multiplying rows:\n\n"
+    + APPLYING_FIX
+    + "I wrote the keywords in lowercase, as you prefer.\n\nAlternatives:\n"
+    "- Use `select distinct o.id, u.email ...` on your original query. It works, but it "
+    "still builds all the duplicate rows first, so it is slower.\n"
+    "- If you want one row per order and also need event data such as the first purchase "
+    "time, aggregate `events` in a subquery grouped by `user_id`, then join to that.\n"
+    "- If each order should match its own purchase event, join on a shared key such as an "
+    "order ID in the event properties. Your current query has no such key."
+)
+
+APPLYING_TRIAL_3 = (
+    "The duplicates come from the join to `events`. A user with several 'Purchase' events "
+    "matches several `events` rows, so each of their orders is returned once per purchase "
+    "event. You only need to know whether the user has at least one purchase, so use "
+    "`exists` instead of a join:\n\n"
+    + APPLYING_FIX
+    + "This returns one row per order, and only for users with at least one Purchase "
+    "event. I wrote the keywords in lowercase, going by your stored SQL style "
+    "preference.\n\nAlternatives:\n"
+    "- `select distinct o.id, u.email ...` on your original query also removes the "
+    "duplicates. It still builds the full fan-out first, so it is slower on large "
+    "tables.\n"
+    "- If you meant that the order itself should be tied to a purchase event, for example "
+    "through an order_id property, join on that key instead. Your original query doesn't "
+    "link orders to specific events.\n\nI haven't run this against your data."
+)
+
+
+def test_reply_check_skips_a_data_row_in_the_applying_trial_1() -> None:
+    """The verbatim AIE-1185 trial 1 turn is not flagged (AIE-1199, US1.1)."""
+    assert _flags(_turns(APPLYING_TRIAL_1, user=APPLYING_USER)) == ()
+
+
+def test_reply_check_skips_a_data_row_in_the_applying_trial_3() -> None:
+    """The verbatim AIE-1185 trial 3 turn is not flagged (AIE-1199, US1.2)."""
+    assert _flags(_turns(APPLYING_TRIAL_3, user=APPLYING_USER)) == ()
+
+
+def test_reply_check_sql_in_a_fenced_reply_makes_an_sql_turn() -> None:
+    """A fenced SQL block in the reply makes the turn an SQL turn (AIE-1199, US1.3)."""
+    reply = (
+        "```sql\nselect o.id from orders o join users u on o.user_id = u.id\n```\n"
+        "This keeps the row when the user has at least one Purchase event."
+    )
+
+    assert _flags(_turns(reply)) == ()
+
+
+def test_reply_check_sql_in_an_unfenced_reply_makes_an_sql_turn() -> None:
+    """Unfenced SQL in the reply makes the turn an SQL turn (AIE-1199, US1.4)."""
+    reply = (
+        "select o.id from orders o where o.total > 10\n\nIt returns the user who made the order."
+    )
+
+    assert _flags(_turns(reply)) == ()
+
+
+def test_reply_check_sql_in_an_earlier_turn_makes_later_turns_sql() -> None:
+    """SQL in an earlier user turn of the session covers a later turn (AIE-1199, US1.5)."""
+    transcript = _exchanges((SQL_USER, "Done."), ("thanks", "The user has two rows."))
+
+    assert _flags(transcript) == ()
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "has",
+        "have",
+        "had",
+        "is",
+        "are",
+        "was",
+        "were",
+        "with",
+        "who",
+        "whose",
+        "did",
+        "does",
+        "exists",
+    ],
+)
+def test_reply_check_every_data_verb_is_exempt_in_an_sql_turn(verb: str) -> None:
+    """Each data verb after "the user" is exempt in an SQL turn (AIE-1199, US1.6)."""
+    assert _flags(_turns(f"The user {verb} one row.", user=SQL_USER)) == ()
+
+
+@pytest.mark.parametrize(
+    ("user", "reply", "phrase"),
+    [
+        (
+            "Your notes say our fiscal year starts in January. That's wrong: it starts in "
+            "February.",
+            "The user said the fiscal year starts in February, not January.",
+            "the user said",
+        ),
+        (
+            "For us, Signup means the user has verified their email, not just submitted the form.",
+            "The user said that for them, Signup means the user has verified their email, "
+            "not just submitted the form.",
+            "the user said",
+        ),
+        (
+            "My dad is in the hospital, so I'll be slower reviewing checkout changes for a "
+            "while. Please let the team know.",
+            "I can't notify the team. Here is a draft the user can post in Slack or email:",
+            "the user can",
+        ),
+        (
+            "My dad is in the hospital, so I'll be slower reviewing checkout changes for a "
+            "while. Please let the team know.",
+            "I couldn't notify the team. I drafted a message for the user to post themselves:",
+            "the user to",
+        ),
+        (
+            "My dad is in the hospital, so I'll be slower reviewing checkout changes for a "
+            "while. Please let the team know.",
+            "I couldn't notify the team because I have no messaging tool. I gave the user a "
+            "draft message to post themselves.",
+            "the user a",
+        ),
+        (
+            "Our company calls customers 'members' everywhere. Remember that.",
+            "The user said their company calls customers 'members' everywhere and asked me "
+            "to remember it.",
+            "the user said",
+        ),
+        (
+            "Our company calls customers 'members' everywhere. Remember that.",
+            "I haven't saved the fact yet. The user said \"Our company calls customers "
+            "'members' everywhere.\" This is company-wide vocabulary.",
+            "the user said",
+        ),
+        (
+            "Our company calls customers 'members' everywhere. Remember that.",
+            "I haven't saved anything yet. The user said \"Our company calls customers "
+            "'members' everywhere.\" That is a company-wide vocabulary fact.",
+            "the user said",
+        ),
+    ],
+)
+def test_reply_check_still_flags_the_true_positives(user: str, reply: str, phrase: str) -> None:
+    """Each true positive of the AIE-1184 N=6 run is still flagged (AIE-1199, US2.2)."""
+    assert _flags(_turns(reply, user=user)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+@pytest.mark.parametrize(
+    ("reply", "phrase"),
+    [
+        ("The user asked me to fix their join.", "the user asked"),
+        ("I asked the user whether to keep the join.", "the user whether"),
+        ("Waiting for the user's confirmation.", "the user's confirmation"),
+        ("Here is a draft the user can post.", "the user can"),
+        ("I'll tell the user.", "the user"),
+        ("The user's email is in the users table.", "the user's email"),
+        ("I'll tell the user that it works.", "the user that"),
+        ("I asked the user who owns it.", "the user who"),
+        ("Check with the user whose table it is.", "the user whose"),
+    ],
+)
+def test_reply_check_sql_turn_still_flags_non_data_uses(reply: str, phrase: str) -> None:
+    """In an SQL turn, non-data uses and addressee-preceded uses are flagged (AIE-1199, US2.3)."""
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+@pytest.mark.parametrize(
+    ("reply", "phrase"),
+    [
+        ("The user has asked for lowercase keywords.", "the user has"),
+        ("The user has also asked for lowercase.", "the user has"),
+        ("The user is asking for a faster query.", "the user is"),
+        ("The user did say lowercase.", "the user did"),
+        ("The user has not asked for this.", "the user has"),
+    ],
+)
+def test_reply_check_sql_turn_flags_a_data_verb_before_a_speech_verb(
+    reply: str, phrase: str
+) -> None:
+    """A data verb followed by a speech verb, with at most one adverb between,
+    is flagged (AIE-1199, US2.4).
+    """
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+def test_reply_check_sql_turn_flags_once_with_the_first_non_exempt_match() -> None:
+    """An exempt match does not hide a later speech use (AIE-1199, US2.5)."""
+    reply = "The user has at least one event, and the user said to keep it."
+
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user said"),)
+
+
+def test_reply_check_flags_a_data_verb_without_sql() -> None:
+    """Without SQL in the session, "the user has" is flagged (AIE-1199, US2.6)."""
+    reply = "The user has at least one draft saved."
+
+    assert _flags(_turns(reply)) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        "Select the option from the list.",
+        "Select the option from the list where it is needed.",
+        "Select a report from Insights.\n\nThen order by date.",
+        "Select the rows from the export; then where x = 1 applies.",
+        "Select the files from memory and order by date.",
+        "I'll insert into the memory file.",
+        "Let me create table of contents.",
+    ],
+)
+def test_reply_check_prose_is_not_an_sql_turn(user: str) -> None:
+    """Prose that reads like SQL does not make an SQL turn (AIE-1199, US2.7)."""
+    assert _flags(_turns("The user has a draft.", user=user)) == (
+        ThirdPersonReply(1, 1, "the user has"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("reply", "phrase"),
+    [
+        ("The user has been asked twice.", "the user has"),
+        ("The user also has two rows.", "the user also"),
+    ],
+)
+def test_reply_check_sql_turn_lookahead_edges(reply: str, phrase: str) -> None:
+    """The word "been" is skipped like an adverb; an adverb before the data verb is not
+    (AIE-1199, US2.11).
+    """
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, phrase),)
+
+
+def test_reply_check_sql_turn_punctuation_ends_the_lookahead() -> None:
+    """A sentence end stops the look-ahead, so "The user exists." is exempt (AIE-1199, US2.11)."""
+    assert _flags(_turns("The user exists. Note it.", user=SQL_USER)) == ()
+
+
+ADDRESSEES = [
+    "ask",
+    "asks",
+    "asked",
+    "asking",
+    "tell",
+    "tells",
+    "told",
+    "telling",
+    "remind",
+    "reminds",
+    "reminded",
+    "inform",
+    "informs",
+    "informed",
+    "check with",
+    "confirm with",
+    "wait for",
+    "waiting for",
+    "reply to",
+    "respond to",
+]
+
+ADVERBS = ["also", "already", "just", "explicitly", "previously", "not", "never"]
+
+SPEECH_VERBS = [
+    "ask",
+    "asked",
+    "asking",
+    "say",
+    "said",
+    "saying",
+    "tell",
+    "told",
+    "telling",
+    "mention",
+    "mentioned",
+    "mentioning",
+    "request",
+    "requested",
+    "requesting",
+    "state",
+    "stated",
+    "explain",
+    "explained",
+    "confirm",
+    "confirmed",
+    "want",
+    "wanted",
+    "wanting",
+    "write",
+    "wrote",
+    "written",
+    "share",
+    "shared",
+    "paste",
+    "pasted",
+    "prefer",
+    "preferred",
+    "reply",
+    "replied",
+    "answer",
+    "answered",
+    "clarify",
+    "clarified",
+    "note",
+    "noted",
+]
+
+
+@pytest.mark.parametrize("word", ADDRESSEES)
+def test_reply_check_every_addressee_word_blocks_the_exemption(word: str) -> None:
+    """Each addressee word before "the user who" keeps the flag in an SQL turn
+    (AIE-1199, US2.12).
+    """
+    reply = f"I will {word} the user who owns it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user who"),)
+
+
+def test_reply_check_curly_apostrophe_addressee_blocks_the_exemption() -> None:
+    """A curly apostrophe in the text before the match does not hide the addressee
+    word (AIE-1199, US2.12).
+    """
+    reply = "I\u2019ll tell the user who owns it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user who"),)
+
+
+@pytest.mark.parametrize("adverb", ADVERBS)
+def test_reply_check_every_adverb_is_skipped_before_a_speech_verb(adverb: str) -> None:
+    """Each adverb between the data verb and a speech verb still flags (AIE-1199, US2.12)."""
+    reply = f"The user has {adverb} asked for it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+@pytest.mark.parametrize("verb", SPEECH_VERBS)
+def test_reply_check_every_speech_verb_after_a_data_verb_is_flagged(verb: str) -> None:
+    """Each speech verb after a data verb keeps the flag in an SQL turn (AIE-1199, US2.12)."""
+    reply = f"The user did {verb} it."
+    assert _flags(_turns(reply, user=SQL_USER)) == (ThirdPersonReply(1, 1, "the user did"),)
+
+
+def test_reply_check_long_select_run_is_checked_quickly() -> None:
+    """A 200,000-character user text of repeated "select " is checked in under
+    two seconds (AIE-1199, US2.13).
+    """
+    user = "select " * 28572
+    start = time.perf_counter()
+    flags = _flags(_turns("The user has a draft.", user=user))
+    elapsed = time.perf_counter() - start
+
+    assert flags == (ThirdPersonReply(1, 1, "the user has"),)
+    assert elapsed < 2.0
+
+
+def test_reply_check_sql_in_another_session_does_not_count() -> None:
+    """SQL in another session does not make this session's turn SQL (AIE-1199, US2.8)."""
+    transcript = (
+        TranscriptTurn(1, 1, "hello", "The user has a draft.", None),
+        TranscriptTurn(2, 1, SQL_USER, "Done.", None),
+    )
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+def test_reply_check_sql_in_a_later_turn_does_not_count() -> None:
+    """SQL only in a later turn's user text does not cover an earlier reply (AIE-1199, US2.9)."""
+    transcript = _exchanges(("hello", "The user has a draft."), (SQL_USER, "Done."))
+
+    assert _flags(transcript) == (ThirdPersonReply(1, 1, "the user has"),)
+
+
+def test_reply_check_the_caller_is_never_exempt() -> None:
+    """ "the caller has" is flagged in an SQL turn (AIE-1199, US2.10)."""
+    assert _flags(_turns("The caller has the row.", user=SQL_USER)) == (
+        ThirdPersonReply(1, 1, "the caller has"),
+    )
+
+
+# --- product and data vocabulary (AIE-1199) -----------------------------------
+
+DATA_NOUNS = [
+    "id",
+    "ids",
+    "profile",
+    "profiles",
+    "property",
+    "properties",
+    "table",
+    "tables",
+    "row",
+    "rows",
+    "record",
+    "records",
+    "column",
+    "columns",
+    "attribute",
+    "attributes",
+]
+
+INTERFACE_VERBS = [
+    "taps",
+    "tapped",
+    "clicks",
+    "clicked",
+    "swipes",
+    "swiped",
+    "scrolls",
+    "scrolled",
+    "presses",
+    "pressed",
+    "hovers",
+    "hovered",
+]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        'set a deterministic `$insert_id`, such as a hash of the user ID plus "signup", '
+        "on the client.",
+        "check a few raw events in the User Profile activity feed for the same user.",
+        "Otherwise use the user property.",
+        'for example a hash of the user ID and "signup"',
+    ],
+)
+def test_reply_check_skips_data_nouns_from_the_aie_1182_run(reply: str) -> None:
+    """Each verbatim AIE-1182 excerpt with a data noun is not flagged (AIE-1199, US1.7)."""
+    assert _flags(_turns(reply)) == ()
+
+
+@pytest.mark.parametrize("noun", DATA_NOUNS)
+def test_reply_check_every_data_noun_is_exempt(noun: str) -> None:
+    """Each data noun after "the user" is not flagged (AIE-1199, US1.7)."""
+    assert _flags(_turns(f"The user {noun} is set.")) == ()
+
+
+@pytest.mark.parametrize(
+    "separator",
+    ["-", chr(0x2013), " " + chr(0x2014) + " ", " ", "\t", chr(0xA0), " - "],
+)
+def test_reply_check_data_noun_separators(separator: str) -> None:
+    """Spaces, tabs, NBSP, and one dash before a data noun are not flagged (AIE-1199, US1.7)."""
+    assert _flags(_turns(f"Look at the user{separator}id here.")) == ()
+
+
+def test_reply_check_skips_an_interface_verb_from_the_aie_1182_run() -> None:
+    """The verbatim AIE-1182 trial 6 excerpt is not flagged (AIE-1199, US1.8)."""
+    reply = "for example a UUID created when the user taps the button."
+
+    assert _flags(_turns(reply)) == ()
+
+
+@pytest.mark.parametrize("verb", INTERFACE_VERBS)
+def test_reply_check_every_interface_verb_is_exempt(verb: str) -> None:
+    """Each interface action verb after "the user" is not flagged (AIE-1199, US1.8)."""
+    assert _flags(_turns(f"When the user {verb} it, it fires.")) == ()
+
+
+@pytest.mark.parametrize("verb", ["logs", "signs", "visits"])
+def test_reply_check_flags_verbs_left_out_of_the_interface_list(verb: str) -> None:
+    """ "logs", "signs", and "visits" stay flagged (AIE-1199, US1.8)."""
+    assert _flags(_turns(f"The user {verb} it.")) == (ThirdPersonReply(1, 1, f"the user {verb}"),)
+
+
+def test_reply_check_flags_a_possessive_before_a_data_noun() -> None:
+    """A possessive before a data noun is still flagged (AIE-1199, US1.9)."""
+    assert _flags(_turns("I'll check the user's profile.")) == (
+        ThirdPersonReply(1, 1, "the user's profile"),
+    )
+
+
+def test_reply_check_a_newline_is_not_a_vocabulary_separator() -> None:
+    """A newline before a data noun does not exempt "the user" (AIE-1199, US1.9)."""
+    assert _flags(_turns("Ask the user\nProfile questions later.")) == (
+        ThirdPersonReply(1, 1, "the user profile"),
+    )
+
+
+def test_reply_check_vocabulary_applies_in_an_sql_turn() -> None:
+    """A data noun after "the user" is not flagged in an SQL turn (AIE-1199, US1.9)."""
+    assert _flags(_turns("The user ID is 5.", user=SQL_USER)) == ()
+
+
+def test_reply_check_vocabulary_never_exempts_the_caller() -> None:
+    """ "the caller" before a data noun is still flagged (AIE-1199, US1.9)."""
+    assert _flags(_turns("The caller ID is 5.")) == (ThirdPersonReply(1, 1, "the caller id"),)
+
+
+# --- reply paths (AIE-1198, US2) -----------------------------------------------
+
+NOTE = "user/u-ada/notes/a.md"
+
+
+def _result_call(
+    seq: int,
+    result: object,
+    *,
+    tool: str = "write_file",
+    session: int = 1,
+    turn: int = 1,
+    is_error: bool = False,
+) -> TraceCall:
+    return replace(
+        _call(seq, tool, session=session, turn=turn, is_error=is_error),
+        result=result,
+    )
+
+
+def _wrote(
+    path: str, seq: int = 1, *, session: int = 1, turn: int = 1, is_error: bool = False
+) -> TraceCall:
+    return _result_call(
+        seq, {"path": path, "version": "1"}, session=session, turn=turn, is_error=is_error
+    )
+
+
+def _paths(
+    reply: str,
+    trace: Sequence[TraceCall] = (),
+    *,
+    user: str = "hello",
+    scenario: Scenario | None = None,
+) -> tuple[UnmatchedReplyPath, ...]:
+    return find_unmatched_reply_paths(
+        scenario or _scenario(IndexReadFirst("i")),
+        trace,
+        _turns(reply, user=user),
+    )
+
+
+def _flag(
+    token: str, kind: str = "unmatched", session: int = 1, turn: int = 1
+) -> tuple[object, ...]:
+    return (UnmatchedReplyPath(session, turn, token, kind),)
+
+
+def test_path_roots_are_the_reference_scopes_plus_org_and_system() -> None:
+    """AIE-1198, US2.1: the default roots."""
+    assert frozenset(REFERENCE_SCOPES) | {"org", "system"} == PATH_ROOTS
+
+
+def test_reply_path_exact_match_is_not_flagged() -> None:
+    """AIE-1198, US2.2: a path written earlier matches exactly."""
+    assert _paths(f"Saved {NOTE} for you", [_wrote(NOTE)]) == ()
+
+
+def test_reply_path_missing_md_extension_matches() -> None:
+    """AIE-1198, US2.2: T matches when T.md is known."""
+    assert _paths("Saved user/u-ada/notes/a now", [_wrote(NOTE)]) == ()
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        f"`{NOTE}`",
+        f"({NOTE})",
+        f"**{NOTE}**",
+        f"'{NOTE}'",
+        f'"{NOTE}"',
+        f"/{NOTE}",
+        f"{NOTE}.",
+        f"{NOTE},",
+        f"{NOTE};",
+        f"{NOTE}:",
+        f"{NOTE}!",
+        f"{NOTE}?",
+        f"see {NOTE}.\nnext line",
+    ],
+)
+def test_reply_path_delimiters_and_trailing_punctuation_are_stripped(reply: str) -> None:
+    """AIE-1198, US2.2: delimiters, leading slash and trailing punctuation are stripped."""
+    assert _paths(reply, [_wrote(NOTE)]) == ()
+
+
+def test_reply_path_token_is_normalized_in_the_output() -> None:
+    """AIE-1198, US2.2: the flagged token has no slash, delimiter or punctuation."""
+    assert _paths("**/user/u-ada/notes/zzz.md**.") == _flag("user/u-ada/notes/zzz.md")
+
+
+def test_reply_path_segments_before_the_first_root_are_dropped() -> None:
+    """AIE-1198, US2.2: only root onward is kept."""
+    assert _paths("see wenchang/mem/user/u-ada/notes/zzz.md") == _flag("user/u-ada/notes/zzz.md")
+
+
+def test_reply_path_directory_reference_matches_a_known_directory() -> None:
+    """AIE-1198, US2.2: every directory prefix of a known location is known."""
+    trace = [_wrote("user/u-ada/preferences/editor.md")]
+    assert _paths("See user/u-ada/preferences/ for it", trace) == ()
+    assert _paths("See `user/u-ada`", trace) == ()
+
+
+def test_reply_path_system_suffix_matches_a_scoped_location() -> None:
+    """AIE-1198, US2.2: a known location ending with /candidate matches."""
+    trace = [_wrote("organization/o-acme/system/fiscal-calendar.md")]
+    assert _paths("Read system/fiscal-calendar for it", trace) == ()
+
+
+def test_reply_path_entity_omitted_kind() -> None:
+    """AIE-1198, US2.3: dropping the entity id from a written path is entity_omitted."""
+    trace = [_wrote("project/p-checkout/metrics/dau.md")]
+    assert _paths("Wrote project/metrics/dau.md", trace) == _flag(
+        "project/metrics/dau.md", "entity_omitted"
+    )
+
+
+def test_reply_path_wrong_name_is_unmatched() -> None:
+    """AIE-1198, US2.3: a wrong file name is unmatched."""
+    trace = [_wrote("project/p-checkout/metrics/dau.md")]
+    assert _paths("Wrote project/metrics/daily-active-users.md", trace) == _flag(
+        "project/metrics/daily-active-users.md"
+    )
+
+
+def test_reply_path_two_segment_entity_omitted_against_an_index_entry() -> None:
+    """AIE-1198, US2.3: user/preferences is entity_omitted when a directory beneath exists."""
+    index = _result_call(
+        1,
+        {"entries": [{"path": "user/u-ada/preferences/x.md"}]},
+        tool="get_memory_index",
+    )
+    assert _paths("Look in user/preferences", [index]) == _flag(
+        "user/preferences", "entity_omitted"
+    )
+
+
+def test_reply_path_known_only_from_a_later_turn_is_flagged() -> None:
+    """AIE-1198, US2.4: a location written after the reply's turn does not count."""
+    transcript = _turns(f"Saved {NOTE}", "later")
+    trace = [_wrote(NOTE, turn=2)]
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), trace, transcript) == (
+        UnmatchedReplyPath(1, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_known_in_the_same_turn_counts() -> None:
+    """AIE-1198, US2.4: calls in the reply's own turn count."""
+    assert _paths(f"Saved {NOTE}", [_wrote(NOTE, turn=1)]) == ()
+
+
+def test_reply_path_earlier_session_counts_and_later_session_does_not() -> None:
+    """AIE-1198, US2.4: session < s counts; session > s does not."""
+    transcript = (TranscriptTurn(2, 1, "hi", f"Saved {NOTE}", None),)
+    scenario = _scenario(IndexReadFirst("i"), sessions=3)
+    earlier = [_wrote(NOTE, session=1, turn=5)]
+    later = [_wrote(NOTE, session=3, turn=1)]
+    assert find_unmatched_reply_paths(scenario, earlier, transcript) == ()
+    assert find_unmatched_reply_paths(scenario, later, transcript) == (
+        UnmatchedReplyPath(2, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_same_session_later_turn_does_not_count_across_sessions() -> None:
+    """AIE-1198, US2.4: in the reply's session only turn <= t counts."""
+    transcript = (TranscriptTurn(2, 1, "hi", f"Saved {NOTE}", None),)
+    scenario = _scenario(IndexReadFirst("i"), sessions=2)
+    trace = [_wrote(NOTE, session=2, turn=2)]
+    assert find_unmatched_reply_paths(scenario, trace, transcript) == (
+        UnmatchedReplyPath(2, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_untagged_session_zero_call_counts() -> None:
+    """AIE-1198, US2.4: session 0 (seeding) calls count."""
+    assert _paths(f"Saved {NOTE}", [_wrote(NOTE, session=0, turn=0)]) == ()
+
+
+def test_reply_path_failed_call_result_counts() -> None:
+    """AIE-1198, US2.4: an is_error result path is known."""
+    assert _paths(f"Saved {NOTE}", [_wrote(NOTE, is_error=True)]) == ()
+
+
+def test_reply_path_arguments_never_count() -> None:
+    """AIE-1198, US2.4: a path only in the call arguments is not known."""
+    call = _call(1, "write_file", path=NOTE, content="x")
+    assert _paths(f"Saved {NOTE}", [call]) == _flag(NOTE)
+
+
+def test_reply_path_nested_index_entries_and_capped_prefixes_count() -> None:
+    """AIE-1198, US2.4: path/prefix at any depth in a get_memory_index result."""
+    result = {
+        "scopes": {
+            "user": {
+                "entries": [{"path": "user/u-ada/notes/a.md"}],
+                "capped": [{"prefix": "user/u-ada/preferences/"}],
+            }
+        }
+    }
+    trace = [_result_call(1, result, tool="get_memory_index")]
+    assert _paths("`user/u-ada/notes/a.md` and user/u-ada/preferences/", trace) == ()
+
+
+def test_reply_path_list_prefix_entries_count() -> None:
+    """AIE-1198, US2.4: list_prefix entries are known locations."""
+    result = {"entries": [{"path": "project/p-checkout/metrics/dau.md"}]}
+    trace = [_result_call(1, result, tool="list_prefix")]
+    assert _paths("project/p-checkout/metrics/dau.md", trace) == ()
+
+
+def test_reply_path_nesting_beyond_32_levels_is_ignored() -> None:
+    """AIE-1198, US2.4: paths deeper than 32 levels are not known."""
+    deep: object = {"path": NOTE}
+    for _ in range(40):
+        deep = {"x": deep}
+    shallow: object = {"a": {"b": {"path": "user/u-ada/notes/b.md"}}}
+    trace = [_result_call(1, deep), _result_call(2, shallow)]
+    assert _paths(f"{NOTE} user/u-ada/notes/b.md", trace) == _flag(NOTE)
+
+
+def test_reply_path_known_location_edge_slashes_are_stripped() -> None:
+    """AIE-1198, US2.4: a leading or trailing slash on a known location is ignored."""
+    assert _paths(NOTE, [_wrote(f"/{NOTE}/")]) == ()
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "https://x.com/user/u-ada/a/b",
+        "see //user/u-ada/a/b",
+        "www.x.com/user/y/z",
+        "user/",
+        "user/project",
+        "user/session",
+        "a/b",
+    ],
+)
+def test_reply_path_non_paths_are_skipped(reply: str) -> None:
+    """AIE-1198, US2.5: URLs, protocol-relative runs, hosts and degenerate tokens are skipped."""
+    assert _paths(reply) == ()
+
+
+def test_reply_path_after_a_colon_and_space_is_checked() -> None:
+    """AIE-1198, US2.5: only an immediately adjacent scheme exempts."""
+    assert _paths("Saved to: user/u-ada/notes/zzz.md") == _flag("user/u-ada/notes/zzz.md")
+
+
+def test_reply_path_two_segments_with_a_known_area_are_checked() -> None:
+    """AIE-1198, US2.5: user/preferences names a known area."""
+    assert _paths("see user/preferences") == _flag("user/preferences")
+
+
+def test_reply_path_two_segments_with_a_known_entity_id_are_checked() -> None:
+    """AIE-1198, US2.5: user/u-ada names a known entity id."""
+    assert _paths("see user/u-ada") == _flag("user/u-ada")
+
+
+def test_reply_path_two_segments_with_a_scenario_area_are_checked() -> None:
+    """AIE-1198, US2.5: scenario seed areas are known areas."""
+    seed = SeedFile("user", "gardening", "beds", "- [stated] x\n", "Beds", ())
+    scenario = _scenario(IndexReadFirst("i"), seeds=(seed,))
+    assert _paths("see user/gardening", scenario=scenario) == _flag("user/gardening")
+
+
+def test_reply_path_two_segments_with_a_third_segment_area_are_checked() -> None:
+    """AIE-1198, US2.5: the 3rd segment of a known location is a known area."""
+    trace = [_wrote("user/u-ada/hobbies/chess.md")]
+    assert _paths("see user/hobbies", trace) == _flag("user/hobbies", "entity_omitted")
+
+
+def test_reply_path_echo_of_the_users_text_is_skipped() -> None:
+    """AIE-1198, US2.5: a token the user typed this session is not flagged."""
+    assert _paths(f"Yes, {NOTE} it is", user=f"please use {NOTE}") == ()
+
+
+def test_reply_path_user_text_from_a_later_turn_does_not_exempt() -> None:
+    """AIE-1198, US2.5: only turn <= t user text exempts."""
+    transcript = (
+        TranscriptTurn(1, 1, "hello", f"Saved {NOTE}", None),
+        TranscriptTurn(1, 2, f"is {NOTE} there?", "yes", None),
+    )
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), transcript) == (
+        UnmatchedReplyPath(1, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_user_text_from_another_session_does_not_exempt() -> None:
+    """AIE-1198, US2.5: the echo exemption is per session."""
+    transcript = (
+        TranscriptTurn(1, 1, f"use {NOTE}", "ok", None),
+        TranscriptTurn(2, 1, "hello", f"Saved {NOTE}", None),
+    )
+    scenario = _scenario(IndexReadFirst("i"), sessions=2)
+    assert find_unmatched_reply_paths(scenario, (), transcript) == (
+        UnmatchedReplyPath(2, 1, NOTE, "unmatched"),
+    )
+
+
+def test_reply_path_echo_from_an_earlier_turn_of_the_session_exempts() -> None:
+    """AIE-1198, US2.5: user text from turn <= t in the same session exempts."""
+    transcript = (
+        TranscriptTurn(1, 1, f"use {NOTE}", "ok", None),
+        TranscriptTurn(1, 2, "again", f"Saved {NOTE}", None),
+    )
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), transcript) == ()
+
+
+def test_reply_path_custom_root_from_an_identity_grant_is_checked() -> None:
+    """AIE-1198, US2.1: grant keys of the scenario identity are roots; others are not."""
+    identity = Identity(
+        grants={
+            "user": ScopeGrant("u-ada", "owner"),
+            "team": ScopeGrant("t-core", "member"),
+        }
+    )
+    custom = replace(_scenario(IndexReadFirst("i")), identity=identity)
+    reply = "see team/t-core/notes/a.md"
+    assert _paths(reply, scenario=custom) == _flag("team/t-core/notes/a.md")
+    assert _paths(reply) == ()
+
+
+def test_reply_path_roots_are_case_sensitive() -> None:
+    """AIE-1198, US2.1: User/u-ada/notes/a.md has no root."""
+    assert _paths("see User/u-ada/notes/a.md") == ()
+
+
+def test_reply_path_duplicate_token_is_reported_once() -> None:
+    """AIE-1198, US2.5: one result per distinct token per reply."""
+    assert _paths(f"{NOTE} and again `{NOTE}`.") == _flag(NOTE)
+
+
+def test_reply_path_output_order_follows_replies_then_first_appearance() -> None:
+    """AIE-1198, US2.5: transcript order, then first appearance within a reply."""
+    b, c, d = "user/u-ada/notes/b.md", "user/u-ada/notes/c.md", "user/u-ada/notes/d.md"
+    transcript = (
+        TranscriptTurn(1, 2, "x", f"{d} then {b}", None),
+        TranscriptTurn(1, 1, "y", f"{c}", None),
+    )
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), transcript) == (
+        UnmatchedReplyPath(1, 2, d, "unmatched"),
+        UnmatchedReplyPath(1, 2, b, "unmatched"),
+        UnmatchedReplyPath(1, 1, c, "unmatched"),
+    )
+
+
+def test_reply_path_empty_transcript_gives_no_results() -> None:
+    """AIE-1198, US2.5: nothing to check."""
+    assert find_unmatched_reply_paths(_scenario(IndexReadFirst("i")), (), ()) == ()
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["a" * 200_000, "x user/a/b " * 20_000],
+    ids=["no-slash-path-chars", "many-near-paths"],
+)
+def test_reply_path_scan_is_linear_time(reply: str) -> None:
+    """AIE-1198, US2.2: tokenizing a very long reply finishes in well under a second."""
+    start = time.perf_counter()
+    _paths(reply, [_wrote(NOTE)])
+    assert time.perf_counter() - start < 1.0
+
+
+def test_reply_path_list_valued_path_makes_each_string_known() -> None:
+    """AIE-1198, US2.3: a result `path` that is a list of strings makes each string known."""
+    result = _result_call(1, {"path": ["user/u-ada/preferences/charts.md"]})
+    assert _paths("See user/u-ada/preferences/charts.md", [result]) == ()
+
+
+def test_reply_path_list_valued_prefix_makes_each_string_known() -> None:
+    """AIE-1198, US2.3: an entry `prefix` that is a list of strings makes each string known."""
+    result = _result_call(
+        1,
+        {"entries": [{"prefix": ["user/u-ada/preferences/"]}]},
+        tool="get_memory_index",
+    )
+    assert _paths("See user/u-ada/preferences/", [result]) == ()

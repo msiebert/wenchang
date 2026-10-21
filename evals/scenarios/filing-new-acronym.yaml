@@ -20,6 +20,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: tool_not_called
     id: asks-before-project-write
     tool: [write_file, append_line, replace_fact]
@@ -43,3 +46,7 @@ assertions:
     id: no-new-file
     tool: write_file
     args: {scope: project}
+  - kind: line_absent
+    id: acronym-not-in-user
+    pattern: "CRX"
+    scope: user

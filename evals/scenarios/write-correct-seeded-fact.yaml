@@ -1,6 +1,8 @@
 # Prompt: "Use `append_line` to add one fact to an existing file and
-# `replace_fact` to change one fact, quoting the existing line as `old_string`
-# so surrounding lines stay intact"
+# `replace_fact` to change one fact, writing the new line as the current truth
+# and quoting the existing line as `old_string` so surrounding lines stay
+# intact" and "When a fact in a file you can write changes, its old value is
+# gone too: rewrite the line with a fresh label to state only what is true now"
 id: write-correct-seeded-fact
 title: Corrects one stored fact with replace_fact and keeps the rest
 category: write-mechanics
@@ -21,6 +23,9 @@ assertions:
   - kind: index_read_first
     id: index-first
   - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
     id: replaced-quoting-old
     tool: replace_fact
     args: {name: report-format, old_string: {matches: "(?i)pdf"}}
@@ -39,3 +44,9 @@ assertions:
     area: preferences
     name: report-format
     except: "(?i)pdf"
+  - kind: line_absent
+    id: old-format-gone
+    pattern: "(?i)pdf"
+    scope: user
+    area: preferences
+    name: report-format

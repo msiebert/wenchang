@@ -1,7 +1,8 @@
 # Prompt: "Removal is total: leave no note that the fact was ever true." and
 # "To drop one fact line, call `replace_fact` with an empty `new_string` and
 # the whole line as `old_string`" and "Descriptions and aliases are the entire
-# search surface; there is no content search."
+# search surface; there is no content search." and "One fact held in several
+# files is still one fact: remove it from each."
 # Covers specs/AIE-1053-forgetting/spec.md E1, with the fact in two files.
 id: forgetting-two-files
 title: Removes a fact from every file that holds it and keeps both files
@@ -30,6 +31,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: no_content_matching
     id: no-png-left
     pattern: "(?i)png"

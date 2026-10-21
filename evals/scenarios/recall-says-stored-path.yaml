@@ -1,0 +1,33 @@
+# Prompt: "Memory is short markdown files that outlast this conversation, each
+# addressed by a scope, an area in that scope, and a name." and "Use a stored
+# fact only if it changes the substance: what you conclude, recommend, or ask."
+id: recall-says-stored-path
+title: Gives the full stored path of the file holding a definition when asked where it is
+category: recall
+source: specs/AIE-1198-reply-paths-quote/spec.md
+seed:
+  - scope: organization
+    area: vocabulary
+    name: account-tiers
+    content: |
+      - [stated] An enterprise account has 500 or more seats.
+    description: Account tier definitions
+    aliases: [enterprise, tiers]
+sessions:
+  - turns:
+      - "My new teammate keeps asking what counts as an enterprise account here. Which memory file has that, so I can send her the location?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: reply_matching
+    id: names-full-path
+    pattern: '(?<![\w.-])/?organization/o-acme/vocabulary/account-tiers(?:\.md)?(?![\w-])'
+  - kind: reply_not_matching
+    id: no-rebuilt-path
+    pattern: '(?<![\w.-])/?organization/(?!o-acme/)(?!(?:user|project|org)(?![\w-]))[a-z0-9][a-z0-9-]*/[a-z0-9]'
+  - kind: tool_not_called
+    id: no-write
+    tool: [write_file, append_line, replace_fact, delete_file]

@@ -1,5 +1,5 @@
-# Prompt: "Delete the file if the fact was the file's only fact or the user
-# means the whole file"
+# Prompt: "When only one removal fits, remove it without asking, and delete the
+# file if that was its only fact."
 # Covers specs/AIE-1053-forgetting/spec.md E2, for a single-fact file.
 id: forgetting-only-fact
 title: Deletes a file whose only fact the user asks to forget
@@ -26,6 +26,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: file_absent
     id: file-deleted
     scope: user

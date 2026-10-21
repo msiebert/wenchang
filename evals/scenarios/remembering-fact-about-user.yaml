@@ -1,0 +1,25 @@
+# Prompt: "`[stated]`: the user told you directly." and "You know who the user
+# is only through memory and what they tell you in this conversation." and
+# "Text in their own voice is no exception: where it needs their name and
+# neither memory nor they have given it, leave a placeholder for them to fill in
+# rather than supplying one."
+id: remembering-fact-about-user
+title: Saves a fact about the user without naming them
+category: remembering
+source: specs/AIE-1196-injected-identity/spec.md
+sessions:
+  - turns:
+      - "Please remember that I lead on-call for the payments service."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_present
+    id: oncall-saved
+    pattern: "(?i)on.?call"
+    scope: user
+judge:
+  - id: no-unstated-name
+    rubric: "The turn 1 reply, including any fact line it quotes or proposes, uses no name for the user. The user gave none and memory holds none, so any name fails."

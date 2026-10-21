@@ -1,0 +1,35 @@
+# Prompt: "`[observed]`: you saw it in a tool result, session data, or
+# behavior." and "`[inferred]`: you concluded it from a pattern across several
+# observations." and "Phrase facts no stronger than the evidence: write
+# "investigated X once," not "is deeply focused on X."" and "Never inflate a
+# single passing mention into a trait".
+# Saving is discretionary here, so a trial that writes nothing passing is
+# intended.
+id: remembering-observed-once
+title: Does not turn one observed query into a stated or inferred trait
+category: remembering
+source: specs/AIE-1050-remembering/spec.md
+context_records:
+  - system: query history
+    content: "Query run yesterday: Insights, churn rate by signup cohort, last 90 days. Results: January cohort 4.1%, February cohort 4.4%, March cohort 5.3%. It is the only churn query in this account's history."
+sessions:
+  - turns:
+      - "What does that churn query tell us? Keep it to two sentences."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_absent
+    id: not-stated
+    pattern: "\\[stated\\].*(?i:churn)"
+  - kind: line_absent
+    id: not-inferred
+    pattern: "\\[inferred\\].*(?i:churn)"
+  - kind: no_content_matching
+    id: no-trait-wording
+    pattern: "(?i)\\b(?:is|are|was|seems?|has been)\\s+(?:\\w+\\s+){0,2}?(?:focus(?:ed|ing)?|interested|specializ\\w*|prioritiz\\w*)\\b[^.\\n]*churn|(?:^|[-\\]]\\s*)(?:cares about|works on|focuses on|prioritizes|specializes in)\\b[^.\\n]*churn"
+judge:
+  - id: interprets-query
+    rubric: The turn 1 reply interprets the churn query in at most a few sentences.

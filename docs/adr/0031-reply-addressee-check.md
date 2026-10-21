@@ -1,0 +1,222 @@
+# 0031. Reply addressee check
+
+Date: 2026-10-16
+
+## Status
+
+Accepted. The preamble part passed the measurement under Consequences.
+[ADR 0034](0034-operator-identity-check.md) adds an operator-identity check that,
+unlike this one, counts toward `passed`.
+
+## Context
+
+The eval agent is a Claude Code subagent. Claude Code frames a subagent's
+output as a report to its parent, and the ADR 0028 preamble ("reply to them
+directly") does not always win. In the two N=3 baseline runs (9c51a50 and
+a0b1e23, agent sha256 `b668ca85...`), three trials passed every
+deterministic assertion but failed a judge item. Their turn 1 reply talked
+about the user in the third person ("The user said...").
+
+AIE-1184 asked for a deterministic assertion kind or a judge rubric line
+that flags such replies. The report could then separate "wrong answer" from
+"right answer, wrong addressee". It also asked for a stronger but still
+honest preamble, to be kept only if a measurement showed it helps.
+
+## Decision
+
+1. **Run a harness-wide reply check, not an assertion kind or judge rule.**
+   `evals.graders.find_third_person_replies(scenario, transcript)` scans
+   every recorded reply. It is pure and imports no `mcp`.
+   - It ignores quoted text: fenced code blocks, `>` lines, and `"..."`,
+     `“...”`, and `` `...` `` spans on one line.
+   - It matches `the user` and `the caller`.
+     - Any whitespace run (newlines and NBSP included) may separate the
+       words.
+     - An optional possessive `'s`, `’s`, or `ʼs` may follow.
+     - "the user scope", "the user's scope", "the user-scope", "the
+       user—scope", and "the users" do not match.
+   - It skips a match that echoes the context. The context is the
+     session's user text up to that turn, plus every seed file's content,
+     description, and aliases.
+     - A phrase with a next word (the match plus that word, normalized)
+       must appear at word boundaries. A reply that echoes "Signup means the
+       user has verified" is therefore not flagged.
+     - A bare match must appear with the same following character, or end
+       a context text when it ends the reply. A seed's "the user submits"
+       therefore does not exempt "I'll check with the user."
+   - It reports at most one flag per reply.
+
+   An assertion kind was rejected for three reasons:
+   - `grade(scenario, store, trace)` excludes the transcript (ADR 0028 §3).
+   - It would count toward deterministic pass/fail, failing 16 of the 138
+     baseline trials.
+   - It is opt-in per scenario.
+
+   A judge rule was rejected because it is LLM-graded, it runs only with
+   `--judge`, and it would break comparability with the baseline judge
+   counts.
+
+2. **The check is a separate signal and never fails anything.**
+   - `grade.json` gains `third_person_replies` (a list of `{session, turn,
+     phrase}`) when `transcript.json` exists.
+   - A malformed, undecodable, or too-deeply-nested transcript gives
+     `transcript_error` instead and never blocks deterministic grading.
+   - If `transcript.json` is deleted after a check was recorded, the check
+     is dropped and the trial counts as unchecked.
+   - `results` and `passed` are unchanged.
+   - A `grade.json` that is current for the store and trace gets only the
+     check recomputed. Its results are kept, so old runs pick up the check
+     without being silently regraded. The refresh rule is amended below.
+   - The report adds, per scenario, `third_person_trials`,
+     `addressee_unchecked_trials`, and `judge_third_person_fails`, and a
+     run-level `third_person` total. The markdown judge table gains a
+     "Fails with a third-person reply" column. That count is co-occurrence,
+     not cause.
+   - An SDK driver that writes `transcript.json` gets the check with no
+     extra work.
+
+3. **The preamble is tightened, honestly.** The second sentence becomes:
+   "Your reply goes to that user word for word, so in your reply address
+   them as "you" and never call them "the user"." The issue's suggested
+   "nobody else reads it" was rejected as false, because the runner, the
+   later-turn replay, and the judge all read the reply. The rule is scoped
+   to the reply so that it does not reach stored fact lines.
+
+## Consequences
+
+- **Calibration.** The shipped check flags 7 of 69 trials in run A and 9
+  of 69 in run B, 16 of 138 in all. That includes all 3 judge failures, and
+  manual review found no false positives. Re-reporting copies of the
+  baseline dirs left their deterministic results unchanged.
+- **Gate for the preamble.** It is human-run, over two N=3 `--judge` runs
+  at the AIE-1184 head, on the 23 baseline scenario ids only. The preamble
+  stays if all three hold:
+  - flagged trials are at most floor(16/2) = 8;
+  - no scenario's combined deterministic trials-passed is more than 1
+    below baseline;
+  - summed judge passes are no lower than baseline.
+
+  Otherwise the preamble, the rendered agent file, and its pin test revert
+  and the check lands alone. Measure before AIE-1182 or AIE-1183 land, and
+  merge AIE-1184 first. One known confound: the baseline predates
+  5bd1355's `model=` rule.
+- **Outcome: preamble kept.** The gate passed on one N=6 `--judge` run
+  (138 trials of the 23 baseline scenarios, commit 6e1d259) at 8 of 138
+  flagged trials against a baseline of 16. No scenario fell more than 1
+  below baseline, and summed judge passes were 45 of 48, equal to baseline.
+  Details are in `specs/AIE-1184-eval-reply-addressee/review-pr.md`.
+- **Limits.**
+  - The pattern misses phrasings like "they asked me to", so the count is
+    a lower bound.
+  - Future analytics scenarios may add noisy hits, such as "where the user
+    drops off". "the user ID", "the user property", and "the user profile"
+    are no longer matches (amendment below). "user-facing" is never a
+    match, because it has no "the". The check never fails a trial, so the
+    noise stays in the count.
+  - Two quoting forms are not stripped:
+    - a fence opened and closed on one line, such as ```` ```the user``` ````;
+    - straight-quote inch marks (`5" wide ... "the user`), which can pair
+      with the wrong quote and hide or expose text.
+
+## Amendment (AIE-1199)
+
+Date: 2026-10-16
+
+### Problem
+
+The check flagged "the user" where it names a data row or product
+vocabulary:
+
+- AIE-1185 `applying-relevant-only` trials 1 and 3 ("whether the user has at
+  least one Purchase event", in an SQL turn).
+- AIE-1182 `filing-project-fact-in-question` trials 2 to 6 ("the user ID"
+  twice, "the User Profile" twice, "the user taps the button") and
+  `remembering-preference-mid-task` trial 4 ("use the user property").
+
+### Rules
+
+1. **SQL turns.** A turn is an SQL turn when its raw reply, or any raw user
+   text of its session up to that turn, holds an SQL statement:
+   `select ... from <ident>` then `join <ident> [alias] on` or
+   `where <ident> <comparison>`; or `insert into <ident> (`/`values`/`select`,
+   `update <ident> set <ident> =`, `delete from <ident> where`, `create table
+   <ident> (`. Statements are split at blank lines and `;`, and the scan is
+   linear time. In an SQL turn, a non-possessive "the user" followed directly
+   by a data verb (has, have, had, is, are, was, were, with, who, whose, did,
+   does, exists) is skipped, unless:
+   - an addressee word ends the text before it (ask, tell, remind, inform
+     forms; check with; confirm with; wait or waiting for; reply to; respond
+     to), or
+   - a speech verb follows the data verb. One adverb or "been" may sit
+     between, only whitespace separates them, and punctuation ends the
+     look-ahead.
+
+   Rejected: requiring a speech verb everywhere, which loses 3 of the 8
+   AIE-1184 true positives that have none ("the user can post", "for the user
+   to post", "gave the user a draft"); skipping every match near SQL, which
+   loses "the user asked" in SQL turns; and "group by"/"order by" as SQL
+   markers, which are prose.
+2. **Vocabulary, any turn.** A non-possessive "the user" followed (spaces,
+   tabs, NBSP, or one dash) by a data noun (id, profile, property, table,
+   row, record, column, attribute, and plurals) or an interface verb (taps,
+   tapped, clicks, clicked, swipes, swiped, scrolls, scrolled, presses,
+   pressed, hovers, hovered) is not a match. Possessives and "the caller" are
+   unchanged.
+3. **Re-report.** This replaces Decision 2's "older than the transcript"
+   refresh. `build_report` recomputes the reply check of every current
+   `grade.json` whose transcript exists, and rewrites `grade.json` only when
+   the check fields changed. `results` and `passed` are never touched. The
+   cost is one transcript parse per current trial.
+
+### Measurement
+
+Manual review of the flags:
+
+- AIE-1184 N=6 (8) and AIE-1185 N=3 (2): 8 true positives (all AIE-1184) and
+  2 false positives.
+- AIE-1182 N=6 (12): 6 true, 6 false.
+- AIE-1183 N=6 (6): all true.
+
+Re-report of `cp -Rp` copies, with the originals unchanged by file hash.
+`trials_run`, `passed_trials`, `assertions`, and `judge` are identical to the
+originals. The AIE-1184 copy was re-reported from the AIE-1199 branch, which
+contains AIE-1184, with its scenario paths left at the AIE-1184 worktree. The
+AIE-1182, AIE-1183, and AIE-1185 copies were re-reported on scratch worktrees
+at their run commits with the AIE-1199 evals diff applied and scenario paths
+pinned there.
+
+| Run | Flagged before | Flagged after |
+| --- | -------------- | ------------- |
+| AIE-1184 `aie1184-n6` | 8/138 | 8/138 |
+| AIE-1185 `aie1185-n3` | 2/30 | 0/30 |
+| AIE-1182 `aie1182-n6` | 12/168 | 6/168 |
+| AIE-1183 `aie1183-n6` | 6/168 | 6/168 |
+| Total | 28 | 20 |
+
+All 8 removed flags are the false positives above. No true positive is
+removed and no new flag appears.
+
+### Limits
+
+- In an SQL turn, third-person uses after a data verb with no cue are missed
+  ("the user has a draft", "the user has to approve").
+- A quoted span removed between "the user" and a data verb lets the
+  exemption apply.
+- SQL with a blank line inside, or a `;` inside a string literal, may not be
+  recognized, which errs toward flagging.
+- Non-SQL code does not make an SQL turn.
+- In an SQL turn, cue words outside the speech-verb list after a data verb
+  are missed ("the user has decided").
+- Data uses after other verbs ("the user made the order") or possessives
+  ("the user's email") are still flagged.
+- "the caller" is never exempt.
+- A data noun or interface verb used of the addressee is missed.
+- A `transcript_error` that names an absolute path is rewritten once after a
+  run dir is copied.
+
+## Amendment (2026-10-20, ADR 0035)
+
+Third-person counts recorded before this date include auto-mode handback
+summaries: about 16 of the roughly 20 judge fails labelled third-person noise
+were summaries. Counts from the clean baseline after ADR 0035 are the real
+signal.

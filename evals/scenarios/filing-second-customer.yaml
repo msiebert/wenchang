@@ -1,0 +1,63 @@
+# Prompt: "File each fact in the file that is about its subject, not whichever
+# file happens to be open." and "If a file on the subject exists, append to it
+# or edit it instead of creating a duplicate." and "Writes to user need no ask."
+id: filing-second-customer
+title: Files a fact about a second customer in that customer's file, not the open one
+category: filing
+source: specs/AIE-1049-filing-dedup/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: acme-account
+    content: |
+      - [stated] Opens every Acme call with the adoption dashboard.
+      - [stated] Acme cares most about weekly active teams.
+    description: My working notes on the Acme account
+    aliases: [acme]
+  - scope: user
+    area: workflows
+    name: globex-account
+    content: |
+      - [stated] Globex is evaluating the warehouse connector.
+    description: My working notes on the Globex account
+    aliases: [globex]
+sessions:
+  - turns:
+      - "Let's prep for my Acme call. What do my notes say? Oh, and before I forget: for Globex, I always send the call recap to their VP of Data, not to our champion there."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
+    id: filed-in-globex
+    tool: [append_line, replace_fact]
+    args: {scope: user, name: globex-account}
+    succeeded: true
+  - kind: line_present
+    id: recap-in-globex
+    pattern: "(?i)\\bvp\\b|vice president"
+    scope: user
+    area: workflows
+    name: globex-account
+  - kind: line_absent
+    id: not-in-acme
+    pattern: "(?i)globex|\\bvp\\b|vice president"
+    scope: user
+    area: workflows
+    name: acme-account
+  - kind: tool_not_called
+    id: no-duplicate-file
+    tool: write_file
+    args: {name: {matches: "^(?!(acme|globex)-account$)"}}
+  - kind: seed_lines_preserved
+    id: acme-kept
+    scope: user
+    area: workflows
+    name: acme-account
+  - kind: seed_lines_preserved
+    id: globex-kept
+    scope: user
+    area: workflows
+    name: globex-account
