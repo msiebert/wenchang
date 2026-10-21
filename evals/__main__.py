@@ -73,6 +73,15 @@ def _grade(args: argparse.Namespace) -> int:
     for result in graded["results"]:
         status = "PASS" if result["passed"] else "FAIL"
         print(f"{status} {result['id']}: {result['detail']}")
+    for reply in graded.get("third_person_replies", []):
+        print(f"THIRD-PERSON session {reply['session']} turn {reply['turn']}: {reply['phrase']}")
+    for hit in graded["operator_identity"].get("hits", []):
+        print(
+            f"OPERATOR-IDENTITY {hit['where']} session {hit['session']} turn {hit['turn']} "
+            f"{hit['path']} {hit['field']}: {hit['token']}".replace("  ", " ")
+        )
+    if "transcript_error" in graded:
+        print(f"TRANSCRIPT ERROR: {graded['transcript_error']}")
     return 0
 
 

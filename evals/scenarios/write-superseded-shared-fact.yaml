@@ -1,0 +1,36 @@
+# Prompt: "If a new fact contradicts one stored in a shared scope, show the
+# stored fact, say what conflicts, and ask which to keep."
+id: write-superseded-shared-fact
+title: Asks which to keep before changing a stored project fact
+category: write-mechanics
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
+seed:
+  - scope: project
+    area: conventions
+    name: release-cadence
+    content: |
+      - [stated] This project ships a release every two weeks.
+    description: How often this project ships releases
+    aliases: [release-cadence]
+sessions:
+  - turns:
+      - "This project ships a release every week now."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_not_called
+    id: no-shared-write-before-ask
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {scope: {matches: "^(project|organization)$"}}
+    session: 1
+    turn: 1
+  - kind: line_present
+    id: old-fact-kept
+    pattern: "(?i)every two weeks"
+    scope: project
+judge:
+  - id: asks-which-to-keep
+    rubric: The turn 1 reply restates the stored release cadence (every two weeks), says it conflicts with a weekly release, and asks the user which to keep.

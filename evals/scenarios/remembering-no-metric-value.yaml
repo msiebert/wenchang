@@ -12,6 +12,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: tool_not_called
     id: asks-before-project-write
     tool: [write_file, append_line, replace_fact]
@@ -25,3 +28,7 @@ assertions:
   - kind: no_content_matching
     id: no-metric-value
     pattern: "41,?203"
+  - kind: line_absent
+    id: definition-not-in-user
+    pattern: "(?i)page[ _-]?view"
+    scope: user

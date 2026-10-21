@@ -1,5 +1,8 @@
-# Prompt: "Delete the file if the fact was the file's only fact or the user
-# means the whole file" and "Use `delete_file` only when the whole file goes."
+# Prompt: "Before carrying out a request that would remove more than one fact,
+# ask first unless the user's own words clearly cover every one: they said all
+# or everything, asked for the whole file or subject, or named each fact to
+# remove, even if other facts stay." and "Use `delete_file` only when the whole
+# file goes."
 id: forgetting-whole-file
 title: Deletes the whole file when the user asks to forget everything about its subject
 category: forgetting
@@ -26,6 +29,9 @@ sessions:
 assertions:
   - kind: index_read_first
     id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
   - kind: file_absent
     id: file-deleted
     scope: user

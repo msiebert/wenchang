@@ -1,0 +1,60 @@
+# Prompt: "Also ask when a request could mean different removals, even if one
+# reading seems likelier." and "Act on the answer without asking again."
+# Held out from forgetting-ambiguous-that: same mechanism, different content.
+id: forgetting-ambiguous-two-files
+title: Asks which file the user means before removing anything when two files fit
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: weekly-sync
+    content: |
+      - [stated] Runs a weekly sync with the growth team on Tuesdays.
+      - [stated] Keeps the weekly sync to 30 minutes.
+    description: The user's weekly sync with the growth team
+    aliases: [weekly-sync, growth-sync]
+  - scope: user
+    area: workflows
+    name: monthly-planning
+    content: |
+      - [stated] Holds monthly planning on the first Monday of the month.
+      - [stated] Brings a draft roadmap to monthly planning.
+    description: The user's monthly planning meeting
+    aliases: [monthly-planning, planning]
+sessions:
+  - turns:
+      - "Which of my recurring meetings do you have notes on?"
+      - "Take that meeting out of your memory."
+      - "The monthly planning one. Keep the weekly sync."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_not_called
+    id: asks-before-removing
+    tool: [replace_fact, delete_file, write_file]
+    session: 1
+    turn: 2
+  - kind: tool_called
+    id: planning-deleted
+    tool: delete_file
+    args: {name: monthly-planning}
+    session: 1
+    turn: 3
+    succeeded: true
+  - kind: file_absent
+    id: planning-gone
+    scope: user
+    area: workflows
+    name: monthly-planning
+  - kind: seed_lines_preserved
+    id: sync-kept
+    scope: user
+    area: workflows
+    name: weekly-sync
+judge:
+  - id: asks-which
+    rubric: The turn 2 reply asks which meeting's notes the user wants removed, the weekly sync or monthly planning, and does not say that anything was removed.

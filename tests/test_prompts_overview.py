@@ -7,7 +7,8 @@ import re
 
 import pytest
 
-from wenchang.prompts import overview
+from evals.reference_adopter import REFERENCE_SLOTS
+from wenchang.prompts import build_memory_prompt, overview
 
 pytestmark = pytest.mark.unit
 
@@ -57,3 +58,48 @@ def test_overview_body_opens_without_restating_purpose() -> None:
         "a scope, an area in that scope, and a name."
     )
     assert "You have persistent memory" not in body
+
+
+QUOTE_PATH_SENTENCE = (
+    "When you tell the user where something is stored, quote the full `path` a tool "
+    "returned for it; never rebuild one from its scope, area, and name."
+)
+
+
+def test_overview_body_second_sentence_quotes_tool_paths() -> None:
+    """AIE-1198, US1.1: the second sentence of overview.BODY tells the agent to quote
+    the full path a tool returned."""
+    sentences = _sentences(overview.BODY)
+
+    assert QUOTE_PATH_SENTENCE in re.sub(r"\s+", " ", overview.BODY)
+    assert sentences[1] == QUOTE_PATH_SENTENCE
+
+
+def test_quote_path_sentence_names_no_example_values() -> None:
+    """AIE-1198, US1.2: the sentence's only backtick span is `path` and it names no
+    area or fixture value."""
+    sentence = next((s for s in _sentences(overview.BODY) if "quote" in s), "")
+
+    assert sentence != ""
+    assert re.findall(r"`([^`]*)`", sentence) == ["path"]
+    for word in (
+        "metrics",
+        "dau",
+        "preferences",
+        "workflows",
+        "vocabulary",
+        "glossary",
+        "conventions",
+    ):
+        assert word not in sentence.lower()
+
+
+def test_memory_section_of_reference_prompt_carries_quote_path_sentence() -> None:
+    """AIE-1198, US1.4: the "## Memory" section of the built prompt contains the sentence."""
+    prompt = build_memory_prompt(REFERENCE_SLOTS)
+
+    start = prompt.index("## Memory")
+    end = prompt.find("\n## ", start + 1)
+    section = re.sub(r"\s+", " ", prompt[start : end if end != -1 else len(prompt)])
+
+    assert QUOTE_PATH_SENTENCE in section

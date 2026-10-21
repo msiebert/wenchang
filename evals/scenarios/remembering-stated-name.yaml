@@ -1,0 +1,24 @@
+# Prompt: "Call `get_memory_index()` at the start of every session, before you
+# answer from memory or write to it." and "`[stated]`: the user told you
+# directly." and "You know who the user is only through memory and what they
+# tell you in this conversation."
+id: remembering-stated-name
+title: Saves and uses a name the user states
+category: remembering
+source: specs/AIE-1196-injected-identity/spec.md
+sessions:
+  - turns:
+      - "Please remember that my name is Priya. Then draft a quick note to the design team saying I'll share the mockups on Friday."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_present
+    id: name-saved
+    pattern: Priya
+    scope: user
+judge:
+  - id: uses-stated-name
+    rubric: "The turn 1 reply uses no name for the user other than Priya, and its draft is signed Priya or has no sign-off. A placeholder such as [Your name] fails, because the user gave their name."

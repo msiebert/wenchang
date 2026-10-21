@@ -4,6 +4,7 @@
 
 import json
 import sys
+import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import MappingProxyType
@@ -28,6 +29,7 @@ from evals.server import (
     EvalState,
     build_eval_server,
 )
+from evals.subagent_transcript import SubagentTranscriptError
 from wenchang.core import MemoryStore
 from wenchang.mcp import PROMPT_RESOURCE_URI, ToolCallRecord
 from wenchang.prompts import build_memory_prompt
@@ -596,3 +598,280 @@ def test_record_turn_writes_the_transcript(tmp_path: Path, state: EvalState) -> 
 
     turns = load_transcript(trial / "transcript.json")
     assert [(t.session, t.turn, t.reply) for t in turns] == [(1, 1, "first reply")]
+
+
+AGENT_ID = "a2d570cdfd6af0fa2"
+FULL_REPLY = "I'll check my memory first.\n\nI found nothing.\n\nPROBE-END"
+WRAPPED_RESULT = (
+    "[Subagent hand-back] The text below is the subagent's reply. The report follows:\n"
+    "  I found nothing.\n  \n  PROBE-END\n"
+    f"agentId: {AGENT_ID} (use SendMessage with to: '{AGENT_ID}' to continue)\n"
+    "<usage>subagent_tokens: 1</usage>"
+)
+
+
+def _subagent_fixture(root: Path) -> None:
+    lines = [
+        {
+            "type": "assistant",
+            "uuid": "u1",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I'll check my memory first."}],
+            },
+        },
+        {
+            "type": "assistant",
+            "uuid": "u4",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I found nothing.\n\nPROBE-END"}],
+            },
+        },
+    ]
+    path = root / "-some-cwd" / "sess-1" / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+
+
+@pytest.fixture
+def transcript_state(tmp_path: Path) -> EvalState:
+    _subagent_fixture(tmp_path / "projects")
+    state = EvalState(
+        runs_root=tmp_path / "runs",
+        transcripts_root=tmp_path / "projects",
+        transcript_retry_s=0,
+    )
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    state.reset(load_scenario(scenario), state.runs_root / "t")
+    return state
+
+
+def test_record_turn_reads_the_reply_from_the_subagent_transcript(
+    transcript_state: EvalState,
+) -> None:
+    """With a transcripts root, the recorded reply is the reconstructed text
+    and the passed text is kept as agent_result (AIE-1208, AC14).
+    """
+    transcript_state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+
+    (turn,) = transcript_state.transcript()
+    assert (turn.reply, turn.agent_result, turn.agent_id) == (FULL_REPLY, WRAPPED_RESULT, AGENT_ID)
+    saved = load_transcript(transcript_state.runs_root / "t" / "transcript.json")
+    assert saved == (turn,)
+
+
+@pytest.mark.parametrize("agent_id", [None, "ffffffffffffffff0"])
+def test_record_turn_without_a_findable_transcript_records_nothing(
+    transcript_state: EvalState, agent_id: str | None
+) -> None:
+    """A missing agent id or transcript raises and leaves the transcript
+    untouched (AIE-1208, AC14).
+    """
+    with pytest.raises(SubagentTranscriptError):
+        transcript_state.record_turn(1, 1, "hi", WRAPPED_RESULT, agent_id)
+
+    assert transcript_state.transcript() == ()
+    assert load_transcript(transcript_state.runs_root / "t" / "transcript.json") == ()
+
+
+def test_record_turn_tool_errors_when_the_transcript_is_missing(
+    tmp_path: Path, transcript_state: EvalState
+) -> None:
+    """Through MCP, eval_record_turn returns an error result and records
+    nothing (AIE-1208, AC14).
+    """
+
+    async def body(client: Client) -> CallToolResult:
+        return await client.call_tool(
+            "eval_record_turn",
+            {"session": 1, "turn": 1, "user": "hi", "reply": "r", "agent_id": "nope"},
+        )
+
+    result = _run(transcript_state, body)
+
+    assert result.is_error
+    assert transcript_state.transcript() == ()
+
+
+def test_record_turn_is_unchanged_without_a_transcripts_root(
+    tmp_path: Path, state: EvalState
+) -> None:
+    """Without a transcripts root the reply is as passed and no agent_result
+    is recorded or written (AIE-1208, AC15).
+    """
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    state.reset(load_scenario(scenario), state.runs_root / "t")
+
+    state.record_turn(1, 1, "hi", "as passed", "a-1")
+
+    (turn,) = state.transcript()
+    assert (turn.reply, turn.agent_result) == ("as passed", None)
+    written = json.loads((state.runs_root / "t" / "transcript.json").read_text())
+    assert "agent_result" not in json.dumps(written)
+
+
+def test_record_turn_normalizes_a_decorated_agent_id(transcript_state: EvalState) -> None:
+    """The first whitespace-separated token of agent_id is used and recorded
+    (AIE-1208, D6 refinement 3).
+    """
+    decorated = f"{AGENT_ID} (use SendMessage with to: '{AGENT_ID}' to continue)"
+
+    transcript_state.record_turn(1, 1, "hi", WRAPPED_RESULT, decorated)
+
+    (turn,) = transcript_state.transcript()
+    assert (turn.agent_id, turn.reply) == (AGENT_ID, FULL_REPLY)
+
+
+@pytest.mark.parametrize("blank", ["", "   \n"])
+def test_record_turn_rejects_a_blank_agent_id(transcript_state: EvalState, blank: str) -> None:
+    """An empty or whitespace-only agent_id raises and records nothing
+    (AIE-1208, D6 refinement 3).
+    """
+    with pytest.raises(SubagentTranscriptError):
+        transcript_state.record_turn(1, 1, "hi", WRAPPED_RESULT, blank)
+    assert transcript_state.transcript() == ()
+
+
+def test_record_turn_requires_the_final_text_in_the_agent_result(
+    transcript_state: EvalState,
+) -> None:
+    """When the transcript's last text block is not in the agent result, the
+    turn raises after retries and records nothing (AIE-1208, D6 refinement 2).
+    """
+    stale = "[Subagent hand-back]\n  Something else entirely.\nagentId: x\n<usage>t</usage>"
+
+    with pytest.raises(SubagentTranscriptError):
+        transcript_state.record_turn(1, 1, "hi", stale, AGENT_ID)
+
+    assert transcript_state.transcript() == ()
+    assert load_transcript(transcript_state.runs_root / "t" / "transcript.json") == ()
+
+
+def test_record_turn_consistency_check_ignores_whitespace_and_framing(
+    transcript_state: EvalState,
+) -> None:
+    """Indentation and line breaks in the wrapped result do not defeat the
+    consistency check (AIE-1208, D6 refinement 2).
+    """
+    transcript_state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+    assert len(transcript_state.transcript()) == 1
+
+
+def test_missing_transcript_error_names_the_root_and_the_flag(tmp_path: Path) -> None:
+    """The not-found error shows the searched root and how to change it
+    (AIE-1208, D6 refinement 4).
+    """
+    root = tmp_path / "projects"
+    state = EvalState(runs_root=tmp_path / "runs", transcripts_root=root, transcript_retry_s=0)
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    state.reset(load_scenario(scenario), state.runs_root / "t")
+
+    with pytest.raises(SubagentTranscriptError) as info:
+        state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+
+    assert str(root) in str(info.value)
+    assert "--transcripts-root" in str(info.value)
+
+
+def _retry_state(tmp_path: Path, retry_s: float) -> EvalState:
+    state = EvalState(
+        runs_root=tmp_path / "runs",
+        transcripts_root=tmp_path / "projects",
+        transcript_retry_s=retry_s,
+    )
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    state.reset(load_scenario(scenario), state.runs_root / "t")
+    return state
+
+
+def test_record_turn_retries_until_the_transcript_appears(tmp_path: Path) -> None:
+    """A transcript written shortly after the call is picked up by the retry
+    (AIE-1208, review follow-up 1).
+    """
+    state = _retry_state(tmp_path, 1.0)
+    timer = threading.Timer(0.2, _subagent_fixture, args=(tmp_path / "projects",))
+    timer.start()
+    try:
+        state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+    finally:
+        timer.join()
+
+    (turn,) = state.transcript()
+    assert turn.reply == FULL_REPLY
+
+
+def test_record_turn_retries_a_transcript_that_is_still_incomplete(tmp_path: Path) -> None:
+    """A transcript holding only the pre-tool text is retried until the final
+    text lands (AIE-1208, review follow-up 1).
+    """
+    state = _retry_state(tmp_path, 1.0)
+    path = tmp_path / "projects" / "-some-cwd" / "sess-1" / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    path.parent.mkdir(parents=True)
+    first = {
+        "type": "assistant",
+        "uuid": "u1",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": "I'll check."}]},
+    }
+    path.write_text(json.dumps(first) + "\n")
+
+    def finish() -> None:
+        path.unlink()
+        _subagent_fixture(tmp_path / "projects")
+
+    timer = threading.Timer(0.2, finish)
+    timer.start()
+    try:
+        state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+    finally:
+        timer.join()
+
+    (turn,) = state.transcript()
+    assert turn.reply == FULL_REPLY
+
+
+def test_record_turn_raises_on_a_persistently_torn_line(tmp_path: Path) -> None:
+    """A torn final JSON line is retried, then raised, recording nothing
+    (AIE-1208, review follow-up 2).
+    """
+    state = _retry_state(tmp_path, 0.3)
+    _subagent_fixture(tmp_path / "projects")
+    path = tmp_path / "projects" / "-some-cwd" / "sess-1" / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    with path.open("a") as handle:
+        handle.write('{"type":"assistant","uuid":')
+
+    with pytest.raises(SubagentTranscriptError):
+        state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+
+    assert state.transcript() == ()
+
+
+def test_record_turn_raises_on_an_ambiguous_agent_id(tmp_path: Path) -> None:
+    """Two transcripts for one id raise and record nothing (AIE-1208, review
+    follow-up 2).
+    """
+    state = _retry_state(tmp_path, 0.0)
+    root = tmp_path / "projects"
+    _subagent_fixture(root)
+    other = root / "-some-cwd" / "sess-2" / "subagents" / f"agent-{AGENT_ID}.jsonl"
+    other.parent.mkdir(parents=True)
+    other.write_text(
+        (root / "-some-cwd" / "sess-1" / "subagents" / f"agent-{AGENT_ID}.jsonl").read_text()
+    )
+
+    with pytest.raises(SubagentTranscriptError):
+        state.record_turn(1, 1, "hi", WRAPPED_RESULT, AGENT_ID)
+
+    assert state.transcript() == ()
+
+
+def test_reset_writes_an_empty_transcript_file(tmp_path: Path, state: EvalState) -> None:
+    """eval_reset writes transcript.json with an empty turns list into the
+    trial dir (AIE-1208, review follow-up 5).
+    """
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    trial = state.runs_root / "t"
+
+    state.reset(load_scenario(scenario), trial)
+
+    assert json.loads((trial / "transcript.json").read_text()) == {"turns": []}

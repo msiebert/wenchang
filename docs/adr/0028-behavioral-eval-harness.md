@@ -86,6 +86,12 @@ slow and nondeterministic.
        sessions that call memory: if a session makes any memory call, the
        index read must come first. Whether a session should have called
        memory at all is left to the scenario's other assertions.
+       Scenarios that need a lookup pair `index_read_first` with a
+       `tool_called get_memory_index` check, one per session; only the
+       five refusal scenarios (`privacy-account-number`,
+       `privacy-insist-bank`, `privacy-minor`, `privacy-health-shared`,
+       `privacy-sensitive-private`) omit it, as an explicit set rather than
+       the `privacy-` prefix (AIE-1197).
    - **Scanned writes.** `no_content_matching` scans only `content`,
      `line`, `new_string`, `description`, `aliases`, `area`, and `name`,
      and only on `write_file`, `append_line`, and `replace_fact`. Version
@@ -93,6 +99,9 @@ slow and nondeterministic.
      and a delete persists nothing.
    - **Trial dir.** `eval_reset` accepts a `trial_dir` only under the
      server's runs root, which defaults to `evals/runs/` and is gitignored.
+
+   **Amended (2026-10-16) by ADR 0032.** Graders now also take the
+   transcript, and `transcript.json` is a grading input.
 
 4. **The eval server mounts the memory tools with `register_memory_tools`
    and adds three harness tools.**
@@ -169,10 +178,18 @@ slow and nondeterministic.
    root `.mcp.json`. The command is:
 
    ```
-   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" --settings '{"includeGitInstructions": false}'
+   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" "Edit(evals/runs/**)" --settings '{"includeGitInstructions": false}'
    ```
 
    - Ordinary sessions never see the eval server.
+   - `--permission-mode dontAsk` keeps auto mode from injecting
+     `SubagentHandback` into subagents, so the Agent result is the
+     subagent's own text.
+   - `"Edit(evals/runs/**)"`: `dontAsk` denies anything that would prompt,
+     and the judge writes `judge.json`. Edit rules cover Write.
+
+   **Amended (2026-10-20) by ADR 0035.** The command gained
+   `--permission-mode dontAsk` and the `Edit` rule.
    - `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` runs subagents in the
      foreground, which turn tagging needs.
    - `--strict-mcp-config` keeps the tool schemas loaded directly rather
@@ -188,6 +205,12 @@ slow and nondeterministic.
    `eval_record_turn`.** Reading Claude Code's subagent transcript files
    was rejected, because their layout under `~/.claude/projects/` is
    internal. A paraphrased copy would affect only the judge.
+
+   **Amended (2026-10-16) by ADR 0032.** A paraphrased copy now also
+   affects the reply assertion kinds, so the live gate spot-checks it.
+
+   **Amended (2026-10-20) by ADR 0035.** The reply is now read from the
+   subagent transcript by `agent_id`.
 
 8. **The judge is optional and separate.** `wenchang-eval-judge` (Read and
    Write, `omitClaudeMd`) writes `judge.json`. The report shows judge
@@ -227,6 +250,8 @@ slow and nondeterministic.
     reply, and a missing reply is a `fail`. The remaining deferred
     scenarios are listed in the spec.
 
+    **Amended (2026-10-16) by ADR 0032.** The corpus is 48 scenarios.
+
 12. **Parallel runs are sharded across sessions (2026-10-14).** Trials
     inside one runner session stay serial. One eval server holds one
     in-memory store, and `eval_record_turn` assigns memory calls to turns by
@@ -262,8 +287,13 @@ slow and nondeterministic.
   138 trials across two N=3 runs, its turn 1 reply read as a third-person
   report ("I asked the user whether...") instead of addressing the user.
   The judge failed those replies even though every deterministic assertion
-  passed. Judge items on reply wording carry this noise. No change is
-  made.
+  passed. Judge items on reply wording carry this noise. ADR 0031 adds a
+  deterministic reply check that flags such replies separately (16 of the
+  138 baseline trials) and tightens the preamble, subject to a measured
+  gate. ADR 0034 adds a corpus-wide operator-identity check that counts
+  toward `passed`.
+  **Amended (2026-10-20) by ADR 0035.** Most of those third-person replies
+  were auto-mode handback summaries.
 - Strict `index_read_first` grades execution order as the server saw it.
   A host that serializes a batched pair may let it pass.
 - Calls that MCP rejects during argument validation never reach `on_call`,

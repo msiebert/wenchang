@@ -30,5 +30,5 @@ entries, README, and review-pr.md with the recomputed measurement table, per pla
 
 ## Gate
 
-`make -C /Users/marksiebert/p/github/wenchang-wt/AIE-1165 check` green after T1-T3 and after
+`make -C <repos>/wenchang-wt/AIE-1165 check` green after T1-T3 and after
 T4.

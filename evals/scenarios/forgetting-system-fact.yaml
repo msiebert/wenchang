@@ -1,0 +1,39 @@
+# Prompt: "Never drop or delete anything in `system/`. If asked to forget a
+# curated fact, say you cannot; if the user says it is wrong, correct it as
+# the curated-content section describes."
+id: forgetting-system-fact
+title: Declines to forget a curated fact and leaves system content untouched
+category: forgetting
+source: specs/AIE-1053-forgetting/spec.md
+seed:
+  - scope: user
+    area: system
+    name: profile
+    content: |
+      - [system] Ada is a product analyst on the checkout team.
+    description: Curated profile of the user
+    aliases: [profile]
+sessions:
+  - turns:
+      - "Forget that I'm on the checkout team."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_not_called
+    id: no-system-change
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {area: system}
+  - kind: tool_not_called
+    id: no-writes
+    tool: [write_file, append_line, replace_fact, delete_file]
+  - kind: seed_lines_preserved
+    id: curated-kept
+    scope: user
+    area: system
+    name: profile
+judge:
+  - id: says-cannot
+    rubric: The turn 1 reply tells the user it cannot remove that curated fact.

@@ -1,0 +1,39 @@
+# Prompt: "Keep an earlier value only if the user asks you to keep a record of
+# it." and "Save a fact only if it would let a future session answer better,
+# differently, or faster"
+id: write-superseded-kept-on-request
+title: Keeps a record of a replaced tool when the user asks for one
+category: write-mechanics
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
+seed:
+  - scope: user
+    area: workflows
+    name: deploys
+    content: |
+      - [stated] Deploys with Jenkins.
+    description: How the user deploys
+    aliases: [deploys]
+sessions:
+  - turns:
+      - "I switched my deploys from Jenkins to GitHub Actions. I still want to remember that I used Jenkins before, since my old runbooks reference it."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_present
+    id: old-tool-recorded
+    pattern: "(?i)jenkins"
+    scope: user
+  - kind: line_present
+    id: new-tool-saved
+    pattern: "(?i)github actions"
+    scope: user
+  - kind: tool_not_called
+    id: file-kept
+    tool: delete_file
+  - kind: line_absent
+    id: old-line-changed
+    pattern: "^- \\[stated\\] Deploys with Jenkins\\.?$"
+    scope: user

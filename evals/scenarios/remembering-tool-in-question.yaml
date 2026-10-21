@@ -1,0 +1,20 @@
+# Prompt: "`[stated]`: the user told you directly." and "Save a fact only if it
+# would let a future session answer better, differently, or faster; otherwise
+# leave it out, even if true." and "otherwise use user."
+id: remembering-tool-in-question
+title: Saves a tool the user mentions inside a question
+category: remembering
+source: specs/AIE-1182-file-role-stated/spec.md
+sessions:
+  - turns:
+      - "I do my follow-up analysis in a Jupyter notebook. What's the cleanest way to export a funnel?"
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: line_present
+    id: tool-saved
+    pattern: "\\[stated\\].*(?i:jupyter|notebook)"
+    scope: user
