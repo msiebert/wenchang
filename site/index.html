@@ -16,10 +16,12 @@
 <meta name="twitter:title" content="wenchang: persistent, self-organizing memory for AI agents">
 <meta name="twitter:description" content="wenchang gives AI agents persistent memory: a virtual filesystem of markdown files in GCS, exposed as seven tools with optimistic concurrency and scope-based authorization.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
 <script type="application/ld+json">
@@ -40,11 +42,11 @@
 }
 </script>
 </head>
-<body>
+<body class="page-index">
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="index.html">wenchang</a>
+<a class="brand" href="index.html"><svg class="seal" viewBox="0 0 32 32" aria-hidden="true"><rect class="s-bg" width="32" height="32" rx="5"/><rect class="s-bar" x="7" y="8" width="18" height="3" rx="1"/><rect class="s-bar" x="7" y="14.5" width="13" height="3" rx="1"/><rect class="s-bar" x="7" y="21" width="9" height="3" rx="1"/></svg><span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html" aria-current="page">Overview</a></li>
@@ -59,131 +61,146 @@
 </header>
 <div class="page">
 <main id="main" class="content">
-<p class="md-link"><a href="index.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<p class="md-link"><span class="path">wenchang/index.md</span> <a href="index.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
 
 <section class="hero">
-<p class="eyebrow">Python library · MCP server adapter · MIT</p>
-<h1>Memory your agent files for itself.</h1>
-<p class="lede">wenchang gives an AI agent a small virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools. The agent decides what is worth remembering and where to file it; the library supplies storage, optimistic concurrency, scope-based authorization, and the instructions.</p>
-<p class="audience"><strong>Who it is for:</strong> teams building AI agents (chat assistants, coding agents, analytics copilots) that should remember users, projects, and organizations across conversations.</p>
-<p class="cta-row">
-<a class="btn btn-primary" href="quickstart.html">Quickstart</a>
-<a class="btn" href="https://github.com/msiebert/wenchang">View on GitHub</a>
-<a class="btn btn-quiet" href="usage.html">See what usage looks like</a>
-</p>
-<p class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code></p>
+<div class="hero-text">
+<h1>Memory your agent files for itself.<span class="cursor" aria-hidden="true"></span></h1>
+<p class="lede">A small filesystem of markdown files for your AI agent. The agent decides what to remember and where to file it. wenchang supplies the storage, versioned writes, scope rules, and the prompt.</p>
+<p class="audience">For teams building chat assistants, coding agents, and analytics copilots that should remember users, projects, and organizations.</p>
+<p class="cta-row"><a class="btn" href="quickstart.html">Quickstart</a><a href="usage.html">See what usage looks like</a><a href="https://github.com/msiebert/wenchang">View on GitHub</a></p>
+<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code></pre>
+</div>
+<figure class="session-panel">
+<div class="sp-head"><span>session: user/u-ada</span><span>illustrative</span></div>
+<div class="sp-block">
+<p class="sp-label anim" style="--i:0">conversation</p>
+<div class="row anim" style="--i:0"><span class="who">you</span><span>I prefer bar charts for my weekly reports.</span></div>
+<div class="row anim" style="--i:5"><span class="who">agent</span><span>Got it. I'll use bar charts for your weekly reports.</span></div>
+</div>
+<div class="sp-block">
+<p class="sp-label anim" style="--i:1">tool calls</p>
+<div class="row anim" style="--i:1"><span class="arrow">&rarr;</span><code>get_memory_index()</code></div>
+<div class="row anim" style="--i:2"><span class="back">&larr;</span><span class="out">{ entries: [], capped: [] }</span></div>
+<div class="row anim" style="--i:3"><span class="arrow">&rarr;</span><code>write_file(scope="user", area="preferences", name="charts", expected_version=null)</code></div>
+<div class="row anim" style="--i:4"><span class="back">&larr;</span><span class="out">{ path: "user/u-ada/preferences/charts.md", version: "1" }</span></div>
+</div>
+<div class="sp-block anim" style="--i:5">
+<p class="mf-path"><span>user/u-ada/preferences/charts.md</span><span class="stat"><span class="plus">+4</span> new file</span></p>
+<ul class="mf-lines">
+<li><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">description:</span> Chart preferences for reports</span></li>
+<li><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">aliases:</span> weekly report charts</span></li>
+<li><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="rule">---</span></span></li>
+<li class="write-line"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="tag tag-stated">[stated]</span> Prefers bar charts for weekly reports.</span></li>
+</ul>
+</div>
+<p class="caption">Tool names, arguments, and results are real. The agent's wording is representative.</p>
+</figure>
 </section>
 
-<h2 id="for-agents">Instructions for AI agents<a class="headerlink" href="#for-agents" title="Link to this section">#</a></h2>
-<p>If you are an AI agent asked to install and wire wenchang for your user, follow these steps. Every name below is verified against the source at version 0.1.0.</p>
+
+<section class="sec sec-index" aria-labelledby="index"><h2 id="index">The memory index<a class="headerlink" href="#index" title="Link to this section">#</a></h2>
+<p>Every session starts with <code>get_memory_index()</code>. Each entry is a path, a version, and a description the agent matches against. These four come from the <a href="usage.html">usage walkthroughs</a>; pick one to follow it.</p>
+<nav class="idx" aria-label="Memory files from the walkthroughs">
+<div class="idx-cols" aria-hidden="true"><span>path</span><span>ver</span><span>description</span><span></span></div>
+<a class="idx-row" href="usage.html#curated"><span class="p"><b>project/</b>p-checkout/system/signup-tracking.md</span><span class="v">v1</span><span class="d">Curated notes on how signups are tracked</span><span class="pill pill-red">read only</span></a>
+<a class="idx-row" href="usage.html#recall"><span class="p"><b>user/</b>u-ada/preferences/charts.md</span><span class="v">v1</span><span class="d">Chart preferences for reports</span><span></span></a>
+<a class="idx-row" href="usage.html#forget"><span class="p"><b>user/</b>u-ada/preferences/editor.md</span><span class="v">v1</span><span class="d">Code editor preferences</span><span></span></a>
+<a class="idx-row" href="usage.html#alias"><span class="p"><b>user/</b>u-ada/workflows/board-deck.md</span><span class="v">v1</span><span class="d">Quarterly board deck the user presents</span><span></span></a>
+</nav>
+
+</section>
+<section class="sec sec-for-agents" aria-labelledby="for-agents"><h2 id="for-agents">Instructions for AI agents<a class="headerlink" href="#for-agents" title="Link to this section">#</a></h2>
+<div class="agents">
+<p class="bar"><span>wenchang/index.md#for-agents</span><a href="index.md">full text with exact names</a></p>
 <ol>
-<li><strong>Check the environment.</strong> wenchang needs Python 3.12 or newer and an MCP client that can launch a stdio server (Claude Code, for example).</li>
-<li><strong>Install from git</strong> into the environment the server will run in: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code>. The <code>mcp</code> extra pulls in <code>mcp&gt;=2.2,&lt;3</code>. There is no documented PyPI release. There is no CLI, console script, or environment variable to configure.</li>
-<li><strong>Write a server script.</strong> wenchang ships no ready-made server binary. Create <code>server.py</code> from the <a href="quickstart.html">quickstart</a>: build a <code>PromptSlots</code>, a <code>MemoryStore</code> over a <code>Storage</code>, an identity resolver, and a <code>ScopePolicy</code>, then call <code>wenchang.mcp.build_server(...)</code> and <code>server.run("stdio")</code>.</li>
-<li><strong>Pick storage.</strong> <code>InMemoryStorage</code> is for trials only: a stdio server is a fresh process per client session, so everything is lost on exit. For persistence use <code>GcsStorage(bucket)</code> from <code>wenchang.storage.gcs</code> with an existing bucket and Application Default Credentials, or a local fake-gcs-server for development.</li>
-<li><strong>Ask the user about scopes.</strong> Which scopes exist (for example <code>user</code>, <code>project</code>, <code>organization</code>), which are shared, and which roles may write each. Encode the answer in <code>PromptSlots.scope_guidance</code>, the identity grants, and <code>ScopePolicy</code>. See <a href="customize.html">customize</a>.</li>
-<li><strong>Register the server</strong> with the user's MCP client, for example <code>claude mcp add memory -- /path/to/python /path/to/server.py</code>, or an entry under <code>mcpServers</code> in <code>.mcp.json</code>.</li>
-<li><strong>Verify.</strong> The server must list exactly seven tools: <code>get_memory_index</code>, <code>read_file</code>, <code>list_prefix</code>, <code>write_file</code>, <code>append_line</code>, <code>replace_fact</code>, <code>delete_file</code> (each prefixed <code>{tool_prefix}_</code> if you set <code>tool_prefix</code>). The memory prompt is the server's <code>instructions</code> and also the resource <code>wenchang://memory-prompt</code>.</li>
-<li><strong>Use memory correctly.</strong> Call <code>get_memory_index</code> first in every session. Address files by <code>(scope, area, name)</code>. Pass the <code>version</code> you read as <code>expected_version</code> on every write (<code>null</code> creates). Never write to the <code>system/</code> area. Never store financial account numbers, health diagnoses, or anything indicating the user is a minor.</li>
+<li><span>Check for Python 3.12 or newer and an MCP client that can launch a stdio server.</span></li>
+<li><span>Install from git: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code>. There is no PyPI release, CLI, or environment variable.</span></li>
+<li><span>Write <code>server.py</code> from the <a href="quickstart.html">quickstart</a>, ending in <code>build_server(...)</code> and <code>server.run("stdio")</code>.</span></li>
+<li><span>Pick storage: <code>InMemoryStorage</code> for trials, <code>GcsStorage(bucket)</code> to persist.</span></li>
+<li><span>Ask the user which scopes exist, which are shared, and who may write each. See <a href="customize.html">customize</a>.</span></li>
+<li><span>Register the server with the MCP client, for example <code>claude mcp add memory -- /path/to/python /path/to/server.py</code>.</span></li>
+<li><span>Verify that exactly seven tools are listed.</span></li>
+<li><span>In use, call <code>get_memory_index</code> first, pass <code>expected_version</code> on every write, never write to <code>system/</code>, and never store account numbers, health diagnoses, or signs the user is a minor.</span></li>
 </ol>
-<p>Machine-readable versions of this site: <a href="llms.txt">llms.txt</a>, <a href="llms-full.txt">llms-full.txt</a> (every page in one file), and a Markdown twin of every page (<code>index.md</code>, <code>quickstart.md</code>, <code>usage.md</code>, <code>customize.md</code>, <code>reference.md</code>).</p>
-<h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Link to this section">#</a></h2>
-<figure class="diagram">
-<svg viewBox="0 0 460 600" role="img" aria-labelledby="diagram-title diagram-desc" xmlns="http://www.w3.org/2000/svg">
-<title id="diagram-title">How wenchang works</title>
-<desc id="diagram-desc">An agent calls seven memory tools over MCP. The tool layer resolves identity and checks writes. A MemoryStore enforces limits and versions through a Storage protocol, implemented by GcsStorage on a GCS bucket. The bucket holds files under three scopes: user, project, and organization.</desc>
-<defs>
-<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-<path d="M0 0 L10 5 L0 10 z" class="d-arrowhead"/>
-</marker>
-</defs>
+<p class="more">Machine-readable: <a href="llms.txt">llms.txt</a>, <a href="llms-full.txt">llms-full.txt</a>, and a Markdown twin of every page.</p>
+</div>
 
-<rect class="d-box d-agent" x="30" y="10" width="400" height="66" rx="10"/>
-<text class="d-title" x="230" y="38" text-anchor="middle">Agent</text>
-<text class="d-sub" x="230" y="60" text-anchor="middle">Your model and host, with the memory prompt</text>
-
-<line class="d-line" x1="230" y1="76" x2="230" y2="118" marker-end="url(#arrow)"/>
-<text class="d-label" x="244" y="102">MCP: seven tools</text>
-
-<rect class="d-box" x="30" y="120" width="400" height="104" rx="10"/>
-<text class="d-title" x="230" y="146" text-anchor="middle">MCP tools</text>
-<text class="d-code" x="230" y="168" text-anchor="middle">wenchang.mcp, wenchang.tools</text>
-<text class="d-sub" x="230" y="190" text-anchor="middle">1. resolve identity from the request</text>
-<text class="d-sub" x="230" y="208" text-anchor="middle">2. refuse system/ and role-gated writes</text>
-
-<line class="d-line" x1="230" y1="224" x2="230" y2="262" marker-end="url(#arrow)"/>
-<text class="d-label" x="244" y="248">TransportClient</text>
-
-<rect class="d-box" x="30" y="264" width="400" height="80" rx="10"/>
-<text class="d-title" x="230" y="290" text-anchor="middle">MemoryStore</text>
-<text class="d-sub" x="230" y="312" text-anchor="middle">optimistic concurrency, size limits,</text>
-<text class="d-sub" x="230" y="330" text-anchor="middle">metadata merge, capped index</text>
-
-<line class="d-line" x1="230" y1="344" x2="230" y2="382" marker-end="url(#arrow)"/>
-<text class="d-label" x="244" y="368">Storage protocol</text>
-
-<rect class="d-box d-store" x="30" y="384" width="400" height="206" rx="10"/>
-<text class="d-title" x="230" y="410" text-anchor="middle">GcsStorage → GCS bucket</text>
-<text class="d-code" x="230" y="430" text-anchor="middle">{scope}/{entity_id}/{area}/{name}.md</text>
-
-<rect class="d-scope" x="48" y="446" width="364" height="42" rx="8"/>
-<text class="d-code" x="62" y="464" text-anchor="start">user/u-ada/…</text>
-<text class="d-sub" x="62" y="480" text-anchor="start">private to one person</text>
-
-<rect class="d-scope" x="48" y="496" width="364" height="42" rx="8"/>
-<text class="d-code" x="62" y="514" text-anchor="start">project/p-checkout/…</text>
-<text class="d-sub" x="62" y="530" text-anchor="start">shared by a project</text>
-
-<rect class="d-scope" x="48" y="546" width="364" height="36" rx="8"/>
-<text class="d-code" x="62" y="568" text-anchor="start">organization/o-acme/…</text>
-<text class="d-sub" x="398" y="568" text-anchor="end">admin-written</text>
-</svg>
+</section>
+<section class="sec sec-how-it-works" aria-labelledby="how-it-works"><h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Link to this section">#</a></h2>
+<figure class="pipe">
+<ol class="nodes" aria-label="Request path from agent to bucket">
+<li class="node"><span class="id">1</span><b>Agent</b><span class="d">Your model and host, holding the memory prompt</span></li>
+<li class="wire" aria-hidden="true"><span>MCP: seven tools</span></li>
+<li class="node"><span class="id">2</span><b>MCP tools</b><code>wenchang.mcp, wenchang.tools</code><span class="d">Resolve identity on every call. Refuse system/ and role-gated writes.</span></li>
+<li class="wire" aria-hidden="true"><span>TransportClient</span></li>
+<li class="node"><span class="id">3</span><b>MemoryStore</b><span class="d">Versioned writes, size limits, metadata merge, capped index</span></li>
+<li class="wire" aria-hidden="true"><span>Storage protocol</span></li>
+<li class="node"><span class="id">4</span><b>GcsStorage</b><span class="d">One GCS bucket: markdown body as the object, metadata beside it</span></li>
+</ol>
+<div class="pipe-down" aria-hidden="true"></div>
+<div class="bucket" role="group" aria-label="The bucket has one directory per scope">
+<p class="bar"><span>gcs bucket</span><span>{scope}/{entity_id}/{area}/{name}.md</span></p>
+<ul>
+<li><span class="t"><span aria-hidden="true">&boxvr;&boxh; </span><b>user/</b>u-ada/&hellip;</span><span class="n">Private to one person</span></li>
+<li><span class="t"><span aria-hidden="true">&boxvr;&boxh; </span><b>project/</b>p-checkout/&hellip;</span><span class="n">Shared by a project</span></li>
+<li><span class="t"><span aria-hidden="true">&boxvr;&boxh; </span><b>organization/</b>o-acme/&hellip;</span><span class="n">Written by admins</span></li>
+<li><span class="t"><span aria-hidden="true">&boxur;&boxh; </span><b class="ro">&lt;scope&gt;/&hellip;/system/</b></span><span class="n">In every scope: curated, read-only</span></li>
+</ul>
+</div>
 <figcaption>Scopes are yours to define; <code>user</code>, <code>project</code>, and <code>organization</code> are the reference adopter's. Every scope also has a read-only <code>system/</code> area.</figcaption>
 </figure>
 
 <p>The agent never sees storage. It sees seven tools and a prompt.</p>
-<ol>
+<ol class="notes">
 <li><strong>The agent</strong> calls a tool such as <code>append_line(scope, area, name, line, expected_version)</code>. It addresses a file by scope, area, and name.</li>
 <li><strong>The tool layer</strong> (<code>wenchang.tools</code>, mounted on MCP by <code>wenchang.mcp</code>) resolves the caller's identity on every call, fills in the caller's own entity ID for the scope, refuses writes to <code>system/</code> and to scopes the policy gates by role, and forwards the call to a <code>TransportClient</code>.</li>
 <li><strong><code>MemoryStore</code></strong> (reached through <code>InProcessClient</code> today) enforces the per-file size limit, merges metadata, and makes every write conditional on the version the agent read.</li>
 <li><strong><code>Storage</code></strong> is a small get/put/list protocol. <code>GcsStorage</code> implements it on one GCS bucket: markdown body as the object, metadata as custom object metadata, GCS generation as the version.</li>
 </ol>
 <p>Files live at <code>{scope}/{entity_id}/{area}/{name}.md</code>. A scope is a visibility tier you define (the reference adopter uses <code>user</code>, <code>project</code>, and <code>organization</code>); the entity ID says whose copy of that scope it is.</p>
-<h2 id="transcript">See it work<a class="headerlink" href="#transcript" title="Link to this section">#</a></h2>
+</section>
+<section class="sec sec-transcript" aria-labelledby="transcript"><h2 id="transcript">See it work<a class="headerlink" href="#transcript" title="Link to this section">#</a></h2>
 <p>An illustrative exchange. Tool names, arguments, and result shapes are real; the agent's wording is representative, not recorded. The full tool-call detail is on the <a href="usage.html">usage page</a>.</p>
-<p><strong>Session 1</strong></p>
-<ul>
-<li><strong>You:</strong> I prefer bar charts for my weekly reports.</li>
-<li><strong>Agent</strong> calls <code>get_memory_index()</code>. The index is empty.</li>
-<li><strong>Agent</strong> calls <code>write_file(scope="user", area="preferences", name="charts", content="- [stated] Prefers bar charts for weekly reports.\n", description="Chart preferences for reports", aliases=["weekly report charts"], expected_version=null)</code>.</li>
-<li class="transcript"><strong>Agent:</strong> Got it. I'll remember bar charts for your weekly reports.</li>
+<div class="sessions"><div class="chargecard"><p class="session"><strong>Session 1</strong></p>
+<ul class="transcript">
+<li class="msg-user"><strong>You:</strong> I prefer bar charts for my weekly reports.</li>
+<li class="msg-call"><strong>Agent</strong> calls <code>get_memory_index()</code>. The index is empty.</li>
+<li class="msg-call"><strong>Agent</strong> calls <code>write_file(scope="user", area="preferences", name="charts", content="- [stated] Prefers bar charts for weekly reports.\n", description="Chart preferences for reports", aliases=["weekly report charts"], expected_version=null)</code>.</li>
+<li class="msg-agent"><strong>Agent:</strong> Got it. I'll remember bar charts for your weekly reports.</li>
+</ul></div><div class="chargecard"><p class="session"><strong>Session 2, days later, a brand-new conversation</strong></p>
+<ul class="transcript">
+<li class="msg-user"><strong>You:</strong> Which chart type should I use for this week's report?</li>
+<li class="msg-call"><strong>Agent</strong> calls <code>get_memory_index()</code>. One entry: <code>user/u-ada/preferences/charts.md</code>, "Chart preferences for reports".</li>
+<li class="msg-call"><strong>Agent</strong> calls <code>read_file(scope="user", area="preferences", name="charts")</code> and reads <code>- [stated] Prefers bar charts for weekly reports.</code></li>
+<li class="msg-agent"><strong>Agent:</strong> Use a bar chart. You told me you prefer them for your weekly reports.</li>
+</ul></div></div>
+</section>
+<section class="sec sec-properties" aria-labelledby="properties"><h2 id="properties">Key properties<a class="headerlink" href="#properties" title="Link to this section">#</a></h2>
+<ul class="cards">
+<li><span class="pill pill-muted">no schema</span><b>Agent-organized</b><span class="d">The agent files each fact in the file about its subject and finds files by description and aliases. There is no content search.</span></li>
+<li><span class="pill pill-muted">versioned</span><b>Optimistic concurrency</b><span class="d">Every write names the version it read. A stale version returns the current content, so the agent merges and retries.</span></li>
+<li><span class="pill pill-muted">scoped</span><b>Scope authorization</b><span class="d">Each call resolves an <code>Identity</code>. A <code>ScopePolicy</code> says which roles may write which scope, and paths come from the caller's own grants.</span></li>
+<li><span class="pill pill-red">read only</span><b>Curated system/ area</b><span class="d">People maintain it. The agent can read it and never change it. A correction goes in a normal area and wins.</span></li>
+<li><span class="pill pill-muted">prompt rule</span><b>Privacy in the prompt</b><span class="d">The agent is told to refuse account numbers, health diagnoses, and anything indicating a minor. It is guidance, not a content filter.</span></li>
+<li><span class="pill pill-muted">pluggable</span><b>Transport-agnostic</b><span class="d">Tools talk to a <code>TransportClient</code>. <code>InProcessClient</code> calls a <code>MemoryStore</code> directly; a remote transport is planned.</span></li>
+<li><span class="pill pill-muted">logged</span><b>Observable</b><span class="d"><code>on_call</code> receives a <code>ToolCallRecord</code> after every MCP tool call.</span></li>
+<li><span class="pill pill-muted">markdown</span><b>Plain files</b><span class="d">A markdown body with its metadata stored beside it, at <code>{scope}/{entity_id}/{area}/{name}.md</code>.</span></li>
 </ul>
-<p><strong>Session 2, days later, a brand-new conversation</strong></p>
-<ul>
-<li><strong>You:</strong> Which chart type should I use for this week's report?</li>
-<li><strong>Agent</strong> calls <code>get_memory_index()</code>. One entry: <code>user/u-ada/preferences/charts.md</code>, "Chart preferences for reports".</li>
-<li><strong>Agent</strong> calls <code>read_file(scope="user", area="preferences", name="charts")</code> and reads <code>- [stated] Prefers bar charts for weekly reports.</code></li>
-<li class="transcript"><strong>Agent:</strong> Use a bar chart. You told me you prefer them for your weekly reports.</li>
-</ul>
-<h2 id="properties">Key properties<a class="headerlink" href="#properties" title="Link to this section">#</a></h2>
-<ul>
-<li><strong>Agent-organized.</strong> No schema is imposed. The agent files each fact in the file about its subject, creates files and areas as needed, and navigates by each file's <code>description</code> and <code>aliases</code>. There is no content search.</li>
-<li><strong>Optimistic concurrency.</strong> Every write names the <code>expected_version</code> it read; <code>null</code> means create-if-absent. A stale version returns a <code>VersionConflictError</code> that carries the current content and version, so the agent merges and retries. <code>append_line</code> and <code>replace_fact</code> change one fact without rewriting the file.</li>
-<li><strong>Scope authorization.</strong> Each call resolves an <code>Identity</code> (a grant of entity ID and role per scope) through your <code>IdentityResolver</code>. A <code>ScopePolicy</code> names which roles may write which scopes. Paths are always built from the caller's own grants.</li>
-<li><strong>Curated, read-only <code>system/</code> area.</strong> Every scope has a <code>system/</code> area that people maintain and the agent can read but never change. Corrections go in a normal area and win over the curated fact.</li>
-<li><strong>Privacy rules in the prompt.</strong> The shipped prompt tells the agent to refuse to store financial account numbers, health diagnoses, or anything indicating the user is a minor, in any scope. This is prompt guidance, not a content filter: no tool checks for sensitive content.</li>
-<li><strong>Transport-agnostic.</strong> The tool layer talks to a <code>TransportClient</code> protocol. <code>InProcessClient</code> calls a <code>MemoryStore</code> directly; a remote transport is planned.</li>
-<li><strong>Observable.</strong> <code>on_call</code> receives a <code>ToolCallRecord</code> after every MCP tool call.</li>
-</ul>
-<h2 id="status">Status<a class="headerlink" href="#status" title="Link to this section">#</a></h2>
+
+</section>
+<section class="sec sec-status" aria-labelledby="status"><h2 id="status">Status<a class="headerlink" href="#status" title="Link to this section">#</a></h2>
+<ul class="facts-row"><li><span class="pill pill-raw">v0.1.0</span></li><li><span class="pill">MIT</span></li><li><span class="pill">Python 3.12+</span></li></ul>
+
 <p>Version 0.1.0, MIT licensed, Python 3.12+. wenchang is a library: you supply the identity resolver, scope policy, and prompt slots, and write a small server script. The behavioral evals in the repository are signal for prompt iteration, not release gates. See the <a href="reference.html#limitations">reference</a> for known limits.</p>
-<h2 id="next">Next<a class="headerlink" href="#next" title="Link to this section">#</a></h2>
+</section>
+<section class="sec sec-next" aria-labelledby="next"><h2 id="next">Next<a class="headerlink" href="#next" title="Link to this section">#</a></h2>
 <ul>
-<li><a href="quickstart.html">Quickstart</a>: install, build a server, connect Claude Code.</li>
-<li><a href="usage.html">Usage</a>: five walkthroughs with real tool calls and file contents.</li>
-<li><a href="customize.html">Customize</a>: scopes, prompt slots, limits, storage, telemetry.</li>
-<li><a href="reference.html">Reference</a>: every tool, the file format, and the error taxonomy.</li>
-</ul>
+<li><a href="quickstart.html">Quickstart</a>Install, build a server, connect Claude Code.</li>
+<li><a href="usage.html">Usage</a>Five walkthroughs with real tool calls and file contents.</li>
+<li><a href="customize.html">Customize</a>Scopes, prompt slots, limits, storage, telemetry.</li>
+<li><a href="reference.html">Reference</a>Every tool, the file format, and the error taxonomy.</li>
+</ul></section>
 </main>
 
 </div>
