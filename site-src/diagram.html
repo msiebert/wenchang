@@ -1,52 +1,22 @@
-<figure class="diagram">
-<svg viewBox="0 0 460 600" role="img" aria-labelledby="diagram-title diagram-desc" xmlns="http://www.w3.org/2000/svg">
-<title id="diagram-title">How wenchang works</title>
-<desc id="diagram-desc">An agent calls seven memory tools over MCP. The tool layer resolves identity and checks writes. A MemoryStore enforces limits and versions through a Storage protocol, implemented by GcsStorage on a GCS bucket. The bucket holds files under three scopes: user, project, and organization.</desc>
-<defs>
-<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-<path d="M0 0 L10 5 L0 10 z" class="d-arrowhead"/>
-</marker>
-</defs>
-
-<rect class="d-box d-agent" x="30" y="10" width="400" height="66" rx="10"/>
-<text class="d-title" x="230" y="38" text-anchor="middle">Agent</text>
-<text class="d-sub" x="230" y="60" text-anchor="middle">Your model and host, with the memory prompt</text>
-
-<line class="d-line" x1="230" y1="76" x2="230" y2="118" marker-end="url(#arrow)"/>
-<text class="d-label" x="244" y="102">MCP: seven tools</text>
-
-<rect class="d-box" x="30" y="120" width="400" height="104" rx="10"/>
-<text class="d-title" x="230" y="146" text-anchor="middle">MCP tools</text>
-<text class="d-code" x="230" y="168" text-anchor="middle">wenchang.mcp, wenchang.tools</text>
-<text class="d-sub" x="230" y="190" text-anchor="middle">1. resolve identity from the request</text>
-<text class="d-sub" x="230" y="208" text-anchor="middle">2. refuse system/ and role-gated writes</text>
-
-<line class="d-line" x1="230" y1="224" x2="230" y2="262" marker-end="url(#arrow)"/>
-<text class="d-label" x="244" y="248">TransportClient</text>
-
-<rect class="d-box" x="30" y="264" width="400" height="80" rx="10"/>
-<text class="d-title" x="230" y="290" text-anchor="middle">MemoryStore</text>
-<text class="d-sub" x="230" y="312" text-anchor="middle">optimistic concurrency, size limits,</text>
-<text class="d-sub" x="230" y="330" text-anchor="middle">metadata merge, capped index</text>
-
-<line class="d-line" x1="230" y1="344" x2="230" y2="382" marker-end="url(#arrow)"/>
-<text class="d-label" x="244" y="368">Storage protocol</text>
-
-<rect class="d-box d-store" x="30" y="384" width="400" height="206" rx="10"/>
-<text class="d-title" x="230" y="410" text-anchor="middle">GcsStorage → GCS bucket</text>
-<text class="d-code" x="230" y="430" text-anchor="middle">{scope}/{entity_id}/{area}/{name}.md</text>
-
-<rect class="d-scope" x="48" y="446" width="364" height="42" rx="8"/>
-<text class="d-code" x="62" y="464" text-anchor="start">user/u-ada/…</text>
-<text class="d-sub" x="62" y="480" text-anchor="start">private to one person</text>
-
-<rect class="d-scope" x="48" y="496" width="364" height="42" rx="8"/>
-<text class="d-code" x="62" y="514" text-anchor="start">project/p-checkout/…</text>
-<text class="d-sub" x="62" y="530" text-anchor="start">shared by a project</text>
-
-<rect class="d-scope" x="48" y="546" width="364" height="36" rx="8"/>
-<text class="d-code" x="62" y="568" text-anchor="start">organization/o-acme/…</text>
-<text class="d-sub" x="398" y="568" text-anchor="end">admin-written</text>
-</svg>
+<figure class="pipe">
+<ol class="nodes" aria-label="Request path from agent to bucket">
+<li class="node"><span class="id">1</span><b>Agent</b><span class="d">Your model and host, holding the memory prompt</span></li>
+<li class="wire" aria-hidden="true"><span>MCP: seven tools</span></li>
+<li class="node"><span class="id">2</span><b>MCP tools</b><code>wenchang.mcp, wenchang.tools</code><span class="d">Resolve identity on every call. Refuse system/ and role-gated writes.</span></li>
+<li class="wire" aria-hidden="true"><span>TransportClient</span></li>
+<li class="node"><span class="id">3</span><b>MemoryStore</b><span class="d">Versioned writes, size limits, metadata merge, capped index</span></li>
+<li class="wire" aria-hidden="true"><span>Storage protocol</span></li>
+<li class="node"><span class="id">4</span><b>GcsStorage</b><span class="d">One GCS bucket: markdown body as the object, metadata beside it</span></li>
+</ol>
+<div class="pipe-down" aria-hidden="true"></div>
+<div class="bucket" role="group" aria-label="The bucket has one directory per scope">
+<p class="bar"><span>gcs bucket</span><span>{scope}/{entity_id}/{area}/{name}.md</span></p>
+<ul>
+<li><span class="t"><span aria-hidden="true">&boxvr;&boxh; </span><b>user/</b>u-ada/&hellip;</span><span class="n">Private to one person</span></li>
+<li><span class="t"><span aria-hidden="true">&boxvr;&boxh; </span><b>project/</b>p-checkout/&hellip;</span><span class="n">Shared by a project</span></li>
+<li><span class="t"><span aria-hidden="true">&boxvr;&boxh; </span><b>organization/</b>o-acme/&hellip;</span><span class="n">Written by admins</span></li>
+<li><span class="t"><span aria-hidden="true">&boxur;&boxh; </span><b class="ro">&lt;scope&gt;/&hellip;/system/</b></span><span class="n">In every scope: curated, read-only</span></li>
+</ul>
+</div>
 <figcaption>Scopes are yours to define; <code>user</code>, <code>project</code>, and <code>organization</code> are the reference adopter's. Every scope also has a read-only <code>system/</code> area.</figcaption>
 </figure>

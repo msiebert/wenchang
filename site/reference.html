@@ -16,18 +16,20 @@
 <meta name="twitter:title" content="Reference: wenchang tools, file format, and errors">
 <meta name="twitter:description" content="The seven memory tools with exact parameters and returns, the file and path format, limits, the memory prompt resource, the error taxonomy, and known limitations.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
 </head>
-<body>
+<body class="page-reference">
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="index.html">wenchang</a>
+<a class="brand" href="index.html"><svg class="seal" viewBox="0 0 32 32" aria-hidden="true"><rect class="s-bg" width="32" height="32" rx="5"/><rect class="s-bar" x="7" y="8" width="18" height="3" rx="1"/><rect class="s-bar" x="7" y="14.5" width="13" height="3" rx="1"/><rect class="s-bar" x="7" y="21" width="9" height="3" rx="1"/></svg><span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html">Overview</a></li>
@@ -42,7 +44,7 @@
 </header>
 <div class="page has-toc">
 <main id="main" class="content">
-<p class="md-link"><a href="reference.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<p class="md-link"><span class="path">wenchang/reference.md</span> <a href="reference.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
 <nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
 <li><a href="#concepts">Concepts</a>
 <ul>
@@ -249,7 +251,7 @@
 </tr>
 </tbody>
 </table></div>
-<h3 id="get_memory_index">get_memory_index<a class="headerlink" href="#get_memory_index" title="Link to this section">#</a></h3>
+<section class="tool-card"><h3 id="get_memory_index"><span>get_memory_index</span><span class="pill pill-muted">reads</span><a class="headerlink" href="#get_memory_index" title="Link to this section">#</a></h3><p class="sig"><span class="fn">get_memory_index</span>()</p>
 <blockquote>
 <p>Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's path, metadata, and version, without content.</p>
 </blockquote>
@@ -295,7 +297,7 @@
 </tbody>
 </table></div>
 <p>Each <code>capped</code> object: <code>prefix</code> (string, for example <code>user/u-ada/preferences/</code>), <code>scope</code> (string), <code>area</code> (string, or <code>null</code> for a prefix above area level), <code>omitted</code> (integer, files left out). Page a capped area with <code>list_prefix(scope, area)</code>.</p>
-<h3 id="read_file">read_file<a class="headerlink" href="#read_file" title="Link to this section">#</a></h3>
+</section><section class="tool-card"><h3 id="read_file"><span>read_file</span><span class="pill pill-muted">reads</span><a class="headerlink" href="#read_file" title="Link to this section">#</a></h3><p class="sig"><span class="fn">read_file</span>(scope, area, name)</p>
 <blockquote>
 <p>Read one memory file: its content, metadata, and version. Any area may be read, including <code>system/</code>.</p>
 </blockquote>
@@ -330,7 +332,7 @@
 </tbody>
 </table></div>
 <p>Returns the common file object. If no file exists: <code>NotFoundError</code> with reason <code>file_absent</code>.</p>
-<h3 id="list_prefix">list_prefix<a class="headerlink" href="#list_prefix" title="Link to this section">#</a></h3>
+</section><section class="tool-card"><h3 id="list_prefix"><span>list_prefix</span><span class="pill pill-muted">reads</span><a class="headerlink" href="#list_prefix" title="Link to this section">#</a></h3><p class="sig"><span class="fn">list_prefix</span>(scope, <span class="opt">area?</span>, <span class="opt">cursor?</span>)</p>
 <blockquote>
 <p>List the files in a scope or area, one page at a time, without content. Each page returns entries with metadata and version, and a <code>next_cursor</code>; until it is null, pass it back as <code>cursor</code> with the same <code>scope</code> and <code>area</code> for the next page.</p>
 </blockquote>
@@ -365,7 +367,7 @@
 </tbody>
 </table></div>
 <p>Returns <code>{"entries": [...], "next_cursor": string | null}</code>. Entries are the common file object without <code>content</code>, ascending by path. A malformed cursor, or one from a different prefix, returns <code>InvalidArgumentError</code> for <code>cursor</code>. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.</p>
-<h3 id="write_file">write_file<a class="headerlink" href="#write_file" title="Link to this section">#</a></h3>
+</section><section class="tool-card"><h3 id="write_file"><span>write_file</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#write_file" title="Link to this section">#</a></h3><p class="sig"><span class="fn">write_file</span>(scope, area, name, content, description, aliases, expected_version)</p>
 <blockquote>
 <p>Create a memory file or replace one whole. Pass <code>expected_version=None</code> to create a file, or the version you read to replace one. <code>description</code> (one line) and <code>aliases</code> replace the stored values; they are not merged. Content over the per-file byte ceiling is rejected with the current size and the limit; shorten it and retry. A version conflict is routine: merge your change into the content it returns and retry with its version.</p>
 </blockquote>
@@ -424,7 +426,7 @@
 </tbody>
 </table></div>
 <p>Returns the common file object. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code> (<code>file_absent</code>, when replacing a file that does not exist), <code>OversizeWriteError</code>, <code>InvalidArgumentError</code>, <code>RestrictedScopeError</code>.</p>
-<h3 id="append_line">append_line<a class="headerlink" href="#append_line" title="Link to this section">#</a></h3>
+</section><section class="tool-card"><h3 id="append_line"><span>append_line</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#append_line" title="Link to this section">#</a></h3><p class="sig"><span class="fn">append_line</span>(scope, area, name, line, expected_version, <span class="opt">aliases?</span>, <span class="opt">description?</span>)</p>
 <blockquote>
 <p>Add one fact line to the end of an existing memory file. <code>line</code> is a single fact line with a leading bracketed label (<code>[stated]</code>, <code>[observed]</code>, <code>[inferred]</code>, or <code>[system]</code>), as in <code>- [stated] Prefers tea</code>. Pass the version you read as <code>expected_version</code>. The per-file byte ceiling applies to the result. Optional <code>aliases</code> are added to the file's existing aliases and never removed (<code>write_file</code> replaces the whole set); an optional one-line <code>description</code> replaces the stored one. A version conflict is routine: merge your change into the content it returns and retry with its version.</p>
 </blockquote>
@@ -483,7 +485,7 @@
 </tbody>
 </table></div>
 <p>The file must already exist (<code>NotFoundError</code> with <code>file_absent</code> otherwise). A newline is added before the line if the body does not end with one, and one after. Returns the common file object.</p>
-<h3 id="replace_fact">replace_fact<a class="headerlink" href="#replace_fact" title="Link to this section">#</a></h3>
+</section><section class="tool-card"><h3 id="replace_fact"><span>replace_fact</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#replace_fact" title="Link to this section">#</a></h3><p class="sig"><span class="fn">replace_fact</span>(scope, area, name, old_string, new_string, expected_version, <span class="opt">aliases?</span>, <span class="opt">description?</span>)</p>
 <blockquote>
 <p>Change one fact in a memory file by quoting the text to replace. <code>old_string</code> must match the content exactly once; otherwise the error carries the current content and version, so quote a unique span. <code>new_string</code> replaces it. Pass the version you read as <code>expected_version</code>. The per-file byte ceiling applies to the result. Optional <code>aliases</code> are added to the file's existing aliases and never removed (<code>write_file</code> replaces the whole set); an optional one-line <code>description</code> replaces the stored one. A version conflict is routine: merge your change into the content it returns and retry with its version.</p>
 </blockquote>
@@ -548,7 +550,7 @@
 </tbody>
 </table></div>
 <p>Zero or several matches return <code>ReplaceFactMatchError</code> with the current content, version, and <code>match_count</code>. Returns the common file object.</p>
-<h3 id="delete_file">delete_file<a class="headerlink" href="#delete_file" title="Link to this section">#</a></h3>
+</section><section class="tool-card"><h3 id="delete_file"><span>delete_file</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#delete_file" title="Link to this section">#</a></h3><p class="sig"><span class="fn">delete_file</span>(scope, area, name, expected_version)</p>
 <blockquote>
 <p>Delete a memory file. Pass the version you read as <code>expected_version</code>. A version conflict is routine: retry with the version it returns only if the file should still go.</p>
 </blockquote>
@@ -589,7 +591,7 @@
 </tbody>
 </table></div>
 <p>Returns <code>{"ok": true}</code>. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code>, <code>RestrictedScopeError</code>.</p>
-<h2 id="resource">The memory prompt resource<a class="headerlink" href="#resource" title="Link to this section">#</a></h2>
+</section><h2 id="resource">The memory prompt resource<a class="headerlink" href="#resource" title="Link to this section">#</a></h2>
 <p>The server exposes the assembled memory prompt as an MCP resource:</p>
 <div class="table-wrap"><table>
 <thead>

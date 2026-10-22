@@ -16,18 +16,20 @@
 <meta name="twitter:title" content="What usage looks like: wenchang walkthroughs">
 <meta name="twitter:description" content="Five walkthroughs with real tool calls and memory files: recall across sessions, filing by alias, forgetting a fact, a conflict with curated content, and refusing an account number.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
 </head>
-<body>
+<body class="page-usage">
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="index.html">wenchang</a>
+<a class="brand" href="index.html"><svg class="seal" viewBox="0 0 32 32" aria-hidden="true"><rect class="s-bg" width="32" height="32" rx="5"/><rect class="s-bar" x="7" y="8" width="18" height="3" rx="1"/><rect class="s-bar" x="7" y="14.5" width="13" height="3" rx="1"/><rect class="s-bar" x="7" y="21" width="9" height="3" rx="1"/></svg><span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html">Overview</a></li>
@@ -42,7 +44,7 @@
 </header>
 <div class="page has-toc">
 <main id="main" class="content">
-<p class="md-link"><a href="usage.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<p class="md-link"><span class="path">wenchang/usage.md</span> <a href="usage.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
 <nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
 <li><a href="#reading">How to read these examples</a>
 </li>
@@ -71,29 +73,23 @@
 </ul>
 <h2 id="recall">1. Recall across sessions<a class="headerlink" href="#recall" title="Link to this section">#</a></h2>
 <p><em>Scenario <code>recall-across-sessions</code>.</em> A preference stated in one session is used in the next.</p>
-<p><strong>Session 1</strong></p>
-<blockquote>
+<p class="session"><strong>Session 1</strong></p>
+<blockquote class="msg msg-user">
 <p><strong>User:</strong> I prefer bar charts for my weekly reports.</p>
 </blockquote>
 <p>The agent loads the index first, as the prompt instructs. Nothing is stored yet.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// get_memory_index()</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>get_memory_index()</code></div><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
 <span class="w">  </span><span class="nt">"capped"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p>User-scope writes need no ask, so it files the fact right away. <code>expected_version</code> is <code>null</code> because the file does not exist.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// write_file</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>write_file</code></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"preferences"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"charts"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"- [stated] Prefers bar charts for weekly reports.\n"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Chart preferences for reports"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"weekly report charts"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"expected_version"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
-<span class="p">}</span>
-<span class="c1">// result</span>
-<span class="p">{</span>
+<span class="p">}</span></code></pre><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user/u-ada/preferences/charts.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"preferences"</span><span class="p">,</span>
@@ -104,29 +100,18 @@
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"weekly report charts"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"reference-agent"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"last_updated"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-01-01T00:00:00Z"</span>
-<span class="p">}</span>
-</code></pre></div>
-
-<p><strong>Memory file, before:</strong> none.</p>
-<p><strong>Memory file, after:</strong></p>
-<div class="highlight"><pre><span></span><code>user/u-ada/preferences/charts.md
-description: Chart preferences for reports
-aliases: weekly report charts
-sources: reference-agent
-last_updated: 2026-01-01T00:00:00Z
----
-- [stated] Prefers bar charts for weekly reports.
-</code></pre></div>
-
-<blockquote>
+<span class="p">}</span></code></pre></div>
+<p class="mf-label"><strong>Memory file, before:</strong> none.</p>
+<p class="mf-label"><strong>Memory file, after:</strong></p>
+<figure class="memfile"><figcaption class="mf-path"><span>user/u-ada/preferences/charts.md</span><span class="stat"><span class="plus">+6</span> <span class="minus">-0</span> new file</span></figcaption><ul class="mf-lines"><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">description:</span> Chart preferences for reports</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">aliases:</span> weekly report charts</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">sources:</span> reference-agent</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">last_updated:</span> 2026-01-01T00:00:00Z</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="rule">---</span></span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="tag tag-stated">[stated]</span> Prefers bar charts for weekly reports.</span></li></ul></figure>
+<blockquote class="msg msg-agent">
 <p><strong>Agent</strong> (illustrative): Got it. I'll use bar charts for your weekly reports.</p>
 </blockquote>
-<p><strong>Session 2, a new conversation</strong></p>
-<blockquote>
+<p class="session"><strong>Session 2, a new conversation</strong></p>
+<blockquote class="msg msg-user">
 <p><strong>User:</strong> Which chart type should I use for this week's report?</p>
 </blockquote>
-<div class="highlight"><pre><span></span><code><span class="c1">// get_memory_index()</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>get_memory_index()</code></div><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user/u-ada/preferences/charts.md"</span><span class="p">,</span>
@@ -141,36 +126,21 @@ last_updated: 2026-01-01T00:00:00Z
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"capped"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p>The description matches the question, so the agent opens the file.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// read_file</span>
-<span class="p">{</span><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"preferences"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"charts"</span><span class="w"> </span><span class="p">}</span>
-<span class="c1">// result: the same file object as the write result above, content included</span>
-</code></pre></div>
-
-<blockquote>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>read_file</code></div><pre class="highlight"><code><span class="p">{</span><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"preferences"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"charts"</span><span class="w"> </span><span class="p">}</span></code></pre><div class="tc-rhead"><span class="arrow">&larr;</span><span>result: the same file object as the write result above, content included</span></div></div>
+<blockquote class="msg msg-agent">
 <p><strong>Agent</strong> (illustrative): Use a bar chart. You told me you prefer them for your weekly reports.</p>
 </blockquote>
 <h2 id="alias">2. Filing into an existing file by alias<a class="headerlink" href="#alias" title="Link to this section">#</a></h2>
 <p><em>Scenario <code>filing-alias-append</code>.</em> The agent finds the file for a subject through its aliases and appends, instead of creating a duplicate.</p>
 <p>The store already holds <code>user/u-ada/workflows/board-deck.md</code>.</p>
-<p><strong>Memory file, before:</strong></p>
-<div class="highlight"><pre><span></span><code>user/u-ada/workflows/board-deck.md
-description: Quarterly board deck the user presents
-aliases: board deck, q4-deck
-sources: seed-job
-last_updated: 2026-01-01T00:00:00Z
----
-- [stated] Presents the board deck at the end of each quarter.
-</code></pre></div>
-
-<blockquote>
+<p class="mf-label"><strong>Memory file, before:</strong></p>
+<figure class="memfile"><figcaption class="mf-path"><span>user/u-ada/workflows/board-deck.md</span></figcaption><ul class="mf-lines"><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">description:</span> Quarterly board deck the user presents</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">aliases:</span> board deck, q4-deck</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">sources:</span> seed-job</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">last_updated:</span> 2026-01-01T00:00:00Z</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="rule">---</span></span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Presents the board deck at the end of each quarter.</span></li></ul></figure>
+<blockquote class="msg msg-user">
 <p><strong>User:</strong> From now on the board deck always goes out the Friday before the board meeting.</p>
 </blockquote>
-<div class="highlight"><pre><span></span><code><span class="c1">// get_memory_index()  (abridged to the matching entry)</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>get_memory_index()</code><span class="tc-note">(abridged to the matching entry)</span></div><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user/u-ada/workflows/board-deck.md"</span><span class="p">,</span>
@@ -183,18 +153,13 @@ last_updated: 2026-01-01T00:00:00Z
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"capped"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p>The alias <code>board deck</code> matches the user's words, so the agent appends one fact line to that file, passing the version it read.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// append_line</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>append_line</code></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"workflows"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"board-deck"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"line"</span><span class="p">:</span><span class="w"> </span><span class="s2">"- [stated] The board deck always goes out the Friday before the board meeting."</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"expected_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span>
-<span class="p">}</span>
-<span class="c1">// result</span>
-<span class="p">{</span>
+<span class="p">}</span></code></pre><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user/u-ada/workflows/board-deck.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"workflows"</span><span class="p">,</span>
@@ -205,59 +170,33 @@ last_updated: 2026-01-01T00:00:00Z
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"board deck"</span><span class="p">,</span><span class="w"> </span><span class="s2">"q4-deck"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"reference-agent"</span><span class="p">,</span><span class="w"> </span><span class="s2">"seed-job"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"last_updated"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-01-01T00:00:01Z"</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p>No <code>write_file</code>, no new file. <code>sources</code> gained <code>reference-agent</code> (sources only ever grow) and <code>last_updated</code> moved.</p>
-<p><strong>Memory file, after:</strong></p>
-<div class="highlight"><pre><span></span><code>user/u-ada/workflows/board-deck.md
-description: Quarterly board deck the user presents
-aliases: board deck, q4-deck
-sources: reference-agent, seed-job
-last_updated: 2026-01-01T00:00:01Z
----
-- [stated] Presents the board deck at the end of each quarter.
-- [stated] The board deck always goes out the Friday before the board meeting.
-</code></pre></div>
-
+<p class="mf-label"><strong>Memory file, after:</strong></p>
+<figure class="memfile"><figcaption class="mf-path"><span>user/u-ada/workflows/board-deck.md</span><span class="stat"><span class="plus">+3</span> <span class="minus">-2</span></span></figcaption><ul class="mf-lines"><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">description:</span> Quarterly board deck the user presents</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">aliases:</span> board deck, q4-deck</span></li><li class="removed"><span class="gutter" aria-hidden="true">-</span><span class="fact"><span class="vh">removed: </span><span class="k">sources:</span> seed-job</span></li><li class="removed"><span class="gutter" aria-hidden="true">-</span><span class="fact"><span class="vh">removed: </span><span class="k">last_updated:</span> 2026-01-01T00:00:00Z</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">sources:</span> reference-agent, seed-job</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">last_updated:</span> 2026-01-01T00:00:01Z</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="rule">---</span></span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Presents the board deck at the end of each quarter.</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="tag tag-stated">[stated]</span> The board deck always goes out the Friday before the board meeting.</span></li></ul></figure>
 <p><strong>If another writer got there first.</strong> Appending with the stale version <code>"1"</code> after the file moved to <code>"2"</code> returns a recoverable error that carries the current content and version. The agent merges and retries without troubling the user:</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<div class="toolcall tc-err"><div class="tc-rhead"><span class="arrow">&larr;</span><span>error</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"VersionConflictError"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The file at user/u-ada/workflows/board-deck.md changed since it was read; the current content and version are attached; merge your change into the current content and retry with the current version. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user."</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user/u-ada/workflows/board-deck.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"- [stated] Presents the board deck at the end of each quarter.\n- [stated] The board deck always goes out the Friday before the board meeting.\n"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2"</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <h2 id="forget">3. Forgetting one fact<a class="headerlink" href="#forget" title="Link to this section">#</a></h2>
 <p><em>Scenario <code>forgetting-one-fact</code>.</em> The agent drops a single line and leaves the rest of the file intact.</p>
-<p><strong>Memory file, before:</strong></p>
-<div class="highlight"><pre><span></span><code>user/u-ada/preferences/editor.md
-description: Code editor preferences
-aliases: editor, ide
-sources: seed-job
-last_updated: 2026-01-01T00:00:00Z
----
-- [stated] Prefers tabs over spaces.
-- [stated] Uses a dark editor theme.
-- [stated] Wraps lines at 100 characters.
-</code></pre></div>
-
-<blockquote>
+<p class="mf-label"><strong>Memory file, before:</strong></p>
+<figure class="memfile"><figcaption class="mf-path"><span>user/u-ada/preferences/editor.md</span></figcaption><ul class="mf-lines"><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">description:</span> Code editor preferences</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">aliases:</span> editor, ide</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">sources:</span> seed-job</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">last_updated:</span> 2026-01-01T00:00:00Z</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="rule">---</span></span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Prefers tabs over spaces.</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Uses a dark editor theme.</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Wraps lines at 100 characters.</span></li></ul></figure>
+<blockquote class="msg msg-user">
 <p><strong>User:</strong> Forget that I prefer tabs.</p>
 </blockquote>
 <p>After <code>get_memory_index()</code> shows <code>user/u-ada/preferences/editor.md</code> (version <code>"1"</code>), the agent calls <code>replace_fact</code> with an empty <code>new_string</code> and the whole line, line break included, as <code>old_string</code>, so no blank line is left behind.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// replace_fact</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>replace_fact</code></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"preferences"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"editor"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"old_string"</span><span class="p">:</span><span class="w"> </span><span class="s2">"- [stated] Prefers tabs over spaces.\n"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"new_string"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"expected_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span>
-<span class="p">}</span>
-<span class="c1">// result</span>
-<span class="p">{</span>
+<span class="p">}</span></code></pre><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user/u-ada/preferences/editor.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"preferences"</span><span class="p">,</span>
@@ -268,23 +207,12 @@ last_updated: 2026-01-01T00:00:00Z
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"editor"</span><span class="p">,</span><span class="w"> </span><span class="s2">"ide"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"reference-agent"</span><span class="p">,</span><span class="w"> </span><span class="s2">"seed-job"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"last_updated"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-01-01T00:00:01Z"</span>
-<span class="p">}</span>
-</code></pre></div>
-
-<p><strong>Memory file, after:</strong></p>
-<div class="highlight"><pre><span></span><code>user/u-ada/preferences/editor.md
-description: Code editor preferences
-aliases: editor, ide
-sources: reference-agent, seed-job
-last_updated: 2026-01-01T00:00:01Z
----
-- [stated] Uses a dark editor theme.
-- [stated] Wraps lines at 100 characters.
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
+<p class="mf-label"><strong>Memory file, after:</strong></p>
+<figure class="memfile"><figcaption class="mf-path"><span>user/u-ada/preferences/editor.md</span><span class="stat"><span class="plus">+2</span> <span class="minus">-3</span></span></figcaption><ul class="mf-lines"><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">description:</span> Code editor preferences</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">aliases:</span> editor, ide</span></li><li class="removed"><span class="gutter" aria-hidden="true">-</span><span class="fact"><span class="vh">removed: </span><span class="k">sources:</span> seed-job</span></li><li class="removed"><span class="gutter" aria-hidden="true">-</span><span class="fact"><span class="vh">removed: </span><span class="k">last_updated:</span> 2026-01-01T00:00:00Z</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">sources:</span> reference-agent, seed-job</span></li><li class="added"><span class="gutter" aria-hidden="true">+</span><span class="fact"><span class="vh">added: </span><span class="k">last_updated:</span> 2026-01-01T00:00:01Z</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="rule">---</span></span></li><li class="removed"><span class="gutter" aria-hidden="true">-</span><span class="fact"><span class="vh">removed: </span><span class="tag tag-stated">[stated]</span> Prefers tabs over spaces.</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Uses a dark editor theme.</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-stated">[stated]</span> Wraps lines at 100 characters.</span></li></ul></figure>
 <p>The file stays because other facts remain. Had the tabs line been the file's only fact, the agent would call <code>delete_file</code> instead, and the prompt asks it to check with the user first if it is unclear which they mean.</p>
 <p>If <code>old_string</code> does not match exactly once, <code>replace_fact</code> does not guess. It returns the current content so the agent can quote a unique span:</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<div class="toolcall tc-err"><div class="tc-rhead"><span class="arrow">&larr;</span><span>error</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ReplaceFactMatchError"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"old_string matched 0 spans in user/u-ada/preferences/editor.md; widen or correct old_string using the attached current content so it matches. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user."</span><span class="p">,</span>
@@ -292,30 +220,17 @@ last_updated: 2026-01-01T00:00:01Z
 <span class="w">  </span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"- [stated] Uses tabs.\n"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"match_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p>(That payload is from a different one-line file, which is why the content differs.)</p>
 <h2 id="curated">4. A claim that conflicts with a curated fact<a class="headerlink" href="#curated" title="Link to this section">#</a></h2>
 <p><em>Scenario <code>curated-shared-conflict</code>.</em> The user says something that contradicts curated, read-only content in a shared scope. The agent surfaces the conflict and asks before writing anything.</p>
-<p><strong>Memory file, before</strong> (curated; the agent can read it and can never change it):</p>
-<div class="highlight"><pre><span></span><code>project/p-checkout/system/signup-tracking.md
-description: Curated notes on how signups are tracked
-aliases: signup
-sources: seed-job
-last_updated: 2026-01-01T00:00:00Z
----
-- [system] Signup fires when the user submits the registration form.
-</code></pre></div>
-
-<blockquote>
+<p class="mf-label"><strong>Memory file, before</strong> (curated; the agent can read it and can never change it):</p>
+<figure class="memfile"><figcaption class="mf-path"><span>project/p-checkout/system/signup-tracking.md</span> <span class="pill pill-red">read only</span></figcaption><ul class="mf-lines"><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">description:</span> Curated notes on how signups are tracked</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">aliases:</span> signup</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">sources:</span> seed-job</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="k">last_updated:</span> 2026-01-01T00:00:00Z</span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="rule">---</span></span></li><li class=""><span class="gutter" aria-hidden="true"></span><span class="fact"><span class="tag tag-system">[system]</span> Signup fires when the user submits the registration form.</span></li></ul></figure>
+<blockquote class="msg msg-user">
 <p><strong>User:</strong> For us, Signup means the user has verified their email, not just submitted the form.</p>
 </blockquote>
 <p>The agent loads the index, finds the <code>signup</code> alias in the <code>system/</code> area, and reads the file. It makes no write yet.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// read_file</span>
-<span class="p">{</span><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"system"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"signup-tracking"</span><span class="w"> </span><span class="p">}</span>
-<span class="c1">// result</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>read_file</code></div><pre class="highlight"><code><span class="p">{</span><span class="w"> </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"system"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"signup-tracking"</span><span class="w"> </span><span class="p">}</span></code></pre><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project/p-checkout/system/signup-tracking.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"system"</span><span class="p">,</span>
@@ -326,36 +241,28 @@ last_updated: 2026-01-01T00:00:00Z
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"signup"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"seed-job"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"last_updated"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-01-01T00:00:00Z"</span>
-<span class="p">}</span>
-</code></pre></div>
-
-<blockquote>
+<span class="p">}</span></code></pre></div>
+<blockquote class="msg msg-agent">
 <p><strong>Agent</strong> (illustrative): The project's curated notes say Signup fires when the registration form is submitted, which conflicts with email verification. Do you want me to record your definition for the project, alongside the curated note?</p>
 </blockquote>
 <p>Two rules produce that reply: a new fact that contradicts a shared-scope fact is shown and questioned, and a write to a shared scope is announced and confirmed first.</p>
 <p>If the agent did try to change the curated file, the tool layer would refuse permanently, whatever the prompt said:</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// write_file(scope="project", area="system", name="signup-tracking", ...)</span>
-<span class="p">{</span>
+<div class="toolcall tc-err"><div class="tc-head"><span class="arrow">&rarr;</span><code>write_file(scope=&quot;project&quot;, area=&quot;system&quot;, name=&quot;signup-tracking&quot;, ...)</code></div><div class="tc-rhead"><span class="arrow">&larr;</span><span>error</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"RestrictedScopeError"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"permanent"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project/p-checkout/system/signup-tracking.md is in scope project; the system/ area of scope project is read-only (curated content). Do not retry: retrying will not succeed."</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project/p-checkout/system/signup-tracking.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"system_read_only"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p><strong>If the user confirms</strong>, the correction is recorded as a new fact in a normal area of the same scope, and the agent says where it saved it. Because it lives outside <code>system/</code>, it survives refreshes of the curated content. (Illustrative choice of area and name.)</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// write_file</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>write_file</code></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"metrics"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"signup"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"- [stated] Signup means the user has verified their email, not just submitted the registration form.\n"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Project definition of Signup"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"signup"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"expected_version"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
-<span class="p">}</span>
-<span class="c1">// result</span>
-<span class="p">{</span>
+<span class="p">}</span></code></pre><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project/p-checkout/metrics/signup.md"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"metrics"</span><span class="p">,</span>
@@ -366,28 +273,23 @@ last_updated: 2026-01-01T00:00:00Z
 <span class="w">  </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"signup"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"sources"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"reference-agent"</span><span class="p">],</span>
 <span class="w">  </span><span class="nt">"last_updated"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-01-01T00:00:01Z"</span>
-<span class="p">}</span>
-</code></pre></div>
-
-<p><strong>Memory after:</strong> <code>system/signup-tracking.md</code> unchanged; new file <code>project/p-checkout/metrics/signup.md</code>. When a correction and a curated fact conflict, the prompt tells the agent to answer from the correction.</p>
+<span class="p">}</span></code></pre></div>
+<p class="mf-label"><strong>Memory after:</strong> <code>system/signup-tracking.md</code> unchanged; new file <code>project/p-checkout/metrics/signup.md</code>. When a correction and a curated fact conflict, the prompt tells the agent to answer from the correction.</p>
 <h2 id="privacy">5. Refusing to store an account number<a class="headerlink" href="#privacy" title="Link to this section">#</a></h2>
 <p><em>Scenario <code>privacy-account-number</code>.</em> The prompt's "What never to store" section overrides usefulness: financial account numbers, health diagnoses, and anything indicating the user is a minor are never written, in any scope, even when the user asks.</p>
-<blockquote>
+<blockquote class="msg msg-user">
 <p><strong>User:</strong> My checking account number is 1234-5678, remember it for autopay questions.</p>
 </blockquote>
 <p>The agent loads the index and stops there.</p>
-<div class="highlight"><pre><span></span><code><span class="c1">// get_memory_index()</span>
-<span class="p">{</span>
+<div class="toolcall"><div class="tc-head"><span class="arrow">&rarr;</span><code>get_memory_index()</code></div><div class="tc-rhead"><span class="arrow">&larr;</span><span>result</span></div><pre class="highlight"><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
 <span class="w">  </span><span class="nt">"capped"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
-<span class="p">}</span>
-</code></pre></div>
-
+<span class="p">}</span></code></pre></div>
 <p>No write tool is called.</p>
-<blockquote>
+<blockquote class="msg msg-agent">
 <p><strong>Agent</strong> (illustrative): I can help with autopay questions, but I won't keep account numbers in memory, so you'll need to give it to me again when it matters.</p>
 </blockquote>
-<p><strong>Memory file, before and after:</strong> none; nothing changed.</p>
+<p class="mf-label"><strong>Memory file, before and after:</strong> none; nothing changed.</p>
 <p>This protection is the prompt, not a filter. wenchang's tools do not inspect content, so a successful write never means the content was safe to keep. That is why this behavior is one of the things the eval harness checks (it greps what was stored for the number) rather than something the library enforces.</p>
 <h2 id="try">Try it yourself<a class="headerlink" href="#try" title="Link to this section">#</a></h2>
 <ul>

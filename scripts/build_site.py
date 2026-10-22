@@ -5,19 +5,24 @@
 """Build the project website: site-src/ -> site/.
 
 site/ is generated output, committed as-is and served by GitHub Pages. Edit
-site-src/ (one Markdown source per page, diagram.html, snippets/*.py) or this
-script, then regenerate with `uv run scripts/build_site.py`. The files in
-site-src/snippets/ are the Python examples embedded in the pages.
+site-src/ (one Markdown source per page, diagram.html, style.css, site.js,
+favicon.svg, snippets/*.py) or this script, then regenerate with
+`uv run scripts/build_site.py`. The files in site-src/snippets/ are the Python
+examples embedded in the pages.
 """
 
 # ruff: noqa: E501
 
+import difflib
 import html
 import json
 import re
 from pathlib import Path
 
 import markdown
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import JsonLexer
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "site-src"
@@ -64,6 +69,27 @@ PAGES = [
     },
 ]
 SLUGS = [p["slug"] for p in PAGES]
+ASSETS = ("style.css", "site.js", "favicon.svg")
+
+FONTS = (
+    "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400"
+    "&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap"
+)
+
+SEAL = (
+    '<svg class="seal" viewBox="0 0 32 32" aria-hidden="true">'
+    '<rect class="s-bg" width="32" height="32" rx="5"/>'
+    '<rect class="s-bar" x="7" y="8" width="18" height="3" rx="1"/>'
+    '<rect class="s-bar" x="7" y="14.5" width="13" height="3" rx="1"/>'
+    '<rect class="s-bar" x="7" y="21" width="9" height="3" rx="1"/>'
+    "</svg>"
+)
+
+FENCE = re.compile(r"```(\w*)\n(.*?)\n```", re.S)
+FACT = re.compile(r"^- \[(\w+)\] (.*)$")
+CARD_PATH = re.compile(r"^[\w-]+/[\w-]+/[\w-]+/[\w.-]+\.md$")
+JSON_LEXER = JsonLexer()
+FORMATTER = HtmlFormatter(nowrap=True)
 
 
 def select(text: str, keep: str) -> str:
@@ -101,9 +127,291 @@ def md_twin(slug: str) -> str:
     return text
 
 
+def parse_card(body: str) -> dict | None:
+    """Parse a memory-file block (path, `key: value` metadata, `---`, fact lines)."""
+    lines = body.split("\n")
+    if not CARD_PATH.match(lines[0]) or "---" not in lines:
+        return None
+    sep = lines.index("---")
+    meta = [tuple(line.split(": ", 1)) for line in lines[1:sep] if ": " in line]
+    facts = []
+    for line in lines[sep + 1 :]:
+        m = FACT.match(line)
+        facts.append((m.group(1), m.group(2)) if m else ("", line))
+    return {"path": lines[0], "meta": meta, "facts": facts}
+
+
+def raw_lines(card: dict) -> list[str]:
+    facts = [f"- [{tag}] {text}" if tag else text for tag, text in card["facts"]]
+    return [f"{key}: {value}" for key, value in card["meta"]] + ["---"] + facts
+
+
+def line_html(raw: str) -> str:
+    m = FACT.match(raw)
+    if m:
+        return f'<span class="tag tag-{m.group(1)}">[{m.group(1)}]</span> {html.escape(m.group(2))}'
+    if raw == "---":
+        return '<span class="rule">---</span>'
+    if ": " in raw:
+        key, value = raw.split(": ", 1)
+        return f'<span class="k">{html.escape(key)}:</span> {html.escape(value)}'
+    return html.escape(raw)
+
+
+def card_html(card: dict, other: dict | None, kind: str) -> str:
+    """Render a memory file as a listing, or as a diff against `other` for an after card."""
+    new = raw_lines(card)
+    rows: list[tuple[str, str]] = []
+    if kind == "after":
+        old = raw_lines(other) if other else []
+        ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+        for op, i1, i2, j1, j2 in ops:
+            if op == "equal":
+                rows += [("", line) for line in new[j1:j2]]
+                continue
+            rows += [("-", line) for line in old[i1:i2]]
+            rows += [("+", line) for line in new[j1:j2]]
+    else:
+        rows = [("", line) for line in new]
+    items = []
+    for sign, raw in rows:
+        state = {"+": "added", "-": "removed"}.get(sign, "")
+        hint = f'<span class="vh">{state}: </span>' if state else ""
+        items.append(
+            f'<li class="{state}"><span class="gutter" aria-hidden="true">{sign}</span>'
+            f'<span class="fact">{hint}{line_html(raw)}</span></li>'
+        )
+    stat = ""
+    if kind == "after":
+        plus = sum(1 for sign, _ in rows if sign == "+")
+        minus = sum(1 for sign, _ in rows if sign == "-")
+        label = " new file" if other is None else ""
+        stat = (
+            f'<span class="stat"><span class="plus">+{plus}</span> '
+            f'<span class="minus">-{minus}</span>{label}</span>'
+        )
+    if "/system/" in card["path"]:
+        stat += ' <span class="pill pill-red">read only</span>'
+    return (
+        f'<figure class="memfile"><figcaption class="mf-path"><span>{html.escape(card["path"])}</span>{stat}</figcaption>'
+        f'<ul class="mf-lines">{"".join(items)}</ul></figure>'
+    )
+
+
+def pre_html(code: str) -> str:
+    return f'<pre class="highlight"><code>{highlight(code, JSON_LEXER, FORMATTER).rstrip()}</code></pre>'
+
+
+def toolcall_html(body: str) -> str | None:
+    """Render a `// name` JSON block as an agent call with its result."""
+    lines = body.split("\n")
+    title = re.match(r"//\s*(\w+(?:\(.*?\))?)\s*(.*)$", lines[0])
+    if not title:
+        if '"error"' not in body[:60]:
+            return None
+        return (
+            '<div class="toolcall tc-err"><div class="tc-rhead"><span class="arrow">&larr;</span><span>error</span></div>'
+            f"{pre_html(body)}</div>"
+        )
+    name, note = title.group(1), title.group(2)
+    rest = lines[1:]
+    split = next((i for i, line in enumerate(rest) if line.startswith("// result")), None)
+    if split is not None:
+        call = "\n".join(rest[:split]).strip()
+        result = "\n".join(rest[split + 1 :]).strip()
+        rnote = rest[split].removeprefix("// result").lstrip(": ")
+    elif "(" in name:
+        call, result, rnote = "", "\n".join(rest).strip(), ""
+    else:
+        call, result, rnote = "\n".join(rest).strip(), "", ""
+    err = '"error"' in result[:60]
+    note_html = f'<span class="tc-note">{html.escape(note)}</span>' if note else ""
+    out = [
+        f'<div class="toolcall{" tc-err" if err else ""}"><div class="tc-head">'
+        f'<span class="arrow">&rarr;</span><code>{html.escape(name)}</code>{note_html}</div>'
+    ]
+    if call:
+        out.append(pre_html(call))
+    if result or rnote:
+        label = "error" if err else "result"
+        if rnote:
+            label += f": {html.escape(rnote)}"
+        out.append(
+            f'<div class="tc-rhead"><span class="arrow">&larr;</span><span>{label}</span></div>'
+        )
+        if result:
+            out.append(pre_html(result))
+    out.append("</div>")
+    return "".join(out)
+
+
+def stash_blocks(text: str) -> tuple[str, dict[str, str]]:
+    """Swap memory-file and tool-call fences for placeholders rendered after Markdown."""
+    stash: dict[str, str] = {}
+    found = []
+    pos = 0
+    pending: dict | None = None
+    for m in FENCE.finditer(text):
+        label = re.findall(r"Memory file, (before|after)", text[pos : m.start()])
+        if label and label[-1] == "before":
+            pending = None
+        pos = m.end()
+        card = parse_card(m.group(2)) if not m.group(1) else None
+        if card:
+            kind = label[-1] if label else "after"
+            other = pending if kind == "after" else None
+            found.append((m, "card", card, kind, other))
+            pending = card if kind == "before" else None
+        elif m.group(1) == "json":
+            found.append((m, "tool", m.group(2), "", None))
+    # A before card is rendered against its paired after card, so link them.
+    for i, (m, kind, card, state, _other) in enumerate(found):
+        if kind == "card" and state == "before":
+            nxt = next((f for f in found[i + 1 :] if f[1] == "card"), None)
+            if nxt and nxt[3] == "after" and nxt[4] is card:
+                found[i] = (m, kind, card, state, nxt[2])
+    out = []
+    last = 0
+    for m, kind, payload, state, other in found:
+        rendered = card_html(payload, other, state) if kind == "card" else toolcall_html(payload)
+        if rendered is None:
+            continue
+        key = f"WCHSTASH{len(stash)}X"
+        stash[key] = rendered
+        out.append(text[last : m.start()])
+        out.append(f"\n\n{key}\n\n")
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out), stash
+
+
+def story_classes(body: str) -> str:
+    body = re.sub(
+        r"<blockquote>\n<p><strong>User:",
+        '<blockquote class="msg msg-user">\n<p><strong>User:',
+        body,
+    )
+    body = re.sub(
+        r"<blockquote>\n<p><strong>Agent</strong>",
+        '<blockquote class="msg msg-agent">\n<p><strong>Agent</strong>',
+        body,
+    )
+    body = re.sub(
+        r"<p><strong>(Session [^<]*)</strong></p>",
+        r'<p class="session"><strong>\1</strong></p>',
+        body,
+    )
+    body = re.sub(r"<p><strong>(Memory )", r'<p class="mf-label"><strong>\1', body)
+    body = body.replace('<li class="transcript">', "<li>")
+    body = body.replace("<li><strong>You:</strong>", '<li class="msg-user"><strong>You:</strong>')
+    body = body.replace(
+        "<li><strong>Agent:</strong>", '<li class="msg-agent"><strong>Agent:</strong>'
+    )
+    body = body.replace(
+        "<li><strong>Agent</strong> calls", '<li class="msg-call"><strong>Agent</strong> calls'
+    )
+    return re.sub(r'<ul>\n(<li class="msg-)', r'<ul class="transcript">\n\1', body)
+
+
+def ledger(section: str) -> str:
+    section = re.sub(
+        r"<li><strong>(.+?)\.</strong> (.*?)</li>",
+        r'<li><span class="term">\1</span><span class="desc">\2</span></li>',
+        section,
+        flags=re.S,
+    )
+    return section.replace("<ul>", '<ul class="ledger">', 1)
+
+
+def sessions(section: str) -> str:
+    pat = re.compile(r'(<p class="session">.*?</p>\s*<ul class="transcript">.*?</ul>)', re.S)
+    found = list(pat.finditer(section))
+    if not found:
+        return section
+    inner = "".join(f'<div class="chargecard">{m.group(1)}</div>' for m in found)
+    return (
+        section[: found[0].start()]
+        + f'<div class="sessions">{inner}</div>'
+        + section[found[-1].end() :]
+    )
+
+
+def next_cards(section: str) -> str:
+    def card(m: re.Match[str]) -> str:
+        return f'<li><a href="{m.group(1)}">{m.group(2)}</a>{m.group(3).upper()}{m.group(4)}</li>'
+
+    return re.sub(r'<li><a href="([^"]+)">([^<]+)</a>: (.)(.*?)</li>', card, section, flags=re.S)
+
+
+def sections(body: str) -> str:
+    """Wrap the content after the hero in one <section> per h2."""
+    head, *parts = re.split(r"(?=<h2 )", body)
+    out = [head]
+    for part in parts:
+        sid = re.search(r'<h2 id="([^"]+)"', part)
+        key = sid.group(1) if sid else ""
+        if key == "how-it-works":
+            part = part.replace("<ol>", '<ol class="notes">', 1)
+        elif key == "transcript":
+            part = sessions(part)
+        elif key == "next":
+            part = next_cards(part)
+        out.append(f'<section class="sec sec-{key}" aria-labelledby="{key}">{part}</section>')
+    return "\n".join(out)
+
+
+TOOLS = (
+    "get_memory_index",
+    "read_file",
+    "list_prefix",
+    "write_file",
+    "append_line",
+    "replace_fact",
+    "delete_file",
+)
+READS = TOOLS[:3]
+
+
+def signature(name: str, part: str) -> str:
+    """A one-line call signature built from the entry's parameter table."""
+    table = re.search(r"<table>.*?</table>", part, re.S)
+    params = []
+    if table:
+        for pname, req in re.findall(
+            r"<tr>\s*<td><code>(\w+)</code></td>\s*<td>.*?</td>\s*<td>(.*?)</td>",
+            table.group(0),
+            re.S,
+        ):
+            params.append(pname if req.startswith("yes") else f'<span class="opt">{pname}?</span>')
+    return f'<p class="sig"><span class="fn">{name}</span>({", ".join(params)})</p>'
+
+
+def tool_cards(body: str) -> str:
+    """Wrap each tool's reference entry in its own card."""
+    out = []
+    for part in re.split(r"(?=<h[23] id=)", body):
+        m = re.match(r'<h3 id="(\w+)"', part)
+        if m and m.group(1) in TOOLS:
+            kind = "reads" if m.group(1) in READS else "writes"
+            part = re.sub(
+                r'(<h3 id="\w+">)(.*?)(<a class="headerlink")',
+                rf'\1<span>\2</span><span class="pill pill-muted">{kind}</span>\3',
+                part,
+                count=1,
+                flags=re.S,
+            )
+            part = part.replace("</h3>", "</h3>" + signature(m.group(1), part), 1)
+            part = f'<section class="tool-card">{part}</section>'
+        out.append(part)
+    return "".join(out)
+
+
 def render_html_body(slug: str) -> tuple[str, list[dict]]:
     text = select((SRC / f"{slug}.md").read_text(), "html")
     text = includes(text)
+    stash: dict[str, str] = {}
+    if slug == "usage":
+        text, stash = stash_blocks(text)
     for s in SLUGS:
         text = re.sub(
             rf"\]\({s}\.md(#[\w-]+)?\)", lambda m, s=s: f"]({s}.html{m.group(1) or ''})", text
@@ -120,6 +428,14 @@ def render_html_body(slug: str) -> tuple[str, list[dict]]:
         },
     )
     body = md.convert(text)
+    for key, rendered in stash.items():
+        body = body.replace(f"<p>{key}</p>", rendered)
+    if slug in ("usage", "index"):
+        body = story_classes(body)
+    if slug == "index":
+        body = sections(body)
+    if slug == "reference":
+        body = tool_cards(body)
     body = re.sub(r"<table>", '<div class="table-wrap"><table>', body)
     body = re.sub(r"</table>", "</table></div>", body)
     tokens: list[dict] = []
@@ -205,18 +521,20 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 <meta name="twitter:title" content="{title}">
 <meta name="twitter:description" content="{desc}">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="{FONTS}">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
 {jsonld}</head>
-<body>
+<body class="page-{slug}">
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="index.html">wenchang</a>
+<a class="brand" href="index.html">{SEAL}<span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 {chr(10).join(nav)}
@@ -226,7 +544,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 </header>
 <div class="{page_cls}">
 <main id="main" class="content">
-<p class="md-link"><a href="{md_href}" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<p class="md-link"><span class="path">wenchang/{md_href}</span> <a href="{md_href}" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
 {inline_toc}
 {body}
 </main>
@@ -259,16 +577,18 @@ def page_404() -> str:
 <meta name="description" content="This page does not exist. Go to the wenchang documentation.">
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
 <link rel="icon" href="/wenchang/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="{FONTS}">
 <link rel="stylesheet" href="/wenchang/style.css">
 <script src="/wenchang/site.js"></script>
 </head>
-<body>
+<body class="page-404">
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="/wenchang/">wenchang</a>
+<a class="brand" href="/wenchang/">{SEAL}<span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="/wenchang/">Overview</a></li>
@@ -282,17 +602,22 @@ def page_404() -> str:
 </div>
 </header>
 <div class="page">
-<main id="main" class="content">
+<main id="main" class="content notfound">
 <h1>Page not found</h1>
-<p>That page does not exist. Try one of these:</p>
-<ul>
-<li><a href="/wenchang/">Overview</a></li>
-<li><a href="/wenchang/quickstart.html">Quickstart</a></li>
-<li><a href="/wenchang/usage.html">Usage walkthroughs</a></li>
-<li><a href="/wenchang/customize.html">Customize</a></li>
-<li><a href="/wenchang/reference.html">Reference</a></li>
-<li><a href="/wenchang/llms.txt">llms.txt (for AI agents)</a></li>
+<p>Nothing is filed at this address. The pages below exist.</p>
+<div class="nf-grid">
+<figure class="memfile">
+<figcaption class="mf-path"><span>get_memory_index()</span><span class="stat">404: no entry for this path</span></figcaption>
+<ul class="mf-lines">
+<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/">Overview</a></span></li>
+<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/quickstart.html">Quickstart</a></span></li>
+<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/usage.html">Usage walkthroughs</a></span></li>
+<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/customize.html">Customize</a></span></li>
+<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/reference.html">Reference</a></span></li>
+<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/llms.txt">llms.txt (for AI agents)</a></span></li>
 </ul>
+</figure>
+</div>
 </main>
 </div>
 <footer class="site-footer">
@@ -327,6 +652,8 @@ def main() -> None:
         full.append(twins[page["slug"]])
     (OUT / "llms-full.txt").write_text("\n".join(full))
     (OUT / "404.html").write_text(page_404())
+    for name in ASSETS:
+        (OUT / name).write_bytes((SRC / name).read_bytes())
     print("generated", [p["slug"] for p in PAGES])
 
 
