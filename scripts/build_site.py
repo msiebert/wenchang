@@ -5,8 +5,8 @@
 """Build the project website: site-src/ -> site/.
 
 site/ is generated output, committed as-is and served by GitHub Pages. Edit
-site-src/ (one Markdown source per page, diagram.html, style.css, site.js,
-favicon.svg, snippets/*.py) or this script, then regenerate with
+site-src/ (one Markdown source per page, style.css, site.js,
+favicon.svg, seal.svg, lattice.svg, snippets/*.py) or this script, then regenerate with
 `uv run scripts/build_site.py`. The files in site-src/snippets/ are the Python
 examples embedded in the pages.
 """
@@ -35,54 +35,53 @@ PAGES = [
     {
         "slug": "index",
         "nav": "Overview",
-        "title": "wenchang: persistent, self-organizing memory for AI agents",
-        "description": "wenchang gives AI agents persistent memory: a virtual filesystem of markdown files in GCS, exposed as seven tools with optimistic concurrency and scope-based authorization.",
+        "title": "wenchang: a memory store AI agents write to themselves",
+        "description": "wenchang is a Python library that lets an AI agent decide what to remember, save it as markdown files in GCS, and read it back in later conversations.",
         "toc": False,
     },
     {
-        "slug": "quickstart",
-        "nav": "Quickstart",
-        "title": "Quickstart: build a wenchang memory server",
-        "description": "Install wenchang from git, build an MCP memory server with in-memory or GCS storage, connect Claude Code, and talk to your agent.",
+        "slug": "setup",
+        "nav": "Setup",
+        "title": "Set up the wenchang MCP server",
+        "description": "Install wenchang, create a GCS bucket, write a server script, register it with Claude Code or another MCP client, and seed curated content.",
+        "toc": True,
+    },
+    {
+        "slug": "prompts",
+        "nav": "Prompts",
+        "title": "Customizing the wenchang prompts",
+        "description": "The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.",
+        "toc": True,
+    },
+    {
+        "slug": "authorization",
+        "nav": "Authorization",
+        "title": "Authorization in wenchang",
+        "description": "Plug in your own authentication: credentials from the request, an identity resolver, and a scope policy, with a per-user and per-project example over HTTP.",
         "toc": True,
     },
     {
         "slug": "usage",
-        "nav": "Usage",
-        "title": "What usage looks like: wenchang walkthroughs",
-        "description": "Five walkthroughs with real tool calls and memory files: recall across sessions, filing by alias, forgetting a fact, a conflict with curated content, and refusing an account number.",
-        "toc": True,
-    },
-    {
-        "slug": "customize",
-        "nav": "Customize",
-        "title": "Customize wenchang: scopes, prompts, storage, telemetry",
-        "description": "Configure identity and scope policy, prompt slots, store limits, storage backends, transport, embedding in an existing MCP server, telemetry, and conformance suites.",
+        "nav": "Examples",
+        "title": "Examples: wenchang tool calls and memory files",
+        "description": "Six walkthroughs of a novelist's writing assistant, with real tool calls and memory files: recall across sessions, a timeline append and an editing conflict, correcting a detail, cutting a subplot, house style from the system area, and refusing an account number.",
         "toc": True,
     },
     {
         "slug": "reference",
         "nav": "Reference",
-        "title": "Reference: wenchang tools, file format, and errors",
-        "description": "The seven memory tools with exact parameters and returns, the file and path format, limits, the memory prompt resource, the error taxonomy, and known limitations.",
+        "title": "Reference: wenchang tools, file format, configuration, and errors",
+        "description": "The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.",
         "toc": True,
     },
 ]
 SLUGS = [p["slug"] for p in PAGES]
-ASSETS = ("style.css", "site.js", "favicon.svg")
+ASSETS = ("style.css", "site.js", "favicon.svg", "seal.svg", "lattice.svg")
 
+HANZI_FONT = "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap"
 FONTS = (
     "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400"
     "&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap"
-)
-
-SEAL = (
-    '<svg class="seal" viewBox="0 0 32 32" aria-hidden="true">'
-    '<rect class="s-bg" width="32" height="32" rx="5"/>'
-    '<rect class="s-bar" x="7" y="8" width="18" height="3" rx="1"/>'
-    '<rect class="s-bar" x="7" y="14.5" width="13" height="3" rx="1"/>'
-    '<rect class="s-bar" x="7" y="21" width="9" height="3" rx="1"/>'
-    "</svg>"
 )
 
 FENCE = re.compile(r"```(\w*)\n(.*?)\n```", re.S)
@@ -103,7 +102,8 @@ def select(text: str, keep: str) -> str:
 def includes(text: str) -> str:
     def code(m: re.Match[str]) -> str:
         lang, name = m.group(1), m.group(2)
-        body = (SNIPS / name).read_text().rstrip("\n")
+        lines = (SNIPS / name).read_text().rstrip("\n").split("\n")
+        body = "\n".join(line for line in lines if not line.startswith(("# pyright:", "# ruff:")))
         return f"```{lang}\n{body}\n```"
 
     text = re.sub(r"<!--include (\w+) ([\w.]+)-->", code, text)
@@ -313,16 +313,6 @@ def story_classes(body: str) -> str:
     return re.sub(r'<ul>\n(<li class="msg-)', r'<ul class="transcript">\n\1', body)
 
 
-def ledger(section: str) -> str:
-    section = re.sub(
-        r"<li><strong>(.+?)\.</strong> (.*?)</li>",
-        r'<li><span class="term">\1</span><span class="desc">\2</span></li>',
-        section,
-        flags=re.S,
-    )
-    return section.replace("<ul>", '<ul class="ledger">', 1)
-
-
 def sessions(section: str) -> str:
     pat = re.compile(r'(<p class="session">.*?</p>\s*<ul class="transcript">.*?</ul>)', re.S)
     found = list(pat.finditer(section))
@@ -334,30 +324,6 @@ def sessions(section: str) -> str:
         + f'<div class="sessions">{inner}</div>'
         + section[found[-1].end() :]
     )
-
-
-def next_cards(section: str) -> str:
-    def card(m: re.Match[str]) -> str:
-        return f'<li><a href="{m.group(1)}">{m.group(2)}</a>{m.group(3).upper()}{m.group(4)}</li>'
-
-    return re.sub(r'<li><a href="([^"]+)">([^<]+)</a>: (.)(.*?)</li>', card, section, flags=re.S)
-
-
-def sections(body: str) -> str:
-    """Wrap the content after the hero in one <section> per h2."""
-    head, *parts = re.split(r"(?=<h2 )", body)
-    out = [head]
-    for part in parts:
-        sid = re.search(r'<h2 id="([^"]+)"', part)
-        key = sid.group(1) if sid else ""
-        if key == "how-it-works":
-            part = part.replace("<ol>", '<ol class="notes">', 1)
-        elif key == "transcript":
-            part = sessions(part)
-        elif key == "next":
-            part = next_cards(part)
-        out.append(f'<section class="sec sec-{key}" aria-labelledby="{key}">{part}</section>')
-    return "\n".join(out)
 
 
 TOOLS = (
@@ -417,7 +383,7 @@ def render_html_body(slug: str) -> tuple[str, list[dict]]:
             rf"\]\({s}\.md(#[\w-]+)?\)", lambda m, s=s: f"]({s}.html{m.group(1) or ''})", text
         )
     md = markdown.Markdown(
-        extensions=["extra", "toc", "codehilite", "sane_lists"],
+        extensions=["extra", "md_in_html", "toc", "codehilite", "sane_lists"],
         extension_configs={
             "toc": {
                 "permalink": "#",
@@ -430,10 +396,8 @@ def render_html_body(slug: str) -> tuple[str, list[dict]]:
     body = md.convert(text)
     for key, rendered in stash.items():
         body = body.replace(f"<p>{key}</p>", rendered)
-    if slug in ("usage", "index"):
+    if slug == "usage":
         body = story_classes(body)
-    if slug == "index":
-        body = sections(body)
     if slug == "reference":
         body = tool_cards(body)
     body = re.sub(r"<table>", '<div class="table-wrap"><table>', body)
@@ -481,6 +445,10 @@ JSONLD = {
 }
 
 
+def page_href(slug: str) -> str:
+    return "index.html" if slug == "index" else f"{slug}.html"
+
+
 def page_html(page: dict, body: str, tokens: list[dict]) -> str:
     slug = page["slug"]
     url = BASE if slug == "index" else f"{BASE}{slug}.html"
@@ -488,7 +456,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
     title = html.escape(page["title"])
     nav = []
     for p in PAGES:
-        href = "index.html" if p["slug"] == "index" else f"{p['slug']}.html"
+        href = page_href(p["slug"])
         cur = ' aria-current="page"' if p["slug"] == slug else ""
         nav.append(f'<li><a href="{href}"{cur}>{p["nav"]}</a></li>')
     nav.append(f'<li><a href="{REPO}">GitHub</a></li>')
@@ -502,6 +470,20 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
     if slug == "index":
         jsonld = f'<script type="application/ld+json">\n{json.dumps(JSONLD, indent=2)}\n</script>\n'
     page_cls = "page has-toc" if toc else "page"
+    pos = SLUGS.index(slug)
+    links = []
+    if pos > 0:
+        prev = PAGES[pos - 1]
+        links.append(
+            f'<a rel="prev" href="{page_href(prev["slug"])}"><small>Previous</small>{prev["nav"]}</a>'
+        )
+    if pos < len(PAGES) - 1:
+        nxt = PAGES[pos + 1]
+        links.append(
+            f'<a rel="next" href="{page_href(nxt["slug"])}"><small>Next</small>{nxt["nav"]}</a>'
+        )
+    page_nav = f'<nav class="page-nav" aria-label="Pages">{"".join(links)}</nav>'
+
     md_href = f"{slug}.md"
     return f"""<!doctype html>
 <html lang="en">
@@ -527,6 +509,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="{FONTS}">
+<link rel="stylesheet" href="{HANZI_FONT}">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
 {jsonld}</head>
@@ -534,7 +517,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="index.html">{SEAL}<span>wenchang</span></a>
+<a class="brand" href="index.html"><span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 {chr(10).join(nav)}
@@ -547,6 +530,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 <p class="md-link"><span class="path">wenchang/{md_href}</span> <a href="{md_href}" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
 {inline_toc}
 {body}
+{page_nav}
 </main>
 {toc}
 </div>
@@ -567,6 +551,15 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 
 
 def page_404() -> str:
+    def url(p: dict) -> str:
+        return "/wenchang/" + ("" if p["slug"] == "index" else page_href(p["slug"]))
+
+    nav404 = "\n".join(f'<li><a href="{url(p)}">{p["nav"]}</a></li>' for p in PAGES)
+    list404 = "\n".join(
+        '<li><span class="gutter" aria-hidden="true"></span><span class="fact">'
+        f'<a href="{url(p)}">{p["nav"]}</a></span></li>'
+        for p in PAGES
+    )
     # Absolute paths: GitHub Pages serves this file for any missing URL depth.
     return f"""<!doctype html>
 <html lang="en">
@@ -581,6 +574,7 @@ def page_404() -> str:
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
 <link rel="icon" href="/wenchang/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="{FONTS}">
+<link rel="stylesheet" href="{HANZI_FONT}">
 <link rel="stylesheet" href="/wenchang/style.css">
 <script src="/wenchang/site.js"></script>
 </head>
@@ -588,14 +582,10 @@ def page_404() -> str:
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="/wenchang/">{SEAL}<span>wenchang</span></a>
+<a class="brand" href="/wenchang/"><span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
-<li><a href="/wenchang/">Overview</a></li>
-<li><a href="/wenchang/quickstart.html">Quickstart</a></li>
-<li><a href="/wenchang/usage.html">Usage</a></li>
-<li><a href="/wenchang/customize.html">Customize</a></li>
-<li><a href="/wenchang/reference.html">Reference</a></li>
+{nav404}
 <li><a href="{REPO}">GitHub</a></li>
 </ul>
 </nav>
@@ -609,11 +599,7 @@ def page_404() -> str:
 <figure class="memfile">
 <figcaption class="mf-path"><span>get_memory_index()</span><span class="stat">404: no entry for this path</span></figcaption>
 <ul class="mf-lines">
-<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/">Overview</a></span></li>
-<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/quickstart.html">Quickstart</a></span></li>
-<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/usage.html">Usage walkthroughs</a></span></li>
-<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/customize.html">Customize</a></span></li>
-<li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/reference.html">Reference</a></span></li>
+{list404}
 <li><span class="gutter" aria-hidden="true"></span><span class="fact"><a href="/wenchang/llms.txt">llms.txt (for AI agents)</a></span></li>
 </ul>
 </figure>
@@ -645,7 +631,7 @@ def main() -> None:
         (OUT / f"{slug}.md").write_text(twins[slug])
     full = [
         "# wenchang: full documentation\n",
-        "> Persistent, self-organizing memory for AI agents. This file concatenates the five pages of https://msiebert.github.io/wenchang/ (overview, quickstart, usage, customize, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
+        "> Persistent, self-organizing memory for AI agents. This file concatenates the pages of https://msiebert.github.io/wenchang/ (overview, setup, prompts, authorization, examples, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
     ]
     for page in PAGES:
         full.append(f"\n<!-- page: {page['slug']}.md -->\n")

@@ -6,10 +6,10 @@ from wenchang.tools import bind_tools
 from wenchang.transport import InProcessClient
 
 client = InProcessClient(MemoryStore(InMemoryStorage()))
-resolver = SandboxResolver(Identity(grants={"user": ScopeGrant("u-me", "owner")}))
+resolver = SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")}))
 
 # One MemoryTools per session; resolving the identity happens here.
-tools = bind_tools(client, resolver, None, ScopePolicy({}), source="my-agent", product="Acme")
+tools = bind_tools(client, resolver, None, ScopePolicy({}), source="inkwell-cli", product="Inkwell")
 
 descriptions = tools.descriptions()  # tool name -> description, product named in the first line
 for name, fn in tools.tools().items():  # the seven tools, as bound methods

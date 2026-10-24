@@ -10,15 +10,18 @@ from wenchang.storage.memory import InMemoryStorage
 from wenchang.testing import ResolverConformance, TransportConformance
 from wenchang.transport import InProcessClient, TransportClient
 
-POLICY = ScopePolicy({"org": frozenset({"admin", "owner"})})
+POLICY = ScopePolicy({"organization": frozenset({"admin", "owner"})})
 
 
 class MyResolver:
     def resolve(self, credentials: str) -> Identity | ResolutionFailure:
-        if credentials != "good-token":
+        if credentials != "tok-tianlong":
             return ResolutionFailure("unknown token")
         return Identity(
-            grants={"user": ScopeGrant("u-1", "owner"), "org": ScopeGrant("o-9", "admin")}
+            grants={
+                "user": ScopeGrant("u-tianlong", "owner"),
+                "organization": ScopeGrant("o-hanlin-press", "admin"),
+            }
         )
 
 
@@ -29,11 +32,11 @@ class TestMyResolver(ResolverConformance[str]):
 
     @pytest.fixture
     def valid_credentials(self) -> str:
-        return "good-token"
+        return "tok-tianlong"
 
     @pytest.fixture
     def invalid_credentials(self) -> str:
-        return "bad-token"
+        return "tok-nobody"
 
     @pytest.fixture
     def policy(self) -> ScopePolicy:
@@ -41,7 +44,7 @@ class TestMyResolver(ResolverConformance[str]):
 
     @pytest.fixture
     def expected_scopes(self) -> frozenset[str]:
-        return frozenset({"user", "org"})
+        return frozenset({"user", "organization"})
 
     @pytest.fixture
     def known_roles(self) -> frozenset[str]:
@@ -68,7 +71,7 @@ class TestMyClient(TransportConformance):
                 clock=_Ticking(),
                 max_file_bytes=256,
                 index_max_bytes=4096,
-                scope_priority=("user", "org"),
+                scope_priority=("user", "organization"),
                 list_page_size=2,
             )
         )
@@ -79,7 +82,7 @@ class TestMyClient(TransportConformance):
 
     @pytest.fixture
     def scope_map(self) -> Mapping[str, str]:
-        return {"user": "u-1", "org": "o-9"}
+        return {"user": "u-tianlong", "organization": "o-hanlin-press"}
 
     @pytest.fixture
     def max_file_bytes(self) -> int:
@@ -91,7 +94,7 @@ class TestMyClient(TransportConformance):
 
     @pytest.fixture
     def scope_priority(self) -> tuple[str, ...]:
-        return ("user", "org")
+        return ("user", "organization")
 
     @pytest.fixture
     def list_page_size(self) -> int:
