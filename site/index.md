@@ -1,93 +1,138 @@
 # wenchang
 
-> Persistent, self-organizing memory for AI agents: a virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools.
+> A memory store that AI agents write to on their own judgment. Python library, files in Google Cloud Storage, served to the agent as tools.
 
-Pages: [Quickstart](quickstart.md) · [Usage walkthroughs](usage.md) · [Customize](customize.md) · [Reference](reference.md) · [Source](https://github.com/msiebert/wenchang) · [llms.txt](llms.txt)
+wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.
 
-wenchang is a Python library that gives an AI agent a small virtual filesystem of markdown files, stored in Google Cloud Storage (GCS) and exposed as seven tools. The agent decides what is worth remembering and where to file it. The library supplies the mechanism: storage, optimistic concurrency, scope-based authorization hooks, and the instruction text that teaches the agent how to use memory.
-
-**Who it is for:** teams building AI agents (chat assistants, coding agents, analytics copilots) that should remember users, projects, and organizations across conversations.
-
-Install (not published on PyPI; install from git):
+Install (not on PyPI yet):
 
 ```
 pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
 ```
 
-## Instructions for AI agents
+The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Setup](setup.md) covers that.
 
-If you are an AI agent asked to install and wire wenchang for your user, follow these steps. Every name below is verified against the source at version 0.1.0.
+## Memory the agent decides to keep
 
-1. **Check the environment.** wenchang needs Python 3.12 or newer and an MCP client that can launch a stdio server (Claude Code, for example).
-2. **Install from git** into the environment the server will run in: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`. The `mcp` extra pulls in `mcp>=2.2,<3`. There is no documented PyPI release. There is no CLI, console script, or environment variable to configure.
-3. **Write a server script.** wenchang ships no ready-made server binary. Create `server.py` from the [quickstart](quickstart.md): build a `PromptSlots`, a `MemoryStore` over a `Storage`, an identity resolver, and a `ScopePolicy`, then call `wenchang.mcp.build_server(...)` and `server.run("stdio")`.
-4. **Pick storage.** `InMemoryStorage` is for trials only: a stdio server is a fresh process per client session, so everything is lost on exit. For persistence use `GcsStorage(bucket)` from `wenchang.storage.gcs` with an existing bucket and Application Default Credentials, or a local fake-gcs-server for development.
-5. **Ask the user about scopes.** Which scopes exist (for example `user`, `project`, `organization`), which are shared, and which roles may write each. Encode the answer in `PromptSlots.scope_guidance`, the identity grants, and `ScopePolicy`. See [customize](customize.md).
-6. **Register the server** with the user's MCP client, for example `claude mcp add memory -- /path/to/python /path/to/server.py`, or an entry under `mcpServers` in `.mcp.json`.
-7. **Verify.** The server must list exactly seven tools: `get_memory_index`, `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`, `delete_file` (each prefixed `{tool_prefix}_` if you set `tool_prefix`). The memory prompt is the server's `instructions` and also the resource `wenchang://memory-prompt`.
-8. **Use memory correctly.** Call `get_memory_index` first in every session. Address files by `(scope, area, name)`. Pass the `version` you read as `expected_version` on every write (`null` creates). Never write to the `system/` area. Never store financial account numbers, health diagnoses, or anything indicating the user is a minor.
+Most agents forget everything when a conversation ends. wenchang gives the agent a small set of tools for writing and reading memory. Nothing outside the agent decides what gets saved. The agent notices a character detail, a plot decision, or a style preference, and writes it down.
 
-Machine-readable versions of this site: [llms.txt](llms.txt), [llms-full.txt](llms-full.txt) (every page in one file), and a Markdown twin of every page (`index.md`, `quickstart.md`, `usage.md`, `customize.md`, `reference.md`).
+Say an author is writing a novel with an assistant built on wenchang. The author mentions that the protagonist, Lin Qiao, has grey eyes and grew up in a river town. The agent saves it in a file called `project/p-ninth-examination/characters/lin-qiao.md`:
+
+```
+description: Lin Qiao, the protagonist
+aliases: Qiao
+---
+- [stated] Has grey eyes.
+- [stated] Grew up in Yunmen, a river town.
+```
+
+Weeks later, in a new conversation, the author asks for a scene with Lin Qiao. The agent reads its index, opens that file, and gives her grey eyes. If the author changes their mind, the agent edits that one line.
+
+wenchang does not decide what is worth keeping. A prompt that ships with the library tells the agent how to decide, and you can change that prompt. See [Customizing the prompts](prompts.md).
 
 ## How it works
 
+### The agent starts from an index
+
+At the start of each session the agent calls `get_memory_index()`. It gets one entry for every file it has written: path, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.
+
+```json
+// get_memory_index()
+{
+  "entries": [
+    {
+      "path": "project/p-ninth-examination/characters/lin-qiao.md",
+      "version": "3",
+      "description": "Lin Qiao, the protagonist",
+      "aliases": ["Qiao"]
+    },
+    {
+      "path": "project/p-ninth-examination/timeline/main-timeline.md",
+      "version": "1",
+      "description": "Order of events in the novel",
+      "aliases": ["chronology", "timeline"]
+    }
+  ],
+  "capped": []
+}
 ```
-Agent --MCP: 7 tools + memory prompt--> tool layer (wenchang.mcp, wenchang.tools)
-      --TransportClient--> MemoryStore --Storage protocol--> GcsStorage --> GCS bucket
+Real entries also carry `scope`, `area`, `name`, `sources`, and `last_updated`. If the index gets too big, it is cut at a size limit and the agent lists the rest with `list_prefix`. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.
 
-GCS bucket: {scope}/{entity_id}/{area}/{name}.md
-  user/u-ada/...                 private to one person
-  project/p-checkout/...         shared by a project
-  organization/o-acme/...        written by admins
+### The agent organizes its own files
+
+The agent has seven tools: `get_memory_index`, `read_file`, `list_prefix`, `write_file`, `append_line`, `replace_fact`, and `delete_file`. Each fact is one line. The agent can add a line, change a line, or drop one. It can rewrite a file, create one, or delete one. It can change a file's description and aliases whenever it writes.
+
+The library sets no schema. The agent decides how to split memory into files, which file a fact belongs in, and what to delete when a fact stops being true. The shipped prompt pushes it toward one file per subject, toward appending to an existing file instead of creating a duplicate, and toward removing a fact completely when the user asks it to forget.
+
+### Scopes and areas
+
+Every file path has this shape:
+
+```
+{scope}/{entity_id}/{area}/{name}.md
+project/p-ninth-examination/characters/lin-qiao.md
 ```
 
-The agent never sees storage. It sees seven tools and a prompt.
+A **scope** says who can see a file. You define the scopes. A common set is `user` (private to one person), `project` (shared by a team), and `organization` (shared by everyone, writable only by admins). For a novel, `user` is the author's own preferences, `project` is the manuscript, and `organization` is the publisher. The **entity ID** says whose copy of that scope it is: `u-tianlong` is one author, `p-ninth-examination` is one manuscript.
 
-1. **The agent** calls a tool such as `append_line(scope, area, name, line, expected_version)`. It addresses a file by scope, area, and name.
-2. **The tool layer** (`wenchang.tools`, mounted on MCP by `wenchang.mcp`) resolves the caller's identity on every call, fills in the caller's own entity ID for the scope, refuses writes to `system/` and to scopes the policy gates by role, and forwards the call to a `TransportClient`.
-3. **`MemoryStore`** (reached through `InProcessClient` today) enforces the per-file size limit, merges metadata, and makes every write conditional on the version the agent read.
-4. **`Storage`** is a small get/put/list protocol. `GcsStorage` implements it on one GCS bucket: markdown body as the object, metadata as custom object metadata, GCS generation as the version.
+An **area** is a kind of information inside a scope, such as `characters`, `plot`, `timeline`, or `style` in a manuscript. You can seed the areas you care about in the prompt, for example "project: characters, plot, timeline, style". Or you can tell the agent to choose its own. Either way it can add areas by writing a file in a new one.
 
-Files live at `{scope}/{entity_id}/{area}/{name}.md`. A scope is a visibility tier you define (the reference adopter uses `user`, `project`, and `organization`); the entity ID says whose copy of that scope it is.
+Every scope also has a `system/` area. You fill it with curated content. The agent can read it and can never change it.
 
-## See it work
+- **Versioned writes.** Every write names the file version the agent read. If someone else changed the file in the meantime, the write fails and returns the current content, and the agent merges and retries.
+- **Plain files.** Each memory is a markdown file in one GCS bucket. The description and aliases are stored as object metadata beside it. You can browse the bucket with ordinary tools.
+- **Sensitive data.** The prompt tells the agent never to store financial account numbers, health diagnoses, or anything that suggests the user is a minor. This is prompt guidance. No tool filters content.
+## How you use it
 
-An illustrative exchange. Tool names, arguments, and result shapes are real; the agent's wording is representative, not recorded. The full tool-call detail is on the [usage page](usage.md).
+wenchang is a library. You write a short Python script that assembles a server, then point your agent's MCP client at it.
 
-**Session 1**
+1. **Install it** and create a GCS bucket for memory files. [Setup](setup.md#install)
+2. **Write the server script.** It picks the storage, says who the caller is, and builds the MCP server:
 
-- **You:** I prefer bar charts for my weekly reports.
-- **Agent** calls `get_memory_index()`. The index is empty.
-- **Agent** calls `write_file(scope="user", area="preferences", name="charts", content="- [stated] Prefers bar charts for weekly reports.\n", description="Chart preferences for reports", aliases=["weekly report charts"], expected_version=null)`.
-- **Agent:** Got it. I'll remember bar charts for your weekly reports.
+    ```python
+    server = build_server(
+        slots=slots,  # your prompt text
+        client=InProcessClient(MemoryStore(GcsStorage(bucket))),
+        resolver=resolver,  # who is calling, and with which scopes
+        policy=policy,  # which roles may write which scopes
+        credentials_from_context=credentials_from_context,
+        source="inkwell-web",
+    )
+    server.run("stdio")
+    ```
 
-**Session 2, days later, a brand-new conversation**
+    [Setup](setup.md#server)
+3. **Register it with your MCP client.** For Claude Code, `claude mcp add memory -- python server.py`. [Setup](setup.md#client)
+4. **Tune the prompts.** Four text slots tell the agent what your product is, which scopes exist, and which areas to start with. [Customizing the prompts](prompts.md)
+5. **Plug in your own auth** when more than one person uses the server. [Authorization](authorization.md)
+## What wenchang is and is not
 
-- **You:** Which chart type should I use for this week's report?
-- **Agent** calls `get_memory_index()`. One entry: `user/u-ada/preferences/charts.md`, "Chart preferences for reports".
-- **Agent** calls `read_file(scope="user", area="preferences", name="charts")` and reads `- [stated] Prefers bar charts for weekly reports.`
-- **Agent:** Use a bar chart. You told me you prefer them for your weekly reports.
+wenchang provides the primitives for agent memory. It is not a hosted service and not a complete product.
 
-## Key properties
+**wenchang provides:**
 
-- **Agent-organized.** No schema is imposed. The agent files each fact in the file about its subject, creates files and areas as needed, and navigates by each file's `description` and `aliases`. There is no content search.
-- **Optimistic concurrency.** Every write names the `expected_version` it read; `null` means create-if-absent. A stale version returns a `VersionConflictError` that carries the current content and version, so the agent merges and retries. `append_line` and `replace_fact` change one fact without rewriting the file.
-- **Scope authorization.** Each call resolves an `Identity` (a grant of entity ID and role per scope) through your `IdentityResolver`. A `ScopePolicy` names which roles may write which scopes. Paths are always built from the caller's own grants.
-- **Curated, read-only `system/` area.** Every scope has a `system/` area that people maintain and the agent can read but never change. Corrections go in a normal area and win over the curated fact.
-- **Privacy rules in the prompt.** The shipped prompt tells the agent to refuse to store financial account numbers, health diagnoses, or anything indicating the user is a minor, in any scope. This is prompt guidance, not a content filter: no tool checks for sensitive content.
-- **Transport-agnostic.** The tool layer talks to a `TransportClient` protocol. `InProcessClient` calls a `MemoryStore` directly; a remote transport is planned.
-- **Observable.** `on_call` receives a `ToolCallRecord` after every MCP tool call.
+- The seven tools the agent calls.
+- The memory prompt that teaches the agent how to use them.
+- The layer that writes to long-term storage (GCS), with versioned writes and size limits.
+- Enforcement of your scope rules: the `system/` area is read-only, and restricted scopes accept only the roles you name.
+- An MCP adapter, so the tools work in any MCP client.
 
-## Status
+**You provide:**
 
-Version 0.1.0, MIT licensed, Python 3.12+. wenchang is a library: you supply the identity resolver, scope policy, and prompt slots, and write a small server script. The behavioral evals in the repository are signal for prompt iteration, not release gates. See the [reference](reference.md#limitations) for known limits.
+- Authentication: verifying who is calling.
+- Authorization: mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call and trusts its answer.
+- A GCS bucket and credentials.
+- The server process: where it runs and how clients reach it.
+- Any content filtering beyond what the prompt asks for.
 
-## Next
+**Not included:**
 
-- [Quickstart](quickstart.md): install, build a server, connect Claude Code.
-- [Usage](usage.md): five walkthroughs with real tool calls and file contents.
-- [Customize](customize.md): scopes, prompt slots, limits, storage, telemetry.
-- [Reference](reference.md): every tool, the file format, and the error taxonomy.
+- Search over file contents.
+- A command line tool or ready-made server.
+- A remote transport. The tools talk to storage in the same process.
+- Storage other than GCS, apart from an in-memory fake for tests.
+
+Version 0.1.0, MIT license, Python 3.12 or newer. See the [reference](reference.md#limitations) for known limits.
 
 ---
 

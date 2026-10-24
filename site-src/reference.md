@@ -1,6 +1,6 @@
 # Reference
 
-Version 0.1.0. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.mcp`), the core store (`wenchang.core`), and the file format (`wenchang.file_format`). For how to assemble a server see the [quickstart](quickstart.md); for configuration see [customize](customize.md).
+Version 0.1.0. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.mcp`), the core store (`wenchang.core`), and the file format (`wenchang.file_format`). For how to assemble a server see [Setup](setup.md); for the prompt see [Customizing the prompts](prompts.md); for auth see [Authorization](authorization.md).
 
 ## Concepts {#concepts}
 
@@ -12,11 +12,11 @@ Every memory file is stored at
 {scope}/{entity_id}/{area}/{name}.md
 ```
 
-For example `user/u-ada/preferences/charts.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full `path` plus the parsed `scope`, `area`, and `name`.
+For example `project/p-ninth-examination/characters/lin-qiao.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full `path` plus the parsed `scope`, `area`, and `name`.
 
 ### Scopes {#scopes}
 
-A scope is an adopter-defined visibility tier. The library defines no scope names; the reference adopter uses `user` (private), `project` (shared), and `organization` (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an `InvalidArgumentError` listing the available scopes.
+A scope is an adopter-defined visibility tier. The library defines no scope names; a typical set is `user` (private), `project` (shared), and `organization` (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an `InvalidArgumentError` listing the available scopes.
 
 ### Areas {#areas}
 
@@ -35,7 +35,7 @@ Every scope has an area named exactly `system`. It holds curated content that pe
 A memory file body is made of fact lines, one per line:
 
 ```
-- [stated] Prefers bar charts for weekly reports.
+- [stated] Has grey eyes.
 ```
 
 The pattern is `- [<label>] <text>` with a non-empty text. The label records how the fact is known:
@@ -113,7 +113,7 @@ Returns an object:
 | `entries` | array of file entries | Each is the common file object without `content`, in index order, up to the byte budget. |
 | `capped` | array of objects | One per area prefix not fully returned. Empty means the index is complete. |
 
-Each `capped` object: `prefix` (string, for example `user/u-ada/preferences/`), `scope` (string), `area` (string, or `null` for a prefix above area level), `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
+Each `capped` object: `prefix` (string, for example `project/p-ninth-examination/characters/`), `scope` (string), `area` (string, or `null` for a prefix above area level), `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
 
 ### read_file {#read_file}
 
@@ -212,7 +212,7 @@ The server exposes the assembled memory prompt as an MCP resource:
 | MIME type | `text/markdown` |
 | Content | The same text as the server's `instructions`: `build_memory_prompt(slots)`. |
 
-Clients that drop server `instructions` can read the resource instead. The prompt is markdown with `##` headings and no H1; see [customize](customize.md#slots) for its sections.
+Clients that drop server `instructions` can read the resource instead. The prompt is markdown with `##` headings and no H1; see [Customizing the prompts](prompts.md#fixed) for its sections.
 
 ## Errors {#errors}
 
@@ -254,6 +254,81 @@ Notes:
 - The tool layer builds each path from the caller's own grants, so over MCP an ungranted scope is reported as `InvalidArgumentError` (naming the available scopes); `not_granted` is raised by the core path check.
 - MCP validates arguments before wenchang sees them. A wrong-type or missing argument returns MCP's own error text, not a rendered wenchang error.
 - MCP pre-parses JSON-like strings: the string `"null"` arrives as `None` for a nullable parameter. For example `list_prefix(area="null")` lists the whole scope.
+
+## Configuration {#configuration}
+
+### Identity types {#identity-types}
+
+`wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Scope names and entity IDs must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`). The role must be non-empty. `identity.scope_map` is scope name to entity ID. `identity.entity_id(scope)` and `identity.role(scope)` raise `KeyError` if the scope is not granted.
+
+`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
+
+`wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. `policy.permitted_roles(scope)` returns the set or `None`.
+
+### Store options {#store-options}
+
+`wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=())`. The three size options must be positive. `scope_priority` entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and `system/` areas always come first. `clock` returns timezone-aware datetimes and stamps `last_updated`; pass a fixed one in tests. A write over `max_file_bytes` raises `OversizeWriteError`.
+
+<!--include python custom_store.py-->
+
+### Storage backends {#storage}
+
+`wenchang.storage.Storage` is the only way the rest of wenchang touches bytes. It is a protocol over objects with a string key, bytes, a flat string metadata map, and an opaque version token:
+
+| Method | Contract |
+| --- | --- |
+| `get(key)` | The object at exactly `key`, or `None`. |
+| `put(key, data, metadata)` | Unconditional atomic replace; returns a new version token. |
+| `put_if_version(key, data, metadata, expected)` | Replace only if the current version equals `expected`; `expected=None` means create, and must not exist. Otherwise raises `PreconditionFailedError` and changes nothing. |
+| `delete_if_version(key, expected)` | Delete only at `expected`; otherwise `PreconditionFailedError`. |
+| `list_page(prefix, start_after, limit)` | Up to `limit` objects whose key starts with `prefix`, ascending by key, never reading bodies. |
+
+Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
+
+- **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.
+- **`InMemoryStorage()`** in `wenchang.storage.memory` is a thread-safe fake for tests and trials.
+
+### Transport {#transport}
+
+The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.
+
+### Add the tools to an existing MCP server {#embed}
+
+`build_server` creates a new `MCPServer`. To add memory to a server you already run, with your own auth, middleware, and tools, use `register_memory_tools`. It adds the seven tools and the `wenchang://memory-prompt` resource. It raises before registering anything if an argument is invalid or a tool name or the resource URI is already registered. Pass the same text as the server's `instructions` that you pass as `prompt`; `memory_instructions(slots)` returns it. If the server's instructions do not contain the prompt, a warning is logged.
+
+<!--include python custom_embed.py-->
+
+### Telemetry {#telemetry}
+
+`on_call`, if given, receives a `wenchang.mcp.ToolCallRecord` after every memory tool call:
+
+| Field | Meaning |
+| --- | --- |
+| `tool` | Registered tool name, prefix included. |
+| `arguments` | The arguments the wrapper received (read-only mapping). |
+| `result` | A copy of the payload sent to the client (read-only mapping). |
+| `is_error` | Whether the payload is a rendered error. |
+| `request_id` | The MCP request's ID. |
+| `duration_s` | Wall time of the wrapper, on a monotonic clock. |
+
+The callback runs on worker threads, so it must be a plain function, fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain memory content, so treat them as sensitive.
+
+### Using the tools without MCP {#bind}
+
+`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)` resolves the identity and returns a `MemoryTools` for one session. `tools.tools()` is the seven bound methods by name, and `tools.descriptions()` is the description for each. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` in `wenchang.tools` produce the JSON-safe dicts the MCP adapter returns.
+
+<!--include python custom_bind.py-->
+
+### Conformance suites {#conformance}
+
+`pip install "wenchang[testing]"` adds `pytest` and two mixins in `wenchang.testing`:
+
+- **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
+- **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values.
+
+Name your subclasses with a `Test` prefix. This example passes against the shipped `InProcessClient`:
+
+<!--include python custom_conformance.py-->
 
 ## Limitations and status {#limitations}
 

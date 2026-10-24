@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="wenchang">
+<rect width="64" height="64" rx="9" fill="#d63a24"/>
+<rect x="4.5" y="4.5" width="55" height="55" rx="5" fill="none" stroke="#fff3ec" stroke-opacity=".55" stroke-width="2"/>
+<g fill="none" stroke="#fff3ec" stroke-width="5" stroke-linecap="square" stroke-linejoin="round">
+<path d="M32 11v6"/>
+<path d="M15 25h34"/>
+<path d="M22 29l22 25"/>
+<path d="M42 29L20 54"/>
+</g>
+</svg>

@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reference: wenchang tools, file format, and errors</title>
-<meta name="description" content="The seven memory tools with exact parameters and returns, the file and path format, limits, the memory prompt resource, the error taxonomy, and known limitations.">
+<title>Reference: wenchang tools, file format, configuration, and errors</title>
+<meta name="description" content="The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.">
 <link rel="canonical" href="https://msiebert.github.io/wenchang/reference.html">
 <link rel="alternate" type="text/markdown" href="reference.md" title="Markdown version of this page">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="wenchang">
-<meta property="og:title" content="Reference: wenchang tools, file format, and errors">
-<meta property="og:description" content="The seven memory tools with exact parameters and returns, the file and path format, limits, the memory prompt resource, the error taxonomy, and known limitations.">
+<meta property="og:title" content="Reference: wenchang tools, file format, configuration, and errors">
+<meta property="og:description" content="The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.">
 <meta property="og:url" content="https://msiebert.github.io/wenchang/reference.html">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Reference: wenchang tools, file format, and errors">
-<meta name="twitter:description" content="The seven memory tools with exact parameters and returns, the file and path format, limits, the memory prompt resource, the error taxonomy, and known limitations.">
+<meta name="twitter:title" content="Reference: wenchang tools, file format, configuration, and errors">
+<meta name="twitter:description" content="The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
@@ -22,6 +22,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
 </head>
@@ -29,13 +30,14 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="inner">
-<a class="brand" href="index.html"><svg class="seal" viewBox="0 0 32 32" aria-hidden="true"><rect class="s-bg" width="32" height="32" rx="5"/><rect class="s-bar" x="7" y="8" width="18" height="3" rx="1"/><rect class="s-bar" x="7" y="14.5" width="13" height="3" rx="1"/><rect class="s-bar" x="7" y="21" width="9" height="3" rx="1"/></svg><span>wenchang</span></a>
+<a class="brand" href="index.html"><span>wenchang</span></a>
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html">Overview</a></li>
-<li><a href="quickstart.html">Quickstart</a></li>
-<li><a href="usage.html">Usage</a></li>
-<li><a href="customize.html">Customize</a></li>
+<li><a href="setup.html">Setup</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="authorization.html">Authorization</a></li>
+<li><a href="usage.html">Examples</a></li>
 <li><a href="reference.html" aria-current="page">Reference</a></li>
 <li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
 </ul>
@@ -74,20 +76,32 @@
 </li>
 <li><a href="#errors">Errors</a>
 </li>
+<li><a href="#configuration">Configuration</a>
+<ul>
+<li><a href="#identity-types">Identity types</a></li>
+<li><a href="#store-options">Store options</a></li>
+<li><a href="#storage">Storage backends</a></li>
+<li><a href="#transport">Transport</a></li>
+<li><a href="#embed">Add the tools to an existing MCP server</a></li>
+<li><a href="#telemetry">Telemetry</a></li>
+<li><a href="#bind">Using the tools without MCP</a></li>
+<li><a href="#conformance">Conformance suites</a></li>
+</ul>
+</li>
 <li><a href="#limitations">Limitations and status</a>
 </li>
 </ul></details></nav>
 <h1 id="reference">Reference<a class="headerlink" href="#reference" title="Link to this section">#</a></h1>
-<p>Version 0.1.0. Everything here is taken from the source: the tool layer (<code>wenchang.tools</code>, <code>wenchang.mcp</code>), the core store (<code>wenchang.core</code>), and the file format (<code>wenchang.file_format</code>). For how to assemble a server see the <a href="quickstart.html">quickstart</a>; for configuration see <a href="customize.html">customize</a>.</p>
+<p>Version 0.1.0. Everything here is taken from the source: the tool layer (<code>wenchang.tools</code>, <code>wenchang.mcp</code>), the core store (<code>wenchang.core</code>), and the file format (<code>wenchang.file_format</code>). For how to assemble a server see <a href="setup.html">Setup</a>; for the prompt see <a href="prompts.html">Customizing the prompts</a>; for auth see <a href="authorization.html">Authorization</a>.</p>
 <h2 id="concepts">Concepts<a class="headerlink" href="#concepts" title="Link to this section">#</a></h2>
 <h3 id="paths">Path shape<a class="headerlink" href="#paths" title="Link to this section">#</a></h3>
 <p>Every memory file is stored at</p>
 <div class="highlight"><pre><span></span><code>{scope}/{entity_id}/{area}/{name}.md
 </code></pre></div>
 
-<p>For example <code>user/u-ada/preferences/charts.md</code>. Agents never write the path. The tools take <code>(scope, area, name)</code> and the tool layer fills in <code>entity_id</code> from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full <code>path</code> plus the parsed <code>scope</code>, <code>area</code>, and <code>name</code>.</p>
+<p>For example <code>project/p-ninth-examination/characters/lin-qiao.md</code>. Agents never write the path. The tools take <code>(scope, area, name)</code> and the tool layer fills in <code>entity_id</code> from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full <code>path</code> plus the parsed <code>scope</code>, <code>area</code>, and <code>name</code>.</p>
 <h3 id="scopes">Scopes<a class="headerlink" href="#scopes" title="Link to this section">#</a></h3>
-<p>A scope is an adopter-defined visibility tier. The library defines no scope names; the reference adopter uses <code>user</code> (private), <code>project</code> (shared), and <code>organization</code> (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an <code>InvalidArgumentError</code> listing the available scopes.</p>
+<p>A scope is an adopter-defined visibility tier. The library defines no scope names; a typical set is <code>user</code> (private), <code>project</code> (shared), and <code>organization</code> (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an <code>InvalidArgumentError</code> listing the available scopes.</p>
 <h3 id="areas">Areas<a class="headerlink" href="#areas" title="Link to this section">#</a></h3>
 <p>An area groups files within a scope. The tool layer requires an area to be a lowercase slug matching <code>^[a-z0-9][a-z0-9_-]*$</code>. Areas are created implicitly by writing a file in them. The prompt's <code>seed_areas</code> slot suggests starting areas; the agent may create more.</p>
 <h3 id="names">Names<a class="headerlink" href="#names" title="Link to this section">#</a></h3>
@@ -96,7 +110,7 @@
 <p>Every scope has an area named exactly <code>system</code>. It holds curated content that people maintain and replace wholesale. The agent can read it (any area may be read) but every mutating tool refuses it with <code>RestrictedScopeError</code> (reason <code>system_read_only</code>). Seeding jobs and admin tooling write it through the core <code>MemoryStore</code>, which applies no restrictions. In the startup index, <code>system/</code> entries come first across all scopes.</p>
 <h3 id="facts">Fact-line format<a class="headerlink" href="#facts" title="Link to this section">#</a></h3>
 <p>A memory file body is made of fact lines, one per line:</p>
-<div class="highlight"><pre><span></span><code>- [stated] Prefers bar charts for weekly reports.
+<div class="highlight"><pre><span></span><code>- [stated] Has grey eyes.
 </code></pre></div>
 
 <p>The pattern is <code>- [&lt;label&gt;] &lt;text&gt;</code> with a non-empty text. The label records how the fact is known:</p>
@@ -296,7 +310,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>Each <code>capped</code> object: <code>prefix</code> (string, for example <code>user/u-ada/preferences/</code>), <code>scope</code> (string), <code>area</code> (string, or <code>null</code> for a prefix above area level), <code>omitted</code> (integer, files left out). Page a capped area with <code>list_prefix(scope, area)</code>.</p>
+<p>Each <code>capped</code> object: <code>prefix</code> (string, for example <code>project/p-ninth-examination/characters/</code>), <code>scope</code> (string), <code>area</code> (string, or <code>null</code> for a prefix above area level), <code>omitted</code> (integer, files left out). Page a capped area with <code>list_prefix(scope, area)</code>.</p>
 </section><section class="tool-card"><h3 id="read_file"><span>read_file</span><span class="pill pill-muted">reads</span><a class="headerlink" href="#read_file" title="Link to this section">#</a></h3><p class="sig"><span class="fn">read_file</span>(scope, area, name)</p>
 <blockquote>
 <p>Read one memory file: its content, metadata, and version. Any area may be read, including <code>system/</code>.</p>
@@ -619,7 +633,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>Clients that drop server <code>instructions</code> can read the resource instead. The prompt is markdown with <code>##</code> headings and no H1; see <a href="customize.html#slots">customize</a> for its sections.</p>
+<p>Clients that drop server <code>instructions</code> can read the resource instead. The prompt is markdown with <code>##</code> headings and no H1; see <a href="prompts.html#fixed">Customizing the prompts</a> for its sections.</p>
 <h2 id="errors">Errors<a class="headerlink" href="#errors" title="Link to this section">#</a></h2>
 <p>A failed tool call returns an MCP error result (<code>isError</code> true) whose JSON payload has this shape:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
@@ -730,6 +744,295 @@
 <li>MCP validates arguments before wenchang sees them. A wrong-type or missing argument returns MCP's own error text, not a rendered wenchang error.</li>
 <li>MCP pre-parses JSON-like strings: the string <code>"null"</code> arrives as <code>None</code> for a nullable parameter. For example <code>list_prefix(area="null")</code> lists the whole scope.</li>
 </ul>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Link to this section">#</a></h2>
+<h3 id="identity-types">Identity types<a class="headerlink" href="#identity-types" title="Link to this section">#</a></h3>
+<p><code>wenchang.identity.Identity(grants)</code> is what a resolver returns: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Scope names and entity IDs must be valid path segments (non-empty, no <code>/</code>, no backslash, no control characters, not <code>.</code> or <code>..</code>). The role must be non-empty. <code>identity.scope_map</code> is scope name to entity ID. <code>identity.entity_id(scope)</code> and <code>identity.role(scope)</code> raise <code>KeyError</code> if the scope is not granted.</p>
+<p><code>IdentityResolver[C]</code> is a protocol with one method, <code>resolve(credentials: C) -&gt; Identity | ResolutionFailure</code>. It must not raise, and the <code>detail</code> of a <code>ResolutionFailure</code> is shown to the agent. <code>SandboxResolver(identity)</code> returns one fixed identity for any credentials, for sandboxes and tests.</p>
+<p><code>wenchang.scope.ScopePolicy(write_roles)</code> maps a scope to the <code>frozenset</code> of roles allowed to write it. A scope absent from the mapping is unrestricted. <code>policy.permitted_roles(scope)</code> returns the set or <code>None</code>.</p>
+<h3 id="store-options">Store options<a class="headerlink" href="#store-options" title="Link to this section">#</a></h3>
+<p><code>wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=())</code>. The three size options must be positive. <code>scope_priority</code> entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and <code>system/</code> areas always come first. <code>clock</code> returns timezone-aware datetimes and stamps <code>last_updated</code>; pass a fixed one in tests. A write over <code>max_file_bytes</code> raises <code>OversizeWriteError</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span>
+    <span class="n">InMemoryStorage</span><span class="p">(),</span>
+    <span class="n">max_file_bytes</span><span class="o">=</span><span class="mi">8</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">,</span>  <span class="c1"># default 16384: larger writes raise OversizeWriteError</span>
+    <span class="n">index_max_bytes</span><span class="o">=</span><span class="mi">32</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">,</span>  <span class="c1"># default 65536: the startup index is capped at this size</span>
+    <span class="n">list_page_size</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>  <span class="c1"># default 100: entries per list_prefix page</span>
+    <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"project"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">),</span>  <span class="c1"># which scopes the capped index keeps first</span>
+    <span class="n">clock</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">),</span>  <span class="c1"># must return timezone-aware datetimes</span>
+<span class="p">)</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">store</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">store</span><span class="o">.</span><span class="n">index_max_bytes</span><span class="p">,</span> <span class="n">store</span><span class="o">.</span><span class="n">scope_priority</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="storage">Storage backends<a class="headerlink" href="#storage" title="Link to this section">#</a></h3>
+<p><code>wenchang.storage.Storage</code> is the only way the rest of wenchang touches bytes. It is a protocol over objects with a string key, bytes, a flat string metadata map, and an opaque version token:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Contract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get(key)</code></td>
+<td>The object at exactly <code>key</code>, or <code>None</code>.</td>
+</tr>
+<tr>
+<td><code>put(key, data, metadata)</code></td>
+<td>Unconditional atomic replace; returns a new version token.</td>
+</tr>
+<tr>
+<td><code>put_if_version(key, data, metadata, expected)</code></td>
+<td>Replace only if the current version equals <code>expected</code>; <code>expected=None</code> means create, and must not exist. Otherwise raises <code>PreconditionFailedError</code> and changes nothing.</td>
+</tr>
+<tr>
+<td><code>delete_if_version(key, expected)</code></td>
+<td>Delete only at <code>expected</code>; otherwise <code>PreconditionFailedError</code>.</td>
+</tr>
+<tr>
+<td><code>list_page(prefix, start_after, limit)</code></td>
+<td>Up to <code>limit</code> objects whose key starts with <code>prefix</code>, ascending by key, never reading bodies.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Backends may raise <code>BackendUnavailableError</code> for timeouts and outages. Two ship with the library:</p>
+<ul>
+<li><strong><code>GcsStorage(bucket)</code></strong> in <code>wenchang.storage.gcs</code> takes a <code>google.cloud.storage.Bucket</code>. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.</li>
+<li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a thread-safe fake for tests and trials.</li>
+</ul>
+<h3 id="transport">Transport<a class="headerlink" href="#transport" title="Link to this section">#</a></h3>
+<p>The tool layer calls a <code>wenchang.transport.TransportClient</code>, a protocol that mirrors <code>MemoryStore</code>'s seven operations. <code>InProcessClient(store)</code> calls a <code>MemoryStore</code> directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.</p>
+<h3 id="embed">Add the tools to an existing MCP server<a class="headerlink" href="#embed" title="Link to this section">#</a></h3>
+<p><code>build_server</code> creates a new <code>MCPServer</code>. To add memory to a server you already run, with your own auth, middleware, and tools, use <code>register_memory_tools</code>. It adds the seven tools and the <code>wenchang://memory-prompt</code> resource. It raises before registering anything if an argument is invalid or a tool name or the resource URI is already registered. Pass the same text as the server's <code>instructions</code> that you pass as <code>prompt</code>; <code>memory_instructions(slots)</code> returns it. If the server's instructions do not contain the prompt, a warning is logged.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span><span class="p">,</span> <span class="n">MCPServer</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span><span class="p">,</span> <span class="n">memory_instructions</span><span class="p">,</span> <span class="n">register_memory_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptSlots</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"inkwell.calls"</span><span class="p">)</span>
+
+<span class="n">slots</span> <span class="o">=</span> <span class="n">PromptSlots</span><span class="p">(</span>
+    <span class="n">purpose</span><span class="o">=</span><span class="s2">"You have persistent memory of your work helping an author write a novel."</span><span class="p">,</span>
+    <span class="n">scope_guidance</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"There is one scope, user, and it is private to the author you are talking with."</span>
+    <span class="p">),</span>
+    <span class="n">seed_areas</span><span class="o">=</span><span class="s2">"- user: preferences, workflows, research</span><span class="se">\n\n</span><span class="s2">Every scope also has a `system/` area."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">identity</span> <span class="o">=</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">credentials_from_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Over HTTP, return the raw credential and let your resolver verify it.</span>
+    <span class="c1"># ctx.headers is None on stdio.</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">headers</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"authorization"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">on_call</span><span class="p">(</span><span class="n">record</span><span class="p">:</span> <span class="n">ToolCallRecord</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Runs on worker threads after every call; keep it fast and thread-safe.</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2"> error=</span><span class="si">%s</span><span class="s2"> </span><span class="si">%.3f</span><span class="s2">s"</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">)</span>
+
+
+<span class="n">prompt</span> <span class="o">=</span> <span class="n">memory_instructions</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span>
+
+<span class="c1"># Your existing server, with your own tools and middleware.</span>
+<span class="n">server</span> <span class="o">=</span> <span class="n">MCPServer</span><span class="p">(</span><span class="s2">"hanlin-tools"</span><span class="p">,</span> <span class="n">instructions</span><span class="o">=</span><span class="n">prompt</span><span class="p">)</span>
+
+<span class="n">register_memory_tools</span><span class="p">(</span>
+    <span class="n">server</span><span class="p">,</span>
+    <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>
+    <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">())),</span>
+    <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({}),</span>
+    <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"hanlin-tools"</span><span class="p">,</span>
+    <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
+    <span class="n">tool_prefix</span><span class="o">=</span><span class="s2">"inkwell"</span><span class="p">,</span>  <span class="c1"># tools are registered as inkwell_read_file, inkwell_write_file, ...</span>
+    <span class="n">on_call</span><span class="o">=</span><span class="n">on_call</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h3 id="telemetry">Telemetry<a class="headerlink" href="#telemetry" title="Link to this section">#</a></h3>
+<p><code>on_call</code>, if given, receives a <code>wenchang.mcp.ToolCallRecord</code> after every memory tool call:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tool</code></td>
+<td>Registered tool name, prefix included.</td>
+</tr>
+<tr>
+<td><code>arguments</code></td>
+<td>The arguments the wrapper received (read-only mapping).</td>
+</tr>
+<tr>
+<td><code>result</code></td>
+<td>A copy of the payload sent to the client (read-only mapping).</td>
+</tr>
+<tr>
+<td><code>is_error</code></td>
+<td>Whether the payload is a rendered error.</td>
+</tr>
+<tr>
+<td><code>request_id</code></td>
+<td>The MCP request's ID.</td>
+</tr>
+<tr>
+<td><code>duration_s</code></td>
+<td>Wall time of the wrapper, on a monotonic clock.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The callback runs on worker threads, so it must be a plain function, fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain memory content, so treat them as sensitive.</p>
+<h3 id="bind">Using the tools without MCP<a class="headerlink" href="#bind" title="Link to this section">#</a></h3>
+<p><code>wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)</code> resolves the identity and returns a <code>MemoryTools</code> for one session. <code>tools.tools()</code> is the seven bound methods by name, and <code>tools.descriptions()</code> is the description for each. Register each tool with its description from <code>descriptions()</code> rather than its docstring. <code>render_result</code> and <code>render_error</code> in <code>wenchang.tools</code> produce the JSON-safe dicts the MCP adapter returns.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
+<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
+
+<span class="c1"># One MemoryTools per session; resolving the identity happens here.</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span>
+
+<span class="n">descriptions</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">descriptions</span><span class="p">()</span>  <span class="c1"># tool name -&gt; description, product named in the first line</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">fn</span> <span class="ow">in</span> <span class="n">tools</span><span class="o">.</span><span class="n">tools</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>  <span class="c1"># the seven tools, as bound methods</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fn</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="s2">"-"</span><span class="p">,</span> <span class="n">descriptions</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">())</span>
+</code></pre></div>
+
+<h3 id="conformance">Conformance suites<a class="headerlink" href="#conformance" title="Link to this section">#</a></h3>
+<p><code>pip install "wenchang[testing]"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
+<ul>
+<li><strong><code>ResolverConformance[C]</code></strong> checks an <code>IdentityResolver</code>. Supply fixtures <code>resolver</code>, <code>valid_credentials</code>, <code>invalid_credentials</code> (call <code>pytest.skip</code> if your resolver accepts everything), <code>policy</code>, <code>expected_scopes</code>, and <code>known_roles</code>.</li>
+<li><strong><code>TransportConformance</code></strong> checks a <code>TransportClient</code>. Supply fixtures <code>client</code> (fresh and empty per test), <code>source</code>, <code>scope_map</code> (at least two writable scopes), <code>max_file_bytes</code> (at least 64), <code>index_max_bytes</code> (at least 1024), <code>scope_priority</code>, and <code>list_page_size</code>. Within one test the client's writes must stamp strictly increasing <code>last_updated</code> values.</li>
+</ul>
+<p>Name your subclasses with a <code>Test</code> prefix. This example passes against the shipped <code>InProcessClient</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Mapping</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">IdentityResolver</span><span class="p">,</span> <span class="n">ResolutionFailure</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResolverConformance</span><span class="p">,</span> <span class="n">TransportConformance</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span><span class="p">,</span> <span class="n">TransportClient</span>
+
+<span class="n">POLICY</span> <span class="o">=</span> <span class="n">ScopePolicy</span><span class="p">({</span><span class="s2">"organization"</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">"admin"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">})})</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyResolver</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">credentials</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Identity</span> <span class="o">|</span> <span class="n">ResolutionFailure</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">credentials</span> <span class="o">!=</span> <span class="s2">"tok-tianlong"</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ResolutionFailure</span><span class="p">(</span><span class="s2">"unknown token"</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Identity</span><span class="p">(</span>
+            <span class="n">grants</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">),</span>
+                <span class="s2">"organization"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"o-hanlin-press"</span><span class="p">,</span> <span class="s2">"admin"</span><span class="p">),</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TestMyResolver</span><span class="p">(</span><span class="n">ResolverConformance</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">resolver</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">IdentityResolver</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="n">MyResolver</span><span class="p">()</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">valid_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">"tok-tianlong"</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">invalid_credentials</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">"tok-nobody"</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">policy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ScopePolicy</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">POLICY</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">expected_scopes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">})</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">known_roles</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">"owner"</span><span class="p">,</span> <span class="s2">"admin"</span><span class="p">,</span> <span class="s2">"member"</span><span class="p">})</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">_Ticking</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""A clock whose every call is strictly later than the last."""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_n</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">datetime</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_n</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">datetime</span><span class="p">(</span><span class="mi">2024</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">tzinfo</span><span class="o">=</span><span class="n">UTC</span><span class="p">)</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">microseconds</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_n</span><span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TestMyClient</span><span class="p">(</span><span class="n">TransportConformance</span><span class="p">):</span>
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">client</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TransportClient</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">InProcessClient</span><span class="p">(</span>
+            <span class="n">MemoryStore</span><span class="p">(</span>
+                <span class="n">InMemoryStorage</span><span class="p">(),</span>
+                <span class="n">clock</span><span class="o">=</span><span class="n">_Ticking</span><span class="p">(),</span>
+                <span class="n">max_file_bytes</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span>
+                <span class="n">index_max_bytes</span><span class="o">=</span><span class="mi">4096</span><span class="p">,</span>
+                <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">),</span>
+                <span class="n">list_page_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">source</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">"conformance"</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">scope_map</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">:</span> <span class="s2">"o-hanlin-press"</span><span class="p">}</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">max_file_bytes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">256</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">index_max_bytes</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">4096</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">scope_priority</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">)</span>
+
+    <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">list_page_size</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">2</span>
+</code></pre></div>
+
 <h2 id="limitations">Limitations and status<a class="headerlink" href="#limitations" title="Link to this section">#</a></h2>
 <ul>
 <li><strong>Status.</strong> Version 0.1.0, MIT license, Python 3.12 or newer. Installed from git; no PyPI release is documented.</li>
@@ -742,6 +1045,7 @@
 <li><strong>Behavior depends on the agent.</strong> Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.</li>
 <li><strong>Tool calls run concurrently</strong> on worker threads, so the transport client (and <code>on_call</code>) must be thread-safe.</li>
 </ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="usage.html"><small>Previous</small>Examples</a></nav>
 </main>
 <aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
 <li><a href="#concepts">Concepts</a>
@@ -771,6 +1075,18 @@
 <li><a href="#resource">The memory prompt resource</a>
 </li>
 <li><a href="#errors">Errors</a>
+</li>
+<li><a href="#configuration">Configuration</a>
+<ul>
+<li><a href="#identity-types">Identity types</a></li>
+<li><a href="#store-options">Store options</a></li>
+<li><a href="#storage">Storage backends</a></li>
+<li><a href="#transport">Transport</a></li>
+<li><a href="#embed">Add the tools to an existing MCP server</a></li>
+<li><a href="#telemetry">Telemetry</a></li>
+<li><a href="#bind">Using the tools without MCP</a></li>
+<li><a href="#conformance">Conformance suites</a></li>
+</ul>
 </li>
 <li><a href="#limitations">Limitations and status</a>
 </li>

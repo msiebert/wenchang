@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customizing the wenchang prompts</title>
+<meta name="description" content="The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/prompts.html">
+<link rel="alternate" type="text/markdown" href="prompts.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Customizing the wenchang prompts">
+<meta property="og:description" content="The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/prompts.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Customizing the wenchang prompts">
+<meta name="twitter:description" content="The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-prompts">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="setup.html">Setup</a></li>
+<li><a href="prompts.html" aria-current="page">Prompts</a></li>
+<li><a href="authorization.html">Authorization</a></li>
+<li><a href="usage.html">Examples</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/prompts.md</span> <a href="prompts.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#slots">The four slots</a>
+<ul>
+<li><a href="#scope-guidance">Scope guidance</a></li>
+<li><a href="#areas">Seed areas, or none</a></li>
+<li><a href="#sor">Systems of record</a></li>
+</ul>
+</li>
+<li><a href="#fixed">The fixed sections</a>
+</li>
+<li><a href="#naming">Names on the tools</a>
+</li>
+</ul></details></nav>
+<h1 id="customizing-the-prompts">Customizing the prompts<a class="headerlink" href="#customizing-the-prompts" title="Link to this section">#</a></h1>
+<p>The agent behaves the way the memory prompt tells it to. wenchang ships most of that prompt and leaves four slots for you to fill in. You also choose how the tools are named and described.</p>
+<p>You can read the finished prompt in two places: it is the MCP server's <code>instructions</code>, and it is the resource <code>wenchang://memory-prompt</code>. In Python, <code>build_memory_prompt(slots)</code> returns it as markdown with <code>##</code> headings and no top-level heading, so a host can nest it in its own system prompt.</p>
+<h2 id="slots">The four slots<a class="headerlink" href="#slots" title="Link to this section">#</a></h2>
+<p><code>wenchang.prompts.PromptSlots</code> holds the text that is specific to your deployment. The example below configures an assistant for novelists. Every field is a string and must not be empty. The generic sections of the prompt only say "shared scope", "private scope", and "the <code>system/</code> area", so your slots have to say which of your scopes are which.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Slot</th>
+<th>Required</th>
+<th>What it does</th>
+<th>When to change it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>purpose</code></td>
+<td>yes</td>
+<td>One or two sentences naming your product and when to use memory. It opens the first section, "Memory".</td>
+<td>Always set it. It is how the agent knows what the memory is for.</td>
+</tr>
+<tr>
+<td><code>scope_guidance</code></td>
+<td>yes</td>
+<td>Which scopes exist, which are shared and which private, who may write each, and the rules for each. Becomes the "Scopes" section.</td>
+<td>Whenever your scopes or write rules change. This is where you set ask-before-write rules and how to choose a scope.</td>
+</tr>
+<tr>
+<td><code>seed_areas</code></td>
+<td>yes</td>
+<td>The starting areas in each scope, as lowercase slugs, and which scopes have a <code>system/</code> area. Becomes "Seed areas".</td>
+<td>To steer where facts go. List areas, or tell the agent to pick its own.</td>
+</tr>
+<tr>
+<td><code>systems_of_record</code></td>
+<td>no</td>
+<td>Which other systems hold canonical information and how to refer to their objects. <code>None</code> leaves the section out.</td>
+<td>When the agent could otherwise copy data that lives elsewhere, such as the manuscript text or an editor's query tracker.</td>
+</tr>
+</tbody>
+</table></div>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">SECTION_ORDER</span><span class="p">,</span> <span class="n">PromptSlots</span><span class="p">,</span> <span class="n">build_memory_prompt</span>
+
+<span class="n">slots</span> <span class="o">=</span> <span class="n">PromptSlots</span><span class="p">(</span>
+    <span class="n">purpose</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"You have persistent memory of your work helping an author write a novel: reference it "</span>
+        <span class="s2">"and save to it with these tools whenever you work on a manuscript."</span>
+    <span class="p">),</span>
+    <span class="n">scope_guidance</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"There are three scopes: user, project, and organization. A project is one manuscript. "</span>
+        <span class="s2">"An organization is a publisher, and an author may work on several manuscripts.</span><span class="se">\n\n</span><span class="s2">"</span>
+        <span class="s2">"- user is private: it belongs to the author you are talking with and follows them "</span>
+        <span class="s2">"across manuscripts.</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- project is the manuscript, shared by its author, co-author, and editor; any of them "</span>
+        <span class="s2">"may write to it.</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- organization is Hanlin Press, shared by every author and editor there; only "</span>
+        <span class="s2">"editors-in-chief may write to it. It holds press-wide conventions, never facts about "</span>
+        <span class="s2">"one book.</span><span class="se">\n\n</span><span class="s2">"</span>
+        <span class="s2">"Writes to user and project need no ask. If a new fact contradicts one stored in project "</span>
+        <span class="s2">"or organization, show the stored fact, say what conflicts, and ask which to keep.</span><span class="se">\n\n</span><span class="s2">"</span>
+        <span class="s2">"Scope a fact by who it is true for, not who said it: if it would hold for a different "</span>
+        <span class="s2">"author on this manuscript, use project, or organization if it holds for every book at "</span>
+        <span class="s1">'the press; otherwise use user. When in doubt, write narrow. "I draft in the morning" '</span>
+        <span class="s1">'goes in user; "Lin Qiao</span><span class="se">\'</span><span class="s1">s eyes are grey" in project; "The press spells in British '</span>
+        <span class="s1">'English" in organization.'</span>
+    <span class="p">),</span>
+    <span class="c1"># To let the agent choose, say so: "No fixed areas. Create areas as subjects need them."</span>
+    <span class="n">seed_areas</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"- user: preferences, workflows</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- project: characters, plot, timeline, style, research</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- organization: conventions</span><span class="se">\n\n</span><span class="s2">"</span>
+        <span class="s2">"Every scope also has a `system/` area."</span>
+    <span class="p">),</span>
+    <span class="c1"># Optional. None omits the whole section.</span>
+    <span class="n">systems_of_record</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"- The manuscript text lives in the author's word processor. Never copy chapters into "</span>
+        <span class="s2">"memory; refer to a chapter by number and title, and store decisions about it.</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- Editorial queries live in the press's tracker; refer to one by its ID."</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">SECTION_ORDER</span><span class="p">)</span>
+<span class="n">prompt</span> <span class="o">=</span> <span class="n">build_memory_prompt</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">([</span><span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">prompt</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span> <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"## "</span><span class="p">)])</span>
+</code></pre></div>
+
+<h3 id="scope-guidance">Scope guidance<a class="headerlink" href="#scope-guidance" title="Link to this section">#</a></h3>
+<p>This slot does the most work. A scope name alone tells the agent nothing, so say what each one means and when to use it. Useful things to include:</p>
+<ul>
+<li>Who can see each scope and who can write it. The agent cannot see your roles. If only admins may write <code>organization</code>, say so, or it will try and get an error.</li>
+<li>When to ask before writing. The example needs no ask for <code>user</code> or <code>project</code>. Add an ask rule for any scope where a wrong write is costly.</li>
+<li>What to do when a new fact contradicts a stored one.</li>
+<li>A test for choosing a scope, with one example per scope. The example below uses "scope a fact by who it is true for, not who said it".</li>
+</ul>
+<h3 id="areas">Seed areas, or none<a class="headerlink" href="#areas" title="Link to this section">#</a></h3>
+<p>Seeding areas gives the agent a starting shape: <code>preferences</code>, <code>workflows</code>, <code>people</code>. It keeps files consistent from the first session. The agent can still create other areas.</p>
+<p>If you would rather let the agent decide, say that in the slot, for example "No fixed areas. Create areas as subjects need them." The slot cannot be empty, but its text can say there is no list. Seed areas if other code or people will rely on the layout. Leave them open if you would rather see what the agent comes up with.</p>
+<h3 id="sor">Systems of record<a class="headerlink" href="#sor" title="Link to this section">#</a></h3>
+<p>If a fact is canonical somewhere else, memory should point to it and not copy it. This slot lists those systems. The shipped text adds the rule: never copy their contents, refer to objects by name or ID, store only what the system lacks, and ask the user which is right when memory and the system disagree.</p>
+<h2 id="fixed">The fixed sections<a class="headerlink" href="#fixed" title="Link to this section">#</a></h2>
+<p>These sections ship with the library and are the same for every deployment. They are listed in assembly order. <code>SECTION_ORDER</code> in <code>wenchang.prompts</code> gives the section ids.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Heading</th>
+<th>What it tells the agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Memory</td>
+<td>Your <code>purpose</code>, then how files are addressed. Call <code>get_memory_index()</code> at the start of every session. Quote the <code>path</code> a tool returns. Split a subject that outgrows the file size limit.</td>
+</tr>
+<tr>
+<td>Scopes</td>
+<td>Your <code>scope_guidance</code>.</td>
+</tr>
+<tr>
+<td>Seed areas</td>
+<td>Your <code>seed_areas</code>.</td>
+</tr>
+<tr>
+<td>Systems of record</td>
+<td>The general rule, then your list. Left out if <code>None</code>.</td>
+</tr>
+<tr>
+<td>Applying memory</td>
+<td>Use a fact only if it changes the answer. Do not turn one mention into a trait. Take the user's name only from memory or from what they say.</td>
+</tr>
+<tr>
+<td>Deciding what to remember</td>
+<td>Label each line <code>[stated]</code>, <code>[observed]</code>, or <code>[inferred]</code>. Save a fact if it would help a future session. Write end dates into the text. Save facts as they come up, before answering.</td>
+</tr>
+<tr>
+<td>What never to store</td>
+<td>Financial account numbers, health diagnoses, and anything indicating the user is a minor, in any scope. Extra care for shared scopes.</td>
+</tr>
+<tr>
+<td>Filing</td>
+<td>Put a fact in the file about its subject. Check the index for an existing file first. Update aliases and description on each write.</td>
+</tr>
+<tr>
+<td>Choosing a write tool</td>
+<td><code>append_line</code> to add a fact, <code>replace_fact</code> to change or drop one, <code>write_file</code> to create or restructure, <code>delete_file</code> for a whole file.</td>
+</tr>
+<tr>
+<td>Curated content</td>
+<td><code>system/</code> is read-only. Record a user's correction as a new line in a writable area, and answer from the correction.</td>
+</tr>
+<tr>
+<td>Forgetting</td>
+<td>Remove a fact completely, with no note that it existed. Ask first when a request would remove more than one fact.</td>
+</tr>
+</tbody>
+</table></div>
+<p>You cannot edit these sections through the slots. The prompt is a plain string, though. To add your own sections, append to the string and pass the same text to the server as both <code>instructions</code> and <code>prompt</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCPServer</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">memory_instructions</span><span class="p">,</span> <span class="n">register_memory_tools</span>
+
+<span class="c1"># slots, client, resolver, policy, and credentials_from_context as in the setup page.</span>
+<span class="n">prompt</span> <span class="o">=</span> <span class="n">memory_instructions</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span>
+    <span class="s2">"</span><span class="se">\n</span><span class="s2">## Tone</span><span class="se">\n\n</span><span class="s2">When you save something, say so in one short sentence.</span><span class="se">\n</span><span class="s2">"</span>
+<span class="p">)</span>
+<span class="n">server</span> <span class="o">=</span> <span class="n">MCPServer</span><span class="p">(</span><span class="s2">"inkwell-memory"</span><span class="p">,</span> <span class="n">instructions</span><span class="o">=</span><span class="n">prompt</span><span class="p">)</span>
+<span class="n">register_memory_tools</span><span class="p">(</span>
+    <span class="n">server</span><span class="p">,</span>
+    <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>  <span class="c1"># the same text as the instructions</span>
+    <span class="n">client</span><span class="o">=</span><span class="n">client</span><span class="p">,</span>
+    <span class="n">resolver</span><span class="o">=</span><span class="n">resolver</span><span class="p">,</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">policy</span><span class="p">,</span>
+    <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-web"</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>Behavior depends on the model reading the text, and small wording changes can shift it. The repository has a behavioral eval harness that runs scripted scenarios against a real agent and grades what it stored. If you rewrite or extend prompt text, run scenarios of your own against it. See <code>evals/</code> in the repository.</p>
+<h2 id="naming">Names on the tools<a class="headerlink" href="#naming" title="Link to this section">#</a></h2>
+<p>Three arguments, accepted by <code>build_server</code> and <code>register_memory_tools</code>, name your deployment.</p>
+<ul>
+<li><strong><code>product</code></strong> (optional) puts your product's name in the first line of each tool description, so each tool says whose memory it is. With <code>product="Inkwell"</code>, <code>append_line</code> begins "Add one fact line to the end of an existing Inkwell memory file." Without it, descriptions are the tools' docstrings. It must be one non-empty line.</li>
+<li><strong><code>tool_prefix</code></strong> (optional) registers the tools as <code>{tool_prefix}_get_memory_index</code>, <code>{tool_prefix}_read_file</code>, and so on. Use it if the server already has tools with those names, or if one server hosts several memories. It must be 1 to 64 letters, digits, <code>_</code> or <code>-</code>, starting and ending with a letter or digit.</li>
+<li><strong><code>source</code></strong> (required) is the surface name written to each file's <code>sources</code> metadata. It does not appear in the prompt.</li>
+</ul>
+<p>Next: <a href="authorization.html">Authorization</a>.</p>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="setup.html"><small>Previous</small>Setup</a><a rel="next" href="authorization.html"><small>Next</small>Authorization</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#slots">The four slots</a>
+<ul>
+<li><a href="#scope-guidance">Scope guidance</a></li>
+<li><a href="#areas">Seed areas, or none</a></li>
+<li><a href="#sor">Systems of record</a></li>
+</ul>
+</li>
+<li><a href="#fixed">The fixed sections</a>
+</li>
+<li><a href="#naming">Names on the tools</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="prompts.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>
