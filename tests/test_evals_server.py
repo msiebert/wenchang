@@ -193,10 +193,11 @@ def test_reset_seeds_the_store(tmp_path: Path, state: EvalState) -> None:
 
     index = _run(state, body)
 
-    entries = {e["path"]: e for e in index["entries"]}
+    entries = {(e["scope"], e["area"], e["name"]): e for e in index["entries"]}
+    assert all("path" not in e for e in entries.values())
     assert set(entries) == {
-        "user/u-ada/preferences/editor.md",
-        "project/p-checkout/metrics/activation.md",
+        ("user", "preferences", "editor"),
+        ("project", "metrics", "activation"),
     }
     assert all(e["sources"] == ["seed-job"] for e in entries.values())
 
@@ -323,7 +324,9 @@ def test_dump_writes_the_store_and_tags_trailing_calls(tmp_path: Path, state: Ev
         await _turn(client, 1, 1)
         index = _payload(await client.call_tool("get_memory_index", {}))
         version = next(
-            e["version"] for e in index["entries"] if e["path"].endswith("metrics/activation.md")
+            e["version"]
+            for e in index["entries"]
+            if (e["scope"], e["area"], e["name"]) == ("project", "metrics", "activation")
         )
         await client.call_tool(
             "delete_file",
@@ -379,7 +382,9 @@ def test_dump_before_reset_is_an_error(state: EvalState) -> None:
 
     assert "eval_reset" in _error_text(dump)
     assert not write.is_error
-    assert _payload(write)["path"] == "user/u-ada/notes/x.md"
+    written = _payload(write)
+    assert (written["scope"], written["area"], written["name"]) == ("user", "notes", "x")
+    assert "path" not in written
 
 
 @pytest.mark.parametrize("problem", ["missing", "invalid", "outside"])
@@ -575,9 +580,10 @@ def test_scenario_index_cap_reaches_the_store(tmp_path: Path, state: EvalState) 
     first, second = _run(state, body)
 
     assert first["entries"] == []
-    assert {row["prefix"] for row in first["capped"]} == {
-        "user/u-ada/preferences/",
-        "user/u-ada/workflows/",
+    assert all(set(row) == {"scope", "area", "omitted"} for row in first["capped"])
+    assert {(row["scope"], row["area"]) for row in first["capped"]} == {
+        ("user", "preferences"),
+        ("user", "workflows"),
     }
     assert len(second["entries"]) == 2
     assert second["capped"] == []

@@ -1,6 +1,5 @@
 """Run planning, trial grading, the per-run report, and the CLI (AIE-1170, US5)."""
 
-import dataclasses
 import hashlib
 import json
 import os
@@ -1917,39 +1916,10 @@ def test_report_markdown_omits_hit_lines_when_clean(tmp_path: Path) -> None:
     assert [line for line in lines if "identity" in line.lower()]
 
 
-# --- reply-path check in grade.json and the report (AIE-1198, US2) ------------
+# --- no reply-path check (AIE-1252, US4) ---------------------------------------
 
-REBUILT = "Saved to project/metrics/dau.md."
-REBUILT_FLAG = {
-    "session": 1,
-    "turn": 1,
-    "token": "project/metrics/dau.md",
-    "kind": "entity_omitted",
-}
-OTHER_FLAG = {
-    "session": 1,
-    "turn": 1,
-    "token": "project/metrics/other.md",
-    "kind": "unmatched",
-}
-
-
-def _path_trace(trial_dir: Path, *paths: str) -> None:
-    """Replace trace.json with the index reads and one write_file call
-    (session 1 turn 1) per path.
-    """
-    calls = [_call(1, "get_memory_index", 1), _call(2, "get_memory_index", 2)]
-    calls += [
-        dataclasses.replace(_call(k, "write_file", 1), result={"path": path, "created": True})
-        for k, path in enumerate(paths, start=3)
-    ]
-    (trial_dir / "trace.json").write_text(json.dumps(trace_to_json(calls)))
-
-
-def _path_trial(trial: Path, reply: str) -> None:
-    _dump(trial, leak=False)
-    _path_trace(trial, "project/p-checkout/metrics/dau.md")
-    _reply_transcript(trial, reply)
+PATH_REPLY = "Saved to project/p-checkout/metrics/dau.md."
+REPLY_PATH_KEYS = ("reply_path_trials", "reply_path_unchecked_trials", "reply_paths")
 
 
 def _age_dumps(trial: Path, seconds: float = 30) -> None:
@@ -1958,326 +1928,120 @@ def _age_dumps(trial: Path, seconds: float = 30) -> None:
             _age(trial / name, seconds)
 
 
-def test_grade_records_unmatched_reply_paths(tmp_path: Path) -> None:
-    """grade.json lists reply paths no tool result named and results do not
-    depend on them (AIE-1198, US2.6).
-    """
+def _path_reply_trial(trial: Path, reply: str = PATH_REPLY) -> None:
+    _dump(trial, leak=False)
+    _reply_transcript(trial, reply)
+
+
+def test_grade_has_no_unmatched_reply_paths(tmp_path: Path) -> None:
+    """A new grade.json never carries unmatched_reply_paths (AIE-1252, US4.2)."""
     _, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, SECOND_PERSON)
-    clean = grade_trial(trial)
-    _reply_transcript(trial, REBUILT)
+    _path_reply_trial(trial)
 
     graded = grade_trial(trial)
 
-    assert graded["unmatched_reply_paths"] == [REBUILT_FLAG]
-    assert _json(trial / "grade.json") == graded
-    assert (graded["results"], graded["passed"]) == (clean["results"], clean["passed"])
-
-
-def test_grade_records_an_empty_reply_path_list(tmp_path: Path) -> None:
-    """A reply whose paths all match gives an empty list (AIE-1198, US2.6)."""
-    _, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, "Saved to project/p-checkout/metrics/dau.md.")
-
-    graded = grade_trial(trial)
-
-    assert graded["unmatched_reply_paths"] == []
+    assert "unmatched_reply_paths" not in graded
+    assert "unmatched_reply_paths" not in _json(trial / "grade.json")
     assert graded["third_person_replies"] == []
 
 
-def test_malformed_transcript_writes_neither_reply_list(tmp_path: Path) -> None:
-    """With a transcript_error neither reply list is written (AIE-1198, US2.6)."""
-    _, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, REBUILT)
-    (trial / "transcript.json").write_text("not json")
+def test_report_has_no_reply_path_fields_or_lines(tmp_path: Path) -> None:
+    """report.json has no reply-path fields and report.md no reply-path lines (AIE-1252, US4.2)."""
+    run_dir, trials = _reply_trial(tmp_path, trials=2)
+    _path_reply_trial(trials[0])
+    _dump(trials[1], leak=False)
 
-    graded = grade_trial(trial)
+    markdown, report = build_report(run_dir)
 
-    assert "transcript.json" in graded["transcript_error"]
-    assert "unmatched_reply_paths" not in graded
-    assert "third_person_replies" not in graded
-
-
-def test_no_transcript_writes_no_reply_path_list(tmp_path: Path) -> None:
-    """Without transcript.json neither reply list is written (AIE-1198, US2.6)."""
-    _, (trial,) = _reply_trial(tmp_path)
-    _dump(trial, leak=False)
-    _path_trace(trial, "project/p-checkout/metrics/dau.md")
-
-    graded = grade_trial(trial)
-
-    assert "unmatched_reply_paths" not in graded
-    assert "third_person_replies" not in graded
+    assert not set(REPLY_PATH_KEYS) & set(report)
+    for entry in report["scenarios"]:
+        assert not set(REPLY_PATH_KEYS) & set(entry)
+    lowered = markdown.lower()
+    assert "reply path" not in lowered
+    assert "unmatched" not in lowered
+    assert report["third_person"] == {"flagged_trials": 0, "checked_trials": 1}
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        "x",
-        {"session": 1},
-        [{"turn": 1, "token": "a/b", "kind": "unmatched"}],
-        [{"session": 1, "token": "a/b", "kind": "unmatched"}],
-        [{"session": 1, "turn": 1, "kind": "unmatched"}],
-        [{"session": 1, "turn": 1, "token": "a/b"}],
-        [{"session": "1", "turn": 1, "token": "a/b", "kind": "unmatched"}],
-        [{"session": 1, "turn": "1", "token": "a/b", "kind": "unmatched"}],
-        [{"session": 1, "turn": 1, "token": 3, "kind": "unmatched"}],
-        [{"session": 1, "turn": 1, "token": "a/b", "kind": 3}],
-        ["not an object"],
-    ],
-    ids=[
-        "string",
-        "object",
-        "no-session",
-        "no-turn",
-        "no-token",
-        "no-kind",
-        "session-str",
-        "turn-str",
-        "token-int",
-        "kind-int",
-        "item-str",
-    ],
-)
-def test_report_rejects_malformed_unmatched_reply_paths(tmp_path: Path, value: object) -> None:
-    """A grade.json whose unmatched_reply_paths is not a list of well-typed
-    objects is rejected (AIE-1198, US2.6).
+def test_merged_report_has_no_reply_path_fields_or_lines(tmp_path: Path) -> None:
+    """A merged report has no reply-path fields or lines (AIE-1252, US4.2)."""
+    shard_dirs = _sharded_runs(tmp_path)
+    for run_dir in shard_dirs:
+        for trial in sorted(run_dir.glob("*/trial-*")):
+            _reply_transcript(trial, PATH_REPLY)
+
+    markdown, report = merge_runs(tmp_path / "merged", shard_dirs)
+
+    assert not set(REPLY_PATH_KEYS) & set(report)
+    for entry in report["scenarios"]:
+        assert not set(REPLY_PATH_KEYS) & set(entry)
+    assert "reply path" not in markdown.lower()
+
+
+_OLD_UNMATCHED = [
+    [{"session": 1, "turn": 1, "token": "project/metrics/dau.md", "kind": "entity_omitted"}],
+    [],
+    "not a list",
+    [{"session": "x"}],
+]
+
+
+@pytest.mark.parametrize("value", _OLD_UNMATCHED, ids=["flagged", "empty", "string", "malformed"])
+def test_old_grade_with_unmatched_reply_paths_loads(tmp_path: Path, value: object) -> None:
+    """A current grade.json that still has unmatched_reply_paths loads without
+    error and the field is ignored (AIE-1252, US4.3).
     """
     run_dir, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, SECOND_PERSON)
+    _path_reply_trial(trial)
     graded = grade_trial(trial)
     graded["unmatched_reply_paths"] = value
     (trial / "grade.json").write_text(json.dumps(graded))
     _age_dumps(trial)
     _age(trial / "grade.json", 10)
 
-    with pytest.raises(GradeInputError):
-        build_report(run_dir)
+    markdown, report = build_report(run_dir)
+
+    (alpha,) = report["scenarios"]
+    assert alpha["passed_trials"] == 1
+    assert not set(REPLY_PATH_KEYS) & set(report)
+    assert not set(REPLY_PATH_KEYS) & set(alpha)
+    assert "reply path" not in markdown.lower()
 
 
-def _old_grade(trial: Path) -> dict[str, Any]:
-    """A current grade.json with third_person_replies but no unmatched_reply_paths,
-    and results deliberately unlike what a regrade would produce.
-    """
-    graded = grade_trial(trial)
-    graded.pop("unmatched_reply_paths")
-    graded["results"][0]["detail"] = "kept"
-    graded["results"][0]["passed"] = False
-    graded["passed"] = False
-    (trial / "grade.json").write_text(json.dumps(graded))
-    _age_dumps(trial)
-    _age(trial / "grade.json", 10)
-    return graded
-
-
-def test_report_adds_unmatched_reply_paths_to_an_old_grade(tmp_path: Path) -> None:
-    """A current grade.json without unmatched_reply_paths gains it and keeps
-    results and passed (AIE-1198, US2.7).
+@pytest.mark.parametrize("value", _OLD_UNMATCHED, ids=["flagged", "empty", "string", "malformed"])
+def test_stale_old_grade_with_unmatched_reply_paths_refreshes(
+    tmp_path: Path, value: object
+) -> None:
+    """A stale grade.json that still has unmatched_reply_paths is refreshed
+    without error (AIE-1252, US4.3).
     """
     run_dir, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, REBUILT)
-    old = _old_grade(trial)
+    _path_reply_trial(trial)
+    graded = grade_trial(trial)
+    graded["unmatched_reply_paths"] = value
+    (trial / "grade.json").write_text(json.dumps(graded))
+    _age(trial / "grade.json", 120)
+    _age_dumps(trial, 30)
 
     _, report = build_report(run_dir)
 
     refreshed = _json(trial / "grade.json")
-    assert refreshed["unmatched_reply_paths"] == [REBUILT_FLAG]
-    assert refreshed["third_person_replies"] == old["third_person_replies"]
-    assert refreshed["results"] == old["results"]
-    assert refreshed["passed"] is False
+    assert refreshed["third_person_replies"] == []
+    assert refreshed["results"] == graded["results"]
     (alpha,) = report["scenarios"]
-    assert alpha["passed_trials"] == 0
+    assert alpha["passed_trials"] == 1
 
 
-def test_report_leaves_current_reply_paths_alone(tmp_path: Path) -> None:
-    """A current grade.json whose reply checks are unchanged is not rewritten
-    (AIE-1198, US2.7).
-    """
+def test_current_grade_without_unmatched_reply_paths_is_not_rewritten(tmp_path: Path) -> None:
+    """A current grade.json with no unmatched_reply_paths is left alone (AIE-1252, US4.3)."""
     run_dir, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, REBUILT)
-    graded = grade_trial(trial)
+    _path_reply_trial(trial)
+    grade_trial(trial)
     _age_dumps(trial)
     _age(trial / "grade.json", 10)
+    before = (trial / "grade.json").read_text()
     before_mtime = (trial / "grade.json").stat().st_mtime
-    before_text = (trial / "grade.json").read_text()
 
     build_report(run_dir)
 
+    assert (trial / "grade.json").read_text() == before
     assert (trial / "grade.json").stat().st_mtime == before_mtime
-    assert (trial / "grade.json").read_text() == before_text
-    assert _json(trial / "grade.json")["unmatched_reply_paths"] == graded["unmatched_reply_paths"]
-
-
-def test_report_drops_both_reply_lists_when_the_transcript_is_gone(tmp_path: Path) -> None:
-    """A deleted transcript drops third_person_replies and unmatched_reply_paths
-    (AIE-1198, US2.7).
-    """
-    run_dir, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, REBUILT)
-    graded = grade_trial(trial)
-    (trial / "transcript.json").unlink()
-
-    _, report = build_report(run_dir)
-
-    refreshed = _json(trial / "grade.json")
-    assert "unmatched_reply_paths" not in refreshed
-    assert "third_person_replies" not in refreshed
-    assert (refreshed["results"], refreshed["passed"]) == (graded["results"], graded["passed"])
-    (alpha,) = report["scenarios"]
-    assert alpha["reply_path_unchecked_trials"] == [1]
-    assert alpha["reply_path_trials"] == []
-
-
-@pytest.mark.parametrize("trace", ["missing", "malformed"])
-def test_refresh_without_a_loadable_trace_omits_reply_paths(tmp_path: Path, trace: str) -> None:
-    """When trace.json is missing or malformed at refresh, third_person_replies
-    is still refreshed, unmatched_reply_paths is omitted, and build_report does
-    not raise (AIE-1198, US2.7).
-    """
-    run_dir, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, SECOND_PERSON)
-    graded = grade_trial(trial)
-    _reply_transcript(trial, THIRD_PERSON + " " + REBUILT)
-    _age_dumps(trial)
-    _age(trial / "grade.json", 10)
-    if trace == "missing":
-        (trial / "trace.json").unlink()
-    else:
-        (trial / "trace.json").write_text("not json")
-        _age(trial / "trace.json", 30)
-
-    _, report = build_report(run_dir)
-
-    refreshed = _json(trial / "grade.json")
-    assert refreshed["third_person_replies"] == [
-        {"session": 1, "turn": 1, "phrase": "the user asked"}
-    ]
-    assert "unmatched_reply_paths" not in refreshed
-    assert refreshed["results"] == graded["results"]
-    (alpha,) = report["scenarios"]
-    assert alpha["reply_path_unchecked_trials"] == [1]
-    assert alpha["reply_path_trials"] == []
-
-
-def _reply_path_run(tmp_path: Path) -> Path:
-    """Trial 1 has one flagged path, trial 2 has two, trial 3 has no transcript."""
-    run_dir, (t1, t2, t3) = _reply_trial(tmp_path, trials=3)
-    _path_trial(t1, REBUILT)
-    _path_trial(t2, "Saved to project/metrics/dau.md and project/metrics/other.md.")
-    _dump(t3, leak=False)
-    _path_trace(t3, "project/p-checkout/metrics/dau.md")
-    return run_dir
-
-
-def test_report_lists_reply_path_trials(tmp_path: Path) -> None:
-    """The report lists flagged and unchecked trials and leaves existing counts
-    alone (AIE-1198, US2.8).
-    """
-    _, report = build_report(_reply_path_run(tmp_path))
-
-    (alpha,) = report["scenarios"]
-    assert alpha["reply_path_trials"] == [
-        {"trial": 1, "paths": [REBUILT_FLAG]},
-        {"trial": 2, "paths": [REBUILT_FLAG, OTHER_FLAG]},
-    ]
-    assert alpha["reply_path_unchecked_trials"] == [3]
-    assert (alpha["trials_run"], alpha["passed_trials"], alpha["pass_rate"]) == (3, 3, 1.0)
-    assert [a["passes"] for a in alpha["assertions"]] == [3, 3]
-    assert alpha["third_person_trials"] == []
-    assert alpha["addressee_unchecked_trials"] == [3]
-
-
-def test_report_json_totals_reply_path_trials(tmp_path: Path) -> None:
-    """report.json totals flagged, checked, and entity-omitted trials
-    (AIE-1198, US2.8).
-    """
-    _, report = build_report(_reply_path_run(tmp_path))
-
-    assert report["reply_paths"] == {
-        "flagged_trials": 2,
-        "checked_trials": 2,
-        "entity_omitted_trials": 2,
-    }
-    assert report["third_person"] == {"flagged_trials": 0, "checked_trials": 2}
-
-
-def test_report_counts_entity_omitted_trials_separately(tmp_path: Path) -> None:
-    """A trial flagged only as unmatched is not an entity-omitted trial
-    (AIE-1198, US2.8).
-    """
-    run_dir, (t1, t2) = _reply_trial(tmp_path, trials=2)
-    _path_trial(t1, "Saved to project/metrics/other.md.")
-    _path_trial(t2, SECOND_PERSON)
-
-    _, report = build_report(run_dir)
-
-    assert report["reply_paths"] == {
-        "flagged_trials": 1,
-        "checked_trials": 2,
-        "entity_omitted_trials": 0,
-    }
-
-
-def test_report_markdown_shows_reply_path_trials(tmp_path: Path) -> None:
-    """report.md shows the total line right after the third-person line, the
-    per-scenario flagged paths, and the unchecked trials (AIE-1198, US2.8).
-    """
-    markdown, _ = build_report(_reply_path_run(tmp_path))
-
-    assert (
-        "Trials with a third-person reply: 0 of 2 checked.\n"
-        "Trials with an unmatched reply path: 2 of 2 checked "
-        "(2 with an omitted entity segment).\n"
-    ) in markdown
-    assert markdown.index("Trials with an unmatched reply path") > markdown.index("| alpha |")
-    flagged = (
-        '\n\nUnmatched reply paths: trial 1 (session 1 turn 1: "project/metrics/dau.md" '
-        '[entity_omitted]); trial 2 (session 1 turn 1: "project/metrics/dau.md" '
-        '[entity_omitted], session 1 turn 1: "project/metrics/other.md" [unmatched])\n'
-    )
-    assert flagged in markdown
-    assert "\n\nReply paths not checked: 3\n" in markdown
-    assert markdown.index("Addressee not checked: 3") < markdown.index("Reply paths not checked: 3")
-    assert markdown.index("Unmatched reply paths:") < markdown.index("Reply paths not checked")
-
-
-def test_report_markdown_omits_empty_reply_path_lines(tmp_path: Path) -> None:
-    """A scenario with no flagged or unchecked trials has neither per-scenario
-    line (AIE-1198, US2.8).
-    """
-    run_dir, (trial,) = _reply_trial(tmp_path)
-    _path_trial(trial, SECOND_PERSON)
-
-    markdown, _ = build_report(run_dir)
-
-    assert "Unmatched reply paths:" not in markdown
-    assert "Reply paths not checked" not in markdown
-    assert (
-        "Trials with an unmatched reply path: 0 of 1 checked "
-        "(0 with an omitted entity segment)." in markdown
-    )
-
-
-def test_merge_runs_includes_reply_path_fields(tmp_path: Path) -> None:
-    """The merged report carries the reply-path fields and sums the totals
-    (AIE-1198, US2.8).
-    """
-    shard_dirs = _sharded_runs(tmp_path)
-    for k, run_dir in enumerate(shard_dirs):
-        for trial in sorted(run_dir.glob("*/trial-*")):
-            _path_trace(trial, "project/p-checkout/metrics/dau.md")
-            flagged = k == 0 or trial.name == "trial-1"
-            _reply_transcript(trial, REBUILT if flagged else SECOND_PERSON)
-
-    markdown, report = merge_runs(tmp_path / "merged", shard_dirs)
-
-    assert report["reply_paths"] == {
-        "flagged_trials": 3,
-        "checked_trials": 4,
-        "entity_omitted_trials": 3,
-    }
-    by_id = {s["id"]: s for s in report["scenarios"]}
-    assert [t["trial"] for t in by_id["alpha"]["reply_path_trials"]] == [1, 2]
-    assert [t["trial"] for t in by_id["beta"]["reply_path_trials"]] == [1]
-    assert by_id["beta"]["reply_path_unchecked_trials"] == []
-    assert "Trials with an unmatched reply path: 3 of 4 checked (3 with an omitted" in markdown

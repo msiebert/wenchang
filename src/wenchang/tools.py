@@ -51,7 +51,6 @@ TOOL_NAMES: Final[tuple[str, ...]] = (
 
 # The only exception attributes render_error copies; never vars(exc).
 _ERROR_FIELDS: Final[tuple[str, ...]] = (
-    "path",
     "content",
     "version",
     "size",
@@ -178,10 +177,10 @@ class MemoryTools:
     def get_memory_index(self) -> MemoryIndex:
         """Load the metadata index of every memory scope available in this session.
 
-        Call this first. Each entry gives a file's path, metadata, and version, without content.
-        A path has the form `scope/<entity>/area/name.md`; the other tools take `scope`, `area`,
-        and `name` (without `.md`), as in `read_file(scope, area, name)`, and the entity segment
-        is filled in for you. Areas are lowercase ASCII slugs. The `system/` area is read-only.
+        Call this first. Each entry gives a file's scope, area, name, metadata, and version,
+        without content. The other tools take the same `scope`, `area`, and `name` (without
+        `.md`), as in `read_file(scope, area, name)`, and the entity segment is filled in for
+        you. Areas are lowercase ASCII slugs. The `system/` area is read-only.
         A prefix with more files than fit is listed under `capped` with the number omitted; page
         it with `list_prefix(scope, area)`.
         """
@@ -603,6 +602,7 @@ def _wenchang_error_fields(error: WenchangError, name: str) -> dict[str, object]
         "category": category_value,
         "message": _message(error),
     }
+    _add_location(error, out)
     for key in _ERROR_FIELDS:
         try:
             field = cast(object, getattr(error, key, None))
@@ -614,6 +614,23 @@ def _wenchang_error_fields(error: WenchangError, name: str) -> dict[str, object]
         if value is not _DROP:
             out[key] = value
     return out
+
+
+def _add_location(error: WenchangError, out: dict[str, object]) -> None:
+    """Add scope, area, and name parsed from the error's path.
+
+    An error's own `scope` attribute overwrites the parsed one when fields are copied afterward.
+    """
+    try:
+        path = cast(object, getattr(error, "path", None))
+        if not issubclass(type(path), str):
+            return
+        parts = parse_path(str.__str__(cast(str, path)))
+    except Exception:
+        return
+    out["scope"] = parts.scope
+    out["area"] = parts.area
+    out["name"] = parts.name
 
 
 def _json_value(value: object) -> object:
@@ -640,7 +657,6 @@ def _file_fields(entry: FileEntry | MemoryFile, content: object = None) -> dict[
     fields: dict[str, object] = {}
     path = _str_or_drop(lambda: entry.path)
     if path is not _DROP:
-        fields["path"] = path
         try:
             parts = parse_path(cast(str, path))
             parsed: dict[str, object] = {
@@ -754,7 +770,6 @@ def _capped_fields(cap: object) -> dict[str, object] | None:
         # A prefix is scope/, scope/entity/, or scope/entity/area/.
         segments = cast(str, prefix).rstrip("/").split("/")
         return {
-            "prefix": prefix,
             "scope": segments[0],
             "area": segments[2] if len(segments) >= 3 else None,
             "omitted": int.__int__(cast(int, omitted)),

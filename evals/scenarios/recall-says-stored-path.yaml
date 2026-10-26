@@ -1,10 +1,10 @@
-# Prompt: "Memory is short markdown files that outlast this conversation, each
-# addressed by a scope, an area in that scope, and a name." and "Use a stored
+# Prompt: "When you tell the user where something is stored, name its scope, area,
+# and name." and "Use a stored
 # fact only if it changes the substance: what you conclude, recommend, or ask."
 id: recall-says-stored-path
-title: Gives the full stored path of the file holding a definition when asked where it is
+title: Names the scope, area, and name of the file holding a definition when asked where it is
 category: recall
-source: specs/AIE-1198-reply-paths-quote/spec.md
+source: specs/AIE-1252-remove-path-results/spec.md
 seed:
   - scope: organization
     area: vocabulary
@@ -22,12 +22,12 @@ assertions:
   - kind: tool_called
     id: index-called
     tool: get_memory_index
-  - kind: reply_matching
-    id: names-full-path
-    pattern: '(?<![\w.-])/?organization/o-acme/vocabulary/account-tiers(?:\.md)?(?![\w-])'
-  - kind: reply_not_matching
-    id: no-rebuilt-path
-    pattern: '(?<![\w.-])/?organization/(?!o-acme/)(?!(?:user|project|org)(?![\w-]))[a-z0-9][a-z0-9-]*/[a-z0-9]'
   - kind: tool_not_called
     id: no-write
     tool: [write_file, append_line, replace_fact, delete_file]
+  - kind: reply_not_matching
+    id: no-entity-id
+    pattern: '(?i)\bo-acme\b'
+judge:
+  - id: names-scope-area-name
+    rubric: The turn 1 reply tells the user the file holding the enterprise definition by its scope (organization), area (vocabulary), and name (account-tiers).

@@ -248,24 +248,28 @@ def test_not_found_reason_has_exactly_two_members() -> None:
 
 @pytest.mark.unit
 def test_not_found_error_invalid_path_tells_caller_to_correct_path() -> None:
-    """A NotFoundError for an invalid path exposes it and says to correct the path (AIE-1030)."""
+    """A NotFoundError for an invalid path keeps .path, does not echo it, and says to
+    correct the location (AIE-1030, AIE-1252, US2.3).
+    """
     err = NotFoundError("m/bad path", NotFoundReason.INVALID_PATH)
     assert err.path == "m/bad path"
     assert err.reason == NotFoundReason.INVALID_PATH
-    message = err.message.lower()
-    assert "m/bad path" in err.message
-    assert "correct the path" in message
+    assert "m/bad path" not in err.message
+    assert "That is not a valid memory location; correct the scope, area, and name." in err.message
 
 
 @pytest.mark.unit
 def test_not_found_error_file_absent_tells_caller_it_may_create() -> None:
-    """A NotFoundError for an absent file exposes it and says it may be created (AIE-1030)."""
-    err = NotFoundError("m/new.md", NotFoundReason.FILE_ABSENT)
-    assert err.path == "m/new.md"
+    """A NotFoundError for an absent file keeps .path, names the location, and says it
+    may be created (AIE-1030, AIE-1252, US2.2, US2.5).
+    """
+    err = NotFoundError("user/u-ada/preferences/csv.md", NotFoundReason.FILE_ABSENT)
+    assert err.path == "user/u-ada/preferences/csv.md"
     assert err.reason == NotFoundReason.FILE_ABSENT
-    message = err.message.lower()
-    assert "m/new.md" in err.message
-    assert "create" in message
+    assert "No file exists at scope user, area preferences, name csv yet; you may create it." in (
+        err.message
+    )
+    _assert_location_only(err.message)
 
 
 @pytest.mark.unit
@@ -419,8 +423,8 @@ def test_restricted_scope_error_role_required_lists_roles_sorted() -> None:
     assert err.path == "org/o-9/notes/a.md"
     assert err.scope == "org"
     assert err.reason == RestrictionReason.ROLE_REQUIRED
-    assert "org/o-9/notes/a.md" in err.message
-    assert "org" in err.message
+    assert "scope org, area notes, name a" in err.message
+    assert "org/o-9/notes/a.md" not in err.message
     assert "admin, owner" in err.message
 
 
@@ -595,12 +599,13 @@ def test_restriction_reason_not_granted_value() -> None:
 
 @pytest.mark.unit
 def test_restricted_scope_error_not_granted_names_path_and_scope() -> None:
-    """A NOT_GRANTED message names the path and scope and does not mention roles
-    (AIE-1042, US5.3).
+    """A NOT_GRANTED message names the location and scope, not the path or entity ID,
+    and does not mention roles (AIE-1042, AIE-1252, US2.2, US5.3).
     """
     err = RestrictedScopeError("org/o-8/notes/a.md", "org", RestrictionReason.NOT_GRANTED)
-    assert "org/o-8/notes/a.md" in err.message
+    assert "scope org, area notes, name a" in err.message
     assert "scope org" in err.message
+    _assert_location_only(err.message, entity_id="o-8")
     assert "role" not in err.message.lower()
 
 
@@ -735,3 +740,97 @@ def test_every_taxonomy_kind_exists_and_reports_its_category(
     """
     assert issubclass(cls, WenchangError)
     assert cls.category == expected_category
+
+
+def _assert_location_only(message: str, entity_id: str = "u-ada") -> None:
+    """AIE-1252, US2.2: no `/`-joined path, `.md`, or entity ID in the message."""
+    assert "/" not in message.replace("system/", "")
+    assert ".md" not in message
+    assert entity_id not in message
+
+
+_LOC = "scope user, area preferences, name csv"
+_CSV_PATH = "user/u-ada/preferences/csv.md"
+
+
+@pytest.mark.unit
+def test_version_conflict_message_names_location() -> None:
+    """VersionConflictError message names scope, area, name only (AIE-1252, US2.2)."""
+    err = VersionConflictError(_CSV_PATH, "body", VersionToken("v-1"))
+    assert (
+        f"The file at {_LOC} changed since it was read; the current content and version are "
+        "attached; merge your change into the current content and retry with the current version."
+    ) in err.message
+    _assert_location_only(err.message)
+    assert err.path == _CSV_PATH
+
+
+@pytest.mark.unit
+def test_oversize_message_names_location() -> None:
+    """OversizeWriteError message names the location (AIE-1252, US2.2)."""
+    err = OversizeWriteError(_CSV_PATH, 20000, 16384)
+    assert (
+        f"The write to {_LOC} is 20000 bytes, over the 16384-byte limit; "
+        "split the content across multiple files."
+    ) in err.message
+    _assert_location_only(err.message)
+    assert err.path == _CSV_PATH
+
+
+@pytest.mark.unit
+def test_oversize_message_unparseable_path_says_the_file() -> None:
+    """OversizeWriteError falls back to "the file" for an unparseable path (AIE-1252, US2.3)."""
+    err = OversizeWriteError("m/a.md", 10, 5)
+    assert "The write to the file is 10 bytes, over the 5-byte limit" in err.message
+    assert "m/a.md" not in err.message
+
+
+@pytest.mark.unit
+def test_replace_fact_match_message_names_location() -> None:
+    """ReplaceFactMatchError message names the location (AIE-1252, US2.2)."""
+    err = ReplaceFactMatchError(_CSV_PATH, "body", VersionToken("v-1"), 2)
+    assert f"old_string matched 2 spans in {_LOC}" in err.message
+    _assert_location_only(err.message)
+    assert err.path == _CSV_PATH
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("reason", "roles", "tail"),
+    [
+        (
+            RestrictionReason.SYSTEM_READ_ONLY,
+            None,
+            "the system/ area of scope user is read-only (curated content).",
+        ),
+        (
+            RestrictionReason.NOT_GRANTED,
+            None,
+            "the caller's identity does not include this entity in scope user.",
+        ),
+        (
+            RestrictionReason.ROLE_REQUIRED,
+            frozenset({"owner", "admin"}),
+            "scope user is role-gated and the caller lacks a permitted role (admin, owner).",
+        ),
+    ],
+    ids=["system_read_only", "not_granted", "role_required"],
+)
+def test_restricted_scope_message_names_location(
+    reason: RestrictionReason, roles: frozenset[str] | None, tail: str
+) -> None:
+    """RestrictedScopeError messages name the location per reason (AIE-1252, US2.2)."""
+    err = RestrictedScopeError(_CSV_PATH, "user", reason, required_roles=roles)
+    assert f"The file at {_LOC} cannot be written: {tail}" in err.message
+    _assert_location_only(err.message)
+    assert err.path == _CSV_PATH
+
+
+@pytest.mark.unit
+def test_restricted_scope_message_unparseable_path_falls_back_to_scope() -> None:
+    """RestrictedScopeError falls back to `scope {scope}` for an unparseable path
+    (AIE-1252, US2.2).
+    """
+    err = RestrictedScopeError("not-a-path", "user", RestrictionReason.NOT_GRANTED)
+    assert "The file at scope user cannot be written:" in err.message
+    assert "not-a-path" not in err.message

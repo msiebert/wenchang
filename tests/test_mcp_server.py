@@ -133,6 +133,16 @@ def _payload(result: CallToolResult) -> dict[str, Any]:
     return payload
 
 
+def _assert_no_path_keys(value: object) -> None:
+    if isinstance(value, dict):
+        for key, member in cast(dict[object, object], value).items():
+            assert key not in ("path", "prefix"), key
+            _assert_no_path_keys(member)
+    elif isinstance(value, list):
+        for member in cast(list[object], value):
+            _assert_no_path_keys(member)
+
+
 def _write_args(name: str = "today", **overrides: object) -> dict[str, object]:
     args: dict[str, object] = {
         "scope": "user",
@@ -732,6 +742,34 @@ def test_write_then_read_round_trip() -> None:
         assert json.loads(_text(result)) == direct
 
 
+def test_successful_results_have_no_path_or_prefix_keys() -> None:
+    """Every successful tool result, as TextContent JSON and as structured
+    content, has no path or prefix key at any depth (AIE-1252, US1.7).
+    """
+
+    async def body(client: Client) -> list[CallToolResult]:
+        written = await _call(client, "write_file", "alice", **_write_args())
+        results = [written]
+        results.append(await _call(client, "read_file", "alice", **FILE))
+        results.append(await _call(client, "list_prefix", "alice", scope="user", area="notes"))
+        results.append(await _call(client, "get_memory_index", "alice"))
+        results.append(
+            await _call(
+                client,
+                "delete_file",
+                "alice",
+                **FILE,
+                expected_version=_payload(written)["version"],
+            )
+        )
+        return results
+
+    for result in _with_client(_server(), body):
+        assert result.is_error is False
+        _assert_no_path_keys(json.loads(_text(result)))
+        _assert_no_path_keys(_payload(result))
+
+
 def test_delete_renders_ok() -> None:
     """A successful delete_file renders {"ok": True} (AIE-1060, US5.2)."""
 
@@ -756,7 +794,9 @@ def test_each_caller_sees_only_their_own_files() -> None:
 
     written, bobs = _with_client(_server(), body)
 
-    assert "u-alice" in _payload(written)["path"]
+    payload = _payload(written)
+    assert (payload["scope"], payload["area"], payload["name"]) == ("user", "notes", "today")
+    assert "path" not in payload
     assert bobs.is_error is True
     assert _payload(bobs)["error"] == "NotFoundError"
 
@@ -805,6 +845,10 @@ def test_system_write_is_rendered_permanent() -> None:
     assert result.is_error is True
     assert result.structured_content == render_error(direct.value)
     assert _payload(result)["category"] == "permanent"
+    payload = _payload(result)
+    assert (payload["scope"], payload["area"], payload["name"]) == ("user", "system", "today")
+    _assert_no_path_keys(payload)
+    _assert_no_path_keys(json.loads(_text(result)))
 
 
 def test_missing_file_is_rendered_recoverable() -> None:
@@ -818,6 +862,12 @@ def test_missing_file_is_rendered_recoverable() -> None:
     assert result.is_error is True
     assert _payload(result)["category"] == "recoverable"
     assert _payload(result)["error"] == "NotFoundError"
+    payload = _payload(result)
+    assert (payload["scope"], payload["area"], payload["name"]) == ("user", "notes", "today")
+    assert "alice" not in payload["message"]
+    assert ".md" not in payload["message"]
+    _assert_no_path_keys(payload)
+    _assert_no_path_keys(json.loads(_text(result)))
 
 
 def test_credential_extraction_failure_leaks_nothing(caplog: pytest.LogCaptureFixture) -> None:
@@ -1058,6 +1108,7 @@ def test_concurrent_writes_at_one_version_have_one_winner() -> None:
         assert loser["error"] == "VersionConflictError"
         assert loser["category"] == "recoverable"
         assert loser["version"] == winners[0]["version"]
+        _assert_no_path_keys(loser)
     assert winners[0]["version"] != setup_version[0]
 
 

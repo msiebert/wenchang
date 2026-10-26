@@ -221,6 +221,9 @@ Terms as used throughout wenchang and its spec.
 - **Memory path** — a file's address, `{scope}/{entity_id}/{area}/{name}.md`,
   relative to the storage root; exactly four non-empty segments, checked
   only syntactically.
+  Internal: tool results and errors do not show it to the agent.
+- **Location** — how the agent refers to a file: its scope, area, and name.
+  The entity ID is not part of it.
 - **Name** — a file's stem: the last segment of its memory path without the
   final `.md`. `.md` is always appended when a path is built, so a name may
   itself end in `.md` (`notes.md` is stored as `notes.md.md`).

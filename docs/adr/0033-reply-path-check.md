@@ -4,7 +4,9 @@ Date: 2026-10-19
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0036](0036-no-path-in-agent-results.md). The reply-path
+check and the `path` sentence are removed; tool results no longer carry a
+`path`.
 
 ## Context
 

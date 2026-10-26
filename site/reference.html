@@ -99,7 +99,7 @@
 <div class="highlight"><pre><span></span><code>{scope}/{entity_id}/{area}/{name}.md
 </code></pre></div>
 
-<p>For example <code>project/p-ninth-examination/characters/lin-qiao.md</code>. Agents never write the path. The tools take <code>(scope, area, name)</code> and the tool layer fills in <code>entity_id</code> from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full <code>path</code> plus the parsed <code>scope</code>, <code>area</code>, and <code>name</code>.</p>
+<p>For example <code>project/p-ninth-examination/characters/lin-qiao.md</code>. Agents never write the path. The tools take <code>(scope, area, name)</code> and the tool layer fills in <code>entity_id</code> from the caller's identity grant for that scope, so a caller can only reach its own entities. Results name a file by its <code>scope</code>, <code>area</code>, and <code>name</code>; they never include the storage path.</p>
 <h3 id="scopes">Scopes<a class="headerlink" href="#scopes" title="Link to this section">#</a></h3>
 <p>A scope is an adopter-defined visibility tier. The library defines no scope names; a typical set is <code>user</code> (private), <code>project</code> (shared), and <code>organization</code> (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an <code>InvalidArgumentError</code> listing the available scopes.</p>
 <h3 id="areas">Areas<a class="headerlink" href="#areas" title="Link to this section">#</a></h3>
@@ -210,7 +210,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>When the index overflows its budget, the remaining files are reported under <code>capped</code> by area prefix, with the count omitted, and the agent pages them with <code>list_prefix</code>. Index order: <code>system/</code> areas of all scopes first; then scopes in <code>scope_priority</code> order (unlisted scopes last, as one tier); within each tier, most recently updated first.</p>
+<p>When the index overflows its budget, the remaining files are reported under <code>capped</code> by area, with the count omitted, and the agent pages them with <code>list_prefix</code>. Index order: <code>system/</code> areas of all scopes first; then scopes in <code>scope_priority</code> order (unlisted scopes last, as one tier); within each tier, most recently updated first.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Link to this section">#</a></h2>
 <p>Seven tools. With <code>tool_prefix</code> set, each is registered as <code>{tool_prefix}_{name}</code>. All results are JSON objects; all failures are rendered as described under <a href="#errors">errors</a>. In every tool, <code>scope</code>, <code>area</code>, and <code>name</code> are strings, and <code>expected_version</code> is a string (the <code>version</code> from a prior result).</p>
 <p>Common file object, returned by <code>read_file</code>, <code>write_file</code>, <code>append_line</code>, and <code>replace_fact</code>:</p>
@@ -224,14 +224,9 @@
 </thead>
 <tbody>
 <tr>
-<td><code>path</code></td>
-<td>string</td>
-<td>Full path, <code>scope/entity/area/name.md</code>.</td>
-</tr>
-<tr>
 <td><code>scope</code>, <code>area</code>, <code>name</code></td>
 <td>string</td>
-<td>Parsed from the path.</td>
+<td>Where the file lives.</td>
 </tr>
 <tr>
 <td><code>content</code></td>
@@ -267,7 +262,7 @@
 </table></div>
 <section class="tool-card"><h3 id="get_memory_index"><span>get_memory_index</span><span class="pill pill-muted">reads</span><a class="headerlink" href="#get_memory_index" title="Link to this section">#</a></h3><p class="sig"><span class="fn">get_memory_index</span>()</p>
 <blockquote>
-<p>Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's path, metadata, and version, without content.</p>
+<p>Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's scope, area, name, metadata, and version, without content.</p>
 </blockquote>
 <p>Call it first in every session.</p>
 <div class="table-wrap"><table>
@@ -306,11 +301,11 @@
 <tr>
 <td><code>capped</code></td>
 <td>array of objects</td>
-<td>One per area prefix not fully returned. Empty means the index is complete.</td>
+<td>One per area not fully returned. Empty means the index is complete.</td>
 </tr>
 </tbody>
 </table></div>
-<p>Each <code>capped</code> object: <code>prefix</code> (string, for example <code>project/p-ninth-examination/characters/</code>), <code>scope</code> (string), <code>area</code> (string, or <code>null</code> for a prefix above area level), <code>omitted</code> (integer, files left out). Page a capped area with <code>list_prefix(scope, area)</code>.</p>
+<p>Each <code>capped</code> object has exactly <code>scope</code> (string), <code>area</code> (string), and <code>omitted</code> (integer, files left out). Page a capped area with <code>list_prefix(scope, area)</code>.</p>
 </section><section class="tool-card"><h3 id="read_file"><span>read_file</span><span class="pill pill-muted">reads</span><a class="headerlink" href="#read_file" title="Link to this section">#</a></h3><p class="sig"><span class="fn">read_file</span>(scope, area, name)</p>
 <blockquote>
 <p>Read one memory file: its content, metadata, and version. Any area may be read, including <code>system/</code>.</p>
@@ -380,7 +375,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>Returns <code>{"entries": [...], "next_cursor": string | null}</code>. Entries are the common file object without <code>content</code>, ascending by path. A malformed cursor, or one from a different prefix, returns <code>InvalidArgumentError</code> for <code>cursor</code>. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.</p>
+<p>Returns <code>{"entries": [...], "next_cursor": string | null}</code>. Entries are the common file object without <code>content</code>, in ascending storage order. A malformed cursor, or one from a different prefix, returns <code>InvalidArgumentError</code> for <code>cursor</code>. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.</p>
 </section><section class="tool-card"><h3 id="write_file"><span>write_file</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#write_file" title="Link to this section">#</a></h3><p class="sig"><span class="fn">write_file</span>(scope, area, name, content, description, aliases, expected_version)</p>
 <blockquote>
 <p>Create a memory file or replace one whole. Pass <code>expected_version=None</code> to create a file, or the version you read to replace one. <code>description</code> (one line) and <code>aliases</code> replace the stored values; they are not merged. Content over the per-file byte ceiling is rejected with the current size and the limit; shorten it and retry. A version conflict is routine: merge your change into the content it returns and retry with its version.</p>
@@ -640,13 +635,15 @@
 <span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"VersionConflictError"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"content"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span>
 <span class="p">}</span>
 </code></pre></div>
 
-<p><code>error</code> is the class name, <code>category</code> is <code>recoverable</code>, <code>permanent</code>, <code>transient</code>, or <code>internal</code>, and <code>message</code> combines the detail with fixed guidance for the category. Extra fields appear only when relevant.</p>
+<p><code>error</code> is the class name, <code>category</code> is <code>recoverable</code>, <code>permanent</code>, <code>transient</code>, or <code>internal</code>, and <code>message</code> combines the detail with fixed guidance for the category. Extra fields appear only when relevant. When the location parses, the payload carries <code>scope</code>, <code>area</code>, and <code>name</code>, and the message names it as <code>scope user, area preferences, name csv</code>. Errors never include a storage path.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -692,19 +689,19 @@
 <td><code>VersionConflictError</code></td>
 <td>recoverable</td>
 <td>The file changed since it was read.</td>
-<td><code>path</code>, <code>content</code>, <code>version</code> (current)</td>
+<td><code>content</code>, <code>version</code> (current)</td>
 </tr>
 <tr>
 <td><code>OversizeWriteError</code></td>
 <td>recoverable</td>
 <td>The resulting content exceeds the per-file limit.</td>
-<td><code>path</code>, <code>size</code>, <code>limit</code></td>
+<td><code>size</code>, <code>limit</code></td>
 </tr>
 <tr>
 <td><code>ReplaceFactMatchError</code></td>
 <td>recoverable</td>
 <td><code>old_string</code> matched zero spans or more than one.</td>
-<td><code>path</code>, <code>content</code>, <code>version</code>, <code>match_count</code></td>
+<td><code>content</code>, <code>version</code>, <code>match_count</code></td>
 </tr>
 <tr>
 <td><code>InvalidArgumentError</code></td>
@@ -715,14 +712,14 @@
 <tr>
 <td><code>NotFoundError</code></td>
 <td>recoverable</td>
-<td>The path is invalid (<code>invalid_path</code>) or no file exists there (<code>file_absent</code>).</td>
-<td><code>path</code>, <code>reason</code></td>
+<td>The location is invalid (<code>invalid_path</code>) or no file exists there (<code>file_absent</code>).</td>
+<td><code>reason</code></td>
 </tr>
 <tr>
 <td><code>RestrictedScopeError</code></td>
 <td>permanent</td>
 <td>A write to <code>system/</code> (<code>system_read_only</code>), or to a scope whose policy requires another role (<code>role_required</code>), or outside the caller's grant (<code>not_granted</code>).</td>
-<td><code>path</code>, <code>scope</code>, <code>reason</code>, and <code>required_roles</code> for <code>role_required</code></td>
+<td><code>scope</code>, <code>reason</code>, and <code>required_roles</code> for <code>role_required</code></td>
 </tr>
 <tr>
 <td><code>ResolverFailureError</code></td>

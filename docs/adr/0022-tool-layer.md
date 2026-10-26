@@ -280,6 +280,12 @@ imports it.
       `BackendUnavailableError`, so nothing the agent must act on arrives
       as an off-contract exception. A host needs one `except Exception` and
       no branching.
+    - **Note (2026-10-26, AIE-1252).** The rendered shape above is
+      amended by [ADR 0036](0036-no-path-in-agent-results.md): results and
+      errors carry no `path`, capped rows are `{scope, area, omitted}` with
+      no `prefix`, and `render_error` copies `scope`, `area`, and `name`
+      parsed from `error.path` in place of `path`. Core types and error
+      classes keep `.path`.
     - **Rejected: tools that return or raise rendered payloads**, which
       lose typed results for in-process callers and the end-to-end tests.
     - **Rejected: leaving formatting to each host.** Every host would have
@@ -373,10 +379,10 @@ own-entity-only.
 The agent never types an entity ID, and a whole class of path mistakes
 becomes either impossible or a recoverable `InvalidArgumentError` naming
 the argument. The trade-off is that the tool signatures differ from
-`TransportClient`'s: index and listing results carry full paths, while
+`TransportClient`'s: typed index and listing results carry full paths, while
 tools take `(scope, area, name)`. `render_result` emits each entry's
-`scope`, `area`, and `name`, and the docstrings describe the mapping, but a
-host that skips `render_result` loses the former. A confused agent passing
+`scope`, `area`, and `name` (and, since ADR 0036, no path), and the
+docstrings describe the mapping. A confused agent passing
 `name="a.md"` creates `a.md.md`.
 
 Milestone 4's prompt text, and the AIE-1059 and AIE-1060 issue text, still

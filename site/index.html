@@ -97,7 +97,7 @@ aliases: Qiao
 <p class="section-label">How it works</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Link to this section">#</a></h2>
 <h3 id="index">The agent starts from an index<a class="headerlink" href="#index" title="Link to this section">#</a></h3>
-<p>At the start of each session the agent calls <code>get_memory_index()</code>. It gets one entry for every file it has written: path, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.</p>
+<p>At the start of each session the agent calls <code>get_memory_index()</code>. It gets one entry for every file it has written: scope, area, name, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.</p>
 <figure class="diagram">
 
 
@@ -105,13 +105,13 @@ aliases: Qiao
 <span class="p">{</span>
 <span class="w">  </span><span class="nt">"entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project/p-ninth-examination/characters/lin-qiao.md"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"characters"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lin-qiao"</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"3"</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Lin Qiao, the protagonist"</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Qiao"</span><span class="p">]</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project/p-ninth-examination/timeline/main-timeline.md"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"scope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"project"</span><span class="p">,</span><span class="w"> </span><span class="nt">"area"</span><span class="p">:</span><span class="w"> </span><span class="s2">"timeline"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"main-timeline"</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1"</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Order of events in the novel"</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">"aliases"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"chronology"</span><span class="p">,</span><span class="w"> </span><span class="s2">"timeline"</span><span class="p">]</span>
@@ -125,7 +125,7 @@ aliases: Qiao
 
 <figcaption>What the agent receives at the start of a session (abridged).</figcaption>
 </figure>
-<p>Real entries also carry <code>scope</code>, <code>area</code>, <code>name</code>, <code>sources</code>, and <code>last_updated</code>. If the index gets too big, it is cut at a size limit and the agent lists the rest with <code>list_prefix</code>. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.</p>
+<p>Real entries also carry <code>sources</code>, and <code>last_updated</code>. If the index gets too big, it is cut at a size limit and the agent lists the rest with <code>list_prefix</code>. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.</p>
 <h3 id="organizing">The agent organizes its own files<a class="headerlink" href="#organizing" title="Link to this section">#</a></h3>
 <p>The agent has seven tools: <code>get_memory_index</code>, <code>read_file</code>, <code>list_prefix</code>, <code>write_file</code>, <code>append_line</code>, <code>replace_fact</code>, and <code>delete_file</code>. Each fact is one line. The agent can add a line, change a line, or drop one. It can rewrite a file, create one, or delete one. It can change a file's description and aliases whenever it writes.</p>
 <p>The library sets no schema. The agent decides how to split memory into files, which file a fact belongs in, and what to delete when a fact stops being true. The shipped prompt pushes it toward one file per subject, toward appending to an existing file instead of creating a duplicate, and toward removing a fact completely when the user asks it to forget.</p>

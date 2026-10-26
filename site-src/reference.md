@@ -12,7 +12,7 @@ Every memory file is stored at
 {scope}/{entity_id}/{area}/{name}.md
 ```
 
-For example `project/p-ninth-examination/characters/lin-qiao.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full `path` plus the parsed `scope`, `area`, and `name`.
+For example `project/p-ninth-examination/characters/lin-qiao.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results name a file by its `scope`, `area`, and `name`; they never include the storage path.
 
 ### Scopes {#scopes}
 
@@ -77,7 +77,7 @@ Every file has an opaque `version` (the GCS generation under `GcsStorage`). Ever
 | `list_prefix` page size | 100 entries | `MemoryStore(list_page_size=...)` |
 | `replace_fact` attempts | 3 | fixed |
 
-When the index overflows its budget, the remaining files are reported under `capped` by area prefix, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+When the index overflows its budget, the remaining files are reported under `capped` by area, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
 
 ## Tools {#tools}
 
@@ -87,8 +87,7 @@ Common file object, returned by `read_file`, `write_file`, `append_line`, and `r
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `path` | string | Full path, `scope/entity/area/name.md`. |
-| `scope`, `area`, `name` | string | Parsed from the path. |
+| `scope`, `area`, `name` | string | Where the file lives. |
 | `content` | string | The body. Present on a file; absent on index and list entries. |
 | `version` | string | Opaque. Pass as `expected_version`. |
 | `description` | string | |
@@ -98,7 +97,7 @@ Common file object, returned by `read_file`, `write_file`, `append_line`, and `r
 
 ### get_memory_index {#get_memory_index}
 
-> Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's path, metadata, and version, without content.
+> Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's scope, area, name, metadata, and version, without content.
 
 Call it first in every session.
 
@@ -111,9 +110,9 @@ Returns an object:
 | Field | Type | Description |
 | --- | --- | --- |
 | `entries` | array of file entries | Each is the common file object without `content`, in index order, up to the byte budget. |
-| `capped` | array of objects | One per area prefix not fully returned. Empty means the index is complete. |
+| `capped` | array of objects | One per area not fully returned. Empty means the index is complete. |
 
-Each `capped` object: `prefix` (string, for example `project/p-ninth-examination/characters/`), `scope` (string), `area` (string, or `null` for a prefix above area level), `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
+Each `capped` object has exactly `scope` (string), `area` (string), and `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
 
 ### read_file {#read_file}
 
@@ -137,7 +136,7 @@ Returns the common file object. If no file exists: `NotFoundError` with reason `
 | `area` | string or null | no (default `null`) | Restrict to one area; `null` lists the whole scope. |
 | `cursor` | string or null | no (default `null`) | The `next_cursor` from the previous page, with the same `scope` and `area`. |
 
-Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the common file object without `content`, ascending by path. A malformed cursor, or one from a different prefix, returns `InvalidArgumentError` for `cursor`. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.
+Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the common file object without `content`, in ascending storage order. A malformed cursor, or one from a different prefix, returns `InvalidArgumentError` for `cursor`. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.
 
 ### write_file {#write_file}
 
@@ -223,13 +222,15 @@ A failed tool call returns an MCP error result (`isError` true) whose JSON paylo
   "error": "VersionConflictError",
   "category": "recoverable",
   "message": "...",
-  "path": "...",
+  "scope": "...",
+  "area": "...",
+  "name": "...",
   "content": "...",
   "version": "..."
 }
 ```
 
-`error` is the class name, `category` is `recoverable`, `permanent`, `transient`, or `internal`, and `message` combines the detail with fixed guidance for the category. Extra fields appear only when relevant.
+`error` is the class name, `category` is `recoverable`, `permanent`, `transient`, or `internal`, and `message` combines the detail with fixed guidance for the category. Extra fields appear only when relevant. When the location parses, the payload carries `scope`, `area`, and `name`, and the message names it as `scope user, area preferences, name csv`. Errors never include a storage path.
 
 | Category | Meaning | What the agent should do |
 | --- | --- | --- |
@@ -240,12 +241,12 @@ A failed tool call returns an MCP error result (`isError` true) whose JSON paylo
 
 | Error | Category | Raised when | Extra fields |
 | --- | --- | --- | --- |
-| `VersionConflictError` | recoverable | The file changed since it was read. | `path`, `content`, `version` (current) |
-| `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `path`, `size`, `limit` |
-| `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `path`, `content`, `version`, `match_count` |
+| `VersionConflictError` | recoverable | The file changed since it was read. | `content`, `version` (current) |
+| `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `size`, `limit` |
+| `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `content`, `version`, `match_count` |
 | `InvalidArgumentError` | recoverable | An argument was rejected: unknown scope, bad area slug, bad name, not a fact line, empty `old_string`, bad cursor, and similar. | `argument` |
-| `NotFoundError` | recoverable | The path is invalid (`invalid_path`) or no file exists there (`file_absent`). | `path`, `reason` |
-| `RestrictedScopeError` | permanent | A write to `system/` (`system_read_only`), or to a scope whose policy requires another role (`role_required`), or outside the caller's grant (`not_granted`). | `path`, `scope`, `reason`, and `required_roles` for `role_required` |
+| `NotFoundError` | recoverable | The location is invalid (`invalid_path`) or no file exists there (`file_absent`). | `reason` |
+| `RestrictedScopeError` | permanent | A write to `system/` (`system_read_only`), or to a scope whose policy requires another role (`role_required`), or outside the caller's grant (`not_granted`). | `scope`, `reason`, and `required_roles` for `role_required` |
 | `ResolverFailureError` | permanent | The identity could not be resolved, or `credentials_from_context` raised. Memory is unavailable for the session. | none |
 | `BackendUnavailableError` | transient | The storage backend timed out or is unreachable. | `reason` (`timeout` or `unavailable`) |
 
