@@ -945,21 +945,22 @@ the one planned piece.
   failures) pass through every tool. Every other client exception
   propagates as the same object.
   `render_result(value)` and `render_error(exc)` turn a tool's result or
-  failure into the JSON-safe `dict` a host shows the agent. A file renders
-  as `path`, `scope`, `area`, `name` (from `parse_path`, or all `None` for
+  failure into the JSON-safe `dict` a host shows the agent. Rendered
+  output never carries a memory `path` or `prefix`, so the entity ID is not
+  shown ([ADR 0036](docs/adr/0036-no-path-in-agent-results.md)). A file
+  renders as `scope`, `area`, `name` (from `parse_path`, or all `None` for
   a malformed path), `version` (`str`), `description`, `aliases` (list),
   `sources` (sorted list), and `last_updated` (the `metadata_to_map`
   string), plus `content` for a `MemoryFile`; a `ListPage` as `entries`
   and `next_cursor`; a `MemoryIndex` as `entries` and `capped` rows of
-  `prefix`, `scope`, `area` (`None` for a scope- or entity-level prefix),
-  and `omitted`; `None` as `{"ok": True}`; any other value raises
-  `TypeError`. `render_result` never raises for any value of a supported
-  type and its output is always JSON-serializable: an `aliases` or
-  `sources` member that is not a JSON-safe string is dropped, and a
-  `path`, `content`, `version`, `description`, or `next_cursor` that is
-  not an exact `str` is dropped from the output; a dropped `path` takes
-  `scope`, `area`, and `name` with it (keys omitted), whereas a malformed
-  `str` path still renders those three as `None`. Container fields are
+  exactly `scope`, `area`, and `omitted`; `None` as `{"ok": True}`; any
+  other value raises `TypeError`. `render_result` never raises for any
+  value of a supported type and its output is always JSON-serializable: an
+  `aliases` or `sources` member that is not a JSON-safe string is dropped,
+  and a `content`, `version`, `description`, or `next_cursor` that is not
+  an exact `str` is dropped from the output; a core `path` that is not an
+  exact `str` omits `scope`, `area`, and `name` (keys omitted), whereas a
+  malformed `str` path still renders those three as `None`. Container fields are
   guarded the same way: a `metadata` that is not a `FileMetadata`,
   `aliases` or `sources` that are not iterable, or a `last_updated` that
   is not a `datetime` is dropped (keys omitted), and `entries` or `capped`
@@ -968,9 +969,11 @@ the one planned piece.
   and a naive `datetime` `last_updated` is dropped. `render_error` accepts any
   `Exception` and never raises. A
   `WenchangError` renders `error` (type name), `category`, `message`, and
-  each non-`None` attribute from a fixed list (`path`, `content`,
+  each non-`None` attribute from a fixed list (`content`,
   `version`, `size`, `limit`, `match_count`, `reason`, `scope`,
-  `required_roles`, `argument`), so the repair material `str(err)` omits
+  `required_roles`, `argument`) plus `scope`, `area`, and `name` parsed
+  from `error.path` (a `RestrictedScopeError`'s own `scope` wins; an
+  unparseable `INVALID_PATH` yields no location keys), so the repair material `str(err)` omits
   reaches the agent; it never reads `vars(exc)`, so `detail` and
   `__cause__` stay hidden. A payload value renders only if it is an exact
   `str`, an `int` that is not a `bool`, an `Enum` member (as its value),
@@ -1197,11 +1200,10 @@ imports it. The editable install makes it importable from any directory.
   ([ADR 0032](docs/adr/0032-transcript-graded-assertions-and-context-records.md)).
   A separate reply check scans the
   transcript for replies that refer to the user in the third person
-  ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). A second reply
-  check, `find_unmatched_reply_paths`, flags scope-rooted paths in replies
-  that no tool result named up to that turn
-  ([ADR 0033](docs/adr/0033-reply-path-check.md)). Neither check changes an
-  assertion result. Recorded replies come from the subagent's transcript
+  ([ADR 0031](docs/adr/0031-reply-addressee-check.md)). The check
+  does not change an assertion result. Reply-path checking was removed
+  because results no longer carry a path
+  ([ADR 0036](docs/adr/0036-no-path-in-agent-results.md)). Recorded replies come from the subagent's transcript
   ([ADR 0035](docs/adr/0035-eval-sessions-dontask.md)). A further pure
   scanner, `find_operator_identity`,
   takes the operator's resolved identity as an input and looks for it in
@@ -1225,9 +1227,8 @@ imports it. The editable install makes it importable from any directory.
 - **evals.report** and `python -m evals`: plan a run, grade trials, and
   write the per-run report. `grade.json` and the report carry the reply
   check's flags, unchecked trials, and judge fails in flagged trials
-  separately from the pass counts. `grade.json` also records
-  `unmatched_reply_paths`, and the report adds reply-path counts, apart from
-  the pass counts ([ADR 0033](docs/adr/0033-reply-path-check.md)).
+  separately from the pass counts. An older `grade.json` that
+  records `unmatched_reply_paths` still loads; the field is ignored.
   `grade.json` also carries
   `operator_identity` (hits, sources, `replies_scanned`, or `unchecked`).
   A hit counts toward `passed` but never changes `results`. The report adds
@@ -1298,8 +1299,8 @@ server, graders, and report end to end.
 - **The agent never has to type an entity ID.** Tools take `scope`,
   `area`, and `name`, and build the path under the caller's own entity in
   that scope from the resolved grant; no tool accepts a path, prefix, or
-  entity ID, so the agent can neither mistype its own entity nor name
-  another's.
+  entity ID, and no result shows one, so the agent can neither mistype its
+  own entity nor name another's.
 - **`scope` and `core` stay independent.** `scope` never imports `core` or
   `storage`, and `core` never imports `scope`, so a restriction check can't
   be wired into `MemoryStore` without breaking the boundary.

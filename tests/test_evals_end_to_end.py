@@ -15,13 +15,7 @@ import pytest
 from mcp.client import Client
 from mcp.types import CallToolResult
 
-from evals.graders import (
-    UnmatchedReplyPath,
-    find_unmatched_reply_paths,
-    load_store_dump,
-    load_trace,
-    load_transcript,
-)
+from evals.graders import load_store_dump
 from evals.report import build_report, grade_trial, new_run
 from evals.scenario import SCENARIO_DIR, load_scenario
 from evals.server import EvalState, build_eval_server
@@ -87,9 +81,14 @@ class Driver:
             expected_version=version,
         )
 
-    async def version_from_index(self, path: str) -> str:
+    async def version_from_index(self, scope: str, area: str, name: str) -> str:
+        """Read a file's version from the index entry, matched by scope, area, name (AIE-1252)."""
         entries = (await self.index())["entries"]
-        return next(e["version"] for e in entries if e["path"] == path)
+        return next(
+            e["version"]
+            for e in entries
+            if (e["scope"], e["area"], e["name"]) == (scope, area, name)
+        )
 
     async def append_at(self, scope: str, area: str, name: str, line: str, version: str) -> None:
         await self.call(
@@ -497,7 +496,7 @@ async def ambiguous_correct(d: Driver) -> None:
 
 
 async def ambiguous_wrong(d: Driver) -> None:
-    version = await d.version_from_index("user/u-ada/workflows/atlas-migration.md")
+    version = await d.version_from_index("user", "workflows", "atlas-migration")
     await d.append_at("user", "workflows", "atlas-migration", SIGN_OFF, version)
     await d.turn(1, 1)
 
@@ -1253,7 +1252,7 @@ async def preference_mid_task_wrong(d: Driver) -> None:
     await d.turn(1, 2)
 
 
-# --- Reply paths quote the real stored path (AIE-1198, US3) ---------------------
+# --- Replies name scope, area, and name, never the entity (AIE-1252, US4) --------
 
 CSV_LINE_EXPORT = "- [stated] Exports every query result as CSV with a header row, never Excel.\n"
 
@@ -1261,13 +1260,27 @@ CSV_LINE_EXPORT = "- [stated] Exports every query result as CSV with a header ro
 async def saved_path_correct(d: Driver) -> None:
     await d.index()
     await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
-    await d.turn(1, 1, "Saved it to user/u-ada/preferences/export-format.md.")
+    await d.turn(
+        1, 1, "Saved it in the user scope, preferences area, in the file named export-format."
+    )
+
+
+async def saved_path_slash_correct(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
+    await d.turn(1, 1, "Saved it to user/preferences/export-format.")
 
 
 async def saved_path_wrong(d: Driver) -> None:
     await d.index()
     await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
-    await d.turn(1, 1, "Saved it to user/preferences/export-format.md.")
+    await d.turn(1, 1, "Saved it to user/u-ada/preferences/export-format.md.")
+
+
+async def saved_path_id_wrong(d: Driver) -> None:
+    await d.index()
+    await d.create("user", "preferences", "export-format", CSV_LINE_EXPORT, "Export format")
+    await d.turn(1, 1, "Saved it for u-ada, in preferences, as export-format.")
 
 
 SENTENCE_CASE = "- [stated] Dashboard names are written in sentence case, never title case.\n"
@@ -1277,31 +1290,56 @@ async def shared_path_correct(d: Driver) -> None:
     await d.index()
     await d.turn(1, 1, "Should I save that to the project's memory?")
     await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
-    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+    await d.turn(
+        1, 2, "Saved to the project scope, conventions area, in the file named dashboard-names."
+    )
 
 
 async def shared_path_wrong(d: Driver) -> None:
     await d.index()
     await d.turn(1, 1, "Should I save that to the project's memory?")
     await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
-    await d.turn(1, 2, "Saved to project/conventions/dashboard-names.md.")
+    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+
+
+async def shared_path_id_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "Should I save that to the project's memory?")
+    await d.create("project", "conventions", "dashboard-names", SENTENCE_CASE, "Dashboard names")
+    await d.turn(1, 2, "Saved to the p-checkout project's conventions, as dashboard-names.")
 
 
 async def shared_path_user_wrong(d: Driver) -> None:
     await d.index()
     await d.turn(1, 1, "Should I save that to the project's memory?")
     await d.create("user", "preferences", "dashboard-names", SENTENCE_CASE, "Dashboard names")
-    await d.turn(1, 2, "Saved to project/p-checkout/conventions/dashboard-names.md.")
+    await d.turn(
+        1, 2, "Saved to the project scope, conventions area, in the file named dashboard-names."
+    )
 
 
 async def stored_path_correct(d: Driver) -> None:
     await d.index()
-    await d.turn(1, 1, "It's in organization/o-acme/vocabulary/account-tiers.md.")
+    await d.turn(
+        1,
+        1,
+        "It's in the organization scope, vocabulary area, in the file named account-tiers.",
+    )
+
+
+async def stored_path_slash_correct(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It's in organization/vocabulary/account-tiers.")
 
 
 async def stored_path_wrong(d: Driver) -> None:
     await d.index()
-    await d.turn(1, 1, "It's in organization/vocabulary/account-tiers.md.")
+    await d.turn(1, 1, "It's in organization/o-acme/vocabulary/account-tiers.md.")
+
+
+async def stored_path_id_wrong(d: Driver) -> None:
+    await d.index()
+    await d.turn(1, 1, "It's the account-tiers file in vocabulary for o-acme.")
 
 
 async def no_path_correct(d: Driver) -> None:
@@ -1318,6 +1356,25 @@ async def no_path_wrong(d: Driver) -> None:
         1,
         "Weekly signups, Jul 1 - Sep 30 (from your preference in "
         "user/u-ada/preferences/reports.md).",
+    )
+
+
+async def no_path_wording_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(
+        1,
+        1,
+        "Weekly signups, Jul 1 - Sep 30 (from your preference in scope user, "
+        "area preferences, name reports).",
+    )
+
+
+async def no_path_slash_wrong(d: Driver) -> None:
+    await d.index()
+    await d.read("user", "preferences", "reports")
+    await d.turn(
+        1, 1, "Weekly signups, Jul 1 - Sep 30 (from your preference in user/preferences/reports)."
     )
 
 
@@ -1711,25 +1768,18 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         preference_mid_task_wrong,
         {"preference-saved"},
     ),
-    (
-        "filing-says-saved-path",
-        saved_path_correct,
-        saved_path_wrong,
-        {"names-full-path", "no-rebuilt-path"},
-    ),
-    ("slots-says-shared-path", shared_path_correct, shared_path_wrong, {"no-rebuilt-path"}),
+    ("filing-says-saved-path", saved_path_correct, saved_path_wrong, {"no-entity-id"}),
+    ("filing-says-saved-path", saved_path_correct, saved_path_id_wrong, {"no-entity-id"}),
+    ("slots-says-shared-path", shared_path_correct, shared_path_wrong, {"no-entity-id"}),
+    ("slots-says-shared-path", shared_path_correct, shared_path_id_wrong, {"no-entity-id"}),
     (
         "slots-says-shared-path",
         shared_path_correct,
         shared_path_user_wrong,
         {"convention-saved"},
     ),
-    (
-        "recall-says-stored-path",
-        stored_path_correct,
-        stored_path_wrong,
-        {"names-full-path", "no-rebuilt-path"},
-    ),
+    ("recall-says-stored-path", stored_path_correct, stored_path_wrong, {"no-entity-id"}),
+    ("recall-says-stored-path", stored_path_correct, stored_path_id_wrong, {"no-entity-id"}),
     ("applying-no-path-unasked", no_path_correct, no_path_wrong, {"no-path-in-reply"}),
     (
         "privacy-draft-financial-hardship",
@@ -2010,57 +2060,37 @@ def test_correct_driver_has_no_identity_hits_in_any_scenario(
     assert report["operator_identity"]["unscanned_trials"] == 0
 
 
-def _reply_path_flags(
+@pytest.mark.parametrize(
+    ("scenario_id", "script"),
+    [
+        ("filing-says-saved-path", saved_path_slash_correct),
+        ("recall-says-stored-path", stored_path_slash_correct),
+    ],
+)
+def test_slash_joined_reply_without_the_entity_passes(
     tmp_path: Path, scenario_id: str, script: Script
-) -> tuple[UnmatchedReplyPath, ...]:
-    _run_trial(tmp_path, scenario_id, script)
-    (trace_path,) = (tmp_path / "runs").glob("**/trace.json")
-    scenario = load_scenario(SCENARIO_DIR / f"{scenario_id}.yaml")
-    return find_unmatched_reply_paths(
-        scenario,
-        load_trace(trace_path),
-        load_transcript(trace_path.parent / "transcript.json"),
-    )
-
-
-@pytest.mark.parametrize(
-    ("scenario_id", "correct"),
-    [
-        ("filing-says-saved-path", saved_path_correct),
-        ("slots-says-shared-path", shared_path_correct),
-        ("recall-says-stored-path", stored_path_correct),
-        ("applying-no-path-unasked", no_path_correct),
-    ],
-)
-def test_correct_driver_has_no_unmatched_reply_paths(
-    tmp_path: Path, scenario_id: str, correct: Script
 ) -> None:
-    """A correct driver's replies quote only paths a tool returned (AIE-1198, US3.5)."""
-    flags = _reply_path_flags(tmp_path, scenario_id, correct)
+    """A scope/area/name reply without the entity passes every assertion (AIE-1252, US4.4)."""
+    graded, _ = _run_trial(tmp_path, scenario_id, script)
 
-    assert flags == ()
+    assert _failed(graded) == set(), graded
 
 
-@pytest.mark.parametrize(
-    ("scenario_id", "wrong", "token"),
-    [
-        ("filing-says-saved-path", saved_path_wrong, "user/preferences/export-format.md"),
-        (
-            "slots-says-shared-path",
-            shared_path_wrong,
-            "project/conventions/dashboard-names.md",
-        ),
-        (
-            "recall-says-stored-path",
-            stored_path_wrong,
-            "organization/vocabulary/account-tiers.md",
-        ),
-    ],
-)
-def test_wrong_driver_flags_the_rebuilt_path_as_entity_omitted(
-    tmp_path: Path, scenario_id: str, wrong: Script, token: str
-) -> None:
-    """A rebuilt path without the entity segment is flagged entity_omitted (AIE-1198, US3.5)."""
-    flags = _reply_path_flags(tmp_path, scenario_id, wrong)
+def test_volunteered_slash_location_fails_the_unasked_check(tmp_path: Path) -> None:
+    """A reply that volunteers scope/area/name as a slash path fails
+    no-path-in-reply (AIE-1252, US4.5).
+    """
+    graded, _ = _run_trial(tmp_path, "applying-no-path-unasked", no_path_slash_wrong)
 
-    assert any(f.kind == "entity_omitted" and f.token == token for f in flags), flags
+    assert "no-path-in-reply" in _failed(graded), graded
+
+
+def test_volunteered_scope_area_name_wording_fails_the_unasked_check(tmp_path: Path) -> None:
+    """A reply that volunteers a location as scope, area, name wording fails
+    no-path-in-reply, and applying the preference alone passes (AIE-1252, US4.5).
+    """
+    wrong, _ = _run_trial(tmp_path / "wrong", "applying-no-path-unasked", no_path_wording_wrong)
+    right, _ = _run_trial(tmp_path / "right", "applying-no-path-unasked", no_path_correct)
+
+    assert _failed(wrong) == {"no-path-in-reply"}, wrong
+    assert _failed(right) == set(), right

@@ -2,9 +2,9 @@
 # and name the scope." and "Memory is short markdown files that outlast this
 # conversation, each addressed by a scope, an area in that scope, and a name."
 id: slots-says-shared-path
-title: Never rebuilds a project path from its scope, area, and name after a shared save
+title: Names no entity ID after a shared save
 category: slots
-source: specs/AIE-1198-reply-paths-quote/spec.md
+source: specs/AIE-1252-remove-path-results/spec.md
 sessions:
   - turns:
       - "On this project, we write every dashboard name in sentence case, never title case."
@@ -20,6 +20,9 @@ assertions:
     pattern: '(?i)sentence case'
     scope: project
   - kind: reply_not_matching
-    id: no-rebuilt-path
-    pattern: '(?<![\w.-])/?project/(?!p-checkout/)(?!(?:user|organization|org)(?![\w-]))[a-z0-9][a-z0-9-]*/[a-z0-9]'
+    id: no-entity-id
+    pattern: '(?i)\bp-checkout\b'
     session: 1
+judge:
+  - id: names-scope-area-name
+    rubric: The turn 2 reply tells the user the scope, area, and file name where the fact is stored.

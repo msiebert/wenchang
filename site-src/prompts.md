@@ -42,7 +42,7 @@ These sections ship with the library and are the same for every deployment. They
 
 | Heading | What it tells the agent |
 | --- | --- |
-| Memory | Your `purpose`, then how files are addressed. Call `get_memory_index()` at the start of every session. Quote the `path` a tool returns. Split a subject that outgrows the file size limit. |
+| Memory | Your `purpose`, then how files are addressed. Call `get_memory_index()` at the start of every session. Name a file by its scope, area, and name. Split a subject that outgrows the file size limit. |
 | Scopes | Your `scope_guidance`. |
 | Seed areas | Your `seed_areas`. |
 | Systems of record | The general rule, then your list. Left out if `None`. |

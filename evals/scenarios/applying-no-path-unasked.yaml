@@ -4,7 +4,7 @@
 id: applying-no-path-unasked
 title: Applies a stored preference without volunteering where it is stored
 category: applying
-source: specs/AIE-1198-reply-paths-quote/spec.md
+source: specs/AIE-1252-remove-path-results/spec.md
 seed:
   - scope: user
     area: preferences
@@ -24,7 +24,7 @@ assertions:
     tool: get_memory_index
   - kind: reply_not_matching
     id: no-path-in-reply
-    pattern: '(?<![\w.-])/?(?:user|project|organization|org)/[a-z0-9][\w-]*(?:/|\.md\b)'
+    pattern: '(?<![\w.-])/?(?:user|project|organization|org)/[a-z0-9][\w-]*(?:/|\.md\b)|(?i:\bscope\s+\w+,\s*area\b)'
 judge:
   - id: applies-preference
     rubric: The turn 1 reply suggests a chart title that states the date range the chart covers.

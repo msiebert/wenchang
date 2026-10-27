@@ -69,7 +69,7 @@ wenchang does not decide what is worth keeping. A prompt that ships with the lib
 
 ### The agent starts from an index {#index}
 
-At the start of each session the agent calls `get_memory_index()`. It gets one entry for every file it has written: path, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.
+At the start of each session the agent calls `get_memory_index()`. It gets one entry for every file it has written: scope, area, name, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.
 
 <!--html-->
 <figure class="diagram">
@@ -80,13 +80,13 @@ At the start of each session the agent calls `get_memory_index()`. It gets one e
 {
   "entries": [
     {
-      "path": "project/p-ninth-examination/characters/lin-qiao.md",
+      "scope": "project", "area": "characters", "name": "lin-qiao",
       "version": "3",
       "description": "Lin Qiao, the protagonist",
       "aliases": ["Qiao"]
     },
     {
-      "path": "project/p-ninth-examination/timeline/main-timeline.md",
+      "scope": "project", "area": "timeline", "name": "main-timeline",
       "version": "1",
       "description": "Order of events in the novel",
       "aliases": ["chronology", "timeline"]
@@ -101,7 +101,7 @@ At the start of each session the agent calls `get_memory_index()`. It gets one e
 </figure>
 
 <!--/html-->
-Real entries also carry `scope`, `area`, `name`, `sources`, and `last_updated`. If the index gets too big, it is cut at a size limit and the agent lists the rest with `list_prefix`. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.
+Real entries also carry `sources`, and `last_updated`. If the index gets too big, it is cut at a size limit and the agent lists the rest with `list_prefix`. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.
 
 ### The agent organizes its own files {#organizing}
 

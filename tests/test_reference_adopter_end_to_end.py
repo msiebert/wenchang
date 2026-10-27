@@ -14,9 +14,7 @@ from evals.reference_adopter import (
     ADMIN_USER_ID,
     AGENT_SOURCE,
     MEMBER_IDENTITY,
-    MEMBER_USER_ID,
     ORGANIZATION,
-    ORGANIZATION_ID,
     OTHER_ORGANIZATION_ID,
     OTHER_PROJECT_ID,
     PARTIAL_IDENTITY,
@@ -46,7 +44,6 @@ from wenchang.version_token import VersionToken
 pytestmark = pytest.mark.unit
 
 _ENTRY_KEYS = {
-    "path",
     "scope",
     "area",
     "name",
@@ -58,15 +55,28 @@ _ENTRY_KEYS = {
 }
 
 
+def _assert_no_path_keys(value: object) -> None:
+    if isinstance(value, dict):
+        for key, member in cast(dict[object, object], value).items():
+            assert key not in ("path", "prefix"), key
+            _assert_no_path_keys(member)
+    elif isinstance(value, list):
+        for member in cast(list[object], value):
+            _assert_no_path_keys(member)
+
+
 def _rendered(value: MemoryFile | ListPage | MemoryIndex | None) -> dict[str, object]:
+    """Render a result and check it has no path or prefix key (AIE-1252, US1)."""
     out = render_result(value)
     assert json.loads(json.dumps(out)) == out
+    _assert_no_path_keys(out)
     return out
 
 
 def _rendered_error(exc: Exception) -> dict[str, object]:
     out = render_error(exc)
     assert json.loads(json.dumps(out)) == out
+    _assert_no_path_keys(out)
     return out
 
 
@@ -74,8 +84,20 @@ def _entries(rendered: dict[str, object]) -> list[dict[str, object]]:
     return cast(list[dict[str, object]], rendered["entries"])
 
 
-def _paths(rendered: dict[str, object]) -> list[str]:
-    return [cast(str, entry["path"]) for entry in _entries(rendered)]
+type _Loc = tuple[str, str, str]
+
+
+def _loc(path: str) -> _Loc:
+    parts = parse_path(path)
+    return (parts.scope, parts.area, parts.name)
+
+
+def _entry_loc(entry: dict[str, object]) -> _Loc:
+    return (cast(str, entry["scope"]), cast(str, entry["area"]), cast(str, entry["name"]))
+
+
+def _locs(rendered: dict[str, object]) -> list[_Loc]:
+    return [_entry_loc(entry) for entry in _entries(rendered)]
 
 
 def _text(rendered: dict[str, object], key: str) -> str:
@@ -115,8 +137,8 @@ def test_us2_1_index_holds_exactly_the_seed_files() -> None:
 
     rendered = _rendered(tools.get_memory_index())
 
-    assert set(_paths(rendered)) == {seed_path(s) for s in REFERENCE_SEED_FILES}
-    assert len(_paths(rendered)) == len(REFERENCE_SEED_FILES)
+    assert set(_locs(rendered)) == {_loc(seed_path(s)) for s in REFERENCE_SEED_FILES}
+    assert len(_locs(rendered)) == len(REFERENCE_SEED_FILES)
     assert all(set(entry) == _ENTRY_KEYS for entry in _entries(rendered))
     assert rendered["capped"] == []
 
@@ -145,8 +167,8 @@ def test_us2_3_index_omits_another_users_file() -> None:
 
     rendered = _rendered(tools.get_memory_index())
 
-    assert other not in _paths(rendered)
-    assert set(_paths(rendered)) == {seed_path(s) for s in REFERENCE_SEED_FILES}
+    assert _loc(other) not in _locs(rendered)
+    assert set(_locs(rendered)) == {_loc(seed_path(s)) for s in REFERENCE_SEED_FILES}
 
 
 def test_us2_4_index_entries_carry_the_seed_source() -> None:
@@ -174,7 +196,6 @@ def test_us3_scope_lifecycle(scope: str, identity: Identity, area: str) -> None:
     """AIE-1059, US3.1-3.7: read, write, append, replace, delete, and read-after-delete."""
     _, tools = _seeded(identity)
     name = "reference-e2e"
-    path = build_path(scope, identity.entity_id(scope), area, name)
 
     # 3.1
     curated = _seed_of(scope, "system")
@@ -186,7 +207,7 @@ def test_us3_scope_lifecycle(scope: str, identity: Identity, area: str) -> None:
     # 3.2
     content = "- [stated] First fact.\n- [stated] Second fact.\n"
     written = _rendered(tools.write_file(scope, area, name, content, "E2E file", ["alpha"], None))
-    assert written["path"] == path
+    assert (written["scope"], written["area"], written["name"]) == (scope, area, name)
     assert written["sources"] == [AGENT_SOURCE]
     assert written["aliases"] == ["alpha"]
     assert written["description"] == "E2E file"
@@ -259,21 +280,21 @@ def test_us4_1_index_reflects_session_writes_and_deletes() -> None:
 
     rendered = _rendered(member.get_memory_index())
 
-    paths = _paths(rendered)
-    note_paths = {
-        scope: build_path(scope, MEMBER_IDENTITY.entity_id(scope), area, "session-note")
+    locs = _locs(rendered)
+    notes = {
+        scope: (scope, area, "session-note")
         for scope, area in (
             (USER, "preferences"),
             (PROJECT, "metrics"),
             (ORGANIZATION, "vocabulary"),
         )
     }
-    for note in note_paths.values():
-        assert note in paths
-    assert seed_path(_seed_of(USER, "preferences")) not in paths
-    for scope, note in note_paths.items():
+    for note in notes.values():
+        assert note in locs
+    assert _loc(seed_path(_seed_of(USER, "preferences"))) not in locs
+    for scope, note in notes.items():
         tier = [
-            _text(e, "path")
+            _entry_loc(e)
             for e in _entries(rendered)
             if e["scope"] == scope and e["area"] != "system"
         ]
@@ -287,12 +308,12 @@ def test_us4_2_admin_index_sees_shared_scopes_not_user_ada() -> None:
 
     rendered = _rendered(admin.get_memory_index())
 
-    paths = set(_paths(rendered))
-    shared_seeds = {seed_path(s) for s in REFERENCE_SEED_FILES if s.scope != USER}
-    assert shared_seeds <= paths
-    assert build_path(PROJECT, PROJECT_ID, "metrics", "session-note") in paths
-    assert build_path(ORGANIZATION, ORGANIZATION_ID, "vocabulary", "session-note") in paths
-    assert not any(p.startswith(build_prefix(USER, MEMBER_USER_ID)) for p in paths)
+    locs = set(_locs(rendered))
+    shared_seeds = {_loc(seed_path(s)) for s in REFERENCE_SEED_FILES if s.scope != USER}
+    assert shared_seeds <= locs
+    assert (PROJECT, "metrics", "session-note") in locs
+    assert (ORGANIZATION, "vocabulary", "session-note") in locs
+    assert not any(scope == USER for scope, _, _ in locs)
 
 
 def test_us4_3_traveler_follows_the_user_across_organizations() -> None:
@@ -305,11 +326,12 @@ def test_us4_3_traveler_follows_the_user_across_organizations() -> None:
 
     rendered = _rendered(tools.get_memory_index())
 
-    expected = {seed_path(s) for s in REFERENCE_SEED_FILES if s.scope == USER}
-    assert set(_paths(rendered)) == expected | {project_file, org_file}
-    assert not any(
-        p.startswith(("project/p-checkout/", "organization/o-acme/")) for p in _paths(rendered)
-    )
+    expected = {_loc(seed_path(s)) for s in REFERENCE_SEED_FILES if s.scope == USER}
+    assert set(_locs(rendered)) == expected | {_loc(project_file), _loc(org_file)}
+    seeded_shared = {
+        _loc(seed_path(s)) for s in REFERENCE_SEED_FILES if s.scope in (PROJECT, ORGANIZATION)
+    }
+    assert not seeded_shared & set(_locs(rendered))
 
 
 def test_us4_4_partial_member_reads_the_organization_scope() -> None:
@@ -320,9 +342,12 @@ def test_us4_4_partial_member_reads_the_organization_scope() -> None:
 
     rendered = _rendered(tools.get_memory_index())
 
-    expected = {seed_path(s) for s in REFERENCE_SEED_FILES if s.scope == ORGANIZATION}
-    assert set(_paths(rendered)) == expected | {project_file}
-    assert not any(p.startswith(("project/p-checkout/", "user/u-ada/")) for p in _paths(rendered))
+    expected = {_loc(seed_path(s)) for s in REFERENCE_SEED_FILES if s.scope == ORGANIZATION}
+    assert set(_locs(rendered)) == expected | {_loc(project_file)}
+    seeded_private = {
+        _loc(seed_path(s)) for s in REFERENCE_SEED_FILES if s.scope in (PROJECT, USER)
+    }
+    assert not seeded_private & set(_locs(rendered))
 
 
 _MUTATING_TOOLS = ("write_file", "append_line", "replace_fact", "delete_file")
@@ -397,7 +422,9 @@ def test_us5_1_system_area_is_read_only_through_tools(
     error = _rendered_error(excinfo.value)
     assert error["category"] == "permanent"
     assert error["reason"] == "system_read_only"
-    assert error["path"] == path
+    parsed = parse_path(path)
+    assert (error["scope"], error["area"], error["name"]) == (scope, "system", parsed.name)
+    assert "path" not in error
     _assert_system_untouched(client, before)
 
 
@@ -493,7 +520,13 @@ def test_us7_1_stale_append_conflicts_with_current_content() -> None:
 
     error = _rendered_error(excinfo.value)
     assert error["category"] == "recoverable"
-    assert error["path"] == seed_path(seed, MEMBER_IDENTITY)
+    parsed = parse_path(seed_path(seed, MEMBER_IDENTITY))
+    assert (error["scope"], error["area"], error["name"]) == (
+        PROJECT,
+        "metrics",
+        parsed.name,
+    )
+    assert "path" not in error
     assert error["content"] == seed.content + "- [observed] LA fact.\n"
     assert error["version"] == appended["version"]
     assert error["version"] != v0
@@ -576,7 +609,7 @@ def test_us8_1_capped_index_is_a_priority_prefix_of_the_uncapped_index() -> None
     assert [_tier(e) for e in capped_entries] == (
         ["system"] * system_count + [USER] * user_count + [PROJECT]
     )
-    assert capped_entries[-1]["path"] == build_path(PROJECT, PROJECT_ID, "metrics", "budget-b")
+    assert _entry_loc(capped_entries[-1]) == (PROJECT, "metrics", "budget-b")
     assert not any(e["scope"] == ORGANIZATION and e["area"] != "system" for e in capped_entries)
 
 
@@ -586,19 +619,16 @@ def test_us8_2_capped_rows_name_every_omitted_area() -> None:
 
     assert _rendered(capped)["capped"] == [
         {
-            "prefix": "organization/o-acme/vocabulary/",
             "scope": "organization",
             "area": "vocabulary",
             "omitted": 1,
         },
         {
-            "prefix": "project/p-checkout/entities/",
             "scope": "project",
             "area": "entities",
             "omitted": 1,
         },
         {
-            "prefix": "project/p-checkout/metrics/",
             "scope": "project",
             "area": "metrics",
             "omitted": 2,
@@ -610,24 +640,26 @@ def test_us8_3_list_prefix_recovers_the_omitted_files() -> None:
     """AIE-1059, US8.3: paging each capped area lists every file omitted from the index."""
     tools, capped, uncapped = _capped_budget_run()
     rendered = _rendered(capped)
-    in_index = set(_paths(rendered))
+    in_index = set(_locs(rendered))
 
     max_pages = 0
     for row in cast(list[dict[str, object]], rendered["capped"]):
-        prefix = _text(row, "prefix")
-        listed: list[str] = []
+        area_key = (_text(row, "scope"), _text(row, "area"))
+        listed: list[_Loc] = []
         cursor: ListCursor | None = None
         pages = 0
         while True:
             page = _rendered(tools.list_prefix(_text(row, "scope"), _text(row, "area"), cursor))
             pages += 1
-            listed += _paths(page)
+            listed += _locs(page)
             next_cursor = page["next_cursor"]
             if next_cursor is None:
                 break
             cursor = ListCursor(cast(str, next_cursor))
         omitted = {
-            e.path for e in uncapped.entries if e.path.startswith(prefix) and e.path not in in_index
+            _loc(e.path)
+            for e in uncapped.entries
+            if _loc(e.path)[:2] == area_key and _loc(e.path) not in in_index
         }
         max_pages = max(max_pages, pages)
         assert len(omitted) == row["omitted"]

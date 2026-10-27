@@ -42,7 +42,6 @@ User-scope writes need no ask, so it files the fact right away. `expected_versio
 }
 // result
 {
-  "path": "user/u-tianlong/preferences/prose-style.md",
   "scope": "user",
   "area": "preferences",
   "name": "prose-style",
@@ -80,7 +79,6 @@ last_updated: 2026-01-01T00:00:00Z
 {
   "entries": [
     {
-      "path": "user/u-tianlong/preferences/prose-style.md",
       "scope": "user",
       "area": "preferences",
       "name": "prose-style",
@@ -131,7 +129,6 @@ last_updated: 2026-01-01T00:00:00Z
 {
   "entries": [
     {
-      "path": "project/p-ninth-examination/timeline/main-timeline.md",
       "scope": "project", "area": "timeline", "name": "main-timeline",
       "version": "1",
       "description": "Order of events in the novel",
@@ -159,8 +156,10 @@ Before that call lands, Diya, the editor, adds a line to the same file from her 
 {
   "error": "VersionConflictError",
   "category": "recoverable",
-  "message": "The file at project/p-ninth-examination/timeline/main-timeline.md changed since it was read; the current content and version are attached; merge your change into the current content and retry with the current version. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
-  "path": "project/p-ninth-examination/timeline/main-timeline.md",
+  "message": "The file at scope project, area timeline, name main-timeline changed since it was read; the current content and version are attached; merge your change into the current content and retry with the current version. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
+  "scope": "project",
+  "area": "timeline",
+  "name": "main-timeline",
   "content": "- [stated] Lin Qiao sits the provincial examination in the autumn of year 1.\n- [stated] The Yunmen flood happens the night before the results.\n- [stated] Han Zhou is posted to the northern garrison in the winter of year 2.\n",
   "version": "2"
 }
@@ -177,7 +176,6 @@ The agent retries with version `"2"` and does not bother the user. Diya's line i
 }
 // result
 {
-  "path": "project/p-ninth-examination/timeline/main-timeline.md",
   "scope": "project",
   "area": "timeline",
   "name": "main-timeline",
@@ -239,7 +237,6 @@ After `get_memory_index()` shows the file at version `"1"`, the agent calls `rep
 }
 // result
 {
-  "path": "project/p-ninth-examination/characters/lin-qiao.md",
   "scope": "project",
   "area": "characters",
   "name": "lin-qiao",
@@ -272,8 +269,10 @@ If `old_string` does not match exactly once, `replace_fact` does not guess. It r
 {
   "error": "ReplaceFactMatchError",
   "category": "recoverable",
-  "message": "old_string matched 0 spans in project/p-ninth-examination/characters/lin-qiao.md; widen or correct old_string using the attached current content so it matches. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
-  "path": "project/p-ninth-examination/characters/lin-qiao.md",
+  "message": "old_string matched 0 spans in scope project, area characters, name lin-qiao; widen or correct old_string using the attached current content so it matches. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
+  "scope": "project",
+  "area": "characters",
+  "name": "lin-qiao",
   "content": "- [stated] Has grey eyes.\n- [stated] Is 24 at the start of the novel.\n- [stated] Grew up in Yunmen, a river town.\n",
   "version": "2",
   "match_count": 0
@@ -336,7 +335,6 @@ The prompt says removal is total. One of Han Zhou's facts exists only because of
 }
 // result
 {
-  "path": "project/p-ninth-examination/characters/han-zhou.md",
   "scope": "project",
   "area": "characters",
   "name": "han-zhou",
@@ -379,7 +377,6 @@ The agent loads the index, finds the `house style` alias in the `system/` area, 
 { "scope": "organization", "area": "system", "name": "house-style" }
 // result
 {
-  "path": "organization/o-hanlin-press/system/house-style.md",
   "scope": "organization",
   "area": "system",
   "name": "house-style",
@@ -403,10 +400,11 @@ If the agent did try to change the curated file, the tool layer would refuse per
 {
   "error": "RestrictedScopeError",
   "category": "permanent",
-  "message": "organization/o-hanlin-press/system/house-style.md is in scope organization; the system/ area of scope organization is read-only (curated content). Do not retry: retrying will not succeed.",
-  "path": "organization/o-hanlin-press/system/house-style.md",
-  "reason": "system_read_only",
-  "scope": "organization"
+  "message": "The file at scope organization, area system, name house-style cannot be written: the system/ area of scope organization is read-only (curated content). Do not retry: retrying will not succeed.",
+  "scope": "organization",
+  "area": "system",
+  "name": "house-style",
+  "reason": "system_read_only"
 }
 ```
 
@@ -417,10 +415,11 @@ A write to a writable area of `organization` is also refused unless the caller h
 {
   "error": "RestrictedScopeError",
   "category": "permanent",
-  "message": "organization/o-hanlin-press/conventions/dialogue.md is in scope organization; scope organization is role-gated and the caller lacks a permitted role (admin, owner). Do not retry: retrying will not succeed.",
-  "path": "organization/o-hanlin-press/conventions/dialogue.md",
-  "reason": "role_required",
+  "message": "The file at scope organization, area conventions, name dialogue cannot be written: scope organization is role-gated and the caller lacks a permitted role (admin, owner). Do not retry: retrying will not succeed.",
   "scope": "organization",
+  "area": "conventions",
+  "name": "dialogue",
+  "reason": "role_required",
   "required_roles": [
     "admin",
     "owner"
@@ -443,7 +442,6 @@ Only Kuixing, the editor-in-chief, could change press-wide rules. The exception 
 }
 // result
 {
-  "path": "project/p-ninth-examination/style/dialogue.md",
   "scope": "project",
   "area": "style",
   "name": "dialogue",

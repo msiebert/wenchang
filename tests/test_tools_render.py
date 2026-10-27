@@ -38,6 +38,9 @@ from wenchang.version_token import VersionToken
 pytestmark = pytest.mark.unit
 
 _PATH = "user/u-1/notes/a.md"
+_LOC = {"scope": "user", "area": "notes", "name": "a"}
+_CSV = "user/u-ada/preferences/csv.md"
+_CSV_LOC = {"scope": "user", "area": "preferences", "name": "csv"}
 _LAST_UPDATED = datetime(2026, 10, 2, 12, 0, 0, tzinfo=timezone(timedelta(hours=2)))
 _METADATA = FileMetadata(
     description="Notes about a",
@@ -52,6 +55,17 @@ def _round_trips(out: dict[str, object]) -> None:
     assert json.loads(json.dumps(out)) == out
 
 
+def _assert_no_path_keys(value: object) -> None:
+    """AIE-1252, US1: no `path` or `prefix` key appears at any depth."""
+    if isinstance(value, dict):
+        for key, member in cast(dict[object, object], value).items():
+            assert key not in ("path", "prefix"), key
+            _assert_no_path_keys(member)
+    elif isinstance(value, list):
+        for member in cast(list[object], value):
+            _assert_no_path_keys(member)
+
+
 def _entry(path: str, version: str = "v-1", description: str = "d") -> FileEntry:
     metadata = FileMetadata(
         description=description,
@@ -62,11 +76,8 @@ def _entry(path: str, version: str = "v-1", description: str = "d") -> FileEntry
     return FileEntry(path, metadata, VersionToken(version))
 
 
-def _entry_fields(
-    path: str, scope: str | None, area: str | None, name: str | None
-) -> dict[str, object]:
+def _entry_fields(scope: str | None, area: str | None, name: str | None) -> dict[str, object]:
     return {
-        "path": path,
         "scope": scope,
         "area": area,
         "name": name,
@@ -88,7 +99,6 @@ def test_render_memory_file() -> None:
     out = render_result(file)
 
     assert out == {
-        "path": _PATH,
         "scope": "user",
         "area": "notes",
         "name": "a",
@@ -101,6 +111,7 @@ def test_render_memory_file() -> None:
     }
     assert type(out["version"]) is str
     assert out["last_updated"] == metadata_to_map(_METADATA)[LAST_UPDATED_KEY]
+    _assert_no_path_keys(out)
 
 
 def test_render_memory_file_with_empty_content() -> None:
@@ -125,13 +136,14 @@ def test_render_list_page_with_cursor() -> None:
 
     assert out == {
         "entries": [
-            _entry_fields("user/u-1/notes/b.md", "user", "notes", "b"),
-            _entry_fields("user/u-1/notes/a.md", "user", "notes", "a"),
+            _entry_fields("user", "notes", "b"),
+            _entry_fields("user", "notes", "a"),
         ],
         "next_cursor": "abc",
     }
     assert type(out["next_cursor"]) is str
     _round_trips(out)
+    _assert_no_path_keys(out)
 
 
 def test_render_list_page_without_cursor() -> None:
@@ -143,7 +155,7 @@ def test_render_list_page_without_cursor() -> None:
 
 
 def test_render_memory_index_with_capped_prefixes() -> None:
-    """AIE-1044, US7.3: capped rows carry prefix, scope, area, and omitted."""
+    """AIE-1044, US7.3: capped rows carry only scope, area, and omitted (AIE-1252)."""
     index = MemoryIndex(
         entries=(_entry("org/o-9/system/rules.md"),),
         capped=(
@@ -156,14 +168,15 @@ def test_render_memory_index_with_capped_prefixes() -> None:
     out = render_result(index)
 
     assert out == {
-        "entries": [_entry_fields("org/o-9/system/rules.md", "org", "system", "rules")],
+        "entries": [_entry_fields("org", "system", "rules")],
         "capped": [
-            {"prefix": "user/u-1/notes/", "scope": "user", "area": "notes", "omitted": 3},
-            {"prefix": "org/o-9/", "scope": "org", "area": None, "omitted": 2},
-            {"prefix": "team/", "scope": "team", "area": None, "omitted": 1},
+            {"scope": "user", "area": "notes", "omitted": 3},
+            {"scope": "org", "area": None, "omitted": 2},
+            {"scope": "team", "area": None, "omitted": 1},
         ],
     }
     _round_trips(out)
+    _assert_no_path_keys(out)
 
 
 def test_render_empty_memory_index() -> None:
@@ -180,6 +193,7 @@ def test_render_none() -> None:
 
     assert out == {"ok": True}
     _round_trips(out)
+    _assert_no_path_keys(out)
 
 
 @pytest.mark.parametrize(
@@ -194,16 +208,17 @@ def test_render_unsupported_value_raises_type_error(value: object) -> None:
 
 
 def test_render_malformed_entry_path_renders_none_segments() -> None:
-    """AIE-1044, US7.5a: a malformed entry path renders None segments without raising."""
+    """AIE-1044, AIE-1252, US7.5a: a malformed entry path renders None segments, no path."""
     page = ListPage(entries=(_entry("not-a-path"),), next_cursor=None)
 
     out = render_result(page)
 
     assert out == {
-        "entries": [_entry_fields("not-a-path", None, None, None)],
+        "entries": [_entry_fields(None, None, None)],
         "next_cursor": None,
     }
     _round_trips(out)
+    _assert_no_path_keys(out)
 
 
 # --- render_error: taxonomy ------------------------------------------------
@@ -218,25 +233,32 @@ def _assert_error(exc: WenchangError, payload: dict[str, object]) -> dict[str, o
         **payload,
     }
     assert out == expected
+    _assert_no_path_keys(out)
     assert list(out)[:3] == ["error", "category", "message"]
     _round_trips(out)
     return out
 
 
 def test_render_version_conflict_error() -> None:
-    """AIE-1044, US7.6/US7.7: a version conflict carries path, content, and version."""
-    exc = VersionConflictError(_PATH, "current body", VersionToken("v-9"))
+    """AIE-1044, AIE-1252, US2.1: a version conflict carries scope, area, name, content,
+    and version, with no path.
+    """
+    exc = VersionConflictError(_CSV, "current body", VersionToken("v-9"))
 
-    out = _assert_error(exc, {"path": _PATH, "content": "current body", "version": "v-9"})
+    out = _assert_error(exc, {**_CSV_LOC, "content": "current body", "version": "v-9"})
+
+    assert list(out)[3:] == ["scope", "area", "name", "content", "version"]
 
     assert out["category"] == "recoverable"
     assert type(out["version"]) is str
 
 
 def test_render_oversize_write_error() -> None:
-    """AIE-1044, US7.6/US7.7: an oversize write carries path, size, and limit as ints."""
+    """AIE-1044, AIE-1252, US2.1: an oversize write carries scope, area, name, size, and
+    limit as ints, with no path.
+    """
     out = _assert_error(
-        OversizeWriteError(_PATH, 20000, 16384), {"path": _PATH, "size": 20000, "limit": 16384}
+        OversizeWriteError(_CSV, 20000, 16384), {**_CSV_LOC, "size": 20000, "limit": 16384}
     )
 
     assert type(out["size"]) is int
@@ -244,21 +266,34 @@ def test_render_oversize_write_error() -> None:
 
 
 def test_render_replace_fact_match_error() -> None:
-    """AIE-1044, US7.6/US7.7: a match error carries path, content, version, match_count."""
-    exc = ReplaceFactMatchError(_PATH, "body", VersionToken("v-3"), 2)
+    """AIE-1044, AIE-1252, US2.1: a match error carries scope, area, name, content,
+    version, match_count, with no path.
+    """
+    exc = ReplaceFactMatchError(_CSV, "body", VersionToken("v-3"), 2)
 
-    _assert_error(exc, {"path": _PATH, "content": "body", "version": "v-3", "match_count": 2})
+    _assert_error(exc, {**_CSV_LOC, "content": "body", "version": "v-3", "match_count": 2})
 
 
-@pytest.mark.parametrize(
-    ("reason", "value"),
-    [(NotFoundReason.FILE_ABSENT, "file_absent"), (NotFoundReason.INVALID_PATH, "invalid_path")],
-)
-def test_render_not_found_error(reason: NotFoundReason, value: str) -> None:
-    """AIE-1044, US7.6/US7.8: NotFoundError carries path and the reason's value."""
-    out = _assert_error(NotFoundError(_PATH, reason), {"path": _PATH, "reason": value})
+def test_render_not_found_file_absent() -> None:
+    """AIE-1044, AIE-1252, US2.1: FILE_ABSENT carries scope, area, name, and reason."""
+    out = _assert_error(
+        NotFoundError(_CSV, NotFoundReason.FILE_ABSENT), {**_CSV_LOC, "reason": "file_absent"}
+    )
 
     assert type(out["reason"]) is str
+
+
+@pytest.mark.parametrize("path", ["not-a-path", "user/u-1/", "user/u-ada/preferences"])
+def test_render_not_found_invalid_path_renders_reason_only(path: str) -> None:
+    """AIE-1252, US2.3: an unparseable INVALID_PATH renders only reason, no location
+    keys, and the message does not echo the raw path.
+    """
+    exc = NotFoundError(path, NotFoundReason.INVALID_PATH)
+
+    out = _assert_error(exc, {"reason": "invalid_path"})
+
+    assert not {"path", "scope", "area", "name"} & set(out)
+    assert path not in str(out["message"])
 
 
 @pytest.mark.parametrize(
@@ -273,7 +308,9 @@ def test_render_backend_unavailable_error(reason: TransientReason, value: str) -
 
 
 def test_render_restricted_scope_role_required() -> None:
-    """AIE-1044, US7.6/US7.9: ROLE_REQUIRED carries sorted required_roles."""
+    """AIE-1044, AIE-1252, US2.1: ROLE_REQUIRED carries scope, area, name, reason, and
+    sorted required_roles, with no path.
+    """
     exc = RestrictedScopeError(
         "org/o-9/notes/a.md",
         "org",
@@ -284,9 +321,10 @@ def test_render_restricted_scope_role_required() -> None:
     out = _assert_error(
         exc,
         {
-            "path": "org/o-9/notes/a.md",
-            "reason": "role_required",
             "scope": "org",
+            "area": "notes",
+            "name": "a",
+            "reason": "role_required",
             "required_roles": ["admin", "auditor", "editor", "owner", "viewer"],
         },
     )
@@ -302,10 +340,12 @@ def test_render_restricted_scope_role_required() -> None:
     ],
 )
 def test_render_restricted_scope_without_roles(reason: RestrictionReason, value: str) -> None:
-    """AIE-1044, US7.6/US7.9: other restriction reasons have no required_roles key."""
+    """AIE-1044, AIE-1252, US2.1: other restriction reasons carry scope, area, name,
+    reason, and no required_roles or path.
+    """
     exc = RestrictedScopeError("user/u-1/system/x.md", "user", reason)
 
-    out = _assert_error(exc, {"path": "user/u-1/system/x.md", "reason": value, "scope": "user"})
+    out = _assert_error(exc, {"scope": "user", "area": "system", "name": "x", "reason": value})
 
     assert "required_roles" not in out
 
@@ -409,7 +449,8 @@ def test_hostile_str_on_wenchang_error_falls_back() -> None:
     assert out["category"] == "recoverable"
     assert out["message"] == "<unreadable>"
     assert type(out["message"]) is str
-    assert out["path"] == _PATH
+    _assert_no_path_keys(out)
+    assert (out["scope"], out["area"], out["name"]) == ("user", "notes", "a")
     assert out["content"] == "body"
     assert out["version"] == "v-1"
     _round_trips(out)
@@ -458,7 +499,7 @@ def test_hostile_type_name_on_wenchang_error_falls_back() -> None:
         "error": "<unnamed>",
         "category": "recoverable",
         "message": str(exc),
-        "path": _PATH,
+        **_LOC,
         "reason": "file_absent",
     }
     _round_trips(out)
@@ -608,19 +649,23 @@ def test_render_file_entry_drops_non_str_version() -> None:
     out = _render_entry(entry)
 
     assert "version" not in out
-    assert out["path"] == _PATH
+    assert "path" not in out
+    assert (out["scope"], out["area"], out["name"]) == ("user", "notes", "a")
     assert out["description"] == "Notes about a"
 
 
 def test_render_file_entry_drops_non_str_path() -> None:
     """AIE-1044, US7.5a: a FileEntry whose path is an int renders without
-    raising, omits path, and keeps its well-typed fields.
+    raising, omits scope, area, name, and path, and keeps its well-typed fields
+    (AIE-1252).
     """
     entry = FileEntry(cast(str, 5), _METADATA, _VERSION)
 
     out = _render_entry(entry)
 
-    assert "path" not in out
+    _assert_no_path_keys(out)
+    for key in ("scope", "area", "name"):
+        assert key not in out
     assert out["version"] == "v-17"
     assert out["description"] == "Notes about a"
 
@@ -634,7 +679,7 @@ def test_render_list_page_drops_non_str_next_cursor() -> None:
     out = render_result(page)
 
     assert "next_cursor" not in out
-    assert out["entries"] == [_entry_fields(_PATH, "user", "notes", "a")]
+    assert out["entries"] == [_entry_fields("user", "notes", "a")]
     _round_trips(out)
 
 
@@ -647,7 +692,8 @@ def test_render_memory_file_drops_bytes_content() -> None:
     out = render_result(file)
 
     assert "content" not in out
-    assert out["path"] == _PATH
+    assert "path" not in out
+    assert out["scope"] == "user"
     assert out["version"] == "v-17"
     _round_trips(out)
 
@@ -675,7 +721,8 @@ def test_render_file_entry_drops_tuple_description() -> None:
     out = _render_entry(entry)
 
     assert "description" not in out
-    assert out["path"] == _PATH
+    assert "path" not in out
+    assert out["name"] == "a"
     assert out["sources"] == ["s"]
 
 
@@ -738,7 +785,8 @@ def test_render_memory_file_with_none_metadata() -> None:
 
     for key in ("aliases", "sources", "description", "last_updated"):
         assert key not in out
-    assert out["path"] == _PATH
+    assert "path" not in out
+    assert out["name"] == "a"
     assert out["content"] == "body"
     assert out["version"] == "v-17"
     _round_trips(out)
@@ -818,10 +866,9 @@ def test_render_memory_index_skips_bad_capped_rows(make_bad: Callable[[], object
 
     out = render_result(index)
 
-    assert out["capped"] == [
-        {"prefix": "user/u-1/notes/", "scope": "user", "area": "notes", "omitted": 2}
-    ]
+    assert out["capped"] == [{"scope": "user", "area": "notes", "omitted": 2}]
     _round_trips(out)
+    _assert_no_path_keys(out)
 
 
 def test_render_memory_file_drops_naive_last_updated() -> None:
@@ -836,3 +883,69 @@ def test_render_memory_file_drops_naive_last_updated() -> None:
     assert "last_updated" not in out
     assert out["description"] == "d"
     _round_trips(out)
+
+
+class _RaisingPathError(NotFoundError):
+    """A NotFoundError whose path attribute raises on read."""
+
+    @property
+    def path(self) -> str:  # pyright: ignore[reportIncompatibleVariableOverride]
+        raise RuntimeError("secret path boom")
+
+    @path.setter
+    def path(self, value: str) -> None:
+        pass
+
+
+class _IntPathError(NotFoundError):
+    """A NotFoundError whose path is not a str."""
+
+    def __init__(self) -> None:
+        super().__init__(_PATH, NotFoundReason.FILE_ABSENT)
+        self.path = cast(str, 7)
+
+
+def test_render_error_with_raising_path_never_raises_or_leaks() -> None:
+    """AIE-1252, US2.6: an error whose path raises renders without location keys or
+    internals.
+    """
+    out = render_error(_RaisingPathError(_PATH, NotFoundReason.FILE_ABSENT))
+
+    assert not {"path", "scope", "area", "name"} & set(out)
+    assert "secret path boom" not in json.dumps(out)
+    assert out["category"] == "recoverable"
+    _round_trips(out)
+
+
+def test_render_error_with_non_str_path_drops_location_keys() -> None:
+    """AIE-1252, US2.6: a non-str path drops path, scope, area, and name."""
+    out = render_error(_IntPathError())
+
+    assert not {"path", "scope", "area", "name"} & set(out)
+    _round_trips(out)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        VersionConflictError(_CSV, "b", VersionToken("v-1")),
+        OversizeWriteError(_CSV, 2, 1),
+        ReplaceFactMatchError(_CSV, "b", VersionToken("v-1"), 2),
+        NotFoundError(_CSV, NotFoundReason.FILE_ABSENT),
+        RestrictedScopeError(_CSV, "user", RestrictionReason.NOT_GRANTED),
+    ],
+    ids=["conflict", "oversize", "match", "not-found", "restricted"],
+)
+def test_error_path_attribute_survives_rendering(
+    exc: (
+        VersionConflictError
+        | OversizeWriteError
+        | ReplaceFactMatchError
+        | NotFoundError
+        | RestrictedScopeError
+    ),
+) -> None:
+    """AIE-1252, US2.5: rendering leaves the in-process .path attribute intact."""
+    render_error(exc)
+
+    assert exc.path == _CSV

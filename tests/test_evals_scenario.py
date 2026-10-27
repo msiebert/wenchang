@@ -1565,3 +1565,77 @@ def test_draft_held_out_turns_do_not_copy_the_rule(scenario_id: str) -> None:
     for session in _by_id()[scenario_id].sessions:
         for turn in session.turns:
             assert _five_grams(turn) & rule_grams == set(), turn
+
+
+# --- reply-location scenarios name scope, area, and name (AIE-1252, US4) ------
+
+ENTITY_ID_CHECKS = {
+    "filing-says-saved-path": (r"(?i)\bu-ada\b", 1, 1),
+    "recall-says-stored-path": (r"(?i)\bo-acme\b", None, None),
+    "slots-says-shared-path": (r"(?i)\bp-checkout\b", 1, None),
+}
+LOCATION_SCENARIO_IDS = [*ENTITY_ID_CHECKS, "applying-no-path-unasked"]
+
+
+@pytest.mark.parametrize("scenario_id", sorted(ENTITY_ID_CHECKS))
+def test_location_scenario_forbids_the_entity_id_in_replies(scenario_id: str) -> None:
+    """Each saved/stored/shared location scenario has a no-entity-id reply
+    check on the entity's ID and no rebuilt-path or full-path check (AIE-1252, US4.4).
+    """
+    scenario = _by_id()[scenario_id]
+    pattern, session, turn = ENTITY_ID_CHECKS[scenario_id]
+
+    (check,) = [a for a in scenario.assertions if a.id == "no-entity-id"]
+    assert isinstance(check, ReplyNotMatching)
+    assert check.pattern == pattern
+    if session is not None:
+        assert check.session == session
+    if turn is not None:
+        assert check.turn == turn
+    ids = {a.id for a in scenario.assertions}
+    assert not ids & {"no-rebuilt-path", "names-full-path"}
+
+
+@pytest.mark.parametrize(
+    "scenario_id",
+    ["filing-says-saved-path", "slots-says-shared-path", "recall-says-stored-path"],
+)
+def test_location_scenario_judges_scope_area_and_name(scenario_id: str) -> None:
+    """The reply must name scope, area, and name, via a judge item (AIE-1252, US4.4)."""
+    scenario = _by_id()[scenario_id]
+
+    (item,) = [j for j in scenario.judge if j.id == "names-scope-area-name"]
+    assert "scope" in item.rubric
+    assert "area" in item.rubric
+    assert "name" in item.rubric
+
+
+def test_recall_location_scenario_keeps_the_no_write_check() -> None:
+    """recall-says-stored-path still checks that nothing was written (AIE-1252, US4.4)."""
+    assert "no-write" in {a.id for a in _by_id()["recall-says-stored-path"].assertions}
+
+
+def test_unasked_location_scenario_keeps_its_pattern_check() -> None:
+    """applying-no-path-unasked keeps its no-path-in-reply check and judge (AIE-1252, US4.5)."""
+    scenario = _by_id()["applying-no-path-unasked"]
+
+    (check,) = [a for a in scenario.assertions if a.id == "no-path-in-reply"]
+    assert isinstance(check, ReplyNotMatching)
+    assert {j.id for j in scenario.judge} == {"applies-preference"}
+
+
+@pytest.mark.parametrize("scenario_id", LOCATION_SCENARIO_IDS)
+def test_location_scenario_prompt_header_cites_existing_sentences(scenario_id: str) -> None:
+    """Every quoted sentence in the # Prompt: header is still in the prompt (AIE-1252, US4.6)."""
+    prompt = _collapse(build_memory_prompt(REFERENCE_SLOTS))
+    lines: list[str] = []
+    for line in (ROOT / "evals" / "scenarios" / f"{scenario_id}.yaml").read_text().splitlines():
+        if not line.startswith("#"):
+            break
+        lines.append(line.removeprefix("#").strip())
+    header = _collapse(" ".join(lines)).removeprefix("Prompt:")
+    quoted = re.findall(r'"([^"]+)"', header)
+
+    assert quoted, scenario_id
+    for sentence in quoted:
+        assert _collapse(sentence) in prompt, sentence

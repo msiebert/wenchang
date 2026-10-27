@@ -41,20 +41,20 @@ wenchang does not decide what is worth keeping. A prompt that ships with the lib
 
 ### The agent starts from an index
 
-At the start of each session the agent calls `get_memory_index()`. It gets one entry for every file it has written: path, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.
+At the start of each session the agent calls `get_memory_index()`. It gets one entry for every file it has written: scope, area, name, version, a one-line description, and aliases. It does not get file contents. It reads the descriptions, decides which files matter for the current conversation, and opens only those.
 
 ```json
 // get_memory_index()
 {
   "entries": [
     {
-      "path": "project/p-ninth-examination/characters/lin-qiao.md",
+      "scope": "project", "area": "characters", "name": "lin-qiao",
       "version": "3",
       "description": "Lin Qiao, the protagonist",
       "aliases": ["Qiao"]
     },
     {
-      "path": "project/p-ninth-examination/timeline/main-timeline.md",
+      "scope": "project", "area": "timeline", "name": "main-timeline",
       "version": "1",
       "description": "Order of events in the novel",
       "aliases": ["chronology", "timeline"]
@@ -63,7 +63,7 @@ At the start of each session the agent calls `get_memory_index()`. It gets one e
   "capped": []
 }
 ```
-Real entries also carry `scope`, `area`, `name`, `sources`, and `last_updated`. If the index gets too big, it is cut at a size limit and the agent lists the rest with `list_prefix`. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.
+Real entries also carry `sources`, and `last_updated`. If the index gets too big, it is cut at a size limit and the agent lists the rest with `list_prefix`. There is no search over file contents. Descriptions and aliases are how the agent finds things, so the agent keeps them up to date as it writes.
 
 ### The agent organizes its own files
 
@@ -479,7 +479,7 @@ These sections ship with the library and are the same for every deployment. They
 
 | Heading | What it tells the agent |
 | --- | --- |
-| Memory | Your `purpose`, then how files are addressed. Call `get_memory_index()` at the start of every session. Quote the `path` a tool returns. Split a subject that outgrows the file size limit. |
+| Memory | Your `purpose`, then how files are addressed. Call `get_memory_index()` at the start of every session. Name a file by its scope, area, and name. Split a subject that outgrows the file size limit. |
 | Scopes | Your `scope_guidance`. |
 | Seed areas | Your `seed_areas`. |
 | Systems of record | The general rule, then your list. Left out if `None`. |
@@ -771,7 +771,6 @@ User-scope writes need no ask, so it files the fact right away. `expected_versio
 }
 // result
 {
-  "path": "user/u-tianlong/preferences/prose-style.md",
   "scope": "user",
   "area": "preferences",
   "name": "prose-style",
@@ -809,7 +808,6 @@ last_updated: 2026-01-01T00:00:00Z
 {
   "entries": [
     {
-      "path": "user/u-tianlong/preferences/prose-style.md",
       "scope": "user",
       "area": "preferences",
       "name": "prose-style",
@@ -860,7 +858,6 @@ last_updated: 2026-01-01T00:00:00Z
 {
   "entries": [
     {
-      "path": "project/p-ninth-examination/timeline/main-timeline.md",
       "scope": "project", "area": "timeline", "name": "main-timeline",
       "version": "1",
       "description": "Order of events in the novel",
@@ -888,8 +885,10 @@ Before that call lands, Diya, the editor, adds a line to the same file from her 
 {
   "error": "VersionConflictError",
   "category": "recoverable",
-  "message": "The file at project/p-ninth-examination/timeline/main-timeline.md changed since it was read; the current content and version are attached; merge your change into the current content and retry with the current version. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
-  "path": "project/p-ninth-examination/timeline/main-timeline.md",
+  "message": "The file at scope project, area timeline, name main-timeline changed since it was read; the current content and version are attached; merge your change into the current content and retry with the current version. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
+  "scope": "project",
+  "area": "timeline",
+  "name": "main-timeline",
   "content": "- [stated] Lin Qiao sits the provincial examination in the autumn of year 1.\n- [stated] The Yunmen flood happens the night before the results.\n- [stated] Han Zhou is posted to the northern garrison in the winter of year 2.\n",
   "version": "2"
 }
@@ -906,7 +905,6 @@ The agent retries with version `"2"` and does not bother the user. Diya's line i
 }
 // result
 {
-  "path": "project/p-ninth-examination/timeline/main-timeline.md",
   "scope": "project",
   "area": "timeline",
   "name": "main-timeline",
@@ -968,7 +966,6 @@ After `get_memory_index()` shows the file at version `"1"`, the agent calls `rep
 }
 // result
 {
-  "path": "project/p-ninth-examination/characters/lin-qiao.md",
   "scope": "project",
   "area": "characters",
   "name": "lin-qiao",
@@ -1001,8 +998,10 @@ If `old_string` does not match exactly once, `replace_fact` does not guess. It r
 {
   "error": "ReplaceFactMatchError",
   "category": "recoverable",
-  "message": "old_string matched 0 spans in project/p-ninth-examination/characters/lin-qiao.md; widen or correct old_string using the attached current content so it matches. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
-  "path": "project/p-ninth-examination/characters/lin-qiao.md",
+  "message": "old_string matched 0 spans in scope project, area characters, name lin-qiao; widen or correct old_string using the attached current content so it matches. This is normal coordination, not an error the user needs to know about. Use the details above to correct the call and retry in the same turn, without asking the user.",
+  "scope": "project",
+  "area": "characters",
+  "name": "lin-qiao",
   "content": "- [stated] Has grey eyes.\n- [stated] Is 24 at the start of the novel.\n- [stated] Grew up in Yunmen, a river town.\n",
   "version": "2",
   "match_count": 0
@@ -1065,7 +1064,6 @@ The prompt says removal is total. One of Han Zhou's facts exists only because of
 }
 // result
 {
-  "path": "project/p-ninth-examination/characters/han-zhou.md",
   "scope": "project",
   "area": "characters",
   "name": "han-zhou",
@@ -1108,7 +1106,6 @@ The agent loads the index, finds the `house style` alias in the `system/` area, 
 { "scope": "organization", "area": "system", "name": "house-style" }
 // result
 {
-  "path": "organization/o-hanlin-press/system/house-style.md",
   "scope": "organization",
   "area": "system",
   "name": "house-style",
@@ -1132,10 +1129,11 @@ If the agent did try to change the curated file, the tool layer would refuse per
 {
   "error": "RestrictedScopeError",
   "category": "permanent",
-  "message": "organization/o-hanlin-press/system/house-style.md is in scope organization; the system/ area of scope organization is read-only (curated content). Do not retry: retrying will not succeed.",
-  "path": "organization/o-hanlin-press/system/house-style.md",
-  "reason": "system_read_only",
-  "scope": "organization"
+  "message": "The file at scope organization, area system, name house-style cannot be written: the system/ area of scope organization is read-only (curated content). Do not retry: retrying will not succeed.",
+  "scope": "organization",
+  "area": "system",
+  "name": "house-style",
+  "reason": "system_read_only"
 }
 ```
 
@@ -1146,10 +1144,11 @@ A write to a writable area of `organization` is also refused unless the caller h
 {
   "error": "RestrictedScopeError",
   "category": "permanent",
-  "message": "organization/o-hanlin-press/conventions/dialogue.md is in scope organization; scope organization is role-gated and the caller lacks a permitted role (admin, owner). Do not retry: retrying will not succeed.",
-  "path": "organization/o-hanlin-press/conventions/dialogue.md",
-  "reason": "role_required",
+  "message": "The file at scope organization, area conventions, name dialogue cannot be written: scope organization is role-gated and the caller lacks a permitted role (admin, owner). Do not retry: retrying will not succeed.",
   "scope": "organization",
+  "area": "conventions",
+  "name": "dialogue",
+  "reason": "role_required",
   "required_roles": [
     "admin",
     "owner"
@@ -1172,7 +1171,6 @@ Only Kuixing, the editor-in-chief, could change press-wide rules. The exception 
 }
 // result
 {
-  "path": "project/p-ninth-examination/style/dialogue.md",
   "scope": "project",
   "area": "style",
   "name": "dialogue",
@@ -1238,7 +1236,7 @@ Every memory file is stored at
 {scope}/{entity_id}/{area}/{name}.md
 ```
 
-For example `project/p-ninth-examination/characters/lin-qiao.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results report the full `path` plus the parsed `scope`, `area`, and `name`.
+For example `project/p-ninth-examination/characters/lin-qiao.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results name a file by its `scope`, `area`, and `name`; they never include the storage path.
 
 ### Scopes
 
@@ -1303,7 +1301,7 @@ Every file has an opaque `version` (the GCS generation under `GcsStorage`). Ever
 | `list_prefix` page size | 100 entries | `MemoryStore(list_page_size=...)` |
 | `replace_fact` attempts | 3 | fixed |
 
-When the index overflows its budget, the remaining files are reported under `capped` by area prefix, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+When the index overflows its budget, the remaining files are reported under `capped` by area, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
 
 ## Tools
 
@@ -1313,8 +1311,7 @@ Common file object, returned by `read_file`, `write_file`, `append_line`, and `r
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `path` | string | Full path, `scope/entity/area/name.md`. |
-| `scope`, `area`, `name` | string | Parsed from the path. |
+| `scope`, `area`, `name` | string | Where the file lives. |
 | `content` | string | The body. Present on a file; absent on index and list entries. |
 | `version` | string | Opaque. Pass as `expected_version`. |
 | `description` | string | |
@@ -1324,7 +1321,7 @@ Common file object, returned by `read_file`, `write_file`, `append_line`, and `r
 
 ### get_memory_index
 
-> Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's path, metadata, and version, without content.
+> Load the metadata index of every memory scope available in this session. Call this first. Each entry gives a file's scope, area, name, metadata, and version, without content.
 
 Call it first in every session.
 
@@ -1337,9 +1334,9 @@ Returns an object:
 | Field | Type | Description |
 | --- | --- | --- |
 | `entries` | array of file entries | Each is the common file object without `content`, in index order, up to the byte budget. |
-| `capped` | array of objects | One per area prefix not fully returned. Empty means the index is complete. |
+| `capped` | array of objects | One per area not fully returned. Empty means the index is complete. |
 
-Each `capped` object: `prefix` (string, for example `project/p-ninth-examination/characters/`), `scope` (string), `area` (string, or `null` for a prefix above area level), `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
+Each `capped` object has exactly `scope` (string), `area` (string), and `omitted` (integer, files left out). Page a capped area with `list_prefix(scope, area)`.
 
 ### read_file
 
@@ -1363,7 +1360,7 @@ Returns the common file object. If no file exists: `NotFoundError` with reason `
 | `area` | string or null | no (default `null`) | Restrict to one area; `null` lists the whole scope. |
 | `cursor` | string or null | no (default `null`) | The `next_cursor` from the previous page, with the same `scope` and `area`. |
 
-Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the common file object without `content`, ascending by path. A malformed cursor, or one from a different prefix, returns `InvalidArgumentError` for `cursor`. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.
+Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the common file object without `content`, in ascending storage order. A malformed cursor, or one from a different prefix, returns `InvalidArgumentError` for `cursor`. Listing is not a snapshot: a file written or deleted between two pages may or may not appear.
 
 ### write_file
 
@@ -1449,13 +1446,15 @@ A failed tool call returns an MCP error result (`isError` true) whose JSON paylo
   "error": "VersionConflictError",
   "category": "recoverable",
   "message": "...",
-  "path": "...",
+  "scope": "...",
+  "area": "...",
+  "name": "...",
   "content": "...",
   "version": "..."
 }
 ```
 
-`error` is the class name, `category` is `recoverable`, `permanent`, `transient`, or `internal`, and `message` combines the detail with fixed guidance for the category. Extra fields appear only when relevant.
+`error` is the class name, `category` is `recoverable`, `permanent`, `transient`, or `internal`, and `message` combines the detail with fixed guidance for the category. Extra fields appear only when relevant. When the location parses, the payload carries `scope`, `area`, and `name`, and the message names it as `scope user, area preferences, name csv`. Errors never include a storage path.
 
 | Category | Meaning | What the agent should do |
 | --- | --- | --- |
@@ -1466,12 +1465,12 @@ A failed tool call returns an MCP error result (`isError` true) whose JSON paylo
 
 | Error | Category | Raised when | Extra fields |
 | --- | --- | --- | --- |
-| `VersionConflictError` | recoverable | The file changed since it was read. | `path`, `content`, `version` (current) |
-| `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `path`, `size`, `limit` |
-| `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `path`, `content`, `version`, `match_count` |
+| `VersionConflictError` | recoverable | The file changed since it was read. | `content`, `version` (current) |
+| `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `size`, `limit` |
+| `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `content`, `version`, `match_count` |
 | `InvalidArgumentError` | recoverable | An argument was rejected: unknown scope, bad area slug, bad name, not a fact line, empty `old_string`, bad cursor, and similar. | `argument` |
-| `NotFoundError` | recoverable | The path is invalid (`invalid_path`) or no file exists there (`file_absent`). | `path`, `reason` |
-| `RestrictedScopeError` | permanent | A write to `system/` (`system_read_only`), or to a scope whose policy requires another role (`role_required`), or outside the caller's grant (`not_granted`). | `path`, `scope`, `reason`, and `required_roles` for `role_required` |
+| `NotFoundError` | recoverable | The location is invalid (`invalid_path`) or no file exists there (`file_absent`). | `reason` |
+| `RestrictedScopeError` | permanent | A write to `system/` (`system_read_only`), or to a scope whose policy requires another role (`role_required`), or outside the caller's grant (`not_granted`). | `scope`, `reason`, and `required_roles` for `role_required` |
 | `ResolverFailureError` | permanent | The identity could not be resolved, or `credentials_from_context` raised. Memory is unavailable for the session. | none |
 | `BackendUnavailableError` | transient | The storage backend timed out or is unreachable. | `reason` (`timeout` or `unavailable`) |
 

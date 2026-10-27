@@ -309,8 +309,8 @@ def test_member_denied_in_restricted_org() -> None:
     assert err.required_roles == frozenset({"admin", "owner"})
     assert err.category is ErrorCategory.PERMANENT
     message = str(err)
-    assert path in message
-    assert "org" in message
+    assert "scope org, area notes, name a" in message  # AIE-1252, US2.2
+    assert path not in message
     assert "admin, owner" in message
 
 
@@ -407,8 +407,8 @@ def test_not_granted_message_omits_caller_entity_and_role() -> None:
     err = _raise_restricted(check_write_allowed, path, identity)
     assert err.reason is RestrictionReason.NOT_GRANTED
     message = str(err)
-    assert path in message
-    assert "org" in message
+    assert "scope org, area notes, name a" in message  # AIE-1252, US2.2
+    assert path not in message
     assert "own-entity-7f3" not in message
     assert "role-zq9" not in message
 

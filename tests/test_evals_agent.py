@@ -94,6 +94,19 @@ def test_eval_agent_body_is_preamble_plus_prompt() -> None:
     assert body.strip("\n") == render_agent_body().strip("\n")
 
 
+def test_eval_agent_file_carries_name_sentence_not_path_quote() -> None:
+    """The checked-in eval agent file carries the scope/area/name sentence and no
+    instruction to quote a tool-returned path (AIE-1252, US3.3).
+    """
+    text = " ".join(EVAL_AGENT.read_text().split())
+
+    assert (
+        "When you tell the user where something is stored, name its scope, area, and name." in text
+    )
+    assert "quote the full `path`" not in text
+    assert "`path`" not in text
+
+
 def test_preamble_frames_each_message_as_the_users_turn() -> None:
     """Each message is the user's turn and may carry earlier turns, and the
     reply addresses the user as "you", never as "the user" (AIE-1184, US2.1).

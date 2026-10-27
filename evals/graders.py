@@ -14,7 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final, Protocol, cast
 
-from evals.reference_adopter import MEMBER_IDENTITY, REFERENCE_SCOPES, SEED_AREAS_BY_SCOPE
+from evals.reference_adopter import MEMBER_IDENTITY
 from evals.scenario import (
     AliasPresent,
     Assertion,
@@ -37,7 +37,6 @@ from evals.scenario import (
 )
 
 __all__ = [
-    "PATH_ROOTS",
     "SCANNED_ARGUMENTS",
     "SCANNED_TOOLS",
     "THIRD_PERSON_PATTERN",
@@ -51,10 +50,8 @@ __all__ = [
     "ThirdPersonReply",
     "TraceCall",
     "TranscriptTurn",
-    "UnmatchedReplyPath",
     "find_operator_identity",
     "find_third_person_replies",
-    "find_unmatched_reply_paths",
     "grade",
     "load_store_dump",
     "load_trace",
@@ -985,128 +982,3 @@ def find_operator_identity(
         for key, text in _scanned_values(call):
             record("write", call.session, call.turn, "", key, text)
     return tuple(hits)
-
-
-# --- reply paths --------------------------------------------------------------
-
-# The scenario identity's grant keys are added per call.
-PATH_ROOTS: Final[frozenset[str]] = frozenset(REFERENCE_SCOPES) | {"org", "system"}
-_PATH_RUN: Final = re.compile(r"[A-Za-z0-9_.~/-]+")
-_URL_SCHEME_END: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:$")
-_URL_SCHEME_LOOKBEHIND: Final = 64
-_LOCATION_KEYS: Final = frozenset({"path", "prefix"})
-_MAX_RESULT_DEPTH: Final = 32
-
-
-@dataclass(frozen=True)
-class UnmatchedReplyPath:
-    """A scope-rooted path in a reply that no tool result named up to that turn."""
-
-    session: int
-    turn: int
-    token: str  # normalized: root onward, "/"-joined, no leading or trailing "/"
-    kind: str  # "entity_omitted" or "unmatched"
-
-
-def _result_locations(value: object, depth: int = 1) -> Iterator[str]:
-    """Strings under a path or prefix key, within _MAX_RESULT_DEPTH nested containers."""
-    if depth > _MAX_RESULT_DEPTH:
-        return
-    if isinstance(value, Mapping):
-        for key, item in cast(Mapping[object, object], value).items():
-            if key in _LOCATION_KEYS and isinstance(item, str):
-                yield item
-            elif key in _LOCATION_KEYS and isinstance(item, list):
-                yield from (i for i in cast(list[object], item) if isinstance(i, str))
-            else:
-                yield from _result_locations(item, depth + 1)
-    elif isinstance(value, list):
-        for item in cast(list[object], value):
-            yield from _result_locations(item, depth + 1)
-
-
-def _known_locations(trace: Sequence[TraceCall], session: int, turn: int) -> frozenset[str]:
-    """Locations, and their directories, that calls up to the given turn returned."""
-    known: set[str] = set()
-    for call in trace:
-        if call.session > session or (call.session == session and call.turn > turn):
-            continue
-        for raw in _result_locations(call.result):
-            location = raw.removeprefix("/").removesuffix("/")
-            segments = location.split("/")
-            known.update("/".join(segments[:n]) for n in range(1, len(segments) + 1))
-    return frozenset(known)
-
-
-def _path_tokens(
-    text: str, roots: frozenset[str], areas: frozenset[str], entities: frozenset[str]
-) -> list[str]:
-    """Distinct normalized scope-rooted path tokens in first-appearance order."""
-    tokens: dict[str, None] = {}
-    for run in _PATH_RUN.finditer(text):
-        if "/" not in run.group():
-            continue
-        raw = run.group().rstrip(".,;:!?")
-        start = run.start()
-        if raw.startswith("//") or _URL_SCHEME_END.search(
-            text, max(0, start - _URL_SCHEME_LOOKBEHIND), start
-        ):
-            continue
-        segments = [s for s in raw.split("/") if s]
-        root = next((i for i, s in enumerate(segments) if s in roots), None)
-        if root is None or any("." in s for s in segments[:root]):
-            continue
-        kept = segments[root:]
-        if len(kept) < 2 or all(s in roots for s in kept):
-            continue
-        if len(kept) == 2 and kept[1] not in areas and kept[1] not in entities:
-            continue
-        tokens.setdefault("/".join(kept), None)
-    return list(tokens)
-
-
-def _matches_location(candidate: str, known: frozenset[str]) -> bool:
-    return candidate in known or any(k.endswith("/" + candidate) for k in known)
-
-
-def find_unmatched_reply_paths(
-    scenario: Scenario,
-    trace: Sequence[TraceCall],
-    transcript: Sequence[TranscriptTurn],
-) -> tuple[UnmatchedReplyPath, ...]:
-    """One flag per distinct scope-rooted path in a reply that no earlier tool result named.
-
-    Tokens are matched against the paths and directories the trial's tool results
-    returned up to the reply's turn. A token the user typed in the session so far
-    is not flagged.
-    """
-    roots = frozenset(PATH_ROOTS | scenario.identity.grants.keys())
-    seed_areas = {a for areas in SEED_AREAS_BY_SCOPE.values() for a in areas} | {"system"}
-    seed_areas.update(f.area for f in scenario.seed_files)
-    grant_entities = {g.entity_id for g in scenario.identity.grants.values()}
-    flags: list[UnmatchedReplyPath] = []
-    for t in transcript:
-        known = _known_locations(trace, t.session, t.turn)
-        deep = [k.split("/") for k in known if k.count("/") >= 2]
-        areas = frozenset(seed_areas | {s[2] for s in deep})
-        entities = frozenset(grant_entities | {k.split("/")[1] for k in known if "/" in k})
-        echoed = {
-            token
-            for u in transcript
-            if u.session == t.session and u.turn <= t.turn
-            for token in _path_tokens(u.user, roots, areas, entities)
-        }
-        entity_dropped = frozenset("/".join((s[0], *s[2:])) for s in deep)
-        for token in _path_tokens(t.reply, roots, areas, entities):
-            if token in echoed:
-                continue
-            candidates = (token,) if token.endswith(".md") else (token, token + ".md")
-            if any(_matches_location(c, known) for c in candidates):
-                continue
-            omitted = any(_matches_location(c, entity_dropped) for c in candidates)
-            flags.append(
-                UnmatchedReplyPath(
-                    t.session, t.turn, token, "entity_omitted" if omitted else "unmatched"
-                )
-            )
-    return tuple(flags)

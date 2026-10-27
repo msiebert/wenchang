@@ -3,7 +3,17 @@
 from enum import StrEnum
 from typing import ClassVar, cast
 
+from wenchang.paths import parse_path
 from wenchang.version_token import VersionToken
+
+
+def _location(path: str) -> str | None:
+    """Name a memory path as scope, area, and name; None if it does not parse."""
+    try:
+        parts = parse_path(path)
+    except ValueError:
+        return None
+    return f"scope {parts.scope}, area {parts.area}, name {parts.name}"
 
 
 class ErrorCategory(StrEnum):
@@ -73,8 +83,10 @@ class VersionConflictError(RecoverableError):
         self.path = path
         self.content = content
         self.version = version
+        loc = _location(path)
+        subject = f"The file at {loc}" if loc else "The file"
         detail = (
-            f"The file at {path} changed since it was read; the current content "
+            f"{subject} changed since it was read; the current content "
             "and version are attached; merge your change into the current content "
             "and retry with the current version."
         )
@@ -91,7 +103,8 @@ class OversizeWriteError(RecoverableError):
         self.size = size
         self.limit = limit
         detail = (
-            f"The write to {path} is {size} bytes, over the {limit}-byte limit; "
+            f"The write to {_location(path) or 'the file'} is {size} bytes, "
+            f"over the {limit}-byte limit; "
             "split the content across multiple files."
         )
         super().__init__(detail)
@@ -107,14 +120,15 @@ class ReplaceFactMatchError(RecoverableError):
         self.content = content
         self.version = version
         self.match_count = match_count
+        where = _location(path) or "the file"
         if match_count == 0:
             detail = (
-                f"old_string matched {match_count} spans in {path}; widen or correct "
+                f"old_string matched {match_count} spans in {where}; widen or correct "
                 "old_string using the attached current content so it matches."
             )
         else:
             detail = (
-                f"old_string matched {match_count} spans in {path}; narrow old_string "
+                f"old_string matched {match_count} spans in {where}; narrow old_string "
                 "(include surrounding text) so it matches exactly one span."
             )
         super().__init__(detail)
@@ -149,9 +163,9 @@ class NotFoundError(RecoverableError):
         self.path = path
         self.reason = reason
         if reason is NotFoundReason.INVALID_PATH:
-            detail = f"{path} is not a valid memory location; correct the path."
+            detail = "That is not a valid memory location; correct the scope, area, and name."
         else:
-            detail = f"No file exists at {path} yet; you may create it."
+            detail = f"No file exists at {_location(path) or 'the file'} yet; you may create it."
         super().__init__(detail)
 
 
@@ -194,21 +208,22 @@ class RestrictedScopeError(PermanentError):
         self.scope = scope
         self.reason = reason
         self.required_roles = required_roles
+        loc = _location(path) or f"scope {scope}"
         if reason is RestrictionReason.SYSTEM_READ_ONLY:
             detail = (
-                f"{path} is in scope {scope}; the system/ area of scope {scope} is "
+                f"The file at {loc} cannot be written: the system/ area of scope {scope} is "
                 "read-only (curated content)."
             )
         elif reason is RestrictionReason.NOT_GRANTED:
             detail = (
-                f"{path} is in scope {scope}; the caller's identity does not include "
+                f"The file at {loc} cannot be written: the caller's identity does not include "
                 f"this entity in scope {scope}."
             )
         else:
             roles = ", ".join(sorted(required_roles or ()))
             detail = (
-                f"{path} is in scope {scope}; scope {scope} is role-gated and the "
-                f"caller lacks a permitted role ({roles})."
+                f"The file at {loc} cannot be written: scope {scope} is role-gated and "
+                f"the caller lacks a permitted role ({roles})."
             )
         super().__init__(detail)
 

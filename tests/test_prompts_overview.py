@@ -60,28 +60,27 @@ def test_overview_body_opens_without_restating_purpose() -> None:
     assert "You have persistent memory" not in body
 
 
-QUOTE_PATH_SENTENCE = (
-    "When you tell the user where something is stored, quote the full `path` a tool "
-    "returned for it; never rebuild one from its scope, area, and name."
-)
+NAME_SENTENCE = "When you tell the user where something is stored, name its scope, area, and name."
 
 
-def test_overview_body_second_sentence_quotes_tool_paths() -> None:
-    """AIE-1198, US1.1: the second sentence of overview.BODY tells the agent to quote
-    the full path a tool returned."""
-    sentences = _sentences(overview.BODY)
+def test_overview_body_second_sentence_names_scope_area_and_name() -> None:
+    """AIE-1252, US3.1: the second sentence of overview.BODY tells the agent to name
+    a stored thing's scope, area, and name, and the body never mentions a path."""
+    body = re.sub(r"\s+", " ", overview.BODY)
 
-    assert QUOTE_PATH_SENTENCE in re.sub(r"\s+", " ", overview.BODY)
-    assert sentences[1] == QUOTE_PATH_SENTENCE
+    assert _sentences(overview.BODY)[1] == NAME_SENTENCE
+    assert NAME_SENTENCE in body
+    assert "`path`" not in body
+    assert re.search(r"\bpaths?\b", body, re.IGNORECASE) is None
 
 
-def test_quote_path_sentence_names_no_example_values() -> None:
-    """AIE-1198, US1.2: the sentence's only backtick span is `path` and it names no
-    area or fixture value."""
-    sentence = next((s for s in _sentences(overview.BODY) if "quote" in s), "")
+def test_name_sentence_names_no_example_values() -> None:
+    """AIE-1252, US3.2: the sentence has no backtick span and names no area or
+    fixture value from any scenario."""
+    sentence = next((s for s in _sentences(overview.BODY) if "where something" in s), "")
 
     assert sentence != ""
-    assert re.findall(r"`([^`]*)`", sentence) == ["path"]
+    assert re.findall(r"`([^`]*)`", sentence) == []
     for word in (
         "metrics",
         "dau",
@@ -94,12 +93,12 @@ def test_quote_path_sentence_names_no_example_values() -> None:
         assert word not in sentence.lower()
 
 
-def test_memory_section_of_reference_prompt_carries_quote_path_sentence() -> None:
-    """AIE-1198, US1.4: the "## Memory" section of the built prompt contains the sentence."""
+def test_memory_section_of_reference_prompt_carries_name_sentence() -> None:
+    """AIE-1198, US1.4; AIE-1252: the "## Memory" section of the built prompt has the sentence."""
     prompt = build_memory_prompt(REFERENCE_SLOTS)
 
     start = prompt.index("## Memory")
     end = prompt.find("\n## ", start + 1)
     section = re.sub(r"\s+", " ", prompt[start : end if end != -1 else len(prompt)])
 
-    assert QUOTE_PATH_SENTENCE in section
+    assert NAME_SENTENCE in section
