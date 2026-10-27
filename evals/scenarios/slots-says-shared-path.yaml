@@ -23,3 +23,6 @@ assertions:
     id: no-entity-id
     pattern: '(?i)\bp-checkout\b'
     session: 1
+judge:
+  - id: names-scope-area-name
+    rubric: The turn 2 reply tells the user the scope, area, and file name where the fact is stored.

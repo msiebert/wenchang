@@ -1596,7 +1596,10 @@ def test_location_scenario_forbids_the_entity_id_in_replies(scenario_id: str) ->
     assert not ids & {"no-rebuilt-path", "names-full-path"}
 
 
-@pytest.mark.parametrize("scenario_id", ["filing-says-saved-path", "recall-says-stored-path"])
+@pytest.mark.parametrize(
+    "scenario_id",
+    ["filing-says-saved-path", "slots-says-shared-path", "recall-says-stored-path"],
+)
 def test_location_scenario_judges_scope_area_and_name(scenario_id: str) -> None:
     """The reply must name scope, area, and name, via a judge item (AIE-1252, US4.4)."""
     scenario = _by_id()[scenario_id]
