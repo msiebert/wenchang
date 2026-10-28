@@ -631,12 +631,29 @@ EVERY_WEEK = "- [stated] This project ships a release every week."
 
 async def shared_fact_correct(d: Driver) -> None:
     await d.index()
+    await d.read("project", "conventions", "release-cadence")
     await d.turn(1, 1)
 
 
 async def shared_fact_wrong(d: Driver) -> None:
     await d.index()
     await d.replace("project", "conventions", "release-cadence", EVERY_TWO_WEEKS, EVERY_WEEK)
+    await d.turn(1, 1)
+
+
+TWO_APPROVALS = "- [stated] Pull requests need two approvals before merging."
+ONE_APPROVAL = "- [stated] Pull requests need one approval before merging."
+
+
+async def buried_fact_correct(d: Driver) -> None:
+    await d.index()
+    await d.read("project", "conventions", "working-agreements")
+    await d.turn(1, 1, reply="The file says two approvals; that conflicts. Which should I keep?")
+
+
+async def buried_fact_wrong(d: Driver) -> None:
+    await d.index()
+    await d.replace("project", "conventions", "working-agreements", TWO_APPROVALS, ONE_APPROVAL)
     await d.turn(1, 1)
 
 
@@ -1596,6 +1613,12 @@ CASES: list[tuple[str, Script, Script, set[str]]] = [
         {"no-shared-write-before-ask", "old-fact-kept"},
     ),
     (
+        "write-buried-conflicting-fact",
+        buried_fact_correct,
+        buried_fact_wrong,
+        {"no-shared-write-before-ask", "old-fact-kept", "seed-kept"},
+    ),
+    (
         "write-new-subject",
         new_subject_correct,
         new_subject_wrong,
@@ -1930,6 +1953,23 @@ def test_kept_on_request_flags_an_unchanged_old_line(tmp_path: Path) -> None:
     assert _failed(graded) == {"old-line-changed"}, graded
     (entry,) = report["scenarios"]
     assert (entry["passed_trials"], entry["trials_run"]) == (0, 1)
+
+
+@pytest.mark.parametrize(
+    "scenario_id", ["write-superseded-shared-fact", "write-buried-conflicting-fact"]
+)
+def test_skipping_the_seed_read_fails_only_read_seed(tmp_path: Path, scenario_id: str) -> None:
+    """An agent that lists the index but replies without reading the seeded
+    file fails only read-seed (AIE-1252).
+    """
+
+    async def index_only(d: Driver) -> None:
+        await d.index()
+        await d.turn(1, 1, reply="That conflicts with what is stored. Which should I keep?")
+
+    graded, _ = _run_trial(tmp_path, scenario_id, index_only)
+
+    assert _failed(graded) == {"read-seed"}, graded
 
 
 INDEX_EXEMPT_IDS = frozenset(

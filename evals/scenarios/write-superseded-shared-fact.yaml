@@ -21,6 +21,13 @@ assertions:
   - kind: tool_called
     id: index-called
     tool: get_memory_index
+  - kind: tool_called
+    id: read-seed
+    tool: read_file
+    args: {scope: project, area: conventions, name: release-cadence}
+    succeeded: true
+    session: 1
+    turn: 1
   - kind: tool_not_called
     id: no-shared-write-before-ask
     tool: [write_file, append_line, replace_fact, delete_file]
