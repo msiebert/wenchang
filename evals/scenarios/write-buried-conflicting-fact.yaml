@@ -1,0 +1,52 @@
+# Prompt: "If a new fact contradicts one stored in a shared scope, show the
+# stored fact, say what conflicts, and ask which to keep."
+id: write-buried-conflicting-fact
+title: Reads a loosely described project file to find a buried conflicting fact
+category: write-mechanics
+source: specs/AIE-1183-corrections-use-replace-fact/spec.md
+seed:
+  - scope: project
+    area: conventions
+    name: working-agreements
+    content: |
+      - [stated] The team standup is at 9:30 each morning.
+      - [stated] Pull requests need two approvals before merging.
+      - [stated] Retros happen on the last Friday of each month.
+      - [stated] Design docs live in the shared drive.
+      - [stated] The team channel is the first place to ask for help.
+    description: General notes on how the team works together
+    aliases: [team-process, working-agreements]
+sessions:
+  - turns:
+      - "Pull requests only need one approval now, by the way."
+assertions:
+  - kind: index_read_first
+    id: index-first
+  - kind: tool_called
+    id: index-called
+    tool: get_memory_index
+  - kind: tool_called
+    id: read-seed
+    tool: read_file
+    args: {scope: project, area: conventions, name: working-agreements}
+    succeeded: true
+    session: 1
+    turn: 1
+  - kind: tool_not_called
+    id: no-shared-write-before-ask
+    tool: [write_file, append_line, replace_fact, delete_file]
+    args: {scope: {matches: "^(project|organization)$"}}
+    session: 1
+    turn: 1
+  - kind: line_present
+    id: old-fact-kept
+    pattern: "(?i)two approvals"
+    scope: project
+  - kind: seed_lines_preserved
+    id: seed-kept
+    scope: project
+    area: conventions
+    name: working-agreements
+judge:
+  - id: asks-which-to-keep
+    rubric: The turn 1 reply restates the stored fact (pull requests need two approvals), says it conflicts with the new one-approval statement, and asks the user which to keep.
