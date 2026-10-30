@@ -75,6 +75,8 @@
 <li><a href="#delete_file">delete_file</a></li>
 </ul>
 </li>
+<li><a href="#schemas">Tool schemas</a>
+</li>
 <li><a href="#resource">The memory prompt resource</a>
 </li>
 <li><a href="#errors">Errors</a>
@@ -620,7 +622,100 @@
 </tbody>
 </table></div>
 <p>Returns <code>{"ok": true}</code>. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code>, <code>RestrictedScopeError</code>.</p>
-</section><h2 id="resource">The memory prompt resource<a class="headerlink" href="#resource" title="Link to this section">#</a></h2>
+</section><h2 id="schemas">Tool schemas<a class="headerlink" href="#schemas" title="Link to this section">#</a></h2>
+<p>To register the memory tools with a framework other than MCP, take their definitions from <code>wenchang.schemas</code> (in the <code>wenchang</code> package: <code>pip install wenchang</code>).</p>
+<p><code>tool_schemas(product=None)</code> returns a read-only mapping from tool name to <code>ToolSchema</code>, one per tool, in <code>wenchang.tools.TOOL_NAMES</code> order. <code>error_schema()</code> returns the schema shared by every <code>render_error</code> payload.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>The bare tool name, such as <code>read_file</code>.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>The tool's description, the same as <code>tool_descriptions(product)[name]</code>.</td>
+</tr>
+<tr>
+<td><code>input</code></td>
+<td>dict</td>
+<td>JSON Schema of the tool's arguments, with defaults for optional ones.</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>dict</td>
+<td>JSON Schema of the <code>render_result</code> payload on success.</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>dict</td>
+<td>JSON Schema of the <code>render_error</code> payload on failure; the same as <code>error_schema()</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Every schema is JSON Schema draft 2020-12 and closed (<code>additionalProperties: false</code>). Each call builds fresh dicts, so you can change them without affecting later calls.</p>
+<p>Use <code>input</code> as the tool's parameter schema, call the matching <code>MemoryTools</code> method from a session's <code>bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)</code>, and return <code>render_result</code> of its value or <code>render_error</code> of what it raised. Those payloads match <code>output</code> and <code>error</code>. Validate the agent's arguments against <code>input</code> before calling the method, as most frameworks do from the parameter schema: the method is called with <code>**arguments</code>, so a missing or unknown argument raises a <code>TypeError</code> that <code>render_error</code> reports as an opaque <code>internal</code> error. Here <code>ToolDef</code> stands in for your framework's tool definition:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.schemas</span><span class="w"> </span><span class="kn">import</span> <span class="n">tool_schemas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryTools</span><span class="p">,</span> <span class="n">bind_tools</span><span class="p">,</span> <span class="n">render_error</span><span class="p">,</span> <span class="n">render_result</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ToolDef</span><span class="p">:</span>  <span class="c1"># stand-in for your framework's tool definition</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">parameters</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span>
+    <span class="n">handler</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">MemoryTools</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]:</span>
+    <span class="n">method</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">tools</span><span class="p">()[</span><span class="n">name</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="n">arguments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]:</span>
+        <span class="c1"># The framework has already validated `arguments` against `s.input`.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">render_result</span><span class="p">(</span><span class="n">method</span><span class="p">(</span><span class="o">**</span><span class="n">arguments</span><span class="p">))</span>  <span class="c1"># matches the schema's output</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">render_error</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>  <span class="c1"># matches the schema's error</span>
+
+    <span class="k">return</span> <span class="n">call</span>
+
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
+<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span>
+
+<span class="n">defs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ToolDef</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">tool_schemas</span><span class="p">(</span><span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+    <span class="n">call</span> <span class="o">=</span> <span class="n">handler</span><span class="p">(</span><span class="n">tools</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="n">defs</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">ToolDef</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">description</span><span class="p">,</span> <span class="n">parameters</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">input</span><span class="p">,</span> <span class="n">handler</span><span class="o">=</span><span class="n">call</span><span class="p">)</span>
+
+<span class="c1"># A NotFoundError payload, valid against tool_schemas()["read_file"].error.</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">defs</span><span class="p">[</span><span class="s2">"read_file"</span><span class="p">]</span><span class="o">.</span><span class="n">handler</span><span class="p">({</span><span class="s2">"scope"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"area"</span><span class="p">:</span> <span class="s2">"notes"</span><span class="p">,</span> <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"tea"</span><span class="p">}))</span>
+</code></pre></div>
+
+<p>The schemas assume on-contract output and standard tool-use modes:</p>
+<ul>
+<li><strong>Every field is required.</strong> An on-contract <code>TransportClient</code> always produces every field, so each output field is marked required. <code>render_result</code> drops a field whose value has the wrong type, which an off-contract client can produce; strict validation rejects that payload.</li>
+<li><strong>Errors are wenchang's own.</strong> The error schema covers the error classes wenchang raises. A <code>WenchangError</code> subclass of your own validates only if it reuses these attribute names, types, and <code>reason</code> values.</li>
+<li><strong>Input schemas target standard tool use.</strong> They work as-is with Anthropic tool use and OpenAI function calling. OpenAI's strict mode requires every property in <code>required</code>, so optional arguments must become required and nullable; Gemini function declarations reject <code>anyOf</code>, <code>additionalProperties</code>, and <code>default</code>. A host using either must transform <code>input</code> first.</li>
+</ul>
+<h2 id="resource">The memory prompt resource<a class="headerlink" href="#resource" title="Link to this section">#</a></h2>
 <p>The server exposes the assembled memory prompt as an MCP resource:</p>
 <div class="table-wrap"><table>
 <thead>
@@ -1152,6 +1247,8 @@
 <li><a href="#replace_fact">replace_fact</a></li>
 <li><a href="#delete_file">delete_file</a></li>
 </ul>
+</li>
+<li><a href="#schemas">Tool schemas</a>
 </li>
 <li><a href="#resource">The memory prompt resource</a>
 </li>

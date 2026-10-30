@@ -1695,6 +1695,77 @@ Zero or several matches return `ReplaceFactMatchError` with the current content,
 
 Returns `{"ok": true}`. Errors: `VersionConflictError`, `NotFoundError`, `RestrictedScopeError`.
 
+## Tool schemas
+
+To register the memory tools with a framework other than MCP, take their definitions from `wenchang.schemas` (in the `wenchang` package: `pip install wenchang`).
+
+`tool_schemas(product=None)` returns a read-only mapping from tool name to `ToolSchema`, one per tool, in `wenchang.tools.TOOL_NAMES` order. `error_schema()` returns the schema shared by every `render_error` payload.
+
+| Field | Type | Contents |
+| --- | --- | --- |
+| `name` | string | The bare tool name, such as `read_file`. |
+| `description` | string | The tool's description, the same as `tool_descriptions(product)[name]`. |
+| `input` | dict | JSON Schema of the tool's arguments, with defaults for optional ones. |
+| `output` | dict | JSON Schema of the `render_result` payload on success. |
+| `error` | dict | JSON Schema of the `render_error` payload on failure; the same as `error_schema()`. |
+
+Every schema is JSON Schema draft 2020-12 and closed (`additionalProperties: false`). Each call builds fresh dicts, so you can change them without affecting later calls.
+
+Use `input` as the tool's parameter schema, call the matching `MemoryTools` method from a session's `bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)`, and return `render_result` of its value or `render_error` of what it raised. Those payloads match `output` and `error`. Validate the agent's arguments against `input` before calling the method, as most frameworks do from the parameter schema: the method is called with `**arguments`, so a missing or unknown argument raises a `TypeError` that `render_error` reports as an opaque `internal` error. Here `ToolDef` stands in for your framework's tool definition:
+
+```python
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from wenchang.core import MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.schemas import tool_schemas
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.tools import MemoryTools, bind_tools, render_error, render_result
+from wenchang.transport import InProcessClient
+
+
+@dataclass
+class ToolDef:  # stand-in for your framework's tool definition
+    name: str
+    description: str
+    parameters: dict[str, object]
+    handler: Callable[[dict[str, object]], dict[str, object]]
+
+
+def handler(tools: MemoryTools, name: str) -> Callable[[dict[str, object]], dict[str, object]]:
+    method = tools.tools()[name]
+
+    def call(arguments: dict[str, object]) -> dict[str, object]:
+        # The framework has already validated `arguments` against `s.input`.
+        try:
+            return render_result(method(**arguments))  # matches the schema's output
+        except Exception as exc:
+            return render_error(exc)  # matches the schema's error
+
+    return call
+
+
+client = InProcessClient(MemoryStore(InMemoryStorage()))
+resolver = SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")}))
+tools = bind_tools(client, resolver, None, ScopePolicy({}), source="inkwell-cli", product="Inkwell")
+
+defs: dict[str, ToolDef] = {}
+for s in tool_schemas(product="Inkwell").values():
+    call = handler(tools, s.name)
+    defs[s.name] = ToolDef(name=s.name, description=s.description, parameters=s.input, handler=call)
+
+# A NotFoundError payload, valid against tool_schemas()["read_file"].error.
+print(defs["read_file"].handler({"scope": "user", "area": "notes", "name": "tea"}))
+```
+
+The schemas assume on-contract output and standard tool-use modes:
+
+- **Every field is required.** An on-contract `TransportClient` always produces every field, so each output field is marked required. `render_result` drops a field whose value has the wrong type, which an off-contract client can produce; strict validation rejects that payload.
+- **Errors are wenchang's own.** The error schema covers the error classes wenchang raises. A `WenchangError` subclass of your own validates only if it reuses these attribute names, types, and `reason` values.
+- **Input schemas target standard tool use.** They work as-is with Anthropic tool use and OpenAI function calling. OpenAI's strict mode requires every property in `required`, so optional arguments must become required and nullable; Gemini function declarations reject `anyOf`, `additionalProperties`, and `default`. A host using either must transform `input` first.
+
 ## The memory prompt resource
 
 The server exposes the assembled memory prompt as an MCP resource:
