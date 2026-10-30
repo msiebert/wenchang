@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import ClassVar, Final, NewType, cast
 
 from wenchang.errors import (
+    FileQuotaExceededError,
     NotFoundError,
     NotFoundReason,
     OversizeWriteError,
@@ -41,6 +42,7 @@ from wenchang.version_token import VersionToken
 DEFAULT_MAX_FILE_BYTES: int = 16 * 1024
 DEFAULT_LIST_PAGE_SIZE: int = 100
 DEFAULT_INDEX_MAX_BYTES: int = 64 * 1024
+DEFAULT_MAX_FILES_PER_ENTITY: int = 500
 PURGE_MAX_PASSES: Final = 5
 
 # Equals scope.SYSTEM_AREA; core must not import scope.
@@ -421,7 +423,10 @@ class MemoryStore:
 
     Exposes read_file, write_file, replace_fact, append_line, delete_file,
     list_prefix, and get_memory_index, plus the operator-only methods purge
-    and export. With an `index_cache`,
+    and export. `max_files_per_entity` caps the
+    non-system/ files under one `{scope}/{entity_id}/` prefix, checked only
+    when write_file creates; None disables the cap. The cap is soft:
+    concurrent creates may exceed it. With an `index_cache`,
     get_memory_index caches each entity's listing under a generation token
     that every mutation attempt replaces.
     """
@@ -435,6 +440,7 @@ class MemoryStore:
         list_page_size: int = DEFAULT_LIST_PAGE_SIZE,
         index_max_bytes: int = DEFAULT_INDEX_MAX_BYTES,
         scope_priority: Sequence[str] = (),
+        max_files_per_entity: int | None = DEFAULT_MAX_FILES_PER_ENTITY,
         index_cache: IndexCache | None = None,
     ) -> None:
         # Real-type checks: a str is a Sequence of its characters, and a
@@ -461,6 +467,8 @@ class MemoryStore:
             raise ValueError("list_page_size must be positive")
         if index_max_bytes <= 0:
             raise ValueError("index_max_bytes must be positive")
+        if max_files_per_entity is not None and max_files_per_entity <= 0:
+            raise ValueError("max_files_per_entity must be positive or None")
         seen: set[str] = set()
         for s in members:
             if not is_valid_segment(s):
@@ -475,7 +483,13 @@ class MemoryStore:
         self._list_page_size = list_page_size
         self._index_max_bytes = index_max_bytes
         self._scope_priority = tuple(members)
+        self._max_files_per_entity = max_files_per_entity
         self._index_cache = index_cache
+
+    @property
+    def max_files_per_entity(self) -> int | None:
+        """The cap on non-system/ files per entity; None if disabled."""
+        return self._max_files_per_entity
 
     @property
     def index_cache(self) -> IndexCache | None:
@@ -651,11 +665,14 @@ class MemoryStore:
         is empty, without calling storage. Raises OversizeWriteError if the
         UTF-8 encoding of `content` exceeds `max_file_bytes`, without
         calling storage. `expected_version=None` requires the file to not
-        already exist, and stores `metadata.sources | {source}`. A non-None
-        value requires it to match the current version exactly, and stores
-        the union of the currently stored sources, `metadata.sources`, and
-        `source`: a caller never has to carry forward sources it doesn't
-        know about, and can't remove a source others recorded. Stamps
+        already exist, and stores `metadata.sources | {source}`; outside
+        system/, if the entity already holds `max_files_per_entity` files,
+        raises VersionConflictError if the path exists, else
+        FileQuotaExceededError. A non-None value requires it to match the
+        current version exactly, and stores the union of the currently
+        stored sources, `metadata.sources`, and `source`: a caller never
+        has to carry forward sources it doesn't know about, and can't
+        remove a source others recorded. Stamps
         `metadata.last_updated` with the store's clock, raising ValueError
         (from FileMetadata's own validation) if the clock returns a naive
         datetime. On a version mismatch raises VersionConflictError
@@ -675,6 +692,19 @@ class MemoryStore:
             raise OversizeWriteError(path, len(data), self._max_file_bytes)
 
         if expected_version is None:
+            limit = self._max_files_per_entity
+            parts = parse_path(path)
+            if (
+                limit is not None
+                and parts.area != INDEX_SYSTEM_AREA
+                and self._at_file_cap(build_prefix(parts.scope, parts.entity_id), limit)
+            ):
+                obj = self._storage.get(path)
+                if obj is None:
+                    raise FileQuotaExceededError(path, limit)
+                current_content = obj.data.decode("utf-8")
+                metadata_from_map(obj.metadata)
+                raise VersionConflictError(path, current_content, obj.version)
             sources = metadata.sources | {source}
         else:
             obj = self._storage.get(path)
@@ -699,6 +729,25 @@ class MemoryStore:
             raise VersionConflictError(path, current_content, obj.version) from None
 
         return MemoryFile(path=path, content=content, metadata=stamped, version=version)
+
+    def _at_file_cap(self, prefix: str, limit: int) -> bool:
+        """Whether `prefix` holds at least `limit` well-formed, non-system/ files.
+
+        Uses storage directly, so corrupt metadata elsewhere cannot block a
+        create and a list_prefix override cannot change the count.
+        """
+        count = 0
+        start_after: str | None = None
+        while count < limit:
+            page_size = max(limit - count, self._list_page_size)
+            objs = self._storage.list_page(prefix, start_after, page_size)
+            for obj in objs:
+                if is_valid_path(obj.key) and parse_path(obj.key).area != INDEX_SYSTEM_AREA:
+                    count += 1
+            if len(objs) < page_size:
+                break
+            start_after = objs[-1].key
+        return count >= limit
 
     def replace_fact(
         self,

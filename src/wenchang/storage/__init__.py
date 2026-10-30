@@ -98,8 +98,9 @@ class Storage(Protocol):
         `prefix` is a plain string match, not a path or glob. If
         `start_after` is given, only keys strictly greater than it (by
         Python string comparison, equal to GCS UTF-8 byte order) are
-        included. Returns at most `limit` (>= 1) objects. Never reads
-        object bodies. Metadata mappings are copies. May raise
+        included. Returns at most `limit` (>= 1) objects, and fewer only
+        when no further key under `prefix` follows the returned ones.
+        Never reads object bodies. Metadata mappings are copies. May raise
         BackendUnavailableError.
         """
         ...

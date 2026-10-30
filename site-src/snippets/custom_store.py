@@ -9,6 +9,7 @@ store = MemoryStore(
     max_file_bytes=8 * 1024,  # default 16384: larger writes raise OversizeWriteError
     index_max_bytes=32 * 1024,  # default 65536: the startup index is capped at this size
     list_page_size=50,  # default 100: entries per list_prefix page
+    max_files_per_entity=200,  # default 500 (None: no cap): at the cap, creates fail
     scope_priority=("user", "project", "organization"),  # which scopes the capped index keeps first
     clock=lambda: datetime.now(UTC),  # must return timezone-aware datetimes
 )

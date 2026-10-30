@@ -7,6 +7,13 @@ Terms as used throughout wenchang and its spec.
   else. No per-line author or timestamp.
 - **File** — a markdown document about one subject, carrying the four
   metadata fields and a version token, capped in size (default 16 KB).
+- **File cap (`max_files_per_entity`)** — the most files one entity
+  (`{scope}/{entity_id}/`) may hold, set on `MemoryStore`; default 500,
+  `None` disables it. `system/` files do not count, and only creating a
+  file outside `system/` is checked, so existing files stay editable at
+  the cap. A create past it fails with the recoverable
+  `FileQuotaExceededError`, telling the agent to add to an existing file or
+  merge and delete files. Soft: concurrent creates can exceed it.
 - **Area** — a folder grouping files by subject matter within a scope
   (e.g. `preferences`, `taxonomy`). Adopter-seeded, agent-extensible.
 - **Scope** — a named visibility tier keyed by an entity ID (e.g. user,

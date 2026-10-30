@@ -32,19 +32,25 @@ the runtime: the executable conformance suites an adopter runs against
 their own identity resolver and their own transport client, installed with
 the optional `wenchang[testing]` extra. A fourteenth, `mcp`, is the host
 adapter that serves the tools and prompt from an MCP server; it is installed
-with the optional `wenchang[mcp]` extra, and nothing else imports it. Every
-module in the map below is implemented; the remote half of `transport` is
-the one planned piece.
+with the optional `wenchang[mcp]` extra, and nothing else imports it. A
+fourteenth, `observer`, is the dependency-free tool-call observer that
+`tools` and `mcp` share. Every module in the map below is implemented; the
+remote half of `transport` is the one planned piece.
 
 ## Module map
 
 - **errors** — the exception hierarchy every core API function will raise:
-  `WenchangError` (base) and one class per category —
-  `RecoverableError`, `PermanentError`, `TransientError` — each fixing that
-  category's next-action guidance text. Concrete kinds: recoverable
-  `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
-  `NotFoundError`, `InvalidArgumentError`; permanent `RestrictedScopeError`,
-  `ResolverFailureError`; transient `BackendUnavailableError`.
+  `WenchangError` (base) and one class per category — `RecoverableError`,
+  `PermanentError`, `TransientError` — each fixing that category's
+  next-action guidance text. Concrete kinds: recoverable
+  `VersionConflictError`, `OversizeWriteError`, `FileQuotaExceededError`,
+  `ReplaceFactMatchError`, `NotFoundError`, `InvalidArgumentError`;
+  permanent `RestrictedScopeError`, `ResolverFailureError`; transient
+  `BackendUnavailableError`. `FileQuotaExceededError(path, limit)` (a
+  `limit < 1` raises `ValueError`) names the location and file limit, says
+  `system/` files are not counted, and tells the agent to add to an
+  existing file, or merge files and delete the extras, then retry (see
+  [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)).
   `InvalidArgumentError(argument, detail)` is raised only by the tool layer
   for a rejected agent-supplied argument. `argument` names it (a non-`str`
   raises `TypeError`, an empty one `ValueError`; a `str` subclass is stored
@@ -161,11 +167,12 @@ the one planned piece.
   `_map_backend_error` like the rest of `GcsStorage`. `list_page(prefix,
   start_after, limit)` returns `ListedObject(key, metadata, version)` for
   keys starting with `prefix` (plain string match), ascending by key, at
-  most `limit`, strictly after `start_after` when given (exclusive), never
-  reading object bodies; metadata mappings are copies. `InMemoryStorage`
-  sorts and slices in memory; `GcsStorage` uses `list_blobs(prefix=...,
-  start_offset=start_after, max_results=limit + 1)`, dropping a key equal to
-  `start_after` (GCS's `start_offset` is inclusive) before truncating to
+  most `limit` (fewer only when the listing is exhausted), strictly after
+  `start_after` when given (exclusive), never reading object bodies;
+  metadata mappings are copies. `InMemoryStorage` sorts and slices in
+  memory; `GcsStorage` uses `list_blobs(prefix=...,
+  start_offset=start_after, max_results=limit + 1)`, dropping a key equal
+  to `start_after` (GCS's `start_offset` is inclusive) before truncating to
   `limit`; call and iteration errors go through the same
   `_map_backend_error` as the rest of `GcsStorage`. See
   [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md),
@@ -207,7 +214,7 @@ the one planned piece.
   [ADR 0040](docs/adr/0040-index-cache.md).
 - **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
   list_page_size=100, index_max_bytes=65536, scope_priority=(),
-  index_cache=None)`,
+  max_files_per_entity=500, index_cache=None)`,
   holding the core API as methods on one object so operations share
   configuration such as the size limit and index cap; `max_file_bytes`
   must be positive, `clock` (default current UTC) is injectable for tests
@@ -228,6 +235,10 @@ the one planned piece.
   then, per normalized member in order, `ValueError("invalid
   scope_priority entry: ...")` if it fails `is_valid_segment` and
   `ValueError("duplicate scope_priority entry: ...")` if already seen.
+  `max_files_per_entity` (default `DEFAULT_MAX_FILES_PER_ENTITY = 500`,
+  `None` disables it, read-only property) caps the files per entity; a
+  non-`None` value `<= 0` raises `ValueError` after the `index_max_bytes`
+  check, with no type check (`True` is a cap of 1).
   `index_cache` (default `None`) is an `IndexCache` or `None`; any other
   real type raises `TypeError` with the other `TypeError`s. It is exposed
   as the read-only `index_cache` property; without one, nothing below
@@ -240,7 +251,19 @@ the one planned piece.
   check and before the size check, without consulting storage), and rejects
   content whose UTF-8 encoding exceeds `max_file_bytes` with
   `OversizeWriteError` (checked before storage is consulted). On create
-  (`expected_version=None`) it stores `metadata.sources | {source}`. On
+  (`expected_version=None`) it stores `metadata.sources | {source}`. After
+  the size check, a create outside the `system/` area with a non-`None` cap
+  counts the well-formed, non-`system/` keys under `build_prefix(scope,
+  entity_id)` through `Storage.list_page` (not `list_prefix`, so corrupt
+  metadata elsewhere cannot block it), in pages of `max(limit - count,
+  list_page_size)`, stopping at `limit`; keys listed per create are at most
+  `limit` + uncounted keys + `list_page_size`. At the cap it reads the
+  path: an existing file raises `VersionConflictError` with its current
+  content and version (after decoding and `metadata_from_map`, as on the
+  conflict path), an absent one `FileQuotaExceededError(path, limit)`. No
+  other operation consults the cap. The count and put are not atomic, so
+  racing creates can exceed the cap by at most the number racing at the
+  boundary (see [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)). On
   replace it first reads the current object — a missing file raises
   `NotFoundError(FILE_ABSENT)`, a version mismatch seen at that read raises
   `VersionConflictError(path, current_content, current_version)`, and
@@ -926,6 +949,19 @@ the one planned piece.
   [ADR 0021](docs/adr/0021-transport-conformance-harness.md),
   [ADR 0023](docs/adr/0023-transport-conformance-cases.md), and
   [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
+- **observer** — the tool-call observer shared by `tools` and `mcp`
+  (`wenchang.observer`); it imports only the stdlib, so it works without
+  the `[mcp]` extra. `ToolCallRecord(tool, arguments, result, is_error,
+  request_id, duration_s)` is a frozen dataclass; its docstring defines
+  each field per entry point. `request_id` is the MCP request id under MCP
+  and `None` for direct calls. `ToolCallObserver` is
+  `Callable[[ToolCallRecord], None]`. `check_observer(on_call)` raises
+  `TypeError` unless `on_call` is `None` or a plain (non-async) callable.
+  `notify_observer(on_call, logger, *, tool, arguments, result, is_error,
+  request_id, duration_s)` builds the record with read-only deep copies of
+  `arguments` and `result` and calls `on_call`; any `Exception` from either
+  step is logged at `ERROR` on `logger`, naming the tool, and swallowed. See
+  [ADR 0043](docs/adr/0043-shared-tool-call-observer.md).
 - **tools** — the agent-facing tool layer: thin verbs over a
   `TransportClient`, carrying no judgment. The description a host shows
   the agent for each tool comes from `descriptions()` (below), built from
@@ -936,8 +972,8 @@ the one planned piece.
   version-conflict rule, since a host that loads tool schemas on demand
   may show it alone (see
   [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) decision
-  11). `MemoryTools(client, identity, policy, *, source, product=None)`
-  is one session: a resolved `Identity`, the adopter's `ScopePolicy`, the
+  11). `MemoryTools(client, identity, policy, *, source, product=None,
+  on_call=None)` is one session: a resolved `Identity`, the adopter's `ScopePolicy`, the
   client, the calling surface's name, stamped as `source` on every write
   and not settable by the agent, and optionally the product the memory
   serves. Constructor arguments are adopter-side, checked in argument
@@ -946,14 +982,30 @@ the one planned piece.
   a `product` that is neither `str` nor `None` raises `TypeError`; an
   empty `source`, or a `product` that after `str.__str__` and `str.strip`
   is empty, spans more than one line (any `str.splitlines` boundary), or
-  is not UTF-8 encodable, raises `ValueError`. All five are read-only
-  properties. `bind_tools(client, resolver, credentials, policy, *,
-  source, product=None)` is the only function in the layer that takes
-  credentials: it passes them to `resolve_identity` and returns a
-  `MemoryTools`, retaining nothing; a resolution failure is the permanent
-  `ResolverFailureError`, raised before `source` or `product` is checked.
+  is not UTF-8 encodable, raises `ValueError`; `on_call` is then checked
+  with `check_observer`. All six are read-only properties.
+  `bind_tools(client, resolver, credentials, policy, *, source,
+  product=None, on_call=None)` is the only function in the layer that takes
+  credentials: it checks `on_call` first, passes the credentials to
+  `resolve_identity`, and returns a `MemoryTools`, retaining nothing; a
+  resolution failure is the permanent `ResolverFailureError`, raised before
+  `source` or `product` is checked.
   A host serving many sessions binds one `MemoryTools` per session; the
   client may be shared.
+  With `on_call` set, each of the seven tool methods (wrapped by a private
+  decorator that keeps docstrings and signatures) delivers one
+  `ToolCallRecord` per call through `notify_observer` (logger
+  `wenchang.tools`), on the calling thread, before returning the tool's
+  value or re-raising its exception object. The record has the bare tool
+  name, every parameter by name with defaults filled, `render_result(value)`
+  or `render_error(exc)` (a `render_result` failure is recorded as
+  `render_error` of it, and the caller still gets the raw value),
+  `request_id=None`, and `duration_s` covering the tool method only. The
+  observer is never called inside an `except` block, so it sees no active
+  exception. A call Python rejects (arity, unknown keyword) and a
+  non-`Exception` `BaseException` produce no record. An undecorated subclass
+  override produces none either, unless it calls the decorated base method,
+  whose call is then recorded.
   The seven tools are methods. `TOOL_NAMES` is `("get_memory_index",
   "read_file", "list_prefix", "write_file", "append_line", "replace_fact",
   "delete_file")`, and `tools()` returns a fresh read-only mapping from
@@ -1093,11 +1145,12 @@ the one planned piece.
   The layer is framework-agnostic and adds no runtime dependency; mounting
   it on a host server is a host adapter's job, done for MCP by `mcp`
   below. It imports from `wenchang`
-  only `core`, `errors`, `file_format`, `identity`, `paths`, `scope`,
-  `transport`, and `version_token`, and none of `core`, `scope`,
+  only `core`, `errors`, `file_format`, `identity`, `observer`, `paths`,
+  `scope`, `transport`, and `version_token`, and none of `core`, `scope`,
   `identity`, or `transport` imports it. See
-  [ADR 0022](docs/adr/0022-tool-layer.md) and
-  [ADR 0026](docs/adr/0026-product-identity.md).
+  [ADR 0022](docs/adr/0022-tool-layer.md),
+  [ADR 0026](docs/adr/0026-product-identity.md), and
+  [ADR 0043](docs/adr/0043-shared-tool-call-observer.md).
 - **prompts** — the instruction text layered over the tools: a subpackage
   (`wenchang.prompts`) that turns library-owned section text plus four
   adopter-supplied text slots into one markdown prompt. Its public names
@@ -1151,7 +1204,7 @@ the one planned piece.
   adopter's `scope_guidance` must say which of its scopes are shared and
   which are private; the library cannot check this. Division of labor with
   `tools`: tool docstrings own per-call mechanics (argument meaning, error
-  repair, the slug rule, the byte ceiling), the prompt owns judgment
+  repair, the slug rule, the byte ceiling, the file cap), the prompt owns judgment
   (what to write, where, with which tool, and when to ask), and the slots
   state only deployment facts (which scopes exist and their rules, seed
   area names, which systems hold canonical information), leaving generic
@@ -1200,10 +1253,17 @@ the one planned piece.
        `ResolverFailureError` without the original exception, and logs one
        `WARNING` naming the tool and the exception's type only. An `internal`
        error is logged on logger `wenchang.mcp`.
-  - **`on_call`**, if given, receives a `ToolCallRecord(tool, arguments,
-    result, is_error, request_id, duration_s)` with a deep-copied result
-    after every wrapper call. `request_id` is the MCP request's id, for
-    correlating records that arrive in completion order.
+  - **`on_call`**, if given, receives the shared
+    `wenchang.observer.ToolCallRecord` (re-exported here) after every
+    wrapper call, delivered through `notify_observer` on logger
+    `wenchang.mcp`. `tool` is the registered name; `result` is a copy of
+    the `structured_content` payload; `request_id` is the MCP request's id
+    (always set; it is `None` only for direct `bind_tools` calls), for
+    correlating records that arrive in completion order; `duration_s`
+    covers credentials, `bind_tools`, the tool, and rendering. MCP does not
+    pass `on_call` into `bind_tools`, so each call yields one record,
+    including credential and resolver failures (see
+    [ADR 0043](docs/adr/0043-shared-tool-call-observer.md)).
   - **Startup checks.** Every argument, the prefix rule (1 to 64 of
     `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
     (which fail under `python -OO`), and name or URI collisions with what
@@ -1281,7 +1341,9 @@ suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
 agent-facing layer: it registers `tools` on an MCP server, serves the text
 `prompts` assembles, and also imports the `wenchang` package root (for
 `__version__`), `identity`, `scope`, `transport`, `errors`, `version_token`,
-and `core` types for its signatures; nothing depends on it.
+and `core` types for its signatures; nothing depends on it. `observer` is
+dependency-free and omitted; `tools` and `mcp` both deliver tool-call
+records through it.
 
 ### Outside the library: `evals/`
 
@@ -1387,6 +1449,14 @@ server, graders, and report end to end.
   content whose UTF-8 encoding exceeds the store's `max_file_bytes` (default
   16384, configurable, exactly the limit allowed) before consulting storage;
   the ceiling counts content bytes only, never metadata.
+- **A per-entity file cap bounds creates only.** `write_file` with
+  `expected_version=None` outside `system/` fails with
+  `FileQuotaExceededError` once `{scope}/{entity_id}/` holds
+  `max_files_per_entity` (default 500, `None` disables, inclusive)
+  well-formed non-`system/` files; replaces, appends, fact edits, deletes,
+  and reads never consult it. It is enforced in `core`, so every transport
+  applies it, and it is soft: concurrent creates can exceed it (see
+  [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)).
 - **`last-updated` is stamped by `core`, not the caller.** Every write path
   sets `metadata.last_updated` from the store's injectable clock, overriding
   whatever the caller supplied, so the field stays reliable for index
@@ -1515,11 +1585,13 @@ cause. Defined in `wenchang.errors` (see [ADR
 - **Recoverable** (`RecoverableError`) — the error carries its own repair
   material (e.g. `VersionConflictError` returns current content and
   version; `OversizeWriteError` returns current size and limit;
-  `ReplaceFactMatchError` returns content, version, and match count;
-  `NotFoundError` distinguishes an invalid path from a valid path with no
-  file yet; `InvalidArgumentError`, raised only by the tool layer, names
-  the agent-supplied argument to correct, and for an ungranted scope lists
-  the available scopes). The agent corrects and retries in the same turn.
+  `FileQuotaExceededError` returns the per-entity file limit and says to
+  add to an existing file or merge and delete; `ReplaceFactMatchError`
+  returns content, version, and match count; `NotFoundError` distinguishes
+  an invalid path from a valid path with no file yet;
+  `InvalidArgumentError`, raised only by the tool layer, names the
+  agent-supplied argument to correct, and for an ungranted scope lists the
+  available scopes). The agent corrects and retries in the same turn.
 - **Permanent** (`PermanentError`) — stop, do not retry
   (`RestrictedScopeError` for a `system/` write (`SYSTEM_READ_ONLY`), a
   role-gated scope the caller's role is not permitted to write
