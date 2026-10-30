@@ -109,12 +109,12 @@ An adopter calls the engine through `bind_tools(..., on_call=observer)` and gets
 
   The `ToolCallRecord` docstring MUST define `tool`, `arguments`, `result`, `request_id`, and `duration_s` per entry point.
 - **FR-007**: `evals/server.py` MUST narrow `record.request_id` to `str` with an explicit `if request_id is None: raise ...` before building `TraceCall`, because MCP records always carry an id.
-- **FR-006**: `make check` MUST pass, with every existing test unmodified.
+- **FR-006**: `make check` MUST pass, with every existing test unmodified except the one approved line below.
 
 ## Success Criteria *(mandatory)*
 
 - **SC-001**: An adopter using `bind_tools` gets one record per tool call without wrapping tools.
-- **SC-002**: `tests/test_mcp_server.py`, `tests/test_evals_server.py`, and `tests/test_tools*.py` pass and type-check (`make typecheck`) unmodified.
+- **SC-002**: `tests/test_mcp_server.py`, `tests/test_evals_server.py`, and `tests/test_tools*.py` pass and type-check (`make typecheck`) unmodified. Deliberate exception, approved by the orchestrator: `tests/test_tools.py` adds `"wenchang.observer"` to `ALLOWED_WENCHANG_IMPORTS`. This one line records the new module boundary and does not weaken the test, which still forbids storage, google, and nested imports.
 
 ## Assumptions
 

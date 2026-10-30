@@ -25,7 +25,7 @@ Files: `TO` = `tests/test_tools_observer.py`, `O` = `tests/test_observer.py`, `M
 | US2.3 uncopyable arguments: logged, no record | `TO::test_uncopyable_arguments_are_logged_not_delivered` |
 | US2.4 no `"secret"` in logs, tracebacks, or chains | `TO::test_observer_failure_log_does_not_leak_tool_exception` |
 | US3.1 keyword-only `on_call=None`; `on_call` property | `TO::test_on_call_is_keyword_only_defaulting_to_none`, `TO::test_on_call_property_returns_the_observer` |
-| US3.2 default: behavior unchanged | `TO::test_no_observer_by_default`; existing `tests/test_tools*.py` (but see below) |
+| US3.2 default: behavior unchanged | `TO::test_no_observer_by_default`; existing `tests/test_tools*.py` (one approved allowlist line; see below) |
 | US3.3 bad / async observer `TypeError`; `bind_tools` before resolver | `TO::test_memory_tools_rejects_bad_observer`, `TO::test_bind_tools_rejects_bad_observer_before_resolving` |
 | US3.4 descriptions and signatures unchanged | `TO::test_descriptions_and_signatures_are_unchanged_by_observer` |
 | US4.1 works without `mcp` | `TO::test_observer_works_without_mcp` |
@@ -43,7 +43,7 @@ Files: `TO` = `tests/test_tools_observer.py`, `O` = `tests/test_observer.py`, `M
 
 ## Deviations from spec
 
-- **Pending:** `tests/test_tools.py::test_tools_module_imports_are_restricted` needs `"wenchang.observer"` added to `ALLOWED_WENCHANG_IMPORTS`. That edits an existing test, which conflicts with FR-006 / SC-002 ("unmodified"). Awaiting the orchestrator's decision.
+- **Approved exception to "existing tests unmodified":** `tests/test_tools.py` adds one line, `"wenchang.observer"`, to `ALLOWED_WENCHANG_IMPORTS` (used by `test_tools_module_imports_are_restricted`). This records the new module boundary. It does not weaken the test, which still forbids storage, google, and nested imports.
 - Accepted narrowing (spec, ADR 0043): an MCP record deep-copy failure is now logged and swallowed, not propagated.
 
 ## Look closely at
@@ -54,4 +54,4 @@ Files: `TO` = `tests/test_tools_observer.py`, `O` = `tests/test_observer.py`, `M
 
 ## Follow-ups
 
-- None beyond the pending allowlist decision.
+- None.

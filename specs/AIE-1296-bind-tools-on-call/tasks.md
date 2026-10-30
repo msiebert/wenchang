@@ -34,9 +34,9 @@ Test-first: test-writer writes failing tests (`tests/**` only), then the impleme
 
 ## T4 - Verify
 
-- [ ] T4 lead:
-  - `make check` is green, including `make typecheck` with `tests/test_tools*.py` unmodified (bound-method calls still type-check through the decorator).
-  - `git diff --diff-filter=MDR origin/main -- 'tests/test_tools*.py' tests/test_mcp_server.py tests/test_evals_server.py` is empty.
+- [x] T4 lead:
+  - `make check` is green, including `make typecheck` with existing `tests/test_tools*.py` unmodified apart from the approved allowlist line (bound-method calls still type-check through the decorator).
+  - `git diff --diff-filter=MDR origin/main -- 'tests/test_tools*.py' tests/test_mcp_server.py tests/test_evals_server.py` shows exactly one change: `+        "wenchang.observer",` in `ALLOWED_WENCHANG_IMPORTS` in `tests/test_tools.py` (an approved exception; see spec.md SC-002).
 
 ## T5 - Docs (doc-updater)
 
