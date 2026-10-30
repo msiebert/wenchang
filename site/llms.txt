@@ -1,15 +1,15 @@
 # wenchang
 
-> A memory store that AI agents write to on their own judgment. A Python library that gives an agent a virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools (over MCP or directly) with versioned writes and scope-based write rules. Version 0.1.0, MIT license, Python 3.12+.
+> A memory store that AI agents write to on their own judgment. A Python library that gives an agent a virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools (over MCP or directly) with versioned writes and scope-based write rules. Version 0.1.0, MIT license, Python 3.11+.
 
-wenchang is a library, not a service: there is no CLI, console script, or ready-made server. You write a short server script. It is installed from git; there is no PyPI release. The agent chooses what to remember and where to file it. Files are found through `description` and `aliases` metadata, and there is no content search. wenchang does not authenticate callers: you supply a resolver that maps credentials to an identity. Repository: https://github.com/msiebert/wenchang
+wenchang is a library, not a service: there is no CLI, console script, or ready-made server. You write a short server script. It is not on PyPI; each release is a git tag with a GitHub Release, installed from git by tag. The agent chooses what to remember and where to file it. Files are found through `description` and `aliases` metadata, and there is no content search. wenchang does not authenticate callers: you supply a resolver that maps credentials to an identity. Repository: https://github.com/msiebert/wenchang
 
 ## Instructions for AI agents
 
 To install and wire wenchang for your user:
 
-1. Confirm Python 3.12+, a GCP project, and an MCP client that can launch a stdio server (for example Claude Code).
-2. Install from git: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`. The `mcp` extra installs `mcp>=2.2,<3`.
+1. Confirm Python 3.11+, a GCP project, and an MCP client that can launch a stdio server (for example Claude Code).
+2. Install the release by tag (not on PyPI): `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`. The `mcp` extra installs `mcp>=2.2,<3`.
 3. Ask the user which scopes they need (for example `user`, `project`, `organization`), which are shared, and which roles may write each.
 4. Create a GCS bucket and make sure Application Default Credentials can read, create, delete, and list objects in it.
 5. Create `server.py` from the Setup page: `PromptSlots` (purpose, scope_guidance, seed_areas), `MemoryStore(GcsStorage(bucket))`, an identity resolver, a `ScopePolicy`, then `wenchang.mcp.build_server(...)` and `server.run("stdio")`. Use `InMemoryStorage` only for trials.

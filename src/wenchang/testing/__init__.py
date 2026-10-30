@@ -1,6 +1,6 @@
 """Conformance suites adopters run against their implementations.
 
-Requires the `testing` extra: `pip install "wenchang[testing]"`.
+Requires the `testing` extra: install `wenchang[testing]`; see docs/releasing.md.
 """
 
 from wenchang.testing.resolver_conformance import ResolverConformance

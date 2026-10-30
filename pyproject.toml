@@ -39,6 +39,10 @@ dev-mode-dirs = [".", "src"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/wenchang"]
 
+[tool.hatch.build.targets.sdist]
+# Anchored to the root. Tests are excluded: the test suite runs from a repo checkout.
+include = ["/src", "/README.md", "/LICENSE", "/CHANGELOG.md", "/pyproject.toml"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

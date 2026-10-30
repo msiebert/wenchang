@@ -12,8 +12,8 @@
 
 <p class="hero-lede">wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.</p>
 
-<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code></pre>
-<p class="install-note">Not on PyPI yet. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="setup.html">Setup</a> covers that.</p>
+<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code></pre>
+<p class="install-note">Not on PyPI; each release is a git tag. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="setup.html">Setup</a> covers that.</p>
 
 </div>
 </section>
@@ -22,10 +22,10 @@
 <!--md-->
 wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.
 
-Install (not on PyPI yet):
+Install a release (not on PyPI; each release is a git tag):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Setup](setup.md) covers that.
@@ -299,7 +299,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - Storage other than GCS, apart from an in-memory fake for tests.
 <!--/md-->
 
-Version 0.1.0, MIT license, Python 3.12 or newer. See the [reference](reference.md#limitations) for known limits.
+Version 0.1.0, MIT license, Python 3.11 or newer. See the [reference](reference.md#limitations) for known limits.
 <!--html-->
 
 </section>

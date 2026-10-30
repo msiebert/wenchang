@@ -9,6 +9,28 @@ authorization, and a transport-agnostic tool layer.
 Website: <https://msiebert.github.io/wenchang/>. For agents:
 <https://msiebert.github.io/wenchang/llms.txt>.
 
+## Install
+
+Releases are git tags with GitHub Releases; wenchang is not on PyPI. Install
+the current release, `v0.1.0`, by tag:
+
+```
+pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
+```
+
+With uv:
+
+```
+uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"
+uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
+```
+
+Python 3.11 or newer. For installing the release wheel by URL, the
+versioning policy, and release steps, see
+[docs/releasing.md](docs/releasing.md). Changes are in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Quickstart
 
 ```
@@ -82,7 +104,8 @@ product, each description is the tool's docstring. See
 ## Serving over MCP
 
 `wenchang.mcp` serves the tools and the memory prompt from an MCP server. It
-needs the optional extra: `pip install 'wenchang[mcp]'`.
+needs the optional `[mcp]` extra:
+`pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
 ```python
 from wenchang.mcp import build_server
@@ -197,4 +220,7 @@ The project website in `site/` is generated from `site-src/` by
 
 - [AGENTS.md](AGENTS.md) — commands, workflow, rules
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module map, invariants, diagrams
+- [CHANGELOG.md](CHANGELOG.md) — changes per release
+- [docs/releasing.md](docs/releasing.md) — installing a release, versioning
+  policy, release steps
 - [docs/](docs/) — product overview, glossary, ADRs

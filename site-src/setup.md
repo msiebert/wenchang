@@ -6,19 +6,23 @@ wenchang is a library. It has no command line tool, no ready-made server, and no
 
 ## What you need {#needs}
 
-- Python 3.12 or newer.
+- Python 3.11 or newer.
 - A GCP project and a GCS bucket for memory files.
 - An MCP client that can launch a stdio server, such as Claude Code.
 
 ## 1. Install {#install}
 
-wenchang is not on PyPI. Install it from git into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
+wenchang is not on PyPI. Each release is a git tag with a GitHub Release. Install a release by its tag into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
-With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
+
+Without the MCP adapter, install the base package: `pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`, or `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
+
+What changed in each release is in the [changelog](https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md).
 
 ## 2. Create the bucket {#bucket}
 

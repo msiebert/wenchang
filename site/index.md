@@ -4,10 +4,10 @@
 
 wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.
 
-Install (not on PyPI yet):
+Install a release (not on PyPI; each release is a git tag):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Setup](setup.md) covers that.
@@ -132,7 +132,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - A remote transport. The tools talk to storage in the same process.
 - Storage other than GCS, apart from an in-memory fake for tests.
 
-Version 0.1.0, MIT license, Python 3.12 or newer. See the [reference](reference.md#limitations) for known limits.
+Version 0.1.0, MIT license, Python 3.11 or newer. See the [reference](reference.md#limitations) for known limits.
 
 ---
 
