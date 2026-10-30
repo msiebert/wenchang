@@ -59,6 +59,7 @@
 <li><a href="#metadata">File metadata</a></li>
 <li><a href="#concurrency">Optimistic concurrency</a></li>
 <li><a href="#limits">Limits</a></li>
+<li><a href="#file-cap">Files per entity</a></li>
 </ul>
 </li>
 <li><a href="#tools">Tools</a>
@@ -204,6 +205,11 @@
 <td><code>MemoryStore(list_page_size=...)</code></td>
 </tr>
 <tr>
+<td>Files per entity</td>
+<td>500 files, <code>system/</code> not counted</td>
+<td><code>MemoryStore(max_files_per_entity=...)</code>; see <a href="#file-cap">Files per entity</a></td>
+</tr>
+<tr>
 <td><code>replace_fact</code> attempts</td>
 <td>3</td>
 <td>fixed</td>
@@ -211,6 +217,18 @@
 </tbody>
 </table></div>
 <p>When the index overflows its budget, the remaining files are reported under <code>capped</code> by area, with the count omitted, and the agent pages them with <code>list_prefix</code>. Index order: <code>system/</code> areas of all scopes first; then scopes in <code>scope_priority</code> order (unlisted scopes last, as one tier); within each tier, most recently updated first.</p>
+<h3 id="file-cap">Files per entity<a class="headerlink" href="#file-cap" title="Link to this section">#</a></h3>
+<p>An entity is everything under one <code>{scope}/{entity_id}/</code> prefix: one user's private memory, or one project's shared memory. <code>MemoryStore(max_files_per_entity=...)</code> caps how many files it holds. The default is 500 (<code>wenchang.core.DEFAULT_MAX_FILES_PER_ENTITY</code>); <code>None</code> disables the cap, and any other value must be positive (<code>ValueError</code> otherwise).</p>
+<div class="highlight"><pre><span></span><code><span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">max_files_per_entity</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>  <span class="c1"># or None for no cap</span>
+</code></pre></div>
+
+<p>Only creates are checked: a <code>write_file</code> with <code>expected_version=null</code> outside <code>system/</code>. Replacing a file, <code>append_line</code>, <code>replace_fact</code>, <code>delete_file</code>, and reads never are, so an entity at its cap keeps working on the files it has. Files in <code>system/</code> and keys that are not well-formed memory paths are not counted. Deleting a file frees a slot.</p>
+<p>At the cap, the create fails with a recoverable <code>FileQuotaExceededError</code> whose payload carries <code>limit</code> (plus <code>scope</code>, <code>area</code>, and <code>name</code>). If a file already exists at that path, the create fails with <code>VersionConflictError</code> instead, as it would below the cap. For scope <code>user</code>, area <code>notes</code>, name <code>new</code>, and a limit of 3, the agent sees:</p>
+<div class="highlight"><pre><span></span><code>Cannot create a new file at scope user, area notes, name new: memory in scope user is at its limit of 3 files (system/ files not counted). Add this content to an existing file instead (append_line, replace_fact, or write_file with that file's version), or merge related files into one and delete the merged ones with delete_file, then retry.
+</code></pre></div>
+
+<p>followed by the standard recoverable guidance, so the agent consolidates and retries in the same turn without asking the user.</p>
+<p>The cap is soft. Counting and writing are not atomic, so concurrent creates in one entity can exceed it by at most the number of creates racing at the boundary. Each checked create counts the entity's keys with <code>Storage.list_page</code>, in pages of <code>max(limit - count, list_page_size)</code> keys, stopping once it reaches the limit: at most the limit plus the uncounted keys plus one <code>list_page_size</code> page, and usually one list call.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Link to this section">#</a></h2>
 <p>Seven tools. With <code>tool_prefix</code> set, each is registered as <code>{tool_prefix}_{name}</code>. All results are JSON objects; all failures are rendered as described under <a href="#errors">errors</a>. In every tool, <code>scope</code>, <code>area</code>, and <code>name</code> are strings, and <code>expected_version</code> is a string (the <code>version</code> from a prior result).</p>
 <p>Common file object, returned by <code>read_file</code>, <code>write_file</code>, <code>append_line</code>, and <code>replace_fact</code>:</p>
@@ -434,7 +452,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>Returns the common file object. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code> (<code>file_absent</code>, when replacing a file that does not exist), <code>OversizeWriteError</code>, <code>InvalidArgumentError</code>, <code>RestrictedScopeError</code>.</p>
+<p>Returns the common file object. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code> (<code>file_absent</code>, when replacing a file that does not exist), <code>OversizeWriteError</code>, <code>FileQuotaExceededError</code> (creating a file in an entity at its <a href="#file-cap">file cap</a>), <code>InvalidArgumentError</code>, <code>RestrictedScopeError</code>.</p>
 </section><section class="tool-card"><h3 id="append_line"><span>append_line</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#append_line" title="Link to this section">#</a></h3><p class="sig"><span class="fn">append_line</span>(scope, area, name, line, expected_version, <span class="opt">aliases?</span>, <span class="opt">description?</span>)</p>
 <blockquote>
 <p>Add one fact line to the end of an existing memory file. <code>line</code> is a single fact line with a leading bracketed label (<code>[stated]</code>, <code>[observed]</code>, <code>[inferred]</code>, or <code>[system]</code>), as in <code>- [stated] Prefers tea</code>. Pass the version you read as <code>expected_version</code>. The per-file byte ceiling applies to the result. Optional <code>aliases</code> are added to the file's existing aliases and never removed (<code>write_file</code> replaces the whole set); an optional one-line <code>description</code> replaces the stored one. A version conflict is routine: merge your change into the content it returns and retry with its version.</p>
@@ -698,6 +716,12 @@
 <td><code>size</code>, <code>limit</code></td>
 </tr>
 <tr>
+<td><code>FileQuotaExceededError</code></td>
+<td>recoverable</td>
+<td>A <code>write_file</code> create would exceed the entity's <a href="#file-cap">file cap</a>.</td>
+<td><code>limit</code></td>
+</tr>
+<tr>
 <td><code>ReplaceFactMatchError</code></td>
 <td>recoverable</td>
 <td><code>old_string</code> matched zero spans or more than one.</td>
@@ -747,7 +771,7 @@
 <p><code>IdentityResolver[C]</code> is a protocol with one method, <code>resolve(credentials: C) -&gt; Identity | ResolutionFailure</code>. It must not raise, and the <code>detail</code> of a <code>ResolutionFailure</code> is shown to the agent. <code>SandboxResolver(identity)</code> returns one fixed identity for any credentials, for sandboxes and tests.</p>
 <p><code>wenchang.scope.ScopePolicy(write_roles)</code> maps a scope to the <code>frozenset</code> of roles allowed to write it. A scope absent from the mapping is unrestricted. <code>policy.permitted_roles(scope)</code> returns the set or <code>None</code>.</p>
 <h3 id="store-options">Store options<a class="headerlink" href="#store-options" title="Link to this section">#</a></h3>
-<p><code>wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=())</code>. The three size options must be positive. <code>scope_priority</code> entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and <code>system/</code> areas always come first. <code>clock</code> returns timezone-aware datetimes and stamps <code>last_updated</code>; pass a fixed one in tests. A write over <code>max_file_bytes</code> raises <code>OversizeWriteError</code>.</p>
+<p><code>wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=(), max_files_per_entity=500)</code>. The three size options must be positive. <code>max_files_per_entity</code> caps the non-<code>system/</code> files per entity and must be positive or <code>None</code> (no cap); see <a href="#file-cap">Files per entity</a>. <code>scope_priority</code> entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and <code>system/</code> areas always come first. <code>clock</code> returns timezone-aware datetimes and stamps <code>last_updated</code>; pass a fixed one in tests. A write over <code>max_file_bytes</code> raises <code>OversizeWriteError</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
@@ -759,6 +783,7 @@
     <span class="n">max_file_bytes</span><span class="o">=</span><span class="mi">8</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">,</span>  <span class="c1"># default 16384: larger writes raise OversizeWriteError</span>
     <span class="n">index_max_bytes</span><span class="o">=</span><span class="mi">32</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">,</span>  <span class="c1"># default 65536: the startup index is capped at this size</span>
     <span class="n">list_page_size</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>  <span class="c1"># default 100: entries per list_prefix page</span>
+    <span class="n">max_files_per_entity</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>  <span class="c1"># default 500 (None: no cap): at the cap, creates fail</span>
     <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"project"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">),</span>  <span class="c1"># which scopes the capped index keeps first</span>
     <span class="n">clock</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">),</span>  <span class="c1"># must return timezone-aware datetimes</span>
 <span class="p">)</span>
@@ -1056,6 +1081,7 @@
 <li><a href="#metadata">File metadata</a></li>
 <li><a href="#concurrency">Optimistic concurrency</a></li>
 <li><a href="#limits">Limits</a></li>
+<li><a href="#file-cap">Files per entity</a></li>
 </ul>
 </li>
 <li><a href="#tools">Tools</a>

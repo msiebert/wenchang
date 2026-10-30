@@ -75,9 +75,30 @@ Every file has an opaque `version` (the GCS generation under `GcsStorage`). Ever
 | Per-file content size | 16384 bytes (UTF-8) | `MemoryStore(max_file_bytes=...)` |
 | Startup index size | 65536 bytes | `MemoryStore(index_max_bytes=...)` |
 | `list_prefix` page size | 100 entries | `MemoryStore(list_page_size=...)` |
+| Files per entity | 500 files, `system/` not counted | `MemoryStore(max_files_per_entity=...)`; see [Files per entity](#file-cap) |
 | `replace_fact` attempts | 3 | fixed |
 
 When the index overflows its budget, the remaining files are reported under `capped` by area, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+
+### Files per entity
+
+An entity is everything under one `{scope}/{entity_id}/` prefix: one user's private memory, or one project's shared memory. `MemoryStore(max_files_per_entity=...)` caps how many files it holds. The default is 500 (`wenchang.core.DEFAULT_MAX_FILES_PER_ENTITY`); `None` disables the cap, and any other value must be positive (`ValueError` otherwise).
+
+```python
+store = MemoryStore(storage, max_files_per_entity=200)  # or None for no cap
+```
+
+Only creates are checked: a `write_file` with `expected_version=null` outside `system/`. Replacing a file, `append_line`, `replace_fact`, `delete_file`, and reads never are, so an entity at its cap keeps working on the files it has. Files in `system/` and keys that are not well-formed memory paths are not counted. Deleting a file frees a slot.
+
+At the cap, the create fails with a recoverable `FileQuotaExceededError` whose payload carries `limit` (plus `scope`, `area`, and `name`). If a file already exists at that path, the create fails with `VersionConflictError` instead, as it would below the cap. For scope `user`, area `notes`, name `new`, and a limit of 3, the agent sees:
+
+```
+Cannot create a new file at scope user, area notes, name new: memory in scope user is at its limit of 3 files (system/ files not counted). Add this content to an existing file instead (append_line, replace_fact, or write_file with that file's version), or merge related files into one and delete the merged ones with delete_file, then retry.
+```
+
+followed by the standard recoverable guidance, so the agent consolidates and retries in the same turn without asking the user.
+
+The cap is soft. Counting and writing are not atomic, so concurrent creates in one entity can exceed it by at most the number of creates racing at the boundary. Each checked create counts the entity's keys with `Storage.list_page`, in pages of `max(limit - count, list_page_size)` keys, stopping once it reaches the limit: at most the limit plus the uncounted keys plus one `list_page_size` page, and usually one list call.
 
 ## Tools
 
@@ -152,7 +173,7 @@ Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the comm
 | `aliases` | array of strings | yes | Replaces the stored set (use `[]` for none). |
 | `expected_version` | string or null | yes | `null` creates (fails if the file exists); otherwise the version being replaced. |
 
-Returns the common file object. Errors: `VersionConflictError`, `NotFoundError` (`file_absent`, when replacing a file that does not exist), `OversizeWriteError`, `InvalidArgumentError`, `RestrictedScopeError`.
+Returns the common file object. Errors: `VersionConflictError`, `NotFoundError` (`file_absent`, when replacing a file that does not exist), `OversizeWriteError`, `FileQuotaExceededError` (creating a file in an entity at its [file cap](#file-cap)), `InvalidArgumentError`, `RestrictedScopeError`.
 
 ### append_line
 
@@ -243,6 +264,7 @@ A failed tool call returns an MCP error result (`isError` true) whose JSON paylo
 | --- | --- | --- | --- |
 | `VersionConflictError` | recoverable | The file changed since it was read. | `content`, `version` (current) |
 | `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `size`, `limit` |
+| `FileQuotaExceededError` | recoverable | A `write_file` create would exceed the entity's [file cap](#file-cap). | `limit` |
 | `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `content`, `version`, `match_count` |
 | `InvalidArgumentError` | recoverable | An argument was rejected: unknown scope, bad area slug, bad name, not a fact line, empty `old_string`, bad cursor, and similar. | `argument` |
 | `NotFoundError` | recoverable | The location is invalid (`invalid_path`) or no file exists there (`file_absent`). | `reason` |
@@ -268,7 +290,7 @@ Notes:
 
 ### Store options
 
-`wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=())`. The three size options must be positive. `scope_priority` entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and `system/` areas always come first. `clock` returns timezone-aware datetimes and stamps `last_updated`; pass a fixed one in tests. A write over `max_file_bytes` raises `OversizeWriteError`.
+`wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=(), max_files_per_entity=500)`. The three size options must be positive. `max_files_per_entity` caps the non-`system/` files per entity and must be positive or `None` (no cap); see [Files per entity](#file-cap). `scope_priority` entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and `system/` areas always come first. `clock` returns timezone-aware datetimes and stamps `last_updated`; pass a fixed one in tests. A write over `max_file_bytes` raises `OversizeWriteError`.
 
 ```python
 from datetime import UTC, datetime
@@ -282,6 +304,7 @@ store = MemoryStore(
     max_file_bytes=8 * 1024,  # default 16384: larger writes raise OversizeWriteError
     index_max_bytes=32 * 1024,  # default 65536: the startup index is capped at this size
     list_page_size=50,  # default 100: entries per list_prefix page
+    max_files_per_entity=200,  # default 500 (None: no cap): at the cap, creates fail
     scope_priority=("user", "project", "organization"),  # which scopes the capped index keeps first
     clock=lambda: datetime.now(UTC),  # must return timezone-aware datetimes
 )
