@@ -54,13 +54,22 @@ invalidates; a read-only cache cannot be correct.
    stale listing is never served. Two concurrent `set`s on the token key
    only replace one fresh random token with another. The lost write costs at
    most an extra miss.
+
+   Known hole: the argument assumes a write has committed or never will by
+   the time its call returns or raises. A write that raised
+   `BackendUnavailableError` (for example a timeout) can still commit
+   server-side after the `finally` in decision 4 has replaced the token. A
+   reader can then cache a pre-commit listing under the fresh token, and it
+   is served until the entity's next write or invalidation, or until `ttl`
+   expires (decision 10).
 4. **Invalidate after every storage mutation attempt.** `write_file`,
    `append_line`, `replace_fact` (on every attempt), and `delete_file`
    replace the entity's token in a `finally` around each `put_if_version`
    and `delete_if_version`. Invalidation runs whether the storage call
    returned or raised, because a `BackendUnavailableError` can hide a write
    that landed. It never replaces or masks the method's own result or
-   exception.
+   exception. It cannot cover a write that commits only after the call
+   raised; see the known hole in decision 3.
 5. **Tombstones on delete and explicit invalidation only.** `delete_file`
    and `MemoryStore.invalidate_index(scope, entity_id)` also overwrite the
    listing key with a tombstone after replacing the token, so deleted
@@ -84,11 +93,15 @@ invalidates; a read-only cache cannot be correct.
    a naive `last_updated`, has a path that is invalid, outside that entity's
    prefix, or repeated, or is the tombstone is a miss. Keys carry no storage
    identity, so stores over different storage roots that share one cache
-   need distinct `key_prefix`es.
+   need distinct `key_prefix`es. Because scope and entity segments may
+   contain `":"`, those prefixes must also be prefix-free: no configured
+   `key_prefix` may be a string prefix of another sharing the cache. Ending
+   each in a delimiter and keeping them distinct satisfies this. It is not
+   validated at runtime.
 8. **Consistency requirement.** `get` and `set` must be linearizable per key,
    as a single Redis primary is. They need not be atomic across keys. A
-   cache with weaker consistency, such as reads from asynchronous replicas,
-   weakens freshness to the `ttl` bound.
+   cache weaker than per-key linearizable, such as one reading from
+   asynchronous replicas, bounds freshness only by `ttl`.
 9. **Failure policy.** In `get_memory_index` and the mutations, an
    `Exception` from `get` or `set` is logged as a WARNING on logger
    `wenchang.core` and treated as a miss, or the store or invalidation is
@@ -100,12 +113,14 @@ invalidates; a read-only cache cannot be correct.
    invalidation. A `MetadataFormatError` or `BackendUnavailableError` during
    listing propagates, and nothing is stored for that entity.
 10. **`ttl`.** It is passed unchanged to every `set`. Tokens cannot detect a
-    write by something that does not invalidate, or an invalidation that
-    failed and was swallowed. A finite `ttl` bounds staleness from both.
-    With `ttl=None` staleness is **unbounded**: the entity stays stale until
-    something invalidates it or the cache evicts the key. A finite `ttl` is
-    recommended in production and **required** for adopters with erasure
-    obligations (decision 12).
+    write by something that does not invalidate, an invalidation that
+    failed and was swallowed, a write that commits after its call raised
+    `BackendUnavailableError` (decision 3), or staleness from a cache
+    weaker than per-key linearizable (decision 8). A finite `ttl` bounds
+    staleness from all of these. With `ttl=None` staleness is
+    **unbounded**: the entity stays stale until something invalidates it or
+    the cache evicts the key. A finite `ttl` is recommended in production
+    and **required** for adopters with erasure obligations (see Privacy).
 
 ### Constitution principle V
 
@@ -157,7 +172,9 @@ required for adopters with erasure obligations, and a purge must call
   cached store.
 - Every writer to a storage root must share the cache config, call
   `invalidate_index`, or accept staleness up to `ttl`, or with no bound when
-  `ttl=None`.
+  `ttl=None`. The same bound covers a timed-out write that commits late.
+- Stores sharing one cache need distinct, prefix-free `key_prefix`es; this
+  is the adopter's responsibility and is not validated.
 - Pre-delete metadata can stay, unserved, in the adopter's cache until
   re-index or `ttl`. Adopters with erasure obligations must set a finite
   `ttl`.

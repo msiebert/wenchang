@@ -183,11 +183,16 @@ the one planned piece.
   that is neither `None` nor a real `timedelta`, or a `key_prefix` whose real
   type is not `str`; then `ttl <= timedelta(0)` raises `ValueError`.
   `key_prefix` is stored as an exact `str`. The contract: `get` and `set`
-  linearizable per key (not across keys); values opaque `str`s; with
-  `ttl=None` a swallowed invalidation failure or a write that bypasses the
-  cache leaves an entity stale with no bound, so production should use a
-  finite `ttl`; keys carry no storage identity, so stores over different
-  storage roots sharing one cache need distinct `key_prefix`es.
+  linearizable per key (not across keys), and a weaker cache (e.g. reading
+  from async replicas) bounds freshness only by `ttl`; values opaque
+  `str`s; with `ttl=None` a swallowed invalidation failure, a write that
+  bypasses the cache, or a timed-out write that commits late leaves an
+  entity stale with no bound, so production should use a finite `ttl`; keys
+  carry no storage identity, so stores over different storage roots sharing
+  one cache need distinct `key_prefix`es, and since scope and entity
+  segments may contain `":"` those prefixes must be prefix-free (none a
+  string prefix of another; e.g. end each in a delimiter), which is not
+  validated at runtime.
   `InMemoryIndexCache(*, clock=...)` is a thread-safe reference
   implementation (one lock per method) for tests and single-process hosts:
   an entry expires once `clock() >= set_time + ttl` and is dropped only when
@@ -1414,8 +1419,14 @@ server, graders, and report end to end.
   storage call, so a listing taken before a write is never served after
   that write's invalidation. Writers that bypass the cache must call
   `invalidate_index` or accept staleness bounded by `ttl` (unbounded when
-  `ttl=None`). Pre-delete metadata stored by a racing reader can persist,
-  unserved, until re-index or `ttl` (see
+  `ttl=None`). One known hole: a write that raised
+  `BackendUnavailableError` (e.g. a timeout) can still commit server-side
+  after the `finally` has replaced the token, so a reader can cache a
+  pre-commit listing under the fresh token, stale until the entity's next
+  write or `ttl` (unbounded when `ttl=None`). A cache weaker than per-key
+  linearizable is likewise bounded only by `ttl`. Pre-delete metadata
+  stored by a racing reader can persist, unserved, until re-index or `ttl`
+  (see
   [ADR 0040](docs/adr/0040-index-cache.md)).
 - **The transport mirrors core exactly.** Each of `TransportClient`'s seven
   operations shared with `MemoryStore` has an identical signature (held by
