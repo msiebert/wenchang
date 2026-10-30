@@ -20,7 +20,11 @@ features are a page list field, redirect stubs, and one generated file).
 | `reference.md#storage`, `#store-options` | Reference keeps API signatures; operational guidance in `storage.md` |
 | `reference.md#limitations` | `status.md#limitations` |
 | `usage.md` | `walkthroughs.md` (content unchanged; title "Walkthroughs") |
-| Sibling-PR site text (purge, cache, cap, on_call, schemas) | Wherever this table and the pages below place that topic |
+| `reference.md` Telemetry section (#53, `on_call` on both entry points) | Reference keeps the `ToolCallRecord` field table; per-entry-point usage moves to the integrate pages |
+| `reference.md` file-cap section (#54) | `storage.md#file-cap`; Concepts limits table and Reference store options keep one row/line linking it |
+| `caching.md` page (#56, in `PAGES`) | `storage.md#index-cache`; `caching` removed from `PAGES` and added to `REDIRECTS` (→ `storage`) |
+| Purge/export docs (#57) | `storage.md#erase` (operator guidance); Reference keeps the `purge`/`export` signatures |
+| Any other sibling site text | Wherever this table and the pages below place that topic; never in two places |
 
 ## New pages
 
@@ -56,7 +60,7 @@ and what `GcsStorage` passes for timeout/retry.
   links follow `PAGES` order across all 13 pages. The 404 page lists top-level
   pages.
 - `REDIRECTS = {"setup": "quickstart", "authorization": "identity",
-  "usage": "walkthroughs"}`: each writes `site/{old}.html` (meta refresh,
+  "usage": "walkthroughs", "caching": "storage"}`: each writes `site/{old}.html` (meta refresh,
   canonical to the new URL, `noindex`, a plain link) and `site/{old}.md` (one
   line pointing to the new `.md`).
 - Memory prompt: the script puts `ROOT / "src"` on `sys.path` and imports

@@ -47,10 +47,9 @@ Docs and build script only; no `src/` change.
 
 ## Open questions / assumptions
 
-- Assumes no ADR is needed for the build-script changes. If the orchestrator wants one, it needs a number (0044?).
+- Settled by orchestrator: no ADR; the prompt drift test is accepted; #55 rebases onto this and re-pins every install line.
 - Status page links `CHANGELOG.md` / `docs/releasing.md`, which exist only after #55 merges right after this.
-- #55 must rebase onto this and re-pin every install line, including the new pages; its pin test will flag them.
-- The drift test means a prompt-wording PR must also regenerate the site.
+- Sibling docs (#53 Telemetry, #54 file cap in `reference.md`; #56 `caching.md`; #57 purge/export) are relocated per plan.md's move table; `caching.html` becomes a redirect to `storage.html`.
 
 ## Risks
 

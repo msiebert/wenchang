@@ -190,13 +190,22 @@ known limitations moved from Reference, each described as it is today (no
 4. **Given** every relative `href` in `site/*.html`, **When** resolved,
    **Then** the target file exists and any `#fragment` names an `id` in the
    target page.
-5. **Given** `setup.html`, `authorization.html`, `usage.html`, **When**
+5. **Given** `setup.html`, `authorization.html`, `usage.html`, and
+   `caching.html` (the page #56 adds), **When**
    loaded, **Then** each redirects (meta refresh plus canonical link) to its
    new page and is not in the nav, sitemap, or llms files.
 6. **Given** each Python snippet in `site-src/snippets/`, **When** run with
    the test interpreter, **Then** it exits 0, unless it is on an explicit skip
    list with a reason (it needs GCS or a network server); every snippet is on
    exactly one of the two lists.
+
+### User Story 9 - Sibling docs are absorbed, not duplicated (P1)
+
+1. **Given** the merged sibling docs (#53 Telemetry and #54 file-cap
+   sections in `reference.md`, #56 `caching.md`, #57 purge/export docs),
+   **When** the build is done, **Then** each topic's operational guidance
+   lives on exactly one page per plan.md's move table, other pages only link
+   to it, and `caching.md` no longer exists as a source page.
 
 ### Edge Cases
 
