@@ -58,9 +58,9 @@ Top nav (short labels; page titles carry the long names):
 This matches the issue's suggested order. Labels are shortened to fit one
 header row; the PR states this.
 
-Old URLs `setup.html`, `authorization.html`, `usage.html`, `caching.html`
-become redirect stubs to `quickstart.html`, `identity.html`,
-`walkthroughs.html`, `storage.html`. Links into moved pages are retargeted
+Old URLs `setup.html`, `authorization.html`, `usage.html`, `caching.html`,
+`operations.html` become redirect stubs to `quickstart.html`,
+`identity.html`, `walkthroughs.html`, `storage.html`, `storage.html`. Links into moved pages are retargeted
 (e.g. `caching.md`'s `setup.md#seed` becomes `quickstart.md#seed`).
 
 ## User Scenarios & Testing
@@ -205,8 +205,8 @@ known limitations moved from Reference, each described as it is today (no
    and regenerates `site/`; a second run produces no diff.
 2. **Given** every generated page, **When** its header nav is read, **Then**
    labels are, in order, the 10 nav labels above plus `GitHub`.
-3. **Given** the 13 slugs (`caching` is folded into `storage` and is not a
-   slug), **When** `site/` is checked, **Then** each has `.html` and `.md`,
+3. **Given** the 13 slugs (`caching` and `operations` are folded into
+   `storage` and are not slugs), **When** `site/` is checked, **Then** each has `.html` and `.md`,
    `sitemap.xml` lists exactly those 13 URLs (`index` as the site root
    `https://msiebert.github.io/wenchang/`),
    `llms-full.txt` has a `<!-- page: {slug}.md -->` marker for each in order,
@@ -214,8 +214,8 @@ known limitations moved from Reference, each described as it is today (no
 4. **Given** every relative `href` in `site/*.html`, **When** resolved,
    **Then** the target file exists and any `#fragment` names an `id` in the
    target page.
-5. **Given** `setup.html`, `authorization.html`, `usage.html`, and
-   `caching.html` (the page #56 adds), **When**
+5. **Given** `setup.html`, `authorization.html`, `usage.html`,
+   `caching.html` (#56), and `operations.html` (#57), **When**
    loaded, **Then** each redirects (meta refresh plus canonical link) to its
    new page and is not in the nav, sitemap, or llms files.
 6. **Given** each Python snippet in `site-src/snippets/`, **When** run with
@@ -237,10 +237,11 @@ known limitations moved from Reference, each described as it is today (no
 ### User Story 9 - Sibling docs are absorbed, not duplicated (P1)
 
 1. **Given** the merged sibling docs (#53 Telemetry and #54 file-cap
-   sections in `reference.md`, #56 `caching.md`, #57 purge/export docs),
-   **When** the build is done, **Then** each topic's operational guidance
-   lives on exactly one page per plan.md's move table, other pages only link
-   to it, and `caching.md` no longer exists as a source page.
+   sections in `reference.md`, #56 `caching.md`, #57 `operations.md` and its
+   snippets), **When** the build is done, **Then** each topic's operational
+   guidance lives on exactly one page per plan.md's move table, other pages
+   only link to it, `caching.md` and `operations.md` no longer exist as source
+   pages, and there is one `ops_erase.py`.
 
 ### Edge Cases
 

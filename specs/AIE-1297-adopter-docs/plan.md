@@ -23,7 +23,7 @@ features are a page list field, redirect stubs, and one generated file).
 | `reference.md` Telemetry section (#53, `on_call` on both entry points) | Reference keeps the `ToolCallRecord` field table; per-entry-point usage moves to the integrate pages |
 | `reference.md` file-cap section (#54) | `storage.md#file-cap`; Concepts limits table and Reference store options keep one row/line linking it |
 | `caching.md` page (#56, in `PAGES`) | `storage.md#index-cache`; `caching` removed from `PAGES` and added to `REDIRECTS` (→ `storage`) |
-| Purge/export docs (#57) | `storage.md#erase` (operator guidance); Reference keeps the `purge`/`export` signatures |
+| `operations.md` page "Purge & export" (#57, in `PAGES`, the `llms-full` header, `sitemap.xml`, `llms.txt`; snippets `ops_erase.py`, `ops_restore.py`) | `storage.md#erase`; `operations` removed from `PAGES`, its hand-added sitemap/llms.txt lines removed, and added to `REDIRECTS` (→ `storage`). Its `ops_erase.py` is reused (extended with the index-cache/`invalidate_index` step and `assert`s if it lacks them), not duplicated; `ops_restore.py` is kept and embedded. Reference keeps the `purge`/`export` signatures |
 | Any other sibling site text | Wherever this table and the pages below place that topic; never in two places |
 
 ## New pages
@@ -39,9 +39,11 @@ features are a page list field, redirect stubs, and one generated file).
   `custom_embed.py` snippet.
 - **`integrate-without-mcp.md`**: US2 items 1-7; new snippet
   `snippets/integrate_direct.py`.
-- **`storage.md`**: US5 items 1-6; new snippet `snippets/ops_erase.py`
-  (export then purge one user on `InMemoryStorage`, with an
-  `InMemoryIndexCache` and `invalidate_index`).
+- **`storage.md`**: US5 items 1-6, absorbing #56's `caching.md` and #57's
+  `operations.md`; uses #57's `snippets/ops_erase.py` (export then purge one
+  user on `InMemoryStorage`), extended if needed with an
+  `InMemoryIndexCache`, `invalidate_index`, and `assert`s, plus #57's
+  `ops_restore.py`.
 - **`status.md`**: US6.
 
 Every fact on these pages is checked against `src/` on the rebased branch,
@@ -60,7 +62,7 @@ and what `GcsStorage` passes for timeout/retry.
   links follow `PAGES` order across all 13 pages. The 404 page lists top-level
   pages.
 - `REDIRECTS = {"setup": "quickstart", "authorization": "identity",
-  "usage": "walkthroughs", "caching": "storage"}`: each writes `site/{old}.html` (meta refresh,
+  "usage": "walkthroughs", "caching": "storage", "operations": "storage"}`: each writes `site/{old}.html` (meta refresh,
   canonical to the new URL, `noindex`, a plain link) and `site/{old}.md` (one
   line pointing to the new `.md`).
 - Memory prompt: the script puts `ROOT / "src"` on `sys.path` and imports
@@ -106,7 +108,7 @@ reads committed files under `site/` and `site-src/`):
 | `test_every_page_is_generated_and_listed` | `.html` + `.md` per slug; sitemap `<loc>`s equal the 13 URLs (`index` → site root); `llms-full.txt` page markers in order; `llms.txt` links each `{slug}.md` (US8.3) |
 | `test_no_stale_outputs` | `site/*.html` stems == slugs ∪ `REDIRECTS` ∪ {`404`}; `site/*.md` stems == slugs ∪ `REDIRECTS` ∪ {`memory-prompt`} (US8.7) |
 | `test_internal_links_resolve` | Every relative `href` in `site/*.html` (redirect stubs included) exists in `site/`; every fragment, including same-page `#frag`, is an `id` in the target. Skipped: absolute `http(s)://`, protocol-relative `//`, `mailto:`, and bare `#` (US8.4) |
-| `test_redirect_stubs` | The four old `.html` files (`setup`, `authorization`, `usage`, `caching`) meta-refresh to the new page; old slugs absent from nav, sitemap, `llms.txt`, `llms-full.txt` (US8.5) |
+| `test_redirect_stubs` | The five old `.html` files (`setup`, `authorization`, `usage`, `caching`, `operations`) meta-refresh to the new page; old slugs absent from nav, sitemap, `llms.txt`, `llms-full.txt` (US8.5) |
 | `test_llms_txt_step_zero` | The instructions list's first item starts `0.` and links the three integrate child pages (US1.1) |
 | `test_memory_prompt_matches_library` | `site/memory-prompt.md` equals `build_memory_prompt(placeholders)` byte for byte; failure message says to run `uv run scripts/build_site.py` (US7.2) |
 | `test_version_consistency` | `status.md` and `site/llms.txt` state `pyproject.toml`'s `version` and the `requires-python` floor (US8.8) |
@@ -129,7 +131,8 @@ snippets, including any siblings added):
   in the dev group (needs a third-party package).
 - `RUNNABLE`: `custom_bind.py`, `custom_embed.py`, `custom_store.py`,
   `custom_conformance.py`, `prompt_slots.py`, `prompt_extra.py`,
-  `custom_observer.py`, `integrate_direct.py`, `ops_erase.py`, and any other
+  `custom_observer.py`, `integrate_direct.py`, `ops_erase.py`,
+  `ops_restore.py` (if it runs offline), and any other
   sibling snippet that runs offline.
 
 `integrate_direct.py` and `ops_erase.py` end in `assert`s on their outcomes
