@@ -4,7 +4,7 @@ Test-first: test-writer writes failing tests (`tests/**` only) before anything e
 
 ## T1 - Version, changelog, and pinned-tag tests (US3)
 
-- [ ] T1 test-writer: add `tests/test_release.py` per plan.md (seven unit tests). Expected failing state: the four changelog tests fail (no `CHANGELOG.md`); the pinned-tag test fails (zero pinned installs); the two version tests pass on arrival.
+- [ ] T1 test-writer: add `tests/test_release.py` per plan.md (seven unit tests). Expected failing state: the four changelog tests fail (no `CHANGELOG.md`); the pin test fails (`docs/releasing.md` missing; unpinned installs in README and site-src); the two version tests pass on arrival.
 
 ## T2 - Changelog (US3, US4; lead/general-purpose)
 
@@ -12,7 +12,7 @@ Test-first: test-writer writes failing tests (`tests/**` only) before anything e
 
 ## T3 - Release workflow (US2; lead/general-purpose)
 
-- [ ] T3 add `.github/workflows/release.yml` per plan.md, including the concurrency group. Validate the YAML parses and dry-run the shell pieces locally: the version check with `GITHUB_REF_NAME=v0.1.0` and `v0.1.1`, `uv build`, the smoke install and imports from a temp dir, and the awk notes extraction against `CHANGELOG.md` (non-empty for `0.1.0`, empty for a missing version). Do not push any tag.
+- [ ] T3 add `.github/workflows/release.yml` per plan.md, including the concurrency group. Validate the YAML parses and dry-run the shell pieces locally: the version check with `GITHUB_REF_NAME=v0.1.0` and `v0.1.1`, `uv build`, the smoke install of `"wenchang[mcp,testing] @ file://…whl"` and the six module imports (including `wenchang.mcp`) from a temp dir, and the awk notes extraction against `CHANGELOG.md` (non-empty for `0.1.0`, empty for a missing version). Do not push any tag.
 
 ## T4 - Docs (US1, US4)
 
@@ -24,7 +24,7 @@ Test-first: test-writer writes failing tests (`tests/**` only) before anything e
 
 ## T5 - Verify
 
-- [ ] T5 lead: `make check`; local `uv build` + scratch-venv wheel install prints `0.1.0` and the module imports succeed.
+- [ ] T5 lead: `make check`; local `uv build` + scratch-venv install of the wheel with `[mcp,testing]` prints `0.1.0` and the six module imports succeed.
 
 ## Order
 

@@ -48,7 +48,7 @@ Keep a Changelog 1.1.0 format. Machine-relevant shape:
 ```
 
 - Release headings match `^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})$`.
-- Section extraction rule (shared by the test and the workflow's awk): the lines after the `## [X.Y.Z]` heading, up to but excluding the next line starting with `## ` or matching `^\[[^]]+\]: ` (link reference). A section is valid if at least one of those lines is non-blank.
+- Section extraction rule (shared by the test and the workflow's awk): start after the line that begins with the literal `## [X.Y.Z] - ` (awk: `index($0, "## [" v "] - ") == 1`); stop before the next line starting with `## ` or a link-reference line (awk: `/^\[/ && /\]: /`; mawk-safe, no `[^]]`). A section is valid if at least one of those lines is non-blank. The test implements the same rule in Python (`startswith(f"## [{version}] - ")`, stop on `startswith("## ")` or `startswith("[") and "]: " in line`).
 - The `0.1.0` section names `get_memory_index` and scope priority explicitly; the dev-only `evals/` harness is not listed.
 - The `0.1.0` date is the PR's merge-intended date; the tag is pushed after merge. If they differ by a day, the date is not corrected (policy: the date is when the release was cut in the changelog).
 
@@ -72,13 +72,21 @@ def test_changelog_section_for_current_version_is_not_empty() -> None
     # extraction rule above yields at least one non-blank line
 def test_changelog_has_link_reference_for_current_version() -> None
     # a line equal to f"[{version}]: https://github.com/msiebert/wenchang/releases/tag/v{version}"
-def test_pinned_install_tags_match_version() -> None
-    # scan README.md, docs/releasing.md, site-src/*.md for
-    # r"git\+https://github\.com/msiebert/wenchang@(v[^\s\"'`)]+)"; every captured tag == f"v{version}";
-    # failures list "file: tag"; also assert at least one match overall (so the scan can't silently pass)
+def test_install_instructions_pin_current_version() -> None
+    # Files: README.md, docs/releasing.md, every site-src/*.md. Each listed file MUST exist
+    # (a missing one is a failure, not a skip). Collect "file: offending text" for each of:
+    #  (a) git+https://github.com/msiebert/wenchang whose following text is not exactly
+    #      f"@v{version}" — capture r"git\+https://github\.com/msiebert/wenchang(@v[^\s\"'`)<]*)?"
+    #      ('<' excluded so "@v0.1.0</code>" captures "@v0.1.0"); offending if group != f"@v{version}";
+    #  (b) an install of wenchang with no direct URL:
+    #      r"(?:pip install|uv add|uv pip install)\s+(['\"]?)wenchang(?:\[[^\]]*\])?\1(?!\s*@)"
+    #      (catches `pip install 'wenchang[mcp]'`, `pip install wenchang`);
+    #  (c) a release wheel/sdist URL whose tag or filename version is not {version}:
+    #      r"releases/download/v([^/\s\"'`)<]+)/wenchang-([^-\s\"'`)<]+?)(?:-py3|\.tar\.gz)";
+    # assert the list is empty; also assert at least one (a) match overall.
 ```
 
-`docs/releasing.md` does not exist when T1 lands; the pinned-tag test skips missing files from the list rather than failing on them, and the "at least one match" assertion holds via README and site-src once T4 lands. Expected T1 failing state: the four changelog tests fail (no `CHANGELOG.md`); the pinned-tag test fails (no pinned installs yet, so zero matches); the two version tests pass.
+Docs never use placeholder pins (`@vX.Y.Z`); `docs/releasing.md` shows concrete current-version commands and describes the bump in prose. Expected T1 failing state: the four changelog tests fail (no `CHANGELOG.md`); the pin test fails (`docs/releasing.md` missing, plus the unpinned lines `site-src/index.md:15,28`, `site-src/setup.md:18,21`, `README.md:85`, `site-src/authorization.md:61`, `site-src/reference.md:325`); the two version tests pass.
 
 ### `.github/workflows/release.yml`
 
@@ -104,10 +112,12 @@ jobs:
       - uv sync --locked
       - make check
       - uv build            # dist/wenchang-$VERSION-py3-none-any.whl, dist/wenchang-$VERSION.tar.gz
-      - Smoke-install: uv venv "$RUNNER_TEMP/smoke"; uv pip install --python "$RUNNER_TEMP/smoke" dist/*.whl;
+      - Smoke-install: uv venv "$RUNNER_TEMP/smoke";
+        uv pip install --python "$RUNNER_TEMP/smoke/bin/python" "wenchang[mcp,testing] @ file://$PWD/dist/wenchang-$VERSION-py3-none-any.whl"
+        (extras needed: wenchang.testing imports pytest, wenchang.mcp imports mcp);
         run from "$RUNNER_TEMP" (so the checkout's src/ is not on sys.path) a Python snippet that:
         asserts wenchang.__version__ == importlib.metadata.version("wenchang") == "$VERSION", and
-        imports wenchang.core, wenchang.tools, wenchang.prompts, wenchang.storage.memory, wenchang.testing
+        imports wenchang.core, wenchang.tools, wenchang.prompts, wenchang.storage.memory, wenchang.testing, wenchang.mcp
       - Release notes: awk applies the plan's extraction rule to CHANGELOG.md, writing $RUNNER_TEMP/notes.md;
         fail if it has no non-blank line
       - gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME"
