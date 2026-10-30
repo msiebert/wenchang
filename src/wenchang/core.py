@@ -374,11 +374,11 @@ class MemoryStore:
         already exist, and stores `metadata.sources | {source}`; outside
         system/, if the entity already holds `max_files_per_entity` files,
         raises VersionConflictError if the path exists, else
-        FileQuotaExceededError. A non-None
-        value requires it to match the current version exactly, and stores
-        the union of the currently stored sources, `metadata.sources`, and
-        `source`: a caller never has to carry forward sources it doesn't
-        know about, and can't remove a source others recorded. Stamps
+        FileQuotaExceededError. A non-None value requires it to match the
+        current version exactly, and stores the union of the currently
+        stored sources, `metadata.sources`, and `source`: a caller never
+        has to carry forward sources it doesn't know about, and can't
+        remove a source others recorded. Stamps
         `metadata.last_updated` with the store's clock, raising ValueError
         (from FileMetadata's own validation) if the clock returns a naive
         datetime. On a version mismatch raises VersionConflictError

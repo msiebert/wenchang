@@ -164,11 +164,12 @@ the one planned piece.
   `_map_backend_error` like the rest of `GcsStorage`. `list_page(prefix,
   start_after, limit)` returns `ListedObject(key, metadata, version)` for
   keys starting with `prefix` (plain string match), ascending by key, at
-  most `limit`, strictly after `start_after` when given (exclusive), never
-  reading object bodies; metadata mappings are copies. `InMemoryStorage`
-  sorts and slices in memory; `GcsStorage` uses `list_blobs(prefix=...,
-  start_offset=start_after, max_results=limit + 1)`, dropping a key equal to
-  `start_after` (GCS's `start_offset` is inclusive) before truncating to
+  most `limit` (fewer only when the listing is exhausted), strictly after
+  `start_after` when given (exclusive), never reading object bodies;
+  metadata mappings are copies. `InMemoryStorage` sorts and slices in
+  memory; `GcsStorage` uses `list_blobs(prefix=...,
+  start_offset=start_after, max_results=limit + 1)`, dropping a key equal
+  to `start_after` (GCS's `start_offset` is inclusive) before truncating to
   `limit`; call and iteration errors go through the same
   `_map_backend_error` as the rest of `GcsStorage`. See
   [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md),
@@ -213,18 +214,17 @@ the one planned piece.
   `OversizeWriteError` (checked before storage is consulted). On create
   (`expected_version=None`) it stores `metadata.sources | {source}`. After
   the size check, a create outside the `system/` area with a non-`None` cap
-  counts the
-  well-formed, non-`system/` keys under `build_prefix(scope, entity_id)`
-  through `Storage.list_page` (not `list_prefix`, so corrupt metadata
-  elsewhere cannot block it), in pages of `max(limit - count,
+  counts the well-formed, non-`system/` keys under `build_prefix(scope,
+  entity_id)` through `Storage.list_page` (not `list_prefix`, so corrupt
+  metadata elsewhere cannot block it), in pages of `max(limit - count,
   list_page_size)`, stopping at `limit`; keys listed per create are at most
   `limit` + uncounted keys + `list_page_size`. At the cap it reads the
   path: an existing file raises `VersionConflictError` with its current
   content and version (after decoding and `metadata_from_map`, as on the
   conflict path), an absent one `FileQuotaExceededError(path, limit)`. No
-  other operation consults the cap. The count and put are not atomic, so racing creates can exceed the cap by at
-  most the number racing at the boundary (see
-  [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)). On
+  other operation consults the cap. The count and put are not atomic, so
+  racing creates can exceed the cap by at most the number racing at the
+  boundary (see [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)). On
   replace it first reads the current object — a missing file raises
   `NotFoundError(FILE_ABSENT)`, a version mismatch seen at that read raises
   `VersionConflictError(path, current_content, current_version)`, and
@@ -1415,11 +1415,12 @@ cause. Defined in `wenchang.errors` (see [ADR
   material (e.g. `VersionConflictError` returns current content and
   version; `OversizeWriteError` returns current size and limit;
   `FileQuotaExceededError` returns the per-entity file limit and says to
-  add to an existing file or merge and delete; `ReplaceFactMatchError` returns content, version, and match count;
-  `NotFoundError` distinguishes an invalid path from a valid path with no
-  file yet; `InvalidArgumentError`, raised only by the tool layer, names
-  the agent-supplied argument to correct, and for an ungranted scope lists
-  the available scopes). The agent corrects and retries in the same turn.
+  add to an existing file or merge and delete; `ReplaceFactMatchError`
+  returns content, version, and match count; `NotFoundError` distinguishes
+  an invalid path from a valid path with no file yet;
+  `InvalidArgumentError`, raised only by the tool layer, names the
+  agent-supplied argument to correct, and for an ungranted scope lists the
+  available scopes). The agent corrects and retries in the same turn.
 - **Permanent** (`PermanentError`) — stop, do not retry
   (`RestrictedScopeError` for a `system/` write (`SYSTEM_READ_ONLY`), a
   role-gated scope the caller's role is not permitted to write

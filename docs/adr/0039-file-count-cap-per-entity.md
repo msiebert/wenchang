@@ -75,9 +75,10 @@ what to do instead.
 - A runaway agent stops at 500 files per entity by default and is told how
   to continue. Adopters can raise, lower, or disable the cap.
 - Every non-`system/` create lists the entity's keys before writing, up to
-  the bound above; the first page requests `limit` keys, so an entity with
-  no uncounted keys takes one `list_page` call. Replaces, edits, deletes, and
-  reads cost nothing extra.
+  the bound above; the first page requests `max(limit, list_page_size)`
+  keys, so an entity with no uncounted keys before the limit is reached
+  takes one `list_page` call. Replaces, edits, deletes, and reads cost
+  nothing extra.
 - Lowering the cap below an entity's current count blocks creates until files
   are deleted below it; existing files are never removed.
 - Storage stubs that create files must implement `list_page`, since the

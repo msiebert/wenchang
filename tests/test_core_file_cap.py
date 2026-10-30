@@ -573,6 +573,63 @@ def test_small_page_size_with_leading_system_keys_reaches_cap() -> None:
     assert storage.get("user/u1/workflows/w4.md") is None
 
 
+def test_small_page_size_with_leading_system_keys_list_page_calls() -> None:
+    """With list_page_size=1 and five system/ keys before w1-w3, each page asks
+    for max(limit - count, list_page_size) keys and listing stops once the count
+    reaches the cap (AIE-1292, edge case).
+    """
+    inner = InMemoryStorage()
+    for name in ("a", "b", "c", "d", "e"):
+        _seed(inner, f"user/u1/system/{name}.md")
+    _seed(inner, "user/u1/workflows/w1.md")
+    _seed(inner, "user/u1/workflows/w2.md")
+    _seed(inner, "user/u1/workflows/w3.md")
+    wrapped = _WrappedStorage(inner)
+    store = MemoryStore(wrapped, clock=_clock, list_page_size=1, max_files_per_entity=3)
+
+    with pytest.raises(FileQuotaExceededError):
+        _create(store, "user/u1/workflows/w4.md")
+
+    assert wrapped.list_page_calls == [
+        ("user/u1/", None, 3),
+        ("user/u1/", "user/u1/system/c.md", 3),
+        ("user/u1/", "user/u1/workflows/w1.md", 2),
+    ]
+
+
+def test_count_stops_after_first_page_reaching_cap() -> None:
+    """With cap 3, list_page_size=1, and 10 counted files, the count makes one
+    list_page call sized to the cap and stops (AIE-1292, edge case).
+    """
+    inner = InMemoryStorage()
+    for i in range(10):
+        _seed(inner, f"user/u1/notes/f{i}.md")
+    wrapped = _WrappedStorage(inner)
+    store = MemoryStore(wrapped, clock=_clock, list_page_size=1, max_files_per_entity=3)
+
+    with pytest.raises(FileQuotaExceededError):
+        _create(store, "user/u1/notes/new.md")
+
+    assert wrapped.list_page_calls == [("user/u1/", None, 3)]
+
+
+def test_empty_source_at_cap_is_value_error_without_listing() -> None:
+    """At the cap, a create with an empty source raises the empty-source
+    ValueError, not FileQuotaExceededError, and does not list (AIE-1292, edge case).
+    """
+    inner = InMemoryStorage()
+    for i in range(3):
+        _seed(inner, f"user/u1/notes/f{i}.md")
+    wrapped = _WrappedStorage(inner)
+    store = MemoryStore(wrapped, clock=_clock, max_files_per_entity=3)
+
+    with pytest.raises(ValueError, match=r"^source must be non-empty$"):
+        store.write_file("user/u1/notes/new.md", "- [stated] x\n", _metadata(), None, source="")
+
+    assert wrapped.list_page_calls == []
+    assert inner.get("user/u1/notes/new.md") is None
+
+
 def test_small_page_size_with_leading_system_keys_below_cap() -> None:
     """With list_page_size=1 and several system/ keys sorting before 2 counted
     keys, a create succeeds (AIE-1292, edge case).
