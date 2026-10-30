@@ -11,9 +11,10 @@ authorization — and prompt text describing how to use it well; it enforces
 no schema and does not search file content.
 
 Today the repository holds the project skeleton (tooling, tests, docs) plus
-eleven implemented modules: the cross-cutting `errors` and `version_token`; the
-dependency-free `file_format` and `paths`; the `storage` layer (an in-memory
-fake and a GCS implementation behind one protocol); `core`, which
+twelve implemented modules: the cross-cutting `errors` and `version_token`; the
+dependency-free `file_format`, `paths`, and `index_cache` (the optional
+adopter-supplied cache config for the memory index); the `storage` layer (an
+in-memory fake and a GCS implementation behind one protocol); `core`, which
 implements all seven core operations (`read_file`, `write_file`,
 `replace_fact`, `list_prefix`, `append_line`, `delete_file`, and
 `get_memory_index`, with its value types `MemoryIndex` and
@@ -25,10 +26,10 @@ agent-facing tool layer, which resolves identity through `identity`,
 checks writes through `scope`, and calls a `TransportClient`; and
 `prompts`, the instruction text layered over the tools, assembled from
 library-owned sections and adopter-supplied slots. Any remote transport is
-still planned. A twelfth, `testing`, is adopter-facing rather than part of
+still planned. A thirteenth, `testing`, is adopter-facing rather than part of
 the runtime: the executable conformance suites an adopter runs against
 their own identity resolver and their own transport client, installed with
-the optional `wenchang[testing]` extra. A thirteenth, `mcp`, is the host
+the optional `wenchang[testing]` extra. A fourteenth, `mcp`, is the host
 adapter that serves the tools and prompt from an MCP server; it is installed
 with the optional `wenchang[mcp]` extra, and nothing else imports it. Every
 module in the map below is implemented; the remote half of `transport` is
@@ -171,8 +172,30 @@ the one planned piece.
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
   [ADR 0012](docs/adr/0012-delete-file.md).
+- **index_cache** — the optional, adopter-supplied cache for the memory
+  index; imports nothing from `wenchang`. `IndexCache(get, set, ttl=None,
+  key_prefix=DEFAULT_KEY_PREFIX)` is a frozen value of two adopter callables,
+  `get(key) -> str | None` (the value last set, or `None` if absent or
+  expired) and `set(key, value, ttl) -> None` (expiring `ttl` from now,
+  `None` never), both required since `set` is how `core` invalidates.
+  `DEFAULT_KEY_PREFIX` is `"wenchang:index:"`. Construction raises every
+  `TypeError` before any `ValueError`: a non-callable `get` or `set`, a `ttl`
+  that is neither `None` nor a real `timedelta`, or a `key_prefix` whose real
+  type is not `str`; then `ttl <= timedelta(0)` raises `ValueError`.
+  `key_prefix` is stored as an exact `str`. The contract: `get` and `set`
+  linearizable per key (not across keys); values opaque `str`s; with
+  `ttl=None` a swallowed invalidation failure or a write that bypasses the
+  cache leaves an entity stale with no bound, so production should use a
+  finite `ttl`; keys carry no storage identity, so stores over different
+  storage roots sharing one cache need distinct `key_prefix`es.
+  `InMemoryIndexCache(*, clock=...)` is a thread-safe reference
+  implementation (one lock per method) for tests and single-process hosts:
+  an entry expires once `clock() >= set_time + ttl` and is dropped only when
+  read, so with `ttl=None` it grows without bound. See
+  [ADR 0040](docs/adr/0040-index-cache.md).
 - **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
-  list_page_size=100, index_max_bytes=65536, scope_priority=())`,
+  list_page_size=100, index_max_bytes=65536, scope_priority=(),
+  index_cache=None)`,
   holding the core API as methods on one object so operations share
   configuration such as the size limit and index cap; `max_file_bytes`
   must be positive, `clock` (default current UTC) is injectable for tests
@@ -193,6 +216,10 @@ the one planned piece.
   then, per normalized member in order, `ValueError("invalid
   scope_priority entry: ...")` if it fails `is_valid_segment` and
   `ValueError("duplicate scope_priority entry: ...")` if already seen.
+  `index_cache` (default `None`) is an `IndexCache` or `None`; any other
+  real type raises `TypeError` with the other `TypeError`s. It is exposed
+  as the read-only `index_cache` property; without one, nothing below
+  touches a cache.
   `read_file(path) -> MemoryFile` is
   implemented: it validates the path, fetches the object, and returns
   content, metadata, path, and version token. `write_file(path, content,
@@ -363,7 +390,37 @@ the one planned piece.
   extreme `last-updated` (e.g. `0001-01-01T00:00:00+05:00`, which
   `metadata_from_map` accepts but cannot be converted to UTC) is raised as
   `MetadataFormatError("last-updated", ...)`. Like listing, the index is
-  not a snapshot. The two index value types:
+  not a snapshot. With an `index_cache`, argument validation and the
+  empty-map shortcut run first, with no cache call; then each `(scope,
+  entity_id)`'s drained listing is cached separately, and ordering, sizing,
+  and `capped` are computed per call from those listings exactly as above,
+  so a cached result equals an uncached one. Per entity, under token key
+  `{key_prefix}v1:token:{scope}/{entity_id}` and listing key
+  `{key_prefix}v1:listing:{scope}/{entity_id}`: it reads the token (or sets
+  a fresh random one) *before* listing, uses the cached listing only if it
+  decodes and its tag equals that token, and otherwise drains storage and
+  stores the listing (versioned, opaque JSON) tagged with that token. A
+  value that fails to decode (bad JSON or shape, a naive `last_updated`, a
+  path that is invalid, outside the entity's prefix, or repeated, or the
+  tombstone) is a miss. A `MetadataFormatError` or `BackendUnavailableError`
+  while listing propagates and stores nothing. Every
+  `put_if_version`/`delete_if_version` call in `write_file`, `append_line`,
+  `replace_fact` (each attempt), and `delete_file` is followed, in a
+  `finally`, by replacing that entity's token with a fresh random one, so
+  invalidation runs after the storage call whether it returned or raised
+  and never masks the method's result or exception; `delete_file` then
+  also overwrites the listing key with a tombstone. A cache `Exception` (or
+  a non-`str` `get` result) inside these paths is logged as a WARNING on
+  `wenchang.core` naming the scope and type, never the entity ID or key,
+  and treated as a miss or skipped. `invalidate_index(scope, entity_id) ->
+  None` is the public hook for writers that bypass the cache (a purge,
+  seeding, a store without the cache): a non-`str` argument raises
+  `TypeError` and an invalid segment `ValueError("invalid scope: ...")` /
+  `ValueError("invalid entity_id: ...")`, before any cache call; without a
+  cache it returns; otherwise it replaces the token, then tombstones the
+  listing, propagating any cache exception. See
+  [ADR 0040](docs/adr/0040-index-cache.md) for the race argument, the
+  remaining delete race, and `ttl` guidance. The two index value types:
   `CappedPrefix(prefix, omitted)` is a frozen value naming a prefix the
   index could not return in full and how many files under it were left
   out. `MemoryIndex(entries=(), capped=())` is a frozen value holding
@@ -405,8 +462,9 @@ the one planned piece.
   [ADR 0012](docs/adr/0012-delete-file.md),
   [ADR 0013](docs/adr/0013-write-file-source.md),
   [ADR 0019](docs/adr/0019-transport-client-interface.md),
-  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md), and
-  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
+  [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md),
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md), and
+  [ADR 0040](docs/adr/0040-index-cache.md).
 - **identity** — the injected-dependency boundary through which the
   library learns who the caller is; it has no notion of users,
   organizations, or roles of its own, and imports only `errors` and
@@ -1155,6 +1213,8 @@ from the diagram since it isn't wired into the request path shown there.
 `core` builds index prefixes with `build_prefix` and reads index areas
 with `parse_path`. `tools` builds every path and prefix with `build_path` /
 `build_prefix` and renders `scope`/`area`/`name` with `parse_path`.
+`index_cache` is dependency-free and omitted; only `core` imports it, and
+the adopter's cache it wraps sits beside storage, never in front of it.
 `identity` sits beside `core` with no arrow: `tools` calls
 `resolve_identity` once per session, in `bind_tools`, and reads the
 resolved grants to build paths; `transport` never sees an identity.
@@ -1346,6 +1406,17 @@ server, graders, and report end to end.
   omitted ranks below everything returned, and every omitted file is
   counted under its area prefix in `capped`; nothing is truncated silently
   (see [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md)).
+- **The index cache is a derived copy, never a source of truth.** It holds
+  listing metadata only (never content), is written only after a storage
+  listing, and every miss or cache failure falls back to storage. A cached
+  listing is served only while its tag equals the entity's current
+  generation token, which every core mutation attempt replaces after its
+  storage call, so a listing taken before a write is never served after
+  that write's invalidation. Writers that bypass the cache must call
+  `invalidate_index` or accept staleness bounded by `ttl` (unbounded when
+  `ttl=None`). Pre-delete metadata stored by a racing reader can persist,
+  unserved, until re-index or `ttl` (see
+  [ADR 0040](docs/adr/0040-index-cache.md)).
 - **The transport mirrors core exactly.** Each of `TransportClient`'s seven
   operations shared with `MemoryStore` has an identical signature (held by
   an `inspect.signature` equality test), and for well-typed arguments every

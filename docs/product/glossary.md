@@ -118,6 +118,13 @@ Terms as used throughout wenchang and its spec.
   order; by default it is empty and every scope ranks equally (one flat
   tier), ordered by recency. It orders only the capped startup index and
   never affects `system/` areas, which always load first.
+- **Index cache** — the adopter's optional key-value cache (e.g. Redis) for
+  the memory index, set as `MemoryStore(index_cache=IndexCache(get=..., set=...,
+  ttl=...))`. It holds each entity's listing metadata, never file content, so
+  repeated index calls skip storage listings until a write invalidates that
+  entity. Storage stays the source of truth. Writers that bypass the store
+  call `MemoryStore.invalidate_index`, or their writes may go unseen for up
+  to `ttl`, or indefinitely when `ttl` is unset.
 - **Transport client** — the object the tool layer calls to reach memory,
   implementing `transport.TransportClient`: the core API's operations with
   identical signatures and identical errors, over any transport (in-process

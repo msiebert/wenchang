@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-30
 
-**Status**: Draft — awaiting spec review
+**Status**: Implemented
 
 **Input**: `get_memory_index` drains a full listing of every granted
 `{scope}/{entity_id}/` prefix on every call. Cost grows with file count.
