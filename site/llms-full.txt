@@ -1595,22 +1595,74 @@ register_memory_tools(
 
 ### Telemetry
 
-`on_call`, if given, receives a `wenchang.mcp.ToolCallRecord` after every memory tool call:
+Both entry points take an `on_call` observer: `register_memory_tools(..., on_call=...)` and `build_server` for MCP, and `bind_tools(..., on_call=...)` (or `MemoryTools(..., on_call=...)`) for direct calls. It receives a `wenchang.observer.ToolCallRecord` after every memory tool call. `wenchang.mcp` re-exports `ToolCallRecord`.
 
-| Field | Meaning |
-| --- | --- |
-| `tool` | Registered tool name, prefix included. |
-| `arguments` | The arguments the wrapper received (read-only mapping). |
-| `result` | A copy of the payload sent to the client (read-only mapping). |
-| `is_error` | Whether the payload is a rendered error. |
-| `request_id` | The MCP request's ID. |
-| `duration_s` | Wall time of the wrapper, on a monotonic clock. |
+| Field | MCP | Direct call |
+| --- | --- | --- |
+| `tool` | Registered tool name, prefix included. | Bare method name, such as `read_file`. |
+| `arguments` | The arguments the wrapper received. | Every parameter by name, defaults filled. |
+| `result` | A copy of the payload sent to the client. | `render_result` of the return value, or `render_error` of the raised error. |
+| `is_error` | Whether `result` is a rendered error. | Same. |
+| `request_id` | The MCP request's ID, for correlating records that arrive in completion order. | `None`. |
+| `duration_s` | Wall time of the wrapper (credentials, binding, the tool, rendering). | Wall time of the tool method only. |
 
-The callback runs on worker threads, so it must be a plain function, fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain memory content, so treat them as sensitive.
+`arguments` and `result` are read-only deep copies, and `duration_s` uses a monotonic clock. Calls rejected during argument validation never produce a record.
+
+`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.
+
+This observer logs and counts calls without recording arguments or results:
+
+```python
+import logging
+import threading
+from collections import Counter, defaultdict
+from contextlib import suppress
+
+from wenchang.core import MemoryStore
+from wenchang.errors import NotFoundError
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.observer import ToolCallRecord
+from wenchang.scope import ScopePolicy
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.tools import bind_tools
+from wenchang.transport import InProcessClient
+
+log = logging.getLogger("inkwell.memory")
+
+# Stand-ins for your metrics client: a call counter and per-tool latencies.
+lock = threading.Lock()
+calls: Counter[tuple[str, str]] = Counter()
+latencies: defaultdict[str, list[float]] = defaultdict(list)
+
+
+def on_call(record: ToolCallRecord) -> None:
+    # arguments and result carry memory content; log only the call's shape.
+    category = record.result.get("category") if record.is_error else None
+    log.info(
+        "memory tool=%s is_error=%s category=%s duration_s=%.3f",
+        record.tool,
+        record.is_error,
+        category,
+        record.duration_s,
+    )
+    with lock:  # under MCP, observers run on worker threads
+        calls[(record.tool, str(category or "ok"))] += 1
+        latencies[record.tool].append(record.duration_s)
+
+
+client = InProcessClient(MemoryStore(InMemoryStorage()))
+resolver = SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")}))
+tools = bind_tools(client, resolver, None, ScopePolicy({}), source="inkwell-cli", on_call=on_call)
+
+tools.get_memory_index()  # on_call has run by the time this returns
+with suppress(NotFoundError):  # on_call sees it first: is_error=True, category=recoverable
+    tools.read_file("user", "preferences", "csv")
+print(calls)
+```
 
 ### Using the tools without MCP
 
-`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)` resolves the identity and returns a `MemoryTools` for one session. `tools.tools()` is the seven bound methods by name, and `tools.descriptions()` is the description for each. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` in `wenchang.tools` produce the JSON-safe dicts the MCP adapter returns.
+`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)` resolves the identity and returns a `MemoryTools` for one session. `on_call` is a tool-call observer; see [Telemetry](#telemetry). `tools.tools()` is the seven bound methods by name, and `tools.descriptions()` is the description for each. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` in `wenchang.tools` produce the JSON-safe dicts the MCP adapter returns.
 
 ```python
 from wenchang.core import MemoryStore
