@@ -23,7 +23,7 @@ and delete. Without a cache, nothing changes.
 | 7 | write by a store without the cache | before / after `ttl` | stale / fresh; `invalidate_index` fixes immediately |
 | 8 | cache `get`/`set` raises, or `get` returns `bytes` | index or write | succeeds from storage, warning logged (scope only, no entity ID) |
 | 9 | garbage, foreign-entity, invalid, or duplicate paths in a cached value | index | miss, re-list |
-| 9b | `invalidate_index` | raw cache value | old entries tombstoned |
+| 9b | `invalidate_index` or `delete_file` | raw cache value | old entries tombstoned |
 | 10 | `TransportConformance` on a cached store | run | passes |
 
 ## Key design decisions
@@ -36,14 +36,13 @@ and delete. Without a cache, nothing changes.
 | Invalidate in `finally` after every storage mutation attempt | Only on success | A `BackendUnavailableError` may hide a landed write |
 | Cache errors logged and swallowed inside index and mutations; public `invalidate_index` propagates | Propagate everywhere | A committed write must not report failure because the cache is down; ttl bounds the staleness |
 | `str` keys and values, JSON value with `v1` in key | Pickle / adopter-chosen shape | Serializable to any store; format can evolve |
+| `invalidate_index` and `delete_file` tombstone the listing after replacing the token; other mutations only replace the token | Tombstone on every mutation; never tombstone | Deleting and purging are privacy actions, worth one extra `set`; for ordinary writes the old value is never served and is soon overwritten |
 
 ## Files/modules to be touched
 
 - New `src/wenchang/index_cache.py`; `src/wenchang/core.py`.
 - New tests: `tests/test_index_cache.py`, `tests/test_core_index_cache.py`, cached conformance run.
 - `docs/adr/0040-index-cache.md`, `ARCHITECTURE.md`.
-
-| `invalidate_index` tombstones the listing; mutations only replace the token | Tombstone on every mutation | Purges must not leave descriptions in the adopter's cache; for ordinary writes the old value is never served and is soon overwritten, so one `set` suffices |
 
 ## Open questions / assumptions
 
@@ -61,5 +60,10 @@ AIE-1291 hook); swallow-and-log on cache errors; `ttl` optional, default
 - A cache without per-key linearizability (async replicas) weakens freshness to the ttl bound.
 - Cached values hold descriptions and aliases, and keys hold entity IDs; the
   adopter's cache inherits the store's data-handling obligations (ADR 0040).
+- Remaining race: a reader that listed before a delete or purge can store
+  pre-delete metadata after the tombstone. Never served, but it persists
+  until the entity is re-indexed or `ttl` expires. A finite `ttl` is
+  required for adopters with erasure obligations; a purge must call
+  `invalidate_index` after all its deletes finish.
 - Large entities produce large cache values (bounded by file count × metadata size).
 - Two Redis round-trips per entity on a hit; still far cheaper than a GCS list.

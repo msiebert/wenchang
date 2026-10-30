@@ -167,11 +167,19 @@ error). Called in a `finally` around every `put_if_version` /
 returned or raised, before the method returns or raises. It never replaces
 or masks the method's own result or exception.
 
-Mutations replace only the token (one `set`); they do not tombstone the
-listing, since its old value is never served and the next index call for
-the entity overwrites it. `invalidate_index` (public, propagating, also
-tombstones) is the hook for AIE-1291's purge and for adopters' out-of-band
-writers.
+`delete_file`'s invalidation also tombstones: after the token `set`, it
+does `_cache_set(listing_key, TOMBSTONE)` (logged-and-swallowed). The other
+mutations replace only the token (one `set`); their old listing value is
+never served and the next index call for the entity overwrites it.
+`invalidate_index` (public, propagating, also tombstones) is the hook for
+AIE-1291's purge and for adopters' out-of-band writers.
+
+Remaining race (documented in the `invalidate_index` docstring and ADR
+0040, not closed): a reader that listed before a delete or purge can store
+its pre-delete listing after the tombstone. Never served (stale tag), it
+persists until the entity is re-indexed or `ttl` expires. A finite `ttl` is
+required for adopters with erasure obligations; a purge must call
+`invalidate_index` after all its deletes finish.
 
 ## Test plan (files)
 
@@ -203,7 +211,10 @@ writers.
   listing metadata, never content, never written ahead of storage, every
   miss/failure falls back to storage), privacy (values hold descriptions,
   aliases, sources; keys hold scope names and entity IDs; logs never name
-  entity IDs).
+  entity IDs; `delete_file` and `invalidate_index` tombstone the listing,
+  but the remaining race above means pre-delete metadata can persist,
+  unserved, until re-index or `ttl`; finite `ttl` required for erasure
+  obligations; purge calls `invalidate_index` after all deletes).
 - `ARCHITECTURE.md`: new `index_cache` module entry; `core` entry gains
   `index_cache` and `invalidate_index`; concurrency section notes the cache.
 - `specs/AIE-1293-index-cache/review-pr.md`.

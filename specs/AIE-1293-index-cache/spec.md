@@ -48,11 +48,18 @@ requirement.
   `append_line`, `replace_fact`, `delete_file`) **invalidates** that entity
   before returning or raising. `MemoryStore.invalidate_index(scope,
   entity_id)` is the public hook for any other writer (purge, seeding,
-  admin tooling). It also overwrites the entity's listing key with a
-  tombstone (using only `set`), so purged descriptions and aliases do not
-  linger in the adopter's cache. Mutations replace only the token; the
-  listing value they leave behind is never served and is overwritten by the
-  next index call for that entity.
+  admin tooling). `invalidate_index` and `delete_file` also overwrite the
+  entity's listing key with a tombstone (using only `set`, after replacing
+  the token), so deleted or purged descriptions and aliases do not linger
+  in the adopter's cache. `write_file`, `append_line`, and `replace_fact`
+  replace only the token; the listing value they leave behind is never
+  served and is overwritten by the next index call for that entity.
+- **Remaining race (documented, not closed):** a reader that listed before a
+  delete or purge can store its pre-delete listing after the tombstone. It
+  is never served (its tag is stale), but it persists in the cache until
+  the entity is indexed again or `ttl` expires. Adopters with erasure
+  obligations must set a finite `ttl`, and a purge must call
+  `invalidate_index` after all its deletes finish.
 - **Race handling — generation tokens.** Each entity has a token key holding
   a random token. Invalidation replaces the token with a fresh random one.
   A reader reads (or creates) the token *before* listing and stores its
@@ -135,7 +142,7 @@ key, delete a single key, and return a scripted value from `get`. `M` is
 | - | ----- | ---- | ---- |
 | 4.1 | `M`, index cached | `write_file` (create) under `user/u1` | next index includes it |
 | 4.2 | same | `write_file` (replace), `append_line`, `replace_fact` (each separately) | next index has the new version token and metadata |
-| 4.3 | same | `delete_file` | next index omits it |
+| 4.3 | same | `delete_file` | the raw listing value no longer contains the deleted file's path, description, or aliases; next index omits it |
 | 4.4 | same, after any 4.1–4.3 | next index | lists `user/u1/` only; `project/p1/` makes zero `list_page` calls |
 | 4.5 | same | a mutation whose `put_if_version` / `delete_if_version` raises (`PreconditionFailedError` → `VersionConflictError`, or `BackendUnavailableError`) | the entity's token was replaced; next index re-lists `user/u1/` |
 | 4.6 | same | `replace_fact` succeeds on its 2nd attempt after a concurrent write | next index reflects the committed content's version |
@@ -216,5 +223,11 @@ each forces one interleaving with a hook. 5.3 is a threaded smoke test.
   ahead of storage, and every cache miss or failure falls back to storage);
   and privacy (cached values hold descriptions, aliases, and sources; keys
   contain scope names and entity IDs; the adopter's cache inherits the
-  memory store's data-handling obligations, and `invalidate_index`
-  tombstones the listing for purges). ARCHITECTURE.md updated.
+  memory store's data-handling obligations). The privacy guarantee is
+  narrow: `delete_file` and `invalidate_index` tombstone the listing, but a
+  reader that listed before them can store pre-delete metadata afterwards;
+  that value is never served yet persists until the entity is re-indexed or
+  `ttl` expires. A finite `ttl` is **required** for adopters with erasure
+  obligations, and a purge must call `invalidate_index` after all its
+  deletes finish. The same statement goes in the `invalidate_index`
+  docstring. ARCHITECTURE.md updated.
