@@ -24,6 +24,7 @@ To install and wire wenchang for your user:
 - [Prompts](https://msiebert.github.io/wenchang/prompts.md): the four prompt slots, the fixed prompt sections, product, tool_prefix, and source
 - [Authorization](https://msiebert.github.io/wenchang/authorization.md): credentials from the request, identity resolver, scope policy, and a per-user, per-project HTTP example
 - [Caching](https://msiebert.github.io/wenchang/caching.md): an optional cache for get_memory_index (IndexCache get/set/ttl, a Redis example, invalidate_index for writers that bypass the cache, staleness and privacy limits)
+- [Purge & export](https://msiebert.github.io/wenchang/operations.md): operator-only MemoryStore.purge and export for erasing or handing over one entity (stop writers first, max_passes and PurgeIncompleteError, index cache and GCS soft-delete interactions, raw export and restore)
 - [Examples](https://msiebert.github.io/wenchang/usage.md): six scenarios from a novelist's writing assistant (recall, timeline append with a version conflict, correcting a fact, deleting a subplot, read-only house style, refusing an account number) with real tool-call JSON and memory files
 - [Reference](https://msiebert.github.io/wenchang/reference.md): path and file format, the seven tools with exact parameters and returns, configuration, error taxonomy, limitations
 

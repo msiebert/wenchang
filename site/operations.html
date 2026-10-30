@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purging and exporting a wenchang entity</title>
+<meta name="description" content="Operator-only MemoryStore.purge and export: erasing everything stored for one entity, the purge guarantee and PurgeIncompleteError, index cache and GCS soft-delete interactions, and raw export and restore.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/operations.html">
+<link rel="alternate" type="text/markdown" href="operations.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Purging and exporting a wenchang entity">
+<meta property="og:description" content="Operator-only MemoryStore.purge and export: erasing everything stored for one entity, the purge guarantee and PurgeIncompleteError, index cache and GCS soft-delete interactions, and raw export and restore.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/operations.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Purging and exporting a wenchang entity">
+<meta name="twitter:description" content="Operator-only MemoryStore.purge and export: erasing everything stored for one entity, the purge guarantee and PurgeIncompleteError, index cache and GCS soft-delete interactions, and raw export and restore.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-operations">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="setup.html">Setup</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="authorization.html">Authorization</a></li>
+<li><a href="caching.html">Caching</a></li>
+<li><a href="operations.html" aria-current="page">Purge & export</a></li>
+<li><a href="usage.html">Examples</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/operations.md</span> <a href="operations.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#erase">Erasing an entity</a>
+</li>
+<li><a href="#purge">How purge works</a>
+<ul>
+<li><a href="#cache">The index cache</a></li>
+<li><a href="#gcs">Deleted bytes in GCS</a></li>
+</ul>
+</li>
+<li><a href="#export">Export</a>
+</li>
+<li><a href="#limitations">Known limitation</a>
+</li>
+</ul></details></nav>
+<h1 id="purge-export">Purge &amp; export<a class="headerlink" href="#purge-export" title="Link to this section">#</a></h1>
+<p>Erasure requests and project or org deletion need everything stored for one entity removed or handed over. <code>MemoryStore</code> has two methods for that:</p>
+<ul>
+<li><strong><code>purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -&gt; int</code></strong> deletes every object under <code>{scope}/{entity_id}/</code>.</li>
+<li><strong><code>export(scope, entity_id) -&gt; tuple[ExportedObject, ...]</code></strong> returns every object under that prefix, raw.</li>
+</ul>
+<p>Both are operator-only. They are not agent tools and not on the transport: <code>TransportClient</code>, <code>MemoryTools</code>, and the MCP adapter do not have them. Call them on a <code>MemoryStore</code> directly. <code>InProcessClient.store</code> returns the store a client wraps. Both work on <code>GcsStorage</code> and <code>InMemoryStorage</code>.</p>
+<h2 id="erase">Erasing an entity<a class="headerlink" href="#erase" title="Link to this section">#</a></h2>
+<p>Stop the entity's writers first, then purge. For a user, that means your resolver no longer grants that user's scope. Export first if you need a copy.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportedObject</span><span class="p">,</span> <span class="n">MemoryStore</span><span class="p">,</span> <span class="n">PurgeIncompleteError</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"erasure"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">revoke_grant</span><span class="p">(</span><span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Your auth layer: stop resolving any caller to this user's grant."""</span>
+    <span class="o">...</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">erase_user</span><span class="p">(</span><span class="n">store</span><span class="p">:</span> <span class="n">MemoryStore</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ExportedObject</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+    <span class="n">revoke_grant</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>  <span class="c1"># 1. stop writers, and let in-flight sessions end</span>
+    <span class="n">backup</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">)</span>  <span class="c1"># 2. optional: hand over or archive</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">deleted</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">purge</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">)</span>  <span class="c1"># 3. everything under user/{user_id}/</span>
+    <span class="k">except</span> <span class="n">PurgeIncompleteError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="c1"># Objects kept reappearing: a writer is still active. Stop it and re-run.</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"erasure incomplete in scope </span><span class="si">%r</span><span class="s2"> after </span><span class="si">%d</span><span class="s2"> passes"</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">scope</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">passes</span><span class="p">)</span>
+        <span class="k">raise</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"purged </span><span class="si">%d</span><span class="s2"> objects"</span><span class="p">,</span> <span class="n">deleted</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">backup</span>
+</code></pre></div>
+
+<p>Use the same <code>MemoryStore</code> configuration as your server, including its <code>index_cache</code>, so the purge invalidates the cached index.</p>
+<h2 id="purge">How purge works<a class="headerlink" href="#purge" title="Link to this section">#</a></h2>
+<p>A pass lists the prefix from the start and deletes each object it sees, guarded on the listed version. An object that changed or vanished in the meantime is left for the next pass. Passes repeat until one lists nothing.</p>
+<ul>
+<li><strong>Everything goes.</strong> Purge deletes every object under <code>{scope}/{entity_id}/</code>, including <code>system/</code> files, keys that are not valid memory paths, and objects with corrupt metadata. It never reads bodies or parses metadata.</li>
+<li><strong>The guarantee.</strong> When <code>purge</code> returns, the prefix was observed empty after its last delete. A write that lands after that survives. Durable erasure requires stopped writers.</li>
+<li><strong><code>max_passes</code> bounds restarts, not a pass.</strong> At most <code>max_passes + 1</code> listings start from the beginning of the prefix. A writer that adds keys faster than purge deletes them keeps a single pass running. <code>PURGE_MAX_PASSES</code> is 5.</li>
+<li><strong><code>PurgeIncompleteError</code></strong> is raised if objects remain after the last pass. It is a plain <code>Exception</code>, not a <code>WenchangError</code>, with <code>scope</code>, <code>entity_id</code>, and <code>passes</code> attributes. Its message names the scope and pass count, never the entity ID.</li>
+<li><strong>Re-running is safe.</strong> On an empty prefix purge returns 0 without deleting anything. The return value counts deletes storage confirmed: a delete that landed but whose response was lost is not counted, so treat it as a lower bound.</li>
+<li><strong>Other storage errors propagate.</strong> Deletes already made stand. Re-run once the backend recovers.</li>
+<li><strong>Arguments are checked first.</strong> A non-<code>str</code> <code>scope</code> or <code>entity_id</code>, or a non-<code>int</code> <code>max_passes</code>, raises <code>TypeError</code>. An invalid segment or <code>max_passes</code> below 1 raises <code>ValueError</code>. Neither touches storage or the cache.</li>
+</ul>
+<h3 id="cache">The index cache<a class="headerlink" href="#cache" title="Link to this section">#</a></h3>
+<p>Purge calls <a href="caching.html#invalidate"><code>invalidate_index</code></a> once, after its last storage call, whether it succeeded or failed. On success a cache error propagates and the delete count is lost; re-running returns 0 and invalidates again. On failure a cache error is logged to <code>wenchang.core</code> and the purge's own exception is raised.</p>
+<p>A reader that listed before the purge can still store its pre-purge listing in your cache. It is never served, but it stays until the entity is indexed again or <code>ttl</code> expires. If you have erasure obligations, a finite <code>ttl</code> is required. See <a href="caching.html#limits">Guarantees and limits</a>.</p>
+<h3 id="gcs">Deleted bytes in GCS<a class="headerlink" href="#gcs" title="Link to this section">#</a></h3>
+<p>Purge removes live objects only. A bucket's soft-delete policy (7 days by default on new GCS buckets) and object versioning keep deleted bytes recoverable for their retention window. Set both to match your retention obligation: <code>gcloud storage buckets update gs://BUCKET --clear-soft-delete</code> disables soft delete.</p>
+<h2 id="export">Export<a class="headerlink" href="#export" title="Link to this section">#</a></h2>
+<p><code>export</code> lists the prefix and <code>get</code>s each object, returning them in ascending key order. Each <code>ExportedObject</code> has:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key</code></td>
+<td>The full storage key.</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>The raw body, as <code>bytes</code>.</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>The stored flat metadata map, read-only.</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>The storage version token.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, <code>put</code> each object back through the same storage the store uses:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Iterable</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportedObject</span><span class="p">,</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage</span><span class="w"> </span><span class="kn">import</span> <span class="n">Storage</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">restore</span><span class="p">(</span>
+    <span class="n">storage</span><span class="p">:</span> <span class="n">Storage</span><span class="p">,</span> <span class="n">store</span><span class="p">:</span> <span class="n">MemoryStore</span><span class="p">,</span> <span class="n">objects</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">ExportedObject</span><span class="p">],</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">objects</span><span class="p">:</span>
+        <span class="n">storage</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">o</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">o</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">o</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>
+    <span class="c1"># Direct puts bypass the index cache.</span>
+    <span class="n">store</span><span class="o">.</span><span class="n">invalidate_index</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">)</span>
+</code></pre></div>
+
+<ul>
+<li><strong>A backup, not a snapshot.</strong> Each object is internally consistent, but an object deleted between listing and <code>get</code> is omitted, and one written after its page was listed may be missing. Stop writers for a consistent export. Export never touches the index cache.</li>
+<li><strong>Memory.</strong> Every object's bytes are held at once. The library does not bound this.</li>
+<li><strong>Cost.</strong> N objects take N sequential <code>get</code> calls, roughly N round trips on GCS. Purge likewise makes N sequential deletes.</li>
+</ul>
+<h2 id="limitations">Known limitation<a class="headerlink" href="#limitations" title="Link to this section">#</a></h2>
+<p>An invalid <code>entity_id</code> is echoed in the <code>ValueError</code> message (<code>invalid entity_id: '...'</code>), the same message <code>invalidate_index</code> and <code>get_memory_index</code> raise. If entity IDs identify people, do not log that message as is.</p>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="caching.html"><small>Previous</small>Caching</a><a rel="next" href="usage.html"><small>Next</small>Examples</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#erase">Erasing an entity</a>
+</li>
+<li><a href="#purge">How purge works</a>
+<ul>
+<li><a href="#cache">The index cache</a></li>
+<li><a href="#gcs">Deleted bytes in GCS</a></li>
+</ul>
+</li>
+<li><a href="#export">Export</a>
+</li>
+<li><a href="#limitations">Known limitation</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="operations.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>
