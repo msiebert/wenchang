@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final, cast
+from typing import Any, Final, TypeAlias, cast
 
 import yaml
 
@@ -262,7 +262,7 @@ class ContextRecord:
     content: str
 
 
-type Assertion = (
+Assertion: TypeAlias = (
     IndexReadFirst
     | FileAbsent
     | LinePresent

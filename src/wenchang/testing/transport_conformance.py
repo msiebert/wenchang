@@ -43,7 +43,7 @@ Passing every test defines a conforming client.
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from itertools import pairwise
-from typing import Final, NoReturn, cast, overload
+from typing import Final, NoReturn, TypeAlias, TypeVar, cast, overload
 
 import pytest
 
@@ -117,14 +117,17 @@ _METHODS: Final = (
     "delete_file",
     "get_memory_index",
 )
+_T = TypeVar("_T")
+_E = TypeVar("_E", bound=Exception)
+
 _PROBE_LABEL: Final = "probe path"
 _RECOVERABLE: Final = ErrorCategory.RECOVERABLE
 _FILE_ABSENT: Final = NotFoundReason.FILE_ABSENT
 
-type CanonicalFile = tuple[str, str, str, tuple[str, ...], tuple[str, ...], datetime]
-type CanonicalEntry = tuple[str, str, tuple[str, ...], tuple[str, ...], datetime]
-type CanonicalPage = tuple[tuple[CanonicalEntry, ...], bool]
-type CanonicalIndex = tuple[tuple[CanonicalEntry, ...], tuple[tuple[str, int], ...]]
+CanonicalFile: TypeAlias = tuple[str, str, str, tuple[str, ...], tuple[str, ...], datetime]
+CanonicalEntry: TypeAlias = tuple[str, str, tuple[str, ...], tuple[str, ...], datetime]
+CanonicalPage: TypeAlias = tuple[tuple[CanonicalEntry, ...], bool]
+CanonicalIndex: TypeAlias = tuple[tuple[CanonicalEntry, ...], tuple[tuple[str, int], ...]]
 
 
 def _name(t: type) -> str:
@@ -322,7 +325,7 @@ def sentinel_entry_bytes(
     return _call(name, label, lambda: index_entry_bytes(entry))
 
 
-def _call[T](name: str, label: str, fn: Callable[[], T], /) -> T:
+def _call(name: str, label: str, fn: Callable[[], _T], /) -> _T:
     """Run fn(); any Exception fails ("unexpected error") naming label and the type."""
     try:
         return fn()
@@ -374,15 +377,15 @@ def require_fresh(name: str, client: TransportClient, scope_map: Mapping[str, st
 # --- Error parity ------------------------------------------------------------
 
 
-def _check_raised[E: Exception](
+def _check_raised(
     name: str,
     label: str,
     exc: Exception,
-    expected: type[E],
+    expected: type[_E],
     category: ErrorCategory | None,
     message: str | None,
     payload: Mapping[str, object],
-) -> E:
+) -> _E:
     if type(exc) is not expected:
         _fail(
             name,
@@ -418,20 +421,20 @@ def _check_raised[E: Exception](
             )
         if got != want:
             _fail(name, label, f"wrong payload: {attr} is {_short(got)}, expected {_short(want)}")
-    return cast(E, exc)
+    return cast(_E, exc)
 
 
-def expect_error[E: Exception](
+def expect_error(
     name: str,
     label: str,
     call: Callable[[], object],
-    expected: type[E],
+    expected: type[_E],
     category: ErrorCategory | None,
     /,
     *,
     message: str | None = None,
     **payload: object,
-) -> E:
+) -> _E:
     """Run call(); fail unless it raises exactly `expected` with this category, message, payload.
 
     `category` is required for WenchangError subclasses and must be None otherwise.

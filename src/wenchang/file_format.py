@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TypeAlias
 
 _FACT_LINE_PATTERN = re.compile(r"- \[(stated|observed|inferred|system)\] (.*)")
 
@@ -59,7 +60,7 @@ def parse_fact(line: str) -> Fact | None:
     return Fact(ConfidenceLabel(match.group(1)), text)
 
 
-type BodyLine = Fact | str
+BodyLine: TypeAlias = Fact | str
 """A body line: a Fact, or a str for a non-fact line kept verbatim."""
 
 

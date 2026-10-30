@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Final, cast
+from typing import Any, Final, TypeAlias, TypeVar, cast
 
 # mcp is an optional dependency; tell a missing install from an incompatible one.
 if importlib.util.find_spec("mcp") is None:
@@ -60,6 +60,8 @@ __all__ = [
 
 PROMPT_RESOURCE_URI: Final[str] = "wenchang://memory-prompt"
 
+_C = TypeVar("_C")
+
 _TOOL_PREFIX_RULE: Final[str] = (
     "tool_prefix must be 1-64 characters of A-Z, a-z, 0-9, '_' or '-', "
     "starting and ending with a letter or digit"
@@ -68,7 +70,7 @@ _TOOL_PREFIX: Final = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])
 
 _log = logging.getLogger("wenchang.mcp")
 
-type _Result = MemoryFile | ListPage | MemoryIndex | None
+_Result: TypeAlias = MemoryFile | ListPage | MemoryIndex | None
 
 # Wrappers annotate ctx as Context directly: MCPServer detects the injected
 # parameter by annotation and does not see through a type alias.
@@ -108,12 +110,12 @@ def _type_name(t: type) -> str:
         return "<unnamed>"
 
 
-def _validate[C](
+def _validate(
     *,
     client: TransportClient,
-    resolver: IdentityResolver[C],
+    resolver: IdentityResolver[_C],
     policy: ScopePolicy,
-    credentials_from_context: Callable[[Context[Any, Any]], C],
+    credentials_from_context: Callable[[Context[Any, Any]], _C],
     source: str,
     product: str | None,
     tool_prefix: str | None,
@@ -154,14 +156,14 @@ def _validate[C](
     return names, descriptions
 
 
-def register_memory_tools[C](
+def register_memory_tools(
     server: MCPServer,
     *,
     prompt: str,
     client: TransportClient,
-    resolver: IdentityResolver[C],
+    resolver: IdentityResolver[_C],
     policy: ScopePolicy,
-    credentials_from_context: Callable[[Context[Any, Any]], C],
+    credentials_from_context: Callable[[Context[Any, Any]], _C],
     source: str,
     product: str | None = None,
     tool_prefix: str | None = None,
@@ -255,7 +257,7 @@ def register_memory_tools[C](
         ctx: Context[Any, Any], op: Callable[[MemoryTools], _Result], tool: str
     ) -> tuple[dict[str, object], bool]:
         failed_type: str | None = None
-        credentials: C | None = None
+        credentials: _C | None = None
         try:
             credentials = credentials_from_context(ctx)
         except Exception as exc:
@@ -270,7 +272,7 @@ def register_memory_tools[C](
             tools = bind_tools(
                 client,
                 resolver,
-                cast(C, credentials),
+                cast(_C, credentials),
                 policy,
                 source=source,
                 product=product,
@@ -423,13 +425,13 @@ def register_memory_tools[C](
         )
 
 
-def build_server[C](
+def build_server(
     *,
     slots: PromptSlots,
     client: TransportClient,
-    resolver: IdentityResolver[C],
+    resolver: IdentityResolver[_C],
     policy: ScopePolicy,
-    credentials_from_context: Callable[[Context[Any, Any]], C],
+    credentials_from_context: Callable[[Context[Any, Any]], _C],
     source: str,
     product: str | None = None,
     tool_prefix: str | None = None,

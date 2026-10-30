@@ -25,7 +25,7 @@ The suite applies no pytest marks; mark your own subclass if needed.
 Passing every test defines a conforming resolver.
 """
 
-from typing import cast
+from typing import Generic, TypeVar, cast
 
 import pytest
 
@@ -51,6 +51,8 @@ from wenchang.paths import (
     parse_path,
 )
 from wenchang.scope import SYSTEM_AREA, ScopePolicy, check_write
+
+_C = TypeVar("_C")
 
 _PROBE_AREA = "notes"
 _PROBE_NAME = "conformance-probe"
@@ -88,8 +90,8 @@ def _canonical(name: str, result: Identity, call: int | None = None) -> Identity
         )
 
 
-def _resolve_valid[C](
-    resolver: IdentityResolver[C], credentials: C, call: int | None = None
+def _resolve_valid(
+    resolver: IdentityResolver[_C], credentials: _C, call: int | None = None
 ) -> Identity:
     """Resolve credentials that must succeed, failing the test on any violation."""
     name = _name(type(resolver))
@@ -116,8 +118,8 @@ def _resolve_valid[C](
     )
 
 
-def _resolve_invalid[C](
-    resolver: IdentityResolver[C], credentials: C, call: int | None = None
+def _resolve_invalid(
+    resolver: IdentityResolver[_C], credentials: _C, call: int | None = None
 ) -> ResolutionFailure:
     """Resolve credentials that must be rejected, failing the test on any violation."""
     name = _name(type(resolver))
@@ -186,11 +188,11 @@ def _ungranted_scope(identity: Identity) -> str:
     return scope
 
 
-class ResolverConformance[C]:
+class ResolverConformance(Generic[_C]):
     """Tests every IdentityResolver must pass. Subclass with a Test* name and supply fixtures."""
 
     def test_valid_credentials_resolve_to_identity(
-        self, resolver: IdentityResolver[C], valid_credentials: C, expected_scopes: frozenset[str]
+        self, resolver: IdentityResolver[_C], valid_credentials: _C, expected_scopes: frozenset[str]
     ) -> None:
         """Valid credentials resolve to an Identity granting exactly expected_scopes."""
         name = _name(type(resolver))
@@ -203,7 +205,7 @@ class ResolverConformance[C]:
             pytest.fail(f"{name}: granted scopes {sorted(actual)}, expected {sorted(expected)}")
 
     def test_valid_credentials_resolve_through_library_entry_point(
-        self, resolver: IdentityResolver[C], valid_credentials: C
+        self, resolver: IdentityResolver[_C], valid_credentials: _C
     ) -> None:
         """resolve_identity returns an Identity equal to the resolver's own result."""
         name = _name(type(resolver))
@@ -216,13 +218,13 @@ class ResolverConformance[C]:
             pytest.fail(f"{name}: resolve_identity returned a different Identity than resolve")
 
     def test_invalid_credentials_return_resolution_failure(
-        self, resolver: IdentityResolver[C], invalid_credentials: C
+        self, resolver: IdentityResolver[_C], invalid_credentials: _C
     ) -> None:
         """Invalid credentials return a ResolutionFailure; the resolver does not raise."""
         _resolve_invalid(resolver, invalid_credentials)
 
     def test_invalid_credentials_raise_permanent_resolver_failure_error(
-        self, resolver: IdentityResolver[C], invalid_credentials: C
+        self, resolver: IdentityResolver[_C], invalid_credentials: _C
     ) -> None:
         """resolve_identity turns the failure into a permanent ResolverFailureError."""
         name = _name(type(resolver))
@@ -238,7 +240,7 @@ class ResolverConformance[C]:
         )
 
     def test_valid_resolution_is_consistent(
-        self, resolver: IdentityResolver[C], valid_credentials: C
+        self, resolver: IdentityResolver[_C], valid_credentials: _C
     ) -> None:
         """Repeated resolution of the same credentials gives equal identities."""
         name = _name(type(resolver))
@@ -248,7 +250,7 @@ class ResolverConformance[C]:
                 pytest.fail(f"{name}: different results for identical credentials on call {call}")
 
     def test_invalid_resolution_is_consistent(
-        self, resolver: IdentityResolver[C], invalid_credentials: C
+        self, resolver: IdentityResolver[_C], invalid_credentials: _C
     ) -> None:
         """Repeated resolution of invalid credentials fails every time."""
         for call in range(1, _CONSISTENCY_CALLS + 1):
@@ -256,8 +258,8 @@ class ResolverConformance[C]:
 
     def test_roles_are_known_to_scope_configuration(
         self,
-        resolver: IdentityResolver[C],
-        valid_credentials: C,
+        resolver: IdentityResolver[_C],
+        valid_credentials: _C,
         known_roles: frozenset[str],
         policy: ScopePolicy,
     ) -> None:
@@ -277,7 +279,7 @@ class ResolverConformance[C]:
                     )
 
     def test_granted_scopes_build_valid_paths(
-        self, resolver: IdentityResolver[C], valid_credentials: C
+        self, resolver: IdentityResolver[_C], valid_credentials: _C
     ) -> None:
         """Every granted scope and entity ID builds a valid, round-tripping path and prefix."""
         name = _name(type(resolver))
@@ -297,7 +299,7 @@ class ResolverConformance[C]:
                 pytest.fail(f"{name}: path {path!r} is not under prefix {prefix!r}")
 
     def test_system_area_is_read_only_in_every_scope(
-        self, resolver: IdentityResolver[C], valid_credentials: C, policy: ScopePolicy
+        self, resolver: IdentityResolver[_C], valid_credentials: _C, policy: ScopePolicy
     ) -> None:
         """Writes to system/ are rejected in every scope, granted or not, whatever the role."""
         name = _name(type(resolver))
@@ -313,7 +315,7 @@ class ResolverConformance[C]:
         _expect_restriction(name, path, identity, policy, read_only, ungranted)
 
     def test_own_entity_writes_follow_policy(
-        self, resolver: IdentityResolver[C], valid_credentials: C, policy: ScopePolicy
+        self, resolver: IdentityResolver[_C], valid_credentials: _C, policy: ScopePolicy
     ) -> None:
         """A write under the caller's own entity succeeds or needs a role, as the policy says."""
         name = _name(type(resolver))
@@ -345,7 +347,7 @@ class ResolverConformance[C]:
                 )
 
     def test_foreign_entity_writes_are_not_granted(
-        self, resolver: IdentityResolver[C], valid_credentials: C, policy: ScopePolicy
+        self, resolver: IdentityResolver[_C], valid_credentials: _C, policy: ScopePolicy
     ) -> None:
         """A write under another entity ID in a granted scope is not granted."""
         name = _name(type(resolver))
@@ -355,7 +357,7 @@ class ResolverConformance[C]:
             _expect_restriction(name, path, identity, policy, RestrictionReason.NOT_GRANTED, scope)
 
     def test_ungranted_scope_writes_are_not_granted(
-        self, resolver: IdentityResolver[C], valid_credentials: C, policy: ScopePolicy
+        self, resolver: IdentityResolver[_C], valid_credentials: _C, policy: ScopePolicy
     ) -> None:
         """A write in a scope the identity has no grant for is not granted."""
         name = _name(type(resolver))
