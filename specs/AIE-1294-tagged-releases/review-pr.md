@@ -36,6 +36,8 @@ Adopters could pin wenchang only to a commit SHA. Releases are now `vX.Y.Z` tags
 - Smoke install runs from `$RUNNER_TEMP` so the checkout's `src/` cannot mask a broken wheel.
 - `CHANGELOG.md` `0.1.0` contents: accurate and complete for what is on `main` at tag time (sibling PRs may land first).
 - Recovery policy in `docs/releasing.md`: a tag may be moved only if no release was created.
+- The sdist is curated to `src/`, `README.md`, `LICENSE`, `CHANGELOG.md`, `pyproject.toml`; tests run from a checkout (they need `evals/`, `.claude/`, ADRs). The wheel is unchanged by the include list.
+- `site/llms.txt` is hand-maintained; it is in the pin test's file list.
 
 ## Follow-ups
 

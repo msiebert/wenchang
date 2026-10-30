@@ -40,8 +40,8 @@ dev-mode-dirs = [".", "src"]
 packages = ["src/wenchang"]
 
 [tool.hatch.build.targets.sdist]
-# Anchored to the root; the full test suite runs from a repo checkout, not the sdist.
-include = ["/src", "/tests", "/README.md", "/LICENSE", "/CHANGELOG.md", "/pyproject.toml"]
+# Anchored to the root. Tests are excluded: the test suite runs from a repo checkout.
+include = ["/src", "/README.md", "/LICENSE", "/CHANGELOG.md", "/pyproject.toml"]
 
 [tool.ruff]
 line-length = 100

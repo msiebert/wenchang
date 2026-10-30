@@ -43,11 +43,6 @@ equal.
    asset URL with another version, and on any bare install with no URL.
    Code docstrings and error messages name the extra (`wenchang[mcp]`) and
    point to `docs/releasing.md` rather than pinning a version.
-6. **The sdist is curated.** `[tool.hatch.build.targets.sdist]` includes only
-   `src/`, `tests/`, `README.md`, `LICENSE`, `CHANGELOG.md`, and
-   `pyproject.toml`. It builds the same wheel; the full test suite needs the
-   repo (the dev-only `evals/` package, agent docs, ADRs) and runs from a
-   checkout, not the sdist.
 5. **Changelog and versioning policy.** `CHANGELOG.md` follows Keep a
    Changelog; every user-visible PR adds an `[Unreleased]` entry. SemVer
    applies to the documented Python API, the tool contract, and the stored
@@ -55,6 +50,10 @@ equal.
    patch; memory-prompt wording changes are at least minor. Pushed tags with
    a published release are never moved. Details are in
    [docs/releasing.md](../releasing.md).
+6. **The sdist is curated.** `[tool.hatch.build.targets.sdist]` includes only
+   `src/`, `README.md`, `LICENSE`, `CHANGELOG.md`, and `pyproject.toml`, and
+   builds the same wheel. Tests are left out: the test suite needs the repo
+   (the dev-only `evals/` package, agent docs, ADRs) and runs from a checkout.
 
 ## Consequences
 
