@@ -61,6 +61,13 @@ PAGES = [
         "toc": True,
     },
     {
+        "slug": "caching",
+        "nav": "Caching",
+        "title": "Caching the wenchang memory index",
+        "description": "An optional adopter-supplied cache for get_memory_index: the IndexCache get and set contract, a Redis example, invalidate_index for out-of-band writers, failure handling, and the staleness and privacy limits.",
+        "toc": True,
+    },
+    {
         "slug": "usage",
         "nav": "Examples",
         "title": "Examples: wenchang tool calls and memory files",
@@ -631,7 +638,7 @@ def main() -> None:
         (OUT / f"{slug}.md").write_text(twins[slug])
     full = [
         "# wenchang: full documentation\n",
-        "> Persistent, self-organizing memory for AI agents. This file concatenates the pages of https://msiebert.github.io/wenchang/ (overview, setup, prompts, authorization, examples, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
+        "> Persistent, self-organizing memory for AI agents. This file concatenates the pages of https://msiebert.github.io/wenchang/ (overview, setup, prompts, authorization, caching, examples, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
     ]
     for page in PAGES:
         full.append(f"\n<!-- page: {page['slug']}.md -->\n")
