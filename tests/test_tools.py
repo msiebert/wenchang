@@ -85,6 +85,7 @@ ALLOWED_WENCHANG_IMPORTS = frozenset(
         "wenchang.errors",
         "wenchang.file_format",
         "wenchang.identity",
+        "wenchang.observer",
         "wenchang.paths",
         "wenchang.scope",
         "wenchang.transport",

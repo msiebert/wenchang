@@ -144,7 +144,8 @@ Things to know:
   on every call, so cache inside it if resolution is expensive.
 - **Calls run concurrently on worker threads.** The `TransportClient`, and
   the optional `on_call` observer, must be thread-safe. `on_call` receives a
-  `ToolCallRecord` after every call.
+  `ToolCallRecord` after every call. `bind_tools(..., on_call=...)` delivers
+  the same `ToolCallRecord`, with `request_id=None`.
 - **MCP validates arguments first.** A wrong-type or missing argument
   returns MCP's own error text, not a rendered wenchang error.
 - **MCP pre-parses JSON-like strings.** The string `"null"` arrives as
