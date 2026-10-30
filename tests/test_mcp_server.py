@@ -23,6 +23,7 @@ from mcp.types import CallToolResult, TextContent
 
 import wenchang.mcp as wmcp
 from evals.reference_adopter import REFERENCE_SLOTS
+from schema_kinds import schema_kind
 from wenchang.core import MemoryStore
 from wenchang.identity import Identity, ResolutionFailure, ScopeGrant
 from wenchang.mcp import (
@@ -253,18 +254,6 @@ def test_input_schemas_mirror_memory_tools_signatures() -> None:
         assert "ctx" not in schema.get("properties", {})
 
 
-def _kind(prop: Mapping[str, Any]) -> str:
-    """Render a JSON-schema property as e.g. "string", "string|null", "array[string]"."""
-    options = cast(list[Mapping[str, Any]], prop.get("anyOf", [prop]))
-    kinds: list[str] = []
-    for option in options:
-        kind = cast(str, option["type"])
-        if kind == "array":
-            kind = f"array[{option['items']['type']}]"
-        kinds.append(kind)
-    return "|".join(kinds)
-
-
 PINNED_KINDS: dict[str, dict[str, str]] = {
     "read_file": {"scope": "string", "area": "string", "name": "string"},
     "list_prefix": {"scope": "string", "area": "string|null", "cursor": "string|null"},
@@ -310,7 +299,7 @@ def test_input_schema_types_are_pinned(tool: str) -> None:
     """The schema types of every tool parameter are pinned (AIE-1060, US3.7)."""
     properties = _tools(_server())[tool].input_schema["properties"]
 
-    assert {name: _kind(prop) for name, prop in properties.items()} == PINNED_KINDS[tool]
+    assert {name: schema_kind(prop) for name, prop in properties.items()} == PINNED_KINDS[tool]
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ from mcp.client import Client
 from mcp.server.mcpserver import Context, MCPServer
 
 from evals.reference_adopter import REFERENCE_SLOTS
+from schema_kinds import schema_kind
 from wenchang.core import MemoryStore
 from wenchang.identity import Identity, SandboxResolver, ScopeGrant
 from wenchang.mcp import register_memory_tools
@@ -64,18 +65,6 @@ def _tools(server: MCPServer) -> dict[str, Any]:
     return _with_client(server, body)
 
 
-def _kind(prop: Mapping[str, Any]) -> str:
-    """Render a JSON-schema property as e.g. "string", "string|null", "array[string]"."""
-    options = cast(list[Mapping[str, Any]], prop.get("anyOf", [prop]))
-    kinds: list[str] = []
-    for option in options:
-        kind = cast(str, option["type"])
-        if kind == "array":
-            kind = f"array[{option['items']['type']}]"
-        kinds.append(kind)
-    return "|".join(kinds)
-
-
 def test_registered_input_schemas_match_export() -> None:
     """Each MCP-registered input schema has the exported schema's property
     names, required set, and per-property kinds (AIE-1295, US2.2).
@@ -93,4 +82,4 @@ def test_registered_input_schemas_match_export() -> None:
         assert set(theirs) == set(ours), name
         assert set(registered.get("required", [])) == set(cast(list[str], schema["required"])), name
         for prop in ours:
-            assert _kind(theirs[prop]) == _kind(ours[prop]), (name, prop)
+            assert schema_kind(theirs[prop]) == schema_kind(ours[prop]), (name, prop)

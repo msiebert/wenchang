@@ -6,8 +6,10 @@ from values constructed directly. Validation runs without format checking.
 """
 
 import copy
+import importlib
 import inspect
 import json
+import pkgutil
 import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -18,6 +20,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema.protocols import Validator
 
+import wenchang
 from wenchang.core import CappedPrefix, FileEntry, MemoryFile, MemoryIndex, MemoryStore
 from wenchang.errors import (
     BackendUnavailableError,
@@ -162,7 +165,7 @@ def test_every_schema_is_valid_and_json_serializable() -> None:
         for part in (schema.input, schema.output, schema.error):
             Draft202012Validator.check_schema(part)
             json.dumps(part)
-        assert name
+        assert schema.name == name
     Draft202012Validator.check_schema(error_schema())
     json.dumps(error_schema())
 
@@ -410,6 +413,12 @@ def _unparseable_file() -> MemoryFile:
     return MemoryFile(_BAD_PATH, f"{_FACT}\n", _META, _VERSION)
 
 
+def _sourceless_file() -> MemoryFile:
+    # A tool session always stamps its source, so build the file directly.
+    meta = FileMetadata("A note.", ("alias",), frozenset(), _NOW)
+    return MemoryFile(_PATH, f"{_FACT}\n", meta, _VERSION)
+
+
 def _all_success_payloads() -> Payloads:
     return [
         *_us3_1_payloads(),
@@ -417,6 +426,7 @@ def _all_success_payloads() -> Payloads:
         *_us3_2_payloads(),
         ("get_memory_index", render_result(_capped_index())),
         ("read_file", render_result(_unparseable_file())),
+        ("read_file", render_result(_sourceless_file())),
     ]
 
 
@@ -480,6 +490,50 @@ def test_unparseable_path_validates() -> None:
     _assert_output("read_file", payload)
 
 
+def test_empty_sources_render_and_validate() -> None:
+    """A MemoryFile with no sources keeps sources as [] and validates against
+    read_file's output (AIE-1295, US3.1a).
+    """
+    payload = render_result(_sourceless_file())
+
+    assert payload["sources"] == []
+    _assert_output("read_file", payload)
+
+
+def _object_subschemas(node: object, where: str) -> list[tuple[str, dict[str, Any]]]:
+    found: list[tuple[str, dict[str, Any]]] = []
+    if isinstance(node, dict):
+        mapping = cast(dict[str, Any], node)
+        if mapping.get("type") == "object":
+            found.append((where, mapping))
+        for key, value in mapping.items():
+            found += _object_subschemas(value, f"{where}.{key}")
+    elif isinstance(node, list):
+        for i, item in enumerate(cast(list[object], node)):
+            found += _object_subschemas(item, f"{where}[{i}]")
+    return found
+
+
+def test_every_object_schema_is_closed() -> None:
+    """Every subschema with "type": "object" in each tool's input, output, and
+    error, and in error_schema(), sets "additionalProperties": False
+    (AIE-1295, FR-004).
+    """
+    roots: list[tuple[str, dict[str, object]]] = [("error_schema", error_schema())]
+    for name, schema in tool_schemas().items():
+        roots += [
+            (f"{name}.input", schema.input),
+            (f"{name}.output", schema.output),
+            (f"{name}.error", schema.error),
+        ]
+    objects = [found for where, root in roots for found in _object_subschemas(root, where)]
+
+    assert any(".entries.items" in where for where, _ in objects)
+    assert any(".capped.items" in where for where, _ in objects)
+    for where, obj in objects:
+        assert obj.get("additionalProperties") is False, where
+
+
 def test_rendered_keys_cover_declared_properties() -> None:
     """Per tool, the union of rendered keys equals the output's declared
     properties, including file entries and capped rows (AIE-1295, US3.5).
@@ -536,7 +590,18 @@ class _OffCategoryError(WenchangError):
     guidance = "Nothing to do."
 
 
+def _import_all_wenchang_modules() -> None:
+    for module in pkgutil.walk_packages(wenchang.__path__, "wenchang."):
+        try:
+            importlib.import_module(module.name)
+        except ImportError:
+            # wenchang.mcp needs the optional mcp extra.
+            if module.name != "wenchang.mcp":
+                raise
+
+
 def _discovered_error_classes() -> set[type[WenchangError]]:
+    _import_all_wenchang_modules()
     found: set[type[WenchangError]] = set()
     pending = list(WenchangError.__subclasses__())
     while pending:

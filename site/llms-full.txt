@@ -1711,7 +1711,7 @@ To register the memory tools with a framework other than MCP, take their definit
 
 Every schema is JSON Schema draft 2020-12 and closed (`additionalProperties: false`). Each call builds fresh dicts, so you can change them without affecting later calls.
 
-Use `input` as the tool's parameter schema, call the matching `MemoryTools` method from a session's `bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)`, and return `render_result` of its value or `render_error` of what it raised. Those payloads match `output` and `error`. Here `ToolDef` stands in for your framework's tool definition:
+Use `input` as the tool's parameter schema, call the matching `MemoryTools` method from a session's `bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)`, and return `render_result` of its value or `render_error` of what it raised. Those payloads match `output` and `error`. Validate the agent's arguments against `input` before calling the method, as most frameworks do from the parameter schema: the method is called with `**arguments`, so a missing or unknown argument raises a `TypeError` that `render_error` reports as an opaque `internal` error. Here `ToolDef` stands in for your framework's tool definition:
 
 ```python
 from collections.abc import Callable
@@ -1738,6 +1738,7 @@ def handler(tools: MemoryTools, name: str) -> Callable[[dict[str, object]], dict
     method = tools.tools()[name]
 
     def call(arguments: dict[str, object]) -> dict[str, object]:
+        # The framework has already validated `arguments` against `s.input`.
         try:
             return render_result(method(**arguments))  # matches the schema's output
         except Exception as exc:
@@ -1759,10 +1760,11 @@ for s in tool_schemas(product="Inkwell").values():
 print(defs["read_file"].handler({"scope": "user", "area": "notes", "name": "tea"}))
 ```
 
-The schemas describe on-contract output:
+The schemas assume on-contract output and standard tool-use modes:
 
 - **Every field is required.** An on-contract `TransportClient` always produces every field, so each output field is marked required. `render_result` drops a field whose value has the wrong type, which an off-contract client can produce; strict validation rejects that payload.
 - **Errors are wenchang's own.** The error schema covers the error classes wenchang raises. A `WenchangError` subclass of your own validates only if it reuses these attribute names, types, and `reason` values.
+- **Input schemas target standard tool use.** They work as-is with Anthropic tool use and OpenAI function calling. OpenAI's strict mode requires every property in `required`, so optional arguments must become required and nullable; Gemini function declarations reject `anyOf`, `additionalProperties`, and `default`. A host using either must transform `input` first.
 
 ## The memory prompt resource
 

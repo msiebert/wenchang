@@ -17,7 +17,8 @@ Adopters were hand-copying each tool's argument and result shapes into their Too
 | US2.1 input mirrors signature (order, required, defaults) | `test_input_mirrors_signature` |
 | US2.2 MCP-registered input schemas match the export | `test_registered_input_schemas_match_export` (tests/test_schemas_mcp.py) |
 | US2.3 signature change fails the snapshot | follows from US2.1 + US1.4 (no separate test) |
-| US3.1 / 3.1a successful and edge results validate | `test_successful_calls_validate`, `test_edge_results_validate` |
+| US3.1 / 3.1a successful and edge results validate | `test_successful_calls_validate`, `test_edge_results_validate`, `test_empty_sources_render_and_validate` |
+| FR-004 every object schema is closed | `test_every_object_schema_is_closed` |
 | US3.2 multi-page listing with string `next_cursor` | `test_paged_listing_validates` |
 | US3.3 capped index (entity- and area-level) | `test_capped_index_validates` |
 | US3.4 unparseable path renders null location | `test_unparseable_path_validates` |

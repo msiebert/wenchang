@@ -33,11 +33,11 @@ their own identity resolver and their own transport client, installed with
 the optional `wenchang[testing]` extra. A fourteenth, `mcp`, is the host
 adapter that serves the tools and prompt from an MCP server; it is installed
 with the optional `wenchang[mcp]` extra, and nothing else imports it. A
-fourteenth, `observer`, is the dependency-free tool-call observer that
-`tools` and `mcp` share. A fifteenth, `schemas`, exports each tool's JSON
+fifteenth, `observer`, is the dependency-free tool-call observer that
+`tools` and `mcp` share. A sixteenth, `schemas`, exports each tool's JSON
 Schemas for adopters building their own tool definitions. Every module in
-the map below is implemented; the
-remote half of `transport` is the one planned piece.
+the map below is implemented; the remote half of `transport` is the one
+planned piece.
 
 ## Module map
 

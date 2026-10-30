@@ -22,6 +22,7 @@ def handler(tools: MemoryTools, name: str) -> Callable[[dict[str, object]], dict
     method = tools.tools()[name]
 
     def call(arguments: dict[str, object]) -> dict[str, object]:
+        # The framework has already validated `arguments` against `s.input`.
         try:
             return render_result(method(**arguments))  # matches the schema's output
         except Exception as exc:
