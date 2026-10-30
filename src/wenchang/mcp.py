@@ -9,7 +9,6 @@ render_result or render_error output.
 Requires the optional extra: pip install 'wenchang[mcp]'.
 """
 
-import copy
 import importlib.util
 import inspect
 import json
@@ -17,8 +16,6 @@ import logging
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any, Final, TypeAlias, TypeVar, cast
 
 # mcp is an optional dependency; tell a missing install from an incompatible one.
@@ -37,6 +34,7 @@ import wenchang
 from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import ResolverFailureError
 from wenchang.identity import Identity, IdentityResolver
+from wenchang.observer import ToolCallObserver, ToolCallRecord, check_observer, notify_observer
 from wenchang.prompts import PromptSlots, build_memory_prompt
 from wenchang.scope import ScopePolicy
 from wenchang.tools import (
@@ -76,27 +74,6 @@ _Result: TypeAlias = MemoryFile | ListPage | MemoryIndex | None
 # parameter by annotation and does not see through a type alias.
 
 
-@dataclass(frozen=True)
-class ToolCallRecord:
-    """One memory tool call as the MCP adapter handled it.
-
-    tool is the registered name, prefix included; arguments are what the
-    wrapper received; result is a copy of the payload sent to the client;
-    request_id is the MCP request's id, for correlating records that arrive
-    in completion order; duration_s is the wrapper's wall time on a
-    monotonic clock. Calls MCP rejects during argument validation never
-    produce a record. Records compare by value and are unhashable, because
-    arguments and result are mappings.
-    """
-
-    tool: str
-    arguments: Mapping[str, object]
-    result: Mapping[str, object]
-    is_error: bool
-    request_id: str
-    duration_s: float
-
-
 def memory_instructions(slots: PromptSlots) -> str:
     """The text to pass as an MCPServer's instructions: the memory prompt."""
     return build_memory_prompt(slots)
@@ -119,7 +96,7 @@ def _validate(
     source: str,
     product: str | None,
     tool_prefix: str | None,
-    on_call: Callable[[ToolCallRecord], None] | None,
+    on_call: ToolCallObserver | None,
 ) -> tuple[dict[str, str], Mapping[str, str]]:
     """Check the arguments; return registered name by tool name, and the descriptions."""
     # Reuses MemoryTools' checks and messages for client, policy, source, and product.
@@ -131,10 +108,7 @@ def _validate(
     # Tools run on worker threads and call these synchronously.
     if inspect.iscoroutinefunction(credentials_from_context):
         raise TypeError("credentials_from_context must be a plain function, not async")
-    if on_call is not None and not callable(cast(object, on_call)):
-        raise TypeError("on_call must be callable or None")
-    if inspect.iscoroutinefunction(on_call):
-        raise TypeError("on_call must be a plain function, not async")
+    check_observer(on_call)
     if tool_prefix is not None:
         if not issubclass(type(cast(object, tool_prefix)), str):
             raise TypeError(
@@ -167,7 +141,7 @@ def register_memory_tools(
     source: str,
     product: str | None = None,
     tool_prefix: str | None = None,
-    on_call: Callable[[ToolCallRecord], None] | None = None,
+    on_call: ToolCallObserver | None = None,
 ) -> None:
     """Add the seven memory tools and the prompt resource to server.
 
@@ -239,18 +213,16 @@ def register_memory_tools(
             is_error=is_error,
         )
         if on_call is not None:
-            record = ToolCallRecord(
-                tool,
-                MappingProxyType(copy.deepcopy(dict(arguments))),
-                MappingProxyType(copy.deepcopy(payload)),
-                is_error,
-                ctx.request_id,
-                duration,
+            notify_observer(
+                on_call,
+                _log,
+                tool=tool,
+                arguments=arguments,
+                result=payload,
+                is_error=is_error,
+                request_id=ctx.request_id,
+                duration_s=duration,
             )
-            try:
-                on_call(record)
-            except Exception:
-                _log.error("on_call observer failed for %s", tool, exc_info=True)
         return result
 
     def _run(
@@ -435,7 +407,7 @@ def build_server(
     source: str,
     product: str | None = None,
     tool_prefix: str | None = None,
-    on_call: Callable[[ToolCallRecord], None] | None = None,
+    on_call: ToolCallObserver | None = None,
     name: str = "wenchang",
 ) -> MCPServer:
     """Return an MCPServer with the memory prompt as instructions and the memory tools.

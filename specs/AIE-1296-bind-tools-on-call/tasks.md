@@ -40,9 +40,9 @@ Test-first: test-writer writes failing tests (`tests/**` only), then the impleme
 
 ## T5 - Docs (doc-updater)
 
-- [ ] T5a ARCHITECTURE.md updates per plan.md.
-- [ ] T5b ADR `docs/adr/0043-shared-tool-call-observer.md`, covering the items listed in plan.md's Docs section; pointer in ADR 0027 decision 10.
-- [ ] T5c `specs/AIE-1296-bind-tools-on-call/review-pr.md` with the AC-to-test mapping.
+- [x] T5a ARCHITECTURE.md updates per plan.md.
+- [x] T5b ADR `docs/adr/0043-shared-tool-call-observer.md`, covering the items listed in plan.md's Docs section; pointer in ADR 0027 decision 10.
+- [x] T5c `specs/AIE-1296-bind-tools-on-call/review-pr.md` with the AC-to-test mapping.
 
 ## Order
 

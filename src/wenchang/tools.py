@@ -9,22 +9,27 @@ tool_descriptions(product) gives the same text without a session. Tools
 take a scope, area, and name and build the path under the caller's own
 entity in that scope. Mutating tools check the write against the identity
 and policy, then call the client. render_result and render_error produce
-the JSON-safe form a host shows the agent.
+the JSON-safe form a host shows the agent. An on_call observer, if set,
+receives a ToolCallRecord after each tool call.
 """
 
+import functools
 import inspect
+import logging
 import re
+import time
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Final, NoReturn, TypeVar, cast
+from typing import Concatenate, Final, NoReturn, ParamSpec, TypeVar, cast
 
 from wenchang.core import CappedPrefix, FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import ErrorCategory, InvalidArgumentError, WenchangError
 from wenchang.file_format import FileMetadata, MetadataFormatError, parse_fact
 from wenchang.identity import Identity, IdentityResolver, resolve_identity
+from wenchang.observer import ToolCallObserver, check_observer, notify_observer
 from wenchang.paths import build_path, build_prefix, is_valid_segment, parse_path
 from wenchang.scope import ScopePolicy, check_write
 from wenchang.transport import TransportClient
@@ -40,6 +45,10 @@ __all__ = [
 ]
 
 _C = TypeVar("_C")
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+_log = logging.getLogger("wenchang.tools")
 
 TOOL_NAMES: Final[tuple[str, ...]] = (
     "get_memory_index",
@@ -107,6 +116,69 @@ _DROP: Final = object()
 _UNSET_TIMESTAMP: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
 
+def _observed(
+    method: Callable[Concatenate["MemoryTools", _P], _R],
+) -> Callable[Concatenate["MemoryTools", _P], _R]:
+    """Wrap a tool method to deliver one ToolCallRecord per call to the session's on_call."""
+    tool = method.__name__
+    full = inspect.signature(method)
+    signature = full.replace(parameters=list(full.parameters.values())[1:])
+
+    @functools.wraps(method)
+    def wrapper(self: "MemoryTools", *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        on_call = self.on_call
+        if on_call is None:
+            return method(self, *args, **kwargs)
+        try:
+            bound = signature.bind(*args, **kwargs)
+        except TypeError:
+            # Python rejects the call itself; no record.
+            return method(self, *args, **kwargs)
+        bound.apply_defaults()
+        value = cast(_R, None)
+        error: Exception | None = None
+        render_failure: Exception | None = None
+        try:
+            started = time.monotonic()
+            try:
+                value = method(self, *args, **kwargs)
+            except Exception as exc:
+                error = exc
+            duration_s = time.monotonic() - started
+            # Rendering and delivery run outside any except block, so the observer
+            # sees no active exception and its own failures chain to nothing.
+            result: dict[str, object] = {}
+            if error is None:
+                try:
+                    result = render_result(cast(MemoryFile | ListPage | MemoryIndex | None, value))
+                except Exception as exc:
+                    render_failure = exc
+            failure = error if error is not None else render_failure
+            is_error = failure is not None
+            if failure is not None:
+                result = render_error(failure)
+            notify_observer(
+                on_call,
+                _log,
+                tool=tool,
+                arguments=bound.arguments,
+                result=result,
+                is_error=is_error,
+                request_id=None,
+                duration_s=duration_s,
+            )
+            if error is not None:
+                raise error
+            return value
+        finally:
+            # Break the frame-traceback reference cycle.
+            error = None
+            render_failure = None
+            failure = None
+
+    return cast(Callable[Concatenate["MemoryTools", _P], _R], wrapper)
+
+
 class MemoryTools:
     """The memory tools for one session."""
 
@@ -118,6 +190,7 @@ class MemoryTools:
         *,
         source: str,
         product: str | None = None,
+        on_call: ToolCallObserver | None = None,
     ) -> None:
         if not isinstance(cast(object, client), TransportClient):
             raise TypeError("client must satisfy TransportClient")
@@ -131,11 +204,13 @@ class MemoryTools:
         source = str.__str__(source)
         if source == "":
             raise ValueError("source must be non-empty")
+        check_observer(on_call)
         self._client = client
         self._identity = identity
         self._policy = policy
         self._source = source
         self._product = _product(product)
+        self._on_call = on_call
 
     @property
     def client(self) -> TransportClient:
@@ -162,6 +237,11 @@ class MemoryTools:
         """The product named in each tool description's first line, or None."""
         return self._product
 
+    @property
+    def on_call(self) -> ToolCallObserver | None:
+        """The observer called after each tool call, or None."""
+        return self._on_call
+
     def tools(self) -> Mapping[str, Callable[..., object]]:
         """The seven tools by name, in TOOL_NAMES order, as bound methods."""
         methods: dict[str, Callable[..., object]] = {
@@ -176,6 +256,7 @@ class MemoryTools:
         """
         return tool_descriptions(self._product)
 
+    @_observed
     def get_memory_index(self) -> MemoryIndex:
         """Load the metadata index of every memory scope available in this session.
 
@@ -190,6 +271,7 @@ class MemoryTools:
         scope_map = {scope: grant.entity_id for scope, grant in self._identity.grants.items()}
         return self._client.get_memory_index(scope_map)
 
+    @_observed
     def read_file(self, scope: str, area: str, name: str) -> MemoryFile:
         """Read one memory file: its content, metadata, and version.
 
@@ -198,6 +280,7 @@ class MemoryTools:
         path = self._path(scope, area, name)
         return self._client.read_file(path)
 
+    @_observed
     def list_prefix(
         self, scope: str, area: str | None = None, cursor: ListCursor | None = None
     ) -> ListPage:
@@ -215,6 +298,7 @@ class MemoryTools:
         except ValueError as exc:
             _reraise_argument("cursor", exc)
 
+    @_observed
     def write_file(
         self,
         scope: str,
@@ -246,6 +330,7 @@ class MemoryTools:
             path, content, metadata, expected_version, source=self._source
         )
 
+    @_observed
     def append_line(
         self,
         scope: str,
@@ -289,6 +374,7 @@ class MemoryTools:
             description=description,
         )
 
+    @_observed
     def replace_fact(
         self,
         scope: str,
@@ -331,6 +417,7 @@ class MemoryTools:
             description=description,
         )
 
+    @_observed
     def delete_file(self, scope: str, area: str, name: str, expected_version: VersionToken) -> None:
         """Delete a memory file.
 
@@ -530,10 +617,20 @@ def bind_tools(
     *,
     source: str,
     product: str | None = None,
+    on_call: ToolCallObserver | None = None,
 ) -> MemoryTools:
-    """Resolve the caller's identity and return the session's tools."""
+    """Resolve the caller's identity and return the session's tools.
+
+    on_call is checked before the resolver runs.
+    """
+    check_observer(on_call)
     return MemoryTools(
-        client, resolve_identity(resolver, credentials), policy, source=source, product=product
+        client,
+        resolve_identity(resolver, credentials),
+        policy,
+        source=source,
+        product=product,
+        on_call=on_call,
     )
 
 

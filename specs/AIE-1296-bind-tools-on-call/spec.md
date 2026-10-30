@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-30
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: `on_call` only exists in `wenchang.mcp`. Adopters that call the engine through `bind_tools` can't send logs and metrics without wrapping each tool themselves. Accept the same observer in `bind_tools`, with the same call shape (tool name, arguments, result or error, duration), and share one implementation between `bind_tools` and `wenchang.mcp`. Acceptance: the observer fires once per call for successes and errors; an exception raised by the observer doesn't break the tool call; MCP behavior is unchanged.
 

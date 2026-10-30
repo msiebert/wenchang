@@ -13,6 +13,7 @@ Move `ToolCallRecord` and the observer plumbing (validation, record construction
 ```python
 __all__ = ["ToolCallObserver", "ToolCallRecord", "check_observer", "notify_observer"]
 
+
 @dataclass(frozen=True)
 class ToolCallRecord:
     tool: str
@@ -21,6 +22,7 @@ class ToolCallRecord:
     is_error: bool
     request_id: str | None
     duration_s: float
+
 
 ToolCallObserver: TypeAlias = Callable[[ToolCallRecord], None]
 ```
@@ -38,11 +40,11 @@ The `ToolCallRecord` docstring defines each field per entry point:
 Both entry points use read-only deep copies of `arguments` and `result`. Records compare by value and are unhashable.
 
 ```python
-
 def check_observer(on_call: object) -> None:
     """Raise TypeError unless on_call is None or a plain (non-async) callable."""
     # Messages, verbatim: "on_call must be callable or None"
     #                     "on_call must be a plain function, not async"
+
 
 def notify_observer(
     on_call: ToolCallObserver,
@@ -80,6 +82,7 @@ class MemoryTools:
 
     @property
     def on_call(self) -> ToolCallObserver | None: ...
+
 
 def bind_tools(
     client: TransportClient,
