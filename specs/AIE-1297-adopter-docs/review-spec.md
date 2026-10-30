@@ -1,0 +1,59 @@
+# Spec Review: AIE-1297 — Restructure the docs site for adopters
+
+## What & why
+
+The site only explains one setup: a new stdio MCP server for Claude Code.
+Adopters embedding wenchang in an existing service, with their own MCP server
+or tool framework, have to stitch it together. This reorganizes the site
+around three integration paths and adds pages for identity, storage and
+operations, and status, describing AIE-1291/1292/1293/1295/1296 as shipped.
+Docs and build script only; no `src/` change.
+
+## Acceptance criteria
+
+| # | Given | When | Then |
+| - | ----- | ---- | ---- |
+| 1 | llms.txt | agent reads instructions | step 0 asks which path and links the three integrate pages |
+| 2 | Integrate without MCP | read | base install, per-request `bind_tools`, `tool_schemas`, `render_error`, sync/thread-safe, `on_call` on `bind_tools`, runnable snippet |
+| 3 | Quickstart + MCP integrate pages | read | callout: mcp 2.x `MCPServer` only, no FastMCP/1.x, `TypeError` otherwise |
+| 4 | Identity page | read | domain-neutral chain credentials→resolver→Identity→path→ScopePolicy and a type/owner/org-project-user table, before the example |
+| 5 | Storage page | read | stored keys (`last-updated`, JSON arrays), purge/export + GDPR + soft delete/versioning, index cost + cache, file cap, no timeout/retry settings |
+| 6 | Status page | read | 0.1.0, Python 3.11+, tags + GitHub Releases, no PyPI, SemVer policy, changelog link, limitations as they are today |
+| 7 | Nav | read | Overview, Quickstart, Concepts, Integrate, Identity, Storage, Prompts, Reference, Walkthroughs, Status |
+| 8 | `site/memory-prompt.md` | compared to `build_memory_prompt(placeholders)` | equal; Prompts page embeds it |
+| 9 | HTTP auth example | built | run against a live MCP HTTP client; note removed |
+| 10 | Site | built twice; tests run | idempotent; nav, pages, sitemap, llms files, internal links/anchors, redirects, snippets all checked by tests |
+
+## Key design decisions
+
+| Decision | Alternatives rejected | Why |
+| -------- | ---------------------- | --- |
+| 13 pages; Integrate is a chooser page plus 3 children, shown in a sub-nav | One Integrate page with 3 sections | Issue asks for a page per path for llms.txt step 0 |
+| Short nav labels (Identity, Storage, Reference, Status) | Issue's full names | Ten full names don't fit one header row; titles keep full names |
+| Redirect stubs for setup/authorization/usage | Keep old slugs | "Examples" label must match file; old links shouldn't 404 |
+| Generated `memory-prompt.md` with `{slot}` placeholders + drift test | Hand-pasted copy | Hand copy drifts from the library |
+| Tests read committed `site/` output (stdlib parsing) | Run the build in tests | Build needs markdown/pygments, not in dev deps |
+| Snippets executed by a test, with an explicit skip list | Untested snippets | New integrate/ops snippets must actually run |
+| Install lines unpinned URL form | Pin to v0.1.0 here | #55 owns pinning and its pin test, rebasing onto this |
+| HTTP example: one-off live run recorded in review-pr.md | Durable ASGI test | Snippet builds a real GCS client at import; one run satisfies the issue |
+| No ADR | ADR 0044 | Build change is mechanical (page list, stubs, one generated file) |
+
+## Files/modules to be touched
+
+- `site-src/*.md` (rename 3, add 7, edit index/prompts/reference), `site-src/snippets/` (+2), `site-src/style.css` (`.subnav`)
+- `scripts/build_site.py`; regenerated `site/**` incl. `memory-prompt.md`, `sitemap.xml`, redirect stubs
+- `site/llms.txt`
+- `tests/test_site.py`, `tests/test_site_snippets.py`
+
+## Open questions / assumptions
+
+- Assumes no ADR is needed for the build-script changes. If the orchestrator wants one, it needs a number (0044?).
+- Status page links `CHANGELOG.md` / `docs/releasing.md`, which exist only after #55 merges right after this.
+- #55 must rebase onto this and re-pin every install line, including the new pages; its pin test will flag them.
+- The drift test means a prompt-wording PR must also regenerate the site.
+
+## Risks
+
+- Sibling PRs add their own site text in places this moves; rebase conflicts are resolved by placing each topic per the plan's move table.
+- Moved anchors break external deep links into `reference.html` (pages redirect, anchors don't).
+- Facts are written from the specs now; build must re-verify every one against merged `src/`.
