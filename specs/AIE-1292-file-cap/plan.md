@@ -69,7 +69,7 @@ class MemoryStore:
 ### `wenchang.tools`
 
 - No logic change. `render_error(FileQuotaExceededError(...))` already renders `error`, `category`, `message`, `limit`, and `scope`/`area`/`name` from `path`, and no `path`.
-- `MemoryTools.write_file` docstring: after the byte-ceiling sentence (tools.py:232-233), add one sentence, e.g. "Creating a file fails once the scope holds its file limit; add to an existing file, or merge files and delete the extras, then retry." Exact wording is the implementer's, within any length limits `tests/test_tools_descriptions.py` enforces.
+- `MemoryTools.write_file` docstring: after the byte-ceiling sentence (tools.py:232-233), add one sentence, e.g. "Creating a file fails once the scope holds its file limit; add to an existing file, or merge files and delete the extras, then retry." Exact wording is the implementer's; it must not contain `.md` or `is read-only` (`test_shared_mechanics_stated_once`, `tests/test_tools_descriptions.py:289`).
 
 ### Unchanged
 
@@ -81,6 +81,7 @@ Every new test docstring references AIE-1292.
 
 - `tests/test_errors.py`: US5 scenarios 1–2 and US6 scenario 3 — constructor, attributes, category, both exact literals, `ValueError` for `limit` 0 and -1, no entity ID in the message.
 - `tests/test_core_file_cap.py` (new): US1–US4 and US6 scenarios 1–2 against `MemoryStore(InMemoryStorage(), max_files_per_entity=3)` (500 / `None` for default and disabled); edge cases: oversize at the cap raises `OversizeWriteError`; corrupt metadata on another file does not block a create; create-on-existing at the cap raises `VersionConflictError`; vanished file (storage wrapper whose `get` returns `None`) raises `FileQuotaExceededError`; corrupt metadata / non-UTF-8 content on the same path propagates `MetadataFormatError` / `UnicodeDecodeError`; a test with `list_page_size=1` and several `system/` keys preceding counted keys still counts correctly.
+- `tests/test_core_write_file.py`: `_StubStorage.list_page` (line 107) raises `NotImplementedError`; change it to return `[]` so the four create tests at lines 515, 529, 563, 582 keep passing under the default cap. Their assertions stay unchanged, and they do not set `max_files_per_entity=None`.
 - `tests/test_tools.py` (or `test_tools_end_to_end.py`): US5 scenarios 3–5 (render, reference-seed boundary, role-gated check order). Build the store as `MemoryStore(InMemoryStorage(), scope_priority=REFERENCE_SCOPE_PRIORITY, max_files_per_entity=...)` and seed with `seed_reference_memory`.
 - `tests/test_tools_descriptions.py`: US5 scenario 7.
 - `tests/test_mcp_server.py`: US5 scenario 6.
