@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 from typing import Final, NewType, cast
 
 from wenchang.errors import (
@@ -40,6 +41,7 @@ from wenchang.version_token import VersionToken
 DEFAULT_MAX_FILE_BYTES: int = 16 * 1024
 DEFAULT_LIST_PAGE_SIZE: int = 100
 DEFAULT_INDEX_MAX_BYTES: int = 64 * 1024
+PURGE_MAX_PASSES: Final = 5
 
 # Equals scope.SYSTEM_AREA; core must not import scope.
 INDEX_SYSTEM_AREA: Final = "system"
@@ -103,6 +105,22 @@ def _type_name(t: type) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _normalize_entity_args(scope: object, entity_id: object) -> tuple[str, str]:
+    """Check `scope` and `entity_id` by real type and return them as exact str."""
+    if not issubclass(type(scope), str):
+        raise TypeError(f"scope must be a str, not {_type_name(type(scope))}")
+    if not issubclass(type(entity_id), str):
+        raise TypeError(f"entity_id must be a str, not {_type_name(type(entity_id))}")
+    return str.__str__(cast(str, scope)), str.__str__(cast(str, entity_id))
+
+
+def _check_entity_segments(scope: str, entity_id: str) -> None:
+    if not is_valid_segment(scope):
+        raise ValueError(f"invalid scope: {scope!r}")
+    if not is_valid_segment(entity_id):
+        raise ValueError(f"invalid entity_id: {entity_id!r}")
 
 
 def _normalize_aliases(aliases: object) -> tuple[str, ...]:
@@ -361,11 +379,39 @@ class MemoryIndex:
             prefixes.add(cap.prefix)
 
 
+@dataclass(frozen=True)
+class ExportedObject:
+    """One stored object under an entity's prefix, exactly as stored."""
+
+    key: str
+    data: bytes
+    metadata: Mapping[str, str]
+    version: VersionToken
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+
+class PurgeIncompleteError(Exception):
+    """Objects were still present under the prefix after the final pass."""
+
+    def __init__(self, scope: str, entity_id: str, passes: int) -> None:
+        # The message omits the entity ID, which may identify a person.
+        super().__init__(
+            f"purge of an entity in scope {scope!r} did not finish: "
+            f"objects were still present after {passes} passes"
+        )
+        self.scope = scope
+        self.entity_id = entity_id
+        self.passes = passes
+
+
 class MemoryStore:
     """Core memory operations over a Storage backend.
 
     Exposes read_file, write_file, replace_fact, append_line, delete_file,
-    list_prefix, and get_memory_index. With an `index_cache`,
+    list_prefix, and get_memory_index, plus the operator-only methods purge
+    and export. With an `index_cache`,
     get_memory_index caches each entity's listing under a generation token
     that every mutation attempt replaces.
     """
@@ -451,18 +497,8 @@ class MemoryStore:
         with erasure obligations need a finite `ttl`, and a purge must call
         this after all its deletes finish.
         """
-        raw_scope = cast(object, scope)
-        raw_entity = cast(object, entity_id)
-        if not issubclass(type(raw_scope), str):
-            raise TypeError(f"scope must be a str, not {_type_name(type(raw_scope))}")
-        if not issubclass(type(raw_entity), str):
-            raise TypeError(f"entity_id must be a str, not {_type_name(type(raw_entity))}")
-        scope = str.__str__(cast(str, raw_scope))
-        entity_id = str.__str__(cast(str, raw_entity))
-        if not is_valid_segment(scope):
-            raise ValueError(f"invalid scope: {scope!r}")
-        if not is_valid_segment(entity_id):
-            raise ValueError(f"invalid entity_id: {entity_id!r}")
+        scope, entity_id = _normalize_entity_args(scope, entity_id)
+        _check_entity_segments(scope, entity_id)
         cache = self._index_cache
         if cache is None:
             return
@@ -954,3 +990,114 @@ class MemoryStore:
             counts[area_prefix] = counts.get(area_prefix, 0) + 1
         capped = tuple(CappedPrefix(p, n) for p, n in sorted(counts.items()))
         return MemoryIndex(entries=tuple(included), capped=capped)
+
+    def purge(self, scope: str, entity_id: str, *, max_passes: int = PURGE_MAX_PASSES) -> int:
+        """Delete every object under `scope/entity_id/`, including system/.
+
+        Operator-only; not exposed to agents. Returns the number of deletes
+        confirmed by storage, which excludes any whose response was lost;
+        re-running is safe. Stop the entity's writers first: the store is
+        guaranteed empty on return only if no writer ran concurrently.
+
+        Each pass lists the prefix from the start and conditionally deletes
+        what it sees; passes repeat until one finds nothing. `max_passes`
+        bounds those restarts, not the length of a single pass. Raises
+        PurgeIncompleteError if objects remain after the last pass.
+
+        Raises TypeError for a non-str `scope` or `entity_id` or a non-int
+        `max_passes`, then ValueError for an invalid segment or
+        `max_passes` below 1, all without calling storage or the cache.
+        Other storage exceptions propagate; deletes already made stand.
+
+        Calls invalidate_index once after the last storage call, on every
+        exit path. On success a cache error propagates and the count is
+        lost; on failure it is logged and the purge's exception is raised.
+        On an interrupt this still calls the adopter's cache, which may
+        block. Per ADR 0040, a concurrent reader can still cache a stale
+        listing that is never served; erasure needs a finite cache `ttl`.
+
+        On GCS, soft delete and object versioning retain deleted bytes.
+        Cost is N sequential deletes, about N round trips on GCS.
+        """
+        scope, entity_id = _normalize_entity_args(scope, entity_id)
+        raw_passes = cast(object, max_passes)
+        if issubclass(type(raw_passes), bool) or not issubclass(type(raw_passes), int):
+            raise TypeError(f"max_passes must be an int, not {_type_name(type(raw_passes))}")
+        max_passes = int.__index__(cast(int, raw_passes))
+        _check_entity_segments(scope, entity_id)
+        if max_passes < 1:
+            raise ValueError("max_passes must be positive")
+
+        prefix = build_prefix(scope, entity_id)
+        try:
+            deleted = self._purge_passes(prefix, scope, entity_id, max_passes)
+        except BaseException:
+            try:
+                self.invalidate_index(scope, entity_id)
+            except Exception as cache_exc:
+                _logger.warning(
+                    "index cache invalidation failed after purge of scope %r: %s",
+                    scope,
+                    _type_name(type(cache_exc)),
+                )
+            raise
+        self.invalidate_index(scope, entity_id)
+        return deleted
+
+    def _purge_passes(self, prefix: str, scope: str, entity_id: str, max_passes: int) -> int:
+        storage = self._storage
+        page_size = self._list_page_size
+        deleted = 0
+        for _ in range(max_passes):
+            found = False
+            start_after: str | None = None
+            while True:
+                page = storage.list_page(prefix, start_after, page_size)
+                for obj in page:
+                    found = True
+                    try:
+                        storage.delete_if_version(obj.key, obj.version)
+                        deleted += 1
+                    except PreconditionFailedError:
+                        pass  # Changed or gone; the next pass sees it.
+                if len(page) < page_size:
+                    break
+                start_after = page[-1].key
+            if not found:
+                return deleted
+        if not storage.list_page(prefix, None, 1):
+            return deleted
+        raise PurgeIncompleteError(scope, entity_id, max_passes)
+
+    def export(self, scope: str, entity_id: str) -> tuple[ExportedObject, ...]:
+        """Every object under `scope/entity_id/`, raw and in key order.
+
+        Operator-only; not exposed to agents. Nothing is parsed or dropped
+        for being malformed. Restore an object with
+        `Storage.put(o.key, o.data, o.metadata)`. Not a snapshot: objects
+        written or deleted during the export may or may not appear. Never
+        calls the index cache.
+
+        Raises TypeError for a non-str argument and ValueError for an
+        invalid segment, without calling storage. Holds every object's
+        bytes in memory at once, unbounded by the library. Cost is N
+        sequential gets, about N round trips on GCS.
+        """
+        scope, entity_id = _normalize_entity_args(scope, entity_id)
+        _check_entity_segments(scope, entity_id)
+        prefix = build_prefix(scope, entity_id)
+        storage = self._storage
+        page_size = self._list_page_size
+        out: list[ExportedObject] = []
+        start_after: str | None = None
+        while True:
+            page = storage.list_page(prefix, start_after, page_size)
+            for obj in page:
+                stored = storage.get(obj.key)
+                if stored is None:
+                    continue  # Deleted since listing.
+                out.append(ExportedObject(obj.key, stored.data, stored.metadata, stored.version))
+            if len(page) < page_size:
+                break
+            start_after = page[-1].key
+        return tuple(out)

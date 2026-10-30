@@ -18,7 +18,8 @@ in-memory fake and a GCS implementation behind one protocol); `core`, which
 implements all seven core operations (`read_file`, `write_file`,
 `replace_fact`, `list_prefix`, `append_line`, `delete_file`, and
 `get_memory_index`, with its value types `MemoryIndex` and
-`CappedPrefix`); `identity`, the injected identity resolver boundary;
+`CappedPrefix`) plus two operator-only methods, `purge` and `export`,
+that agents never reach; `identity`, the injected identity resolver boundary;
 `scope`, the tool-layer write checks (`system/` read-only and role-gated
 write restriction); `transport`, the `TransportClient` protocol plus
 `InProcessClient`, its in-process implementation; and `tools`, the
@@ -171,7 +172,13 @@ the one planned piece.
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
-  [ADR 0012](docs/adr/0012-delete-file.md).
+  [ADR 0012](docs/adr/0012-delete-file.md). Besides `StorageConformance`,
+  the shared suite has an `EntityPurgeExportConformance` mixin that runs
+  `MemoryStore.purge` and `export` on both implementations (GCS against
+  fake-gcs-server); its concurrency cases are unit-only, because
+  fake-gcs-server does not enforce `ifGenerationMatch` on DELETE. Purge
+  uses `delete_if_version`, which is still the only delete (see
+  [ADR 0038](docs/adr/0038-entity-purge-and-export.md)).
 - **index_cache** — the optional, adopter-supplied cache for the memory
   index; imports nothing from `wenchang`. `IndexCache(get, set, ttl=None,
   key_prefix=DEFAULT_KEY_PREFIX)` is a frozen value of two adopter callables,
@@ -458,6 +465,35 @@ the one planned piece.
   `path`, are taken as given). Type names in these messages are read
   through a guarded helper that reports `<unnamed>` if `__name__` raises
   or is not a `str`. Equality and hashing are the dataclass defaults.
+  Beside these seven core operations, `MemoryStore` has two operator-only
+  methods, absent from `TransportClient`, `InProcessClient`, the tools,
+  and the MCP adapter (see
+  [ADR 0038](docs/adr/0038-entity-purge-and-export.md)). Both take
+  `(scope, entity_id)`, checked before any storage or cache call (real-type
+  `TypeError`s first, then `ValueError` for a segment failing
+  `is_valid_segment`), and cover every object under
+  `build_prefix(scope, entity_id)`, including `system/`, malformed keys, and
+  corrupt metadata. `purge(scope, entity_id, *,
+  max_passes=PURGE_MAX_PASSES) -> int` (`PURGE_MAX_PASSES = 5`; a `bool` or
+  non-`int` raises `TypeError`, below 1 `ValueError`) repeats passes that
+  list the prefix from the start and `delete_if_version` each listed object
+  at its listed version, skipping precondition failures, until a pass finds
+  nothing. After `max_passes` non-empty passes, one more listing decides:
+  empty returns, otherwise it raises `PurgeIncompleteError(scope,
+  entity_id, passes)`, an `Exception` outside the `WenchangError` taxonomy
+  whose message names the scope, never the entity ID. `max_passes` bounds
+  restarts, not a single pass. The count is successful deletes, so a
+  delete whose response was lost is not counted; re-running is safe. Purge
+  calls `invalidate_index(scope, entity_id)` (ADR 0040) once after its last
+  storage call on every exit path: on success a cache error propagates; on
+  failure it is logged (scope and exception type only) and the purge's
+  exception re-raised. `export(scope, entity_id) -> tuple[ExportedObject,
+  ...]` lists and `get`s each object in key order, omitting any deleted
+  since listing; it is not a snapshot, never calls the index cache, and
+  holds every object in memory. `ExportedObject(key, data, metadata,
+  version)` is frozen, holding raw bytes and the stored metadata map as a
+  read-only copy; `Storage.put(o.key, o.data, o.metadata)` restores it.
+  Both cost about N sequential round trips on GCS for N objects.
   See
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
   [ADR 0008](docs/adr/0008-conditional-put-and-write-file-semantics.md),
@@ -468,7 +504,8 @@ the one planned piece.
   [ADR 0013](docs/adr/0013-write-file-source.md),
   [ADR 0019](docs/adr/0019-transport-client-interface.md),
   [ADR 0020](docs/adr/0020-memory-index-and-in-process-client.md),
-  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md), and
+  [ADR 0024](docs/adr/0024-append-replace-aliases-description.md),
+  [ADR 0038](docs/adr/0038-entity-purge-and-export.md), and
   [ADR 0040](docs/adr/0040-index-cache.md).
 - **identity** — the injected-dependency boundary through which the
   library learns who the caller is; it has no notion of users,
@@ -1327,6 +1364,15 @@ server, graders, and report end to end.
   `VersionConflictError`, since re-applying an append always succeeds and
   would duplicate a landed line on retry (see
   [ADR 0011](docs/adr/0011-append-line-version-guard.md)).
+- **Purge empties a prefix only if writers are stopped.** `purge` deletes
+  each object guarded on the version it listed and re-lists until a pass
+  finds nothing, so a concurrent write is never lost silently mid-pass: it
+  is deleted on a later pass or reported by `PurgeIncompleteError`. When
+  purge returns, the prefix was observed empty after its last delete; a
+  write after that listing survives. Durable erasure means revoking the
+  entity's grant first, setting a finite index-cache `ttl` (ADR 0040), and
+  matching the bucket's soft-delete and versioning policy to the retention
+  obligation (see [ADR 0038](docs/adr/0038-entity-purge-and-export.md)).
 - **One lock, one token per file.** Content and metadata commit together;
   there is no metadata-only update. `write_file` replaces `description`
   and `aliases`; `append_line` and `replace_fact` may also add aliases and
@@ -1487,3 +1533,8 @@ transport layer, and tool-facing error messages. At the tool layer,
 `render_error` turns any failure into the agent-facing form: a taxonomy
 error keeps its category and repair material; anything outside it renders
 as category `"internal"` (see the `tools` entry above).
+
+Operator-only errors sit outside the taxonomy, because they never reach an
+agent and need no next-action guidance. The one such error is
+`PurgeIncompleteError`, a plain `Exception` raised by `MemoryStore.purge`
+(see [ADR 0038](docs/adr/0038-entity-purge-and-export.md)).
