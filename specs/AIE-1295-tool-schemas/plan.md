@@ -188,6 +188,17 @@ The `schemas` module docstring states that the schemas describe on-contract outp
 - README: a short adopter example (`for s in tool_schemas(product=...).values(): ToolDef(name=s.name, description=s.description, parameters=s.input, ...)` in neutral pseudo-code).
 - Glossary: no new term.
 
+## Docs site
+
+A self-contained `## Tool schemas` section in `site-src/reference.md` (an h2, so the page's `tool_cards` post-processing leaves it alone), placed after the tool entries and before errors, so AIE-1297 can relocate it whole. Contents:
+
+- What `tool_schemas(product=None)` returns (`ToolSchema` with `name`, `description`, `input`, `output`, `error`; JSON Schema draft 2020-12, closed, fresh per call) and what `error_schema()` returns.
+- An example feeding each `ToolSchema` into a host's tool definition: a framework-neutral `ToolDef(name=s.name, description=s.description, parameters=s.input)` sketch, forwarding the call to `MemoryTools` and returning `render_result`/`render_error`, whose payloads match `s.output`/`s.error`. A runnable example goes in `site-src/snippets/` and is included with `<!--include python NAME.py-->`.
+- The caveats: the error schema covers wenchang's own error classes, and every field is required for on-contract output.
+- Install lines are unpinned (`pip install wenchang`).
+
+Regenerate `site/` with `uv run scripts/build_site.py` and commit both.
+
 ## Risks
 
 - Snapshot churn on every signature or rendered-shape change (intended); docstring edits do not touch it.
