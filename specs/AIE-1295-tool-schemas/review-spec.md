@@ -12,7 +12,7 @@ Adopters wiring the memory tools into their own tool framework copy argument and
 | 2 | every schema | `check_schema` (draft 2020-12) | valid, JSON-serializable, fresh per call |
 | 3 | the export | compared to `tests/snapshots/tool_schemas.json` | equal |
 | 4 | each tool's input schema | vs. `MemoryTools` signature and MCP-registered schema | same params, required set, defaults, kinds |
-| 5 | real `render_result` payloads for all tools (incl. paged, capped, malformed path) | validated | valid; union of keys = declared properties |
+| 5 | real `render_result` payloads for all tools (incl. paged, capped, malformed path, empty aliases/description/entries/capped) | validated | valid; union of keys = declared properties |
 | 6 | one fixture per concrete error class (completeness-checked), plus internal errors | `render_error` validated | valid; union of keys = declared properties; enums generated from the taxonomy |
 | 7 | docs | read | ADR 0042, ARCHITECTURE `schemas` entry, README snippet |
 
@@ -26,7 +26,8 @@ Adopters wiring the memory tools into their own tool framework copy argument and
 | Outputs chosen by return annotation from declared shapes | derive from renderer code | renderer is defensive code, not data; declared shapes + closed validation catch drift both ways |
 | One flat error schema | per-class `oneOf` keyed by `error` | adopters/transports raise their own `WenchangError` subclasses with other names |
 | Fields required even though off-contract clients can drop them | all-optional | describes the real contract; optional would make adopters' models useless |
-| Snapshot includes descriptions | inputs/outputs only | descriptions are adopter-visible API too |
+| Snapshot holds per-tool input/output + one error schema, property order pinned | include descriptions | docstring (prompt) fixes must not fail `make check`; descriptions are checked against `tool_descriptions` instead |
+| Error schema covers wenchang's own error classes | open schema for adopter subclasses | adopter subclasses validate only if they reuse these attribute names, types, and reasons (orchestrator decision) |
 
 ## Files/modules to be touched
 
@@ -43,6 +44,6 @@ Adopters wiring the memory tools into their own tool framework copy argument and
 
 ## Risks
 
-- Snapshot churn on every docstring or signature edit (intended).
+- Snapshot churn on every signature or rendered-shape edit (intended).
 - Strict adopter validators could reject an off-contract client's payload with a dropped field.
 - Sibling PRs: #54's `FileQuotaExceededError` needs a fixture after rebase (completeness test enforces it); #53's `functools.wraps` wrapper keeps `inspect.signature` intact.

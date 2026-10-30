@@ -51,7 +51,7 @@ Type map (closed; anything else raises `TypeError(f"no JSON Schema for {name}.{p
 | --- | --- |
 | `str`, `VersionToken`, `ListCursor` (any `NewType` whose `__supertype__` is `str`) | `{"type": "string"}` |
 | `Sequence[str]` (`collections.abc.Sequence`) | `{"type": "array", "items": {"type": "string"}}` |
-| `T | None` where `T` is mapped | `{"anyOf": [<T schema>, {"type": "null"}]}` |
+| `T | None` where `T` is mapped (matched by `typing.get_origin(ann) in (typing.Union, types.UnionType)` with exactly two args, one being `type(None)`) | `{"anyOf": [<T schema>, {"type": "null"}]}` |
 
 A parameter with a default adds `"default": <value>`; the value must be `None`, `bool`, `int`, `float`, or `str`, else `TypeError`. Parameters must be positional-or-keyword (else `TypeError`).
 
@@ -70,9 +70,9 @@ Tool input schema:
 | `MemoryIndex` | INDEX |
 | `MemoryFile` | FILE |
 | `ListPage` | PAGE |
-| `None` | OK |
+| `type(None)` (what `get_type_hints` yields for `-> None`) | OK |
 
-Anything else raises `TypeError`.
+Anything else raises `TypeError`. `"format": "date-time"` on `last_updated` is documentation only; tests validate without format checking and assert the timestamp pattern directly.
 
 ## Exact schemas
 
@@ -158,10 +158,10 @@ ARR-or-null = `{"anyOf": [ARR, {"type": "null"}]}`.
 `tests/snapshots/tool_schemas.json` (2-space indent, trailing newline):
 
 ```json
-{"tools": {"<name>": {"name": ..., "description": ..., "input": ..., "output": ..., "error": ...}, ...}, "error": <error_schema()>}
+{"tools": {"<name>": {"input": ..., "output": ...}, ...}, "error": <error_schema()>}
 ```
 
-for `tool_schemas()` with no product, tools in `TOOL_NAMES` order. The test compares parsed JSON to `{"tools": {n: dataclasses.asdict(s) for n, s in tool_schemas().items()}, "error": error_schema()}` and, on mismatch, its assertion message names the file and says to update it deliberately (no regeneration script is provided). Descriptions are included so a docstring change also requires a snapshot update (descriptions are adopter-visible too). The test-writer writes this file by hand from this plan and the current docstrings (`tool_descriptions()` output), not by calling the implementation.
+for `tool_schemas()`, tools in `TOOL_NAMES` order. Descriptions and per-tool `error` copies are not in the snapshot (US1.2 and US1.6 cover them), so docstring edits never touch it. The test compares parsed JSON to `{"tools": {n: {"input": s.input, "output": s.output} for n, s in tool_schemas().items()}, "error": error_schema()}`, and also compares `list(s.input["properties"])` per tool with the key order of the parsed snapshot (`json.load` preserves object order), so property order is pinned. On mismatch the assertion message names the file and says to update it deliberately (no regeneration script). The test-writer writes this file by hand from this plan, not by calling the implementation.
 
 ## Module layering
 
@@ -175,7 +175,11 @@ for `tool_schemas()` with no product, tools in `TOOL_NAMES` order. The test comp
 
 ## Dependencies
 
-`pyproject.toml` `[dependency-groups].dev` gains `"jsonschema>=4.20"` and `"types-jsonschema>=4.20"`; `uv lock` updates `uv.lock`. (Edited by the lead, not test-writer/implementer.)
+`pyproject.toml` `[dependency-groups].dev` gains `"jsonschema>=4.20"` and `"types-jsonschema>=4.20"`; `uv lock` updates `uv.lock`. Done by the implementer as T001, before the tests are written.
+
+## Module docstring (required content)
+
+The `schemas` module docstring states that the schemas describe on-contract output, and that the error schema covers wenchang's own error classes: an adopter's `WenchangError` subclass validates only if it reuses these attribute names, types, and `reason` values.
 
 ## Docs
 
@@ -186,5 +190,5 @@ for `tool_schemas()` with no product, tools in `TOOL_NAMES` order. The test comp
 
 ## Risks
 
-- Snapshot churn: every docstring edit now also edits the snapshot. Accepted; it is the point of the guard.
+- Snapshot churn on every signature or rendered-shape change (intended); docstring edits do not touch it.
 - An off-contract `TransportClient` can make `render_result` drop a required field; adopters validating strictly would reject that payload. Documented.
