@@ -37,9 +37,9 @@ Adopters wiring the memory tools into their own tool framework copy argument and
 
 ## Open questions / assumptions
 
-- Do adopters actually need pydantic classes (not just JSON Schema)? Assumed no; if yes, a follow-up can generate them from this export.
-- MCP tools keep no `outputSchema`; advertising one is a separate change.
-- Parameter-level descriptions are not exported.
+- Resolved (orchestrator, 2026-10-30): JSON Schema only; a pydantic generator from this export is a follow-up.
+- Resolved: MCP tools keep no `outputSchema`; advertising one is a follow-up.
+- Resolved: parameter-level descriptions are not exported.
 
 ## Risks
 
