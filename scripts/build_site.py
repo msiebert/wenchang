@@ -68,6 +68,13 @@ PAGES = [
         "toc": True,
     },
     {
+        "slug": "operations",
+        "nav": "Purge & export",
+        "title": "Purging and exporting a wenchang entity",
+        "description": "Operator-only MemoryStore.purge and export: erasing everything stored for one entity, the purge guarantee and PurgeIncompleteError, index cache and GCS soft-delete interactions, and raw export and restore.",
+        "toc": True,
+    },
+    {
         "slug": "usage",
         "nav": "Examples",
         "title": "Examples: wenchang tool calls and memory files",
@@ -638,7 +645,7 @@ def main() -> None:
         (OUT / f"{slug}.md").write_text(twins[slug])
     full = [
         "# wenchang: full documentation\n",
-        "> Persistent, self-organizing memory for AI agents. This file concatenates the pages of https://msiebert.github.io/wenchang/ (overview, setup, prompts, authorization, caching, examples, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
+        "> Persistent, self-organizing memory for AI agents. This file concatenates the pages of https://msiebert.github.io/wenchang/ (overview, setup, prompts, authorization, caching, purge & export, examples, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
     ]
     for page in PAGES:
         full.append(f"\n<!-- page: {page['slug']}.md -->\n")

@@ -14,7 +14,7 @@ import pytest
 from google.auth.credentials import AnonymousCredentials
 from google.cloud.storage import Client  # pyright: ignore[reportMissingTypeStubs]
 
-from storage_conformance import StorageConformance
+from storage_conformance import EntityPurgeExportConformance, StorageConformance
 from wenchang.storage import Storage
 from wenchang.storage.gcs import GcsStorage
 
@@ -62,6 +62,12 @@ class TestGcsStorage(StorageConformance):
         self, storage: Storage
     ) -> None:
         super().test_delete_if_version_with_stale_token_raises_and_leaves_object_unchanged(storage)
+
+
+class TestGcsEntityPurgeExport(EntityPurgeExportConformance):
+    """Runs entity purge and export against GcsStorage and the emulator
+    (AIE-1291, US5).
+    """
 
 
 def test_put_then_get_round_trips_through_real_client_stack(storage: Storage) -> None:
