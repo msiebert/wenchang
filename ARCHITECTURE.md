@@ -34,7 +34,9 @@ the optional `wenchang[testing]` extra. A fourteenth, `mcp`, is the host
 adapter that serves the tools and prompt from an MCP server; it is installed
 with the optional `wenchang[mcp]` extra, and nothing else imports it. A
 fourteenth, `observer`, is the dependency-free tool-call observer that
-`tools` and `mcp` share. Every module in the map below is implemented; the
+`tools` and `mcp` share. A fifteenth, `schemas`, exports each tool's JSON
+Schemas for adopters building their own tool definitions. Every module in
+the map below is implemented; the
 remote half of `transport` is the one planned piece.
 
 ## Module map
@@ -965,7 +967,8 @@ remote half of `transport` is the one planned piece.
 - **tools** — the agent-facing tool layer: thin verbs over a
   `TransportClient`, carrying no judgment. The description a host shows
   the agent for each tool comes from `descriptions()` (below), built from
-  the tool's docstring. The mechanics every tool shares (what `scope`, `area`, and
+  the tool's docstring; the JSON Schemas of each tool's arguments, result,
+  and error payload come from `schemas` (below). The mechanics every tool shares (what `scope`, `area`, and
   `name` mean, the `.md` exclusion, the slug rule, `system/` being
   read-only, capped paging) are stated once, in the `get_memory_index`
   docstring; each mutating tool's docstring keeps its own one-sentence
@@ -1151,6 +1154,32 @@ remote half of `transport` is the one planned piece.
   [ADR 0022](docs/adr/0022-tool-layer.md),
   [ADR 0026](docs/adr/0026-product-identity.md), and
   [ADR 0043](docs/adr/0043-shared-tool-call-observer.md).
+- **schemas** — JSON Schemas (draft 2020-12) for the tools, for adopters
+  building their own tool definitions (`wenchang.schemas`). Its public
+  names are `ToolSchema`, `tool_schemas`, and `error_schema`.
+  `ToolSchema(name, description, input, output, error)` is a frozen
+  dataclass of plain `dict`s. `tool_schemas(product=None)` returns a
+  read-only mapping in `TOOL_NAMES` order, with `description` equal to
+  `tool_descriptions(product)[name]`; `error_schema()` returns the
+  `render_error` payload schema, which every `ToolSchema.error` equals.
+  Every call returns fresh objects, and every object schema is closed.
+  `input` is derived from the `MemoryTools` method signature (unwrapped
+  past the observer decorator) through a closed type map: `str` and
+  `NewType`s over `str`, `Sequence[str]`, and `T | None`; parameters
+  without a default are required, and defaults are carried as `"default"`.
+  `output` is chosen by the method's return annotation (`MemoryIndex`,
+  `MemoryFile`, `ListPage`, `None`) from rendered shapes declared once in
+  the module. An unmapped annotation or default raises `TypeError`. The
+  error schema is one flat object whose `category` and `reason` enums are
+  generated from `errors`. The schemas describe on-contract output: every
+  field is required, though `render_result` drops a field an off-contract
+  client returns with the wrong type. The error schema covers wenchang's
+  own error classes; an adopter's `WenchangError` subclass validates only
+  if it reuses these attribute names, types, and `reason` values. It adds
+  no runtime dependency, imports `tools`, `core`, and `errors`, and
+  nothing imports it. A committed snapshot and validation of real renders
+  guard it against drift. See
+  [ADR 0042](docs/adr/0042-exported-tool-schemas.md).
 - **prompts** — the instruction text layered over the tools: a subpackage
   (`wenchang.prompts`) that turns library-owned section text plus four
   adopter-supplied text slots into one markdown prompt. Its public names
@@ -1343,7 +1372,9 @@ agent-facing layer: it registers `tools` on an MCP server, serves the text
 `__version__`), `identity`, `scope`, `transport`, `errors`, `version_token`,
 and `core` types for its signatures; nothing depends on it. `observer` is
 dependency-free and omitted; `tools` and `mcp` both deliver tool-call
-records through it.
+records through it. `schemas` is omitted too: it sits above `tools`, reads
+the `MemoryTools` signatures and `core` result types, and is off the
+request path; nothing depends on it.
 
 ### Outside the library: `evals/`
 

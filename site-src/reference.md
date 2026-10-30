@@ -221,6 +221,31 @@ Zero or several matches return `ReplaceFactMatchError` with the current content,
 
 Returns `{"ok": true}`. Errors: `VersionConflictError`, `NotFoundError`, `RestrictedScopeError`.
 
+## Tool schemas {#schemas}
+
+To register the memory tools with a framework other than MCP, take their definitions from `wenchang.schemas` (in the `wenchang` package: `pip install wenchang`).
+
+`tool_schemas(product=None)` returns a read-only mapping from tool name to `ToolSchema`, one per tool, in `wenchang.tools.TOOL_NAMES` order. `error_schema()` returns the schema shared by every `render_error` payload.
+
+| Field | Type | Contents |
+| --- | --- | --- |
+| `name` | string | The bare tool name, such as `read_file`. |
+| `description` | string | The tool's description, the same as `tool_descriptions(product)[name]`. |
+| `input` | dict | JSON Schema of the tool's arguments, with defaults for optional ones. |
+| `output` | dict | JSON Schema of the `render_result` payload on success. |
+| `error` | dict | JSON Schema of the `render_error` payload on failure; the same as `error_schema()`. |
+
+Every schema is JSON Schema draft 2020-12 and closed (`additionalProperties: false`). Each call builds fresh dicts, so you can change them without affecting later calls.
+
+Use `input` as the tool's parameter schema, call the matching `MemoryTools` method from a session's `bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)`, and return `render_result` of its value or `render_error` of what it raised. Those payloads match `output` and `error`. Here `ToolDef` stands in for your framework's tool definition:
+
+<!--include python custom_schemas.py-->
+
+The schemas describe on-contract output:
+
+- **Every field is required.** An on-contract `TransportClient` always produces every field, so each output field is marked required. `render_result` drops a field whose value has the wrong type, which an off-contract client can produce; strict validation rejects that payload.
+- **Errors are wenchang's own.** The error schema covers the error classes wenchang raises. A `WenchangError` subclass of your own validates only if it reuses these attribute names, types, and `reason` values.
+
 ## The memory prompt resource {#resource}
 
 The server exposes the assembled memory prompt as an MCP resource:
