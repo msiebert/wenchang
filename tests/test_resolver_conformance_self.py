@@ -7,6 +7,7 @@ directly and expects pytest.fail with the key phrase and the resolver class name
 
 import re
 from collections.abc import Callable, Iterator
+from typing import TypeVar
 
 import pytest
 
@@ -24,6 +25,8 @@ from wenchang.scope import ScopePolicy, check_write
 from wenchang.testing import ResolverConformance, resolver_conformance
 
 pytestmark = pytest.mark.unit
+
+_C = TypeVar("_C")
 
 ADMIN_IDENTITY = Identity(
     grants={"user": ScopeGrant("u-1", "owner"), "org": ScopeGrant("o-9", "admin")}
@@ -246,7 +249,7 @@ def test_entry_point_returning_different_identity_fails(
     """resolve_identity returning another Identity fails (AIE-1039, US1.7)."""
     _through_entry_point(_conforming())()
 
-    def fake_resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
+    def fake_resolve_identity(resolver: IdentityResolver[_C], credentials: _C) -> Identity:
         return MEMBER_IDENTITY
 
     monkeypatch.setattr(resolver_conformance, "resolve_identity", fake_resolve_identity)
@@ -260,7 +263,7 @@ def test_entry_point_raising_for_valid_fails(monkeypatch: pytest.MonkeyPatch) ->
     (AIE-1039, US1.8)
     """
 
-    def fake_resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
+    def fake_resolve_identity(resolver: IdentityResolver[_C], credentials: _C) -> Identity:
         raise ResolverFailureError("patched")
 
     monkeypatch.setattr(resolver_conformance, "resolve_identity", fake_resolve_identity)
@@ -345,7 +348,7 @@ def test_none_for_invalid_fails() -> None:
 def test_transient_resolver_failure_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """resolve_identity raising a TRANSIENT ResolverFailureError fails (AIE-1039, US2.7)."""
 
-    def fake_resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
+    def fake_resolve_identity(resolver: IdentityResolver[_C], credentials: _C) -> Identity:
         raise TransientResolverFailure("patched")
 
     monkeypatch.setattr(resolver_conformance, "resolve_identity", fake_resolve_identity)
@@ -359,7 +362,7 @@ def test_entry_point_not_raising_for_invalid_fails(monkeypatch: pytest.MonkeyPat
     (AIE-1039, US2.8)
     """
 
-    def fake_resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
+    def fake_resolve_identity(resolver: IdentityResolver[_C], credentials: _C) -> Identity:
         return ADMIN_IDENTITY
 
     monkeypatch.setattr(resolver_conformance, "resolve_identity", fake_resolve_identity)
@@ -1073,7 +1076,7 @@ def test_entry_point_lying_eq_does_not_hide_different_identity(
     (AIE-1039, review finding 1)
     """
 
-    def fake_resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
+    def fake_resolve_identity(resolver: IdentityResolver[_C], credentials: _C) -> Identity:
         return EqualToEverythingIdentity(grants=dict(MEMBER_IDENTITY.grants))
 
     monkeypatch.setattr(resolver_conformance, "resolve_identity", fake_resolve_identity)

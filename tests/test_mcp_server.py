@@ -13,7 +13,7 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import FrozenInstanceError, fields, is_dataclass
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import anyio
 import pytest
@@ -46,6 +46,8 @@ from wenchang.tools import (
 from wenchang.transport import InProcessClient
 
 pytestmark = pytest.mark.unit
+
+_T = TypeVar("_T")
 
 TIMEOUT = 60
 META_KEY = "test/user"
@@ -101,14 +103,14 @@ def _server(**overrides: object) -> MCPServer:
     return build_server(**kwargs)
 
 
-def _run[T](fn: Callable[[], Awaitable[T]]) -> T:
+def _run(fn: Callable[[], Awaitable[_T]]) -> _T:
     return anyio.run(fn)
 
 
-def _with_client[T](
-    server: MCPServer, body: Callable[[Client], Awaitable[T]], mode: str = "auto"
-) -> T:
-    async def main() -> T:
+def _with_client(
+    server: MCPServer, body: Callable[[Client], Awaitable[_T]], mode: str = "auto"
+) -> _T:
+    async def main() -> _T:
         with anyio.fail_after(30):
             async with Client(server, mode=mode) as client:
                 return await body(client)

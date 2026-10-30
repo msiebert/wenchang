@@ -8,7 +8,7 @@ import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import anyio
 import pytest
@@ -38,6 +38,8 @@ from wenchang.tools import TOOL_NAMES, tool_descriptions
 from wenchang.transport import InProcessClient
 
 pytestmark = pytest.mark.unit
+
+_T = TypeVar("_T")
 
 SEEDED = """\
 id: seeded
@@ -91,8 +93,8 @@ def _scenario(tmp_path: Path, text: str, stem: str, **fmt: str) -> Path:
     return path
 
 
-def _run[T](state: EvalState, body: Callable[[Client], Awaitable[T]]) -> T:
-    async def main() -> T:
+def _run(state: EvalState, body: Callable[[Client], Awaitable[_T]]) -> _T:
+    async def main() -> _T:
         with anyio.fail_after(30):
             async with Client(build_eval_server(state)) as client:
                 return await body(client)

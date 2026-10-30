@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Final, NoReturn, cast
+from typing import Final, NoReturn, TypeVar, cast
 
 from wenchang.core import CappedPrefix, FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import ErrorCategory, InvalidArgumentError, WenchangError
@@ -38,6 +38,8 @@ __all__ = [
     "render_result",
     "tool_descriptions",
 ]
+
+_C = TypeVar("_C")
 
 TOOL_NAMES: Final[tuple[str, ...]] = (
     "get_memory_index",
@@ -520,10 +522,10 @@ def tool_descriptions(product: str | None = None) -> Mapping[str, str]:
     return MappingProxyType(out)
 
 
-def bind_tools[C](
+def bind_tools(
     client: TransportClient,
-    resolver: IdentityResolver[C],
-    credentials: C,
+    resolver: IdentityResolver[_C],
+    credentials: _C,
     policy: ScopePolicy,
     *,
     source: str,

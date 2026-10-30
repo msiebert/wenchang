@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final, Protocol, cast
+from typing import Any, Final, Protocol, TypeVar, cast
 
 from evals.reference_adopter import MEMBER_IDENTITY
 from evals.scenario import (
@@ -72,6 +72,7 @@ SCANNED_ARGUMENTS: Final[frozenset[str]] = frozenset(
 SCANNED_TOOLS: Final[frozenset[str]] = frozenset({"write_file", "append_line", "replace_fact"})
 
 INDEX_TOOL: Final = "get_memory_index"
+_T = TypeVar("_T")
 
 
 class GradeInputError(ValueError):
@@ -243,16 +244,16 @@ class _Reader:
                 raise self.fail(f"{key}[{i}] must be an object")
         return cast(list[dict[str, Any]], items)
 
-    def field[T](self, item: Mapping[str, Any], key: str, kind: type[T], where: str) -> T:
+    def field(self, item: Mapping[str, Any], key: str, kind: type[_T], where: str) -> _T:
         if key not in item:
             raise self.fail(f"{where}: missing field {key!r}")
         value: object = item[key]
         ok = isinstance(value, kind) and not (kind is not bool and isinstance(value, bool))
         if kind is float and isinstance(value, int) and not isinstance(value, bool):
-            return cast(T, float(value))
+            return cast(_T, float(value))
         if not ok:
             raise self.fail(f"{where}: field {key!r} must be {kind.__name__}")
-        return cast(T, value)
+        return cast(_T, value)
 
     def strings(self, item: Mapping[str, Any], key: str, where: str) -> tuple[str, ...]:
         values = cast(list[object], self.field(item, key, list, where))

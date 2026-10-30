@@ -12,7 +12,7 @@ import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from itertools import pairwise
-from typing import cast
+from typing import TypeVar, cast
 
 import pytest
 
@@ -62,6 +62,8 @@ from wenchang.transport import InProcessClient
 from wenchang.version_token import VersionToken
 
 pytestmark = pytest.mark.unit
+
+_T = TypeVar("_T")
 pytest_plugins = ["pytester"]
 
 _call = transport_conformance._call  # pyright: ignore[reportPrivateUsage]
@@ -254,7 +256,7 @@ class _FileMetadataSub(FileMetadata):
     """A FileMetadata subclass, which the metadata exact-type check must reject."""
 
 
-def _build[T](cls: type[T], fields: Mapping[str, object]) -> T:
+def _build(cls: type[_T], fields: Mapping[str, object]) -> _T:
     """Construct `cls` bypassing __init__ and validation, setting each field."""
     obj = object.__new__(cls)
     for key, value in fields.items():

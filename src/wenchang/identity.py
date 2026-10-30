@@ -7,7 +7,7 @@ never produce a traversal or malformed memory path.
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol, Self, cast, runtime_checkable
+from typing import Protocol, Self, TypeVar, cast, runtime_checkable
 
 from wenchang.errors import ResolverFailureError
 from wenchang.paths import is_valid_segment
@@ -101,14 +101,17 @@ class ResolutionFailure:
             raise ValueError("detail must be non-empty")
 
 
+_C_contra = TypeVar("_C_contra", contravariant=True)
+
+
 @runtime_checkable
-class IdentityResolver[C](Protocol):
+class IdentityResolver(Protocol[_C_contra]):
     """Turns caller credentials into an Identity. Injected by the adopter.
 
     isinstance checks only that a resolve attribute exists.
     """
 
-    def resolve(self, credentials: C) -> Identity | ResolutionFailure:
+    def resolve(self, credentials: _C_contra) -> Identity | ResolutionFailure:
         """Resolve `credentials`.
 
         Must not raise: report bad or unverifiable credentials as a
@@ -126,7 +129,7 @@ def _type_name(t: type) -> str:
         return "<unnamed>"
 
 
-def resolve_identity[C](resolver: IdentityResolver[C], credentials: C) -> Identity:
+def resolve_identity(resolver: IdentityResolver[_C_contra], credentials: _C_contra) -> Identity:
     """Resolve `credentials` with `resolver`, raising ResolverFailureError on failure."""
     name = _type_name(type(resolver))
     result: object = None

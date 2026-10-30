@@ -5,7 +5,7 @@ Section 9 reference adopter configuration, asserted through render_result and re
 """
 
 import json
-from typing import cast
+from typing import TypeAlias, cast
 
 import pytest
 
@@ -84,7 +84,7 @@ def _entries(rendered: dict[str, object]) -> list[dict[str, object]]:
     return cast(list[dict[str, object]], rendered["entries"])
 
 
-type _Loc = tuple[str, str, str]
+_Loc: TypeAlias = tuple[str, str, str]
 
 
 def _loc(path: str) -> _Loc:

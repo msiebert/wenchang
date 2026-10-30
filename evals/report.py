@@ -66,6 +66,7 @@ def check_model(model: str) -> None:
 
 
 GIT_TIMEOUT_S: Final = 10
+_NEWLINE: Final = "\n"
 
 
 def _slug(text: str) -> str:
@@ -212,7 +213,7 @@ def turn_prompt(trial_dir: Path, session: int, turn: int) -> str:
     if not 1 <= turn <= len(turns):
         raise GradeInputError(f"{trial_dir}: session {session} has no turn {turn}")
     context = "".join(
-        f"[From the product's {r.system}]\n{r.content.rstrip('\n')}\n\n"
+        f"[From the product's {r.system}]\n{r.content.rstrip(_NEWLINE)}\n\n"
         for r in scenario.context_records
     )
     if turn == 1:

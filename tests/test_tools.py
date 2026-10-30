@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Concatenate, cast
+from typing import Concatenate, ParamSpec, TypeAlias, TypeVar, cast
 
 import pytest
 
@@ -45,6 +45,9 @@ from wenchang.transport import TransportClient
 from wenchang.version_token import VersionToken
 
 pytestmark = pytest.mark.unit
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = REPO_ROOT / "src" / "wenchang"
@@ -89,7 +92,7 @@ ALLOWED_WENCHANG_IMPORTS = frozenset(
     }
 )
 
-type _Call = tuple[str, tuple[object, ...], dict[str, object]]
+_Call: TypeAlias = tuple[str, tuple[object, ...], dict[str, object]]
 
 
 def _metadata(description: str = DESCRIPTION, aliases: tuple[str, ...] = ()) -> FileMetadata:
@@ -103,14 +106,14 @@ def _file(path: str = "user/u-1/notes/a.md") -> MemoryFile:
 # --- Test doubles ---------------------------------------------------------------
 
 
-def _recorded[**P, R](
-    method: Callable[Concatenate["_FakeClient", P], R],
-) -> Callable[Concatenate["_FakeClient", P], R]:
+def _recorded(
+    method: Callable[Concatenate["_FakeClient", _P], _R],
+) -> Callable[Concatenate["_FakeClient", _P], _R]:
     """Record each call as (name, args, kwargs), then raise or return the preset."""
     name = method.__name__
 
     @functools.wraps(method)
-    def wrapper(self: "_FakeClient", *args: P.args, **kwargs: P.kwargs) -> R:
+    def wrapper(self: "_FakeClient", *args: _P.args, **kwargs: _P.kwargs) -> _R:
         self.log.append((name, tuple(args), dict(kwargs)))
         error = self.raises.get(name)
         if error is not None:
