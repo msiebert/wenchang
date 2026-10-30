@@ -1,12 +1,13 @@
 """Transport conformance run against InProcessClient over a MemoryStore with an
 index cache.
 
-Covers AIE-1293, US8.4. pytest checks that every inherited case runs and none
-is skipped.
+Covers AIE-1293, US8.4. An autouse fixture turns any pytest.skip call inside an
+inherited case into a failure.
 """
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 import pytest
 
@@ -35,10 +36,19 @@ class _Ticking:
         return datetime(2024, 1, 1, tzinfo=UTC) + timedelta(microseconds=self._n)
 
 
+def _fail_on_skip(reason: str = "", **_: object) -> NoReturn:
+    pytest.fail(f"conformance case skipped: {reason}")
+
+
 class TestCachedInProcessClient(TransportConformance):
     """InProcessClient over a MemoryStore with an IndexCache passes every suite
     case, none skipped (AIE-1293, US8.4).
     """
+
+    @pytest.fixture(autouse=True)
+    def _no_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Turns a pytest.skip call in a case into a failure (AIE-1293, US8.4)."""
+        monkeypatch.setattr(pytest, "skip", _fail_on_skip)
 
     @pytest.fixture
     def client(self) -> TransportClient:

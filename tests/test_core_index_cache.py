@@ -722,9 +722,19 @@ def test_invalidate_index_tombstones_and_relists_only_that_entity() -> None:
     before = env.wrapper.raw(USER_LISTING)
     assert before is not None
     assert A_PATH in before
+    token_before = env.wrapper.raw(USER_TOKEN)
+    assert token_before is not None
+    env.wrapper.sets.clear()
 
     env.store.invalidate_index("user", "u1")
 
+    token_after = env.wrapper.raw(USER_TOKEN)
+    assert token_after is not None
+    assert token_after != token_before
+    set_keys = [key for key, _, _ in env.wrapper.sets]
+    assert USER_TOKEN in set_keys
+    assert USER_LISTING in set_keys
+    assert set_keys.index(USER_TOKEN) < set_keys.index(USER_LISTING)
     raw = env.wrapper.raw(USER_LISTING)
     if raw is not None:
         for secret in (A_PATH, B_PATH, "desc-a-zq", "desc-b-zq", "alias-a-zq", "alias-b-zq"):
@@ -734,6 +744,31 @@ def test_invalidate_index_tombstones_and_relists_only_that_entity() -> None:
     assert env.storage.count(USER_PREFIX) >= 1
     assert env.storage.count(PROJECT_PREFIX) == 0
     assert index == env.uncached()
+
+
+def test_invalidate_during_listing_is_seen_by_next_call() -> None:
+    """An out-of-band delete plus invalidate_index while user/u1/ is being
+    listed leaves the file in that result; the next call re-lists and omits
+    it, because the in-flight listing is tagged with the replaced token
+    (AIE-1293, US4.7; 5.1-style).
+    """
+    env = _standard_env()
+
+    def delete_and_invalidate() -> None:
+        oob = MemoryStore(env.storage.inner)
+        oob.delete_file(A_PATH, _version(env.storage.inner, A_PATH))
+        env.store.invalidate_index("user", "u1")
+
+    env.storage.after_list[USER_PREFIX] = delete_and_invalidate
+    first = env.store.get_memory_index(MAP2)
+    assert env.storage.after_list == {}
+    assert _find(first, A_PATH) is not None
+
+    env.storage.list_calls.clear()
+    second = env.store.get_memory_index(MAP2)
+    assert env.storage.count(USER_PREFIX) >= 1
+    assert _find(second, A_PATH) is None
+    assert second == env.uncached()
 
 
 @pytest.mark.parametrize(

@@ -163,6 +163,20 @@ def test_in_memory_set_without_ttl_never_expires() -> None:
     assert cache.get("k") == "v"
 
 
+def test_in_memory_overflowing_ttl_never_expires() -> None:
+    """set(k, v, timedelta.max) does not raise, and get(k) returns v even far
+    in the future: an expiry past datetime.max never expires (AIE-1293, US8.1).
+    """
+    clock = _Clock(T0)
+    cache = InMemoryIndexCache(clock=clock)
+
+    cache.set("k", "v", timedelta.max)
+    assert cache.get("k") == "v"
+
+    clock.now = datetime(9999, 1, 1, tzinfo=UTC)
+    assert cache.get("k") == "v"
+
+
 def test_in_memory_set_overwrites() -> None:
     """A second set replaces the value (AIE-1293, US8.1)."""
     cache = InMemoryIndexCache(clock=_Clock(T0))

@@ -1,5 +1,6 @@
 """Optional adopter-supplied cache for MemoryStore.get_memory_index."""
 
+import contextlib
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ DEFAULT_KEY_PREFIX: Final = "wenchang:index:"
 
 
 def _type_name(t: type) -> str:
+    # Duplicates core's helper, since this module imports nothing from wenchang.
     # A metaclass may make __name__ raise or return a str subclass.
     try:
         return str.__str__(t.__name__)
@@ -32,12 +34,21 @@ class IndexCache:
     expired. `set(key, value, ttl)` stores `value` expiring `ttl` from now
     (None: no expiry). Both are required, since `set` is how the library
     invalidates, and both must be linearizable per key; neither needs to be
-    atomic across keys. Values are opaque strs.
+    atomic across keys. Values are opaque strs. A weaker cache, such as one
+    reading from async replicas, bounds freshness only by `ttl`.
 
-    With `ttl=None`, a swallowed invalidation failure or a write that
-    bypasses the cache leaves an entity stale with no bound; use a finite
-    `ttl` in production. Keys carry no storage identity, so stores over
-    different storage roots sharing one cache need distinct `key_prefix`es.
+    Only `ttl` bounds staleness from a swallowed invalidation failure, a
+    write that bypasses the cache, or a write that raised
+    BackendUnavailableError (e.g. a timeout) but still commits server-side
+    after the library replaced the token: a reader can then cache the
+    pre-commit listing under the fresh token, stale until the entity's next
+    write. Use a finite `ttl` in production.
+
+    Keys carry no storage identity, so stores over different storage roots
+    sharing one cache need distinct `key_prefix`es. Scope and entity
+    segments may contain ":", so no `key_prefix` may be a string prefix of
+    another sharing the cache; end each in a delimiter and keep them
+    prefix-free.
     """
 
     get: CacheGet
@@ -94,5 +105,9 @@ class InMemoryIndexCache:
     def set(self, key: str, value: str, ttl: timedelta | None) -> None:
         """Store `value` under `key`, expiring `ttl` from now (None: never)."""
         with self._lock:
-            expires_at = None if ttl is None else self._clock() + ttl
+            expires_at: datetime | None = None
+            if ttl is not None:
+                # An expiry past datetime.max never expires.
+                with contextlib.suppress(OverflowError):
+                    expires_at = self._clock() + ttl
             self._entries[key] = (value, expires_at)

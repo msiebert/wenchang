@@ -555,14 +555,7 @@ class MemoryStore:
         # The token is observed before listing, so a write invalidated after
         # this point leaves the stored listing with a stale tag.
         entries = self._drain(prefix)
-        try:
-            encoded = _encode_listing(token, entries)
-        except Exception as exc:
-            _logger.warning(
-                "index cache encode failed for scope %r: %s", scope, _type_name(type(exc))
-            )
-            return entries
-        self._cache_set(cache, scope, listing_key, encoded)
+        self._cache_set(cache, scope, listing_key, _encode_listing(token, entries))
         return entries
 
     def _drain(self, prefix: str) -> tuple[FileEntry, ...]:
