@@ -12,6 +12,7 @@ New module `src/wenchang/schemas.py` exports JSON Schema (draft 2020-12) for eac
 # src/wenchang/schemas.py
 __all__ = ["ToolSchema", "error_schema", "tool_schemas"]
 
+
 @dataclass(frozen=True)
 class ToolSchema:
     """One memory tool's definition for a host: name, description, and JSON Schemas.
@@ -21,17 +22,20 @@ class ToolSchema:
     draft 2020-12, closed, and describe on-contract output (see module docstring).
     Instances compare by value and are unhashable.
     """
+
     name: str
     description: str
     input: dict[str, object]
     output: dict[str, object]
     error: dict[str, object]
 
+
 def tool_schemas(product: str | None = None) -> Mapping[str, ToolSchema]:
     """Each tool's ToolSchema by name, in TOOL_NAMES order.
 
     description is tool_descriptions(product)[name]. Every call builds fresh dicts.
     """
+
 
 def error_schema() -> dict[str, object]:
     """The JSON Schema of every render_error payload; a fresh dict per call."""
