@@ -15,7 +15,7 @@
 - Releases are git tags plus GitHub Releases with the built wheel and sdist attached. No package index (public or internal).
 - The first version is `v0.1.0` (`pyproject.toml` already says `0.1.0`).
 - The release workflow is triggered by pushing a `v*` tag. It builds, verifies the tag matches the `pyproject.toml` version, and creates the GitHub Release with the artifacts.
-- The orchestrator pushes the `v0.1.0` tag after this PR merges. This issue's work never pushes a tag.
+- The orchestrator pushes the `v0.1.0` tag after this PR merges, on the release PR's merge commit, after confirming the `[0.1.0]` changelog section covers everything at that commit (sibling PRs AIE-1292/1293/1296 may land first). This issue's work never pushes a tag.
 - Changelog is `CHANGELOG.md` in Keep a Changelog style.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -31,7 +31,7 @@ An adopter installs a specific wenchang release instead of a commit SHA.
 **Acceptance Scenarios**:
 
 1. **Given** the `v0.1.0` tag is pushed and its release workflow succeeded, **When** an adopter installs `wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0` (with or without the `[mcp]` extra) into a fresh environment, **Then** the install succeeds and `wenchang.__version__ == "0.1.0"`.
-2. **Given** the same tag, **When** the adopter opens the GitHub Release `v0.1.0`, **Then** it has `wenchang-0.1.0-py3-none-any.whl` and `wenchang-0.1.0.tar.gz` attached, and installing the wheel by URL also yields `0.1.0`.
+2. **Given** the same tag, **When** the adopter opens the GitHub Release `v0.1.0`, **Then** it has `wenchang-0.1.0-py3-none-any.whl` and `wenchang-0.1.0.tar.gz` attached, and installing the wheel by URL (`pip install https://github.com/msiebert/wenchang/releases/download/v0.1.0/wenchang-0.1.0-py3-none-any.whl`, or `pip install "wenchang[mcp] @ https://github.com/msiebert/wenchang/releases/download/v0.1.0/wenchang-0.1.0-py3-none-any.whl"` for the extra) also yields `0.1.0`.
 3. **Given** the README and the site's setup page, **When** an adopter reads the install instructions, **Then** they show install-by-tag for the base package and the `[mcp]` extra (pip and uv), and say releases are not on PyPI.
 
 ---
@@ -48,7 +48,7 @@ A maintainer pushes a `vX.Y.Z` tag and the workflow publishes a release only if 
 
 1. **Given** a pushed tag matching `v*`, **When** the release workflow runs, **Then** it fails before publishing if the tag is not exactly `v` + `[project].version` from `pyproject.toml`.
 2. **Given** a pushed tag, **When** the workflow runs, **Then** it fails before publishing if the tagged commit is not an ancestor of `origin/main`.
-3. **Given** a consistent tag on main, **When** the workflow runs, **Then** it runs `make check`, builds the wheel and sdist with `uv build`, installs the built wheel into a clean venv and checks `wenchang.__version__` equals the version, and creates a GitHub Release named after the tag with both artifacts attached and the matching `CHANGELOG.md` section as its notes.
+3. **Given** a consistent tag on main, **When** the workflow runs, **Then** it runs `make check`, builds the wheel and sdist with `uv build`, installs the built wheel into a clean venv and checks `wenchang.__version__` and `importlib.metadata.version("wenchang")` equal the version and that `wenchang.core`, `wenchang.tools`, `wenchang.prompts`, `wenchang.storage.memory`, and `wenchang.testing` import, and creates a GitHub Release named after the tag with both artifacts attached and the matching `CHANGELOG.md` section as its notes.
 4. **Given** `CHANGELOG.md` has no section for the version, **When** the workflow runs, **Then** it fails before publishing.
 5. **Given** a push to a branch or a pull request, **When** CI runs, **Then** the release workflow does not run.
 
@@ -63,7 +63,8 @@ A maintainer pushes a `vX.Y.Z` tag and the workflow publishes a release only if 
 **Acceptance Scenarios**:
 
 1. **Given** `pyproject.toml`, **When** the test suite runs, **Then** `wenchang.__version__` equals `[project].version`, and the version has the form `X.Y.Z` (three non-negative integers, no pre-release or local suffix).
-2. **Given** `CHANGELOG.md`, **When** the test suite runs, **Then** it contains a release heading `## [X.Y.Z] - YYYY-MM-DD` for the current `pyproject.toml` version, and an `## [Unreleased]` heading above it.
+2. **Given** `CHANGELOG.md`, **When** the test suite runs, **Then** it contains a release heading `## [X.Y.Z] - YYYY-MM-DD` for the current `pyproject.toml` version with an `## [Unreleased]` heading above it; that version's section (same extraction rule as the workflow) has at least one non-blank line; and the link reference `[X.Y.Z]: https://github.com/msiebert/wenchang/releases/tag/vX.Y.Z` exists.
+3. **Given** `README.md`, `docs/releasing.md`, and `site-src/*.md`, **When** the test suite runs, **Then** every `git+https://github.com/msiebert/wenchang@v…` occurrence pins `v{__version__}`, and the test fails naming each file and stale tag otherwise.
 
 ---
 
@@ -71,7 +72,7 @@ A maintainer pushes a `vX.Y.Z` tag and the workflow publishes a release only if 
 
 **Acceptance Scenarios**:
 
-1. **Given** `docs/releasing.md`, **When** a maintainer reads it, **Then** it states the versioning policy (SemVer, what counts as breaking, how 0.x is treated) and the release steps: bump version in both places, move changelog entries, merge to main, tag the merge commit, push the tag, verify the release.
+1. **Given** `docs/releasing.md`, **When** a maintainer reads it, **Then** it states the versioning policy (SemVer, what counts as breaking, how 0.x is treated) and the release steps: bump version in both places, move changelog entries, update the pinned tag in README, `site-src/`, and `docs/releasing.md` and regenerate `site/`, merge the release PR, tag the release PR's merge commit, push the tag, verify the release. It also says every user-visible PR adds an entry under `## [Unreleased]`.
 2. **Given** `docs/adr/`, **When** listed, **Then** ADR 0041 records git tags + GitHub Releases (no package index), the tag/version guard, and the two-place version with a consistency test.
 3. **Given** `CHANGELOG.md`, **When** read, **Then** the `0.1.0` section summarizes what the first release contains.
 
@@ -89,13 +90,13 @@ A maintainer pushes a `vX.Y.Z` tag and the workflow publishes a release only if 
 
 ### Functional Requirements
 
-- **FR-001**: `pyproject.toml` `[project].version` MUST be `0.1.0`, and `src/wenchang/__init__.py` MUST keep `__version__ = "0.1.0"` as a literal.
-- **FR-002**: `.github/workflows/release.yml` MUST trigger only on `push` of tags matching `v*`, with `permissions: contents: write`.
-- **FR-003**: The workflow MUST, in order: check out with full history; check the tag equals `v` + pyproject version; check the tagged commit is an ancestor of `origin/main`; `uv sync --locked`; `make check`; `uv build`; install the wheel in a clean venv and assert `wenchang.__version__`; extract the version's `CHANGELOG.md` section (fail if empty); `gh release create <tag> dist/* --verify-tag --title <tag> --notes-file <notes>`.
-- **FR-004**: `tests/test_release.py` MUST assert `__version__` equals the pyproject version, the version matches `^\d+\.\d+\.\d+$`, and `CHANGELOG.md` has `## [Unreleased]` and `## [<version>] - <YYYY-MM-DD>` headings.
-- **FR-005**: `CHANGELOG.md` MUST exist at the repo root in Keep a Changelog format with `[Unreleased]` and `[0.1.0]` sections.
-- **FR-006**: `docs/releasing.md` MUST document the versioning policy, install-by-version, and the release steps; README MUST gain an Install section with pinned install commands and link to it; `site-src/setup.md`, `site-src/index.md`, and the reference "Status" line MUST show install-by-tag, and `site/` MUST be regenerated.
-- **FR-007**: ADR 0041 MUST record the release decision.
+- **FR-001**: `pyproject.toml` `[project].version` MUST be `0.1.0`, and `src/wenchang/__init__.py` MUST keep `__version__ = "0.1.0"` as a literal. Its stale "Skeleton package" docstring is replaced with a one-line description.
+- **FR-002**: `.github/workflows/release.yml` MUST trigger only on `push` of tags matching `v*`, with `permissions: contents: write` and a `concurrency` group keyed on the ref with `cancel-in-progress: false`.
+- **FR-003**: The workflow MUST, in order: check out with full history; check the tag equals `v` + pyproject version; check the tagged commit is an ancestor of `origin/main`; `uv sync --locked`; `make check`; `uv build`; install the wheel in a clean venv and assert `wenchang.__version__` and `importlib.metadata.version("wenchang")` equal the version and that `wenchang.core`, `wenchang.tools`, `wenchang.prompts`, `wenchang.storage.memory`, `wenchang.testing` import; extract the version's `CHANGELOG.md` section (fail if it has no non-blank line); `gh release create <tag> dist/* --verify-tag --title <tag> --notes-file <notes>`.
+- **FR-004**: `tests/test_release.py` MUST assert: `__version__` equals the pyproject version; the version matches `^\d+\.\d+\.\d+$`; `CHANGELOG.md` has `## [Unreleased]` above `## [<version>] - <YYYY-MM-DD>`; that section has a non-blank line; the `[<version>]: https://github.com/msiebert/wenchang/releases/tag/v<version>` link reference exists; and every `git+https://github.com/msiebert/wenchang@v…` in `README.md`, `docs/releasing.md`, and `site-src/*.md` pins `v<version>`.
+- **FR-005**: `CHANGELOG.md` MUST exist at the repo root in Keep a Changelog format with `[Unreleased]` and `[0.1.0]` sections. The `0.1.0` section names `get_memory_index` and scope priority explicitly and omits the dev-only `evals/` harness.
+- **FR-006**: `docs/releasing.md` MUST document the versioning policy, install-by-version (git tag, base and `[mcp]`, and the release-wheel URL form), the release steps, and the rule that every user-visible PR adds an `[Unreleased]` entry; README MUST gain an Install section with pinned install commands and link to it; `site-src/setup.md`, `site-src/index.md`, the reference "Status" line, and the `[testing]` installs at `site-src/authorization.md:61` and `site-src/reference.md:325` MUST use `@v0.1.0` (e.g. `"wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"`); `site/` MUST be regenerated. AGENTS.md Commands gains "Releasing: see docs/releasing.md".
+- **FR-007**: ADR 0041 (pre-assigned by the milestone plan) MUST record the release decision.
 - **FR-008**: `make check` MUST pass.
 
 ## Success Criteria *(mandatory)*
@@ -110,5 +111,5 @@ A maintainer pushes a `vX.Y.Z` tag and the workflow publishes a release only if 
 
 - The repository's Actions settings allow `GITHUB_TOKEN` write access to contents when the workflow requests it (the default for a personal repo).
 - ARCHITECTURE.md describes modules, not packaging, so it needs no change; the `wenchang` package entry already mentions `__version__`.
-- The site's "Python 3.12 or newer" lines are stale after AIE-1290; the setup and status lines touched here are corrected to 3.11 while editing them.
+- The site's "Python 3.12 or newer" lines are stale after AIE-1290; they are corrected to 3.11 (confirmed). `GITHUB_TOKEN` with `contents: write` is allowed (confirmed).
 - No tests exercise the workflow YAML itself; the live `v0.1.0` run is its verification.

@@ -28,7 +28,7 @@ Result: pass.
 ### Version (unchanged, now load-bearing)
 
 - `pyproject.toml`: `[project] version = "0.1.0"` (static; not `dynamic`).
-- `src/wenchang/__init__.py`: `__version__ = "0.1.0"`, a literal string. Both are bumped together in a release PR.
+- `src/wenchang/__init__.py`: `__version__ = "0.1.0"`, a literal string. Both are bumped together in a release PR. The module docstring becomes `"""wenchang: persistent, self-organizing memory for AI agents."""` (drop the stale "Skeleton package" lines).
 
 ### `CHANGELOG.md` (repo root)
 
@@ -48,7 +48,8 @@ Keep a Changelog 1.1.0 format. Machine-relevant shape:
 ```
 
 - Release headings match `^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})$`.
-- A version's section is the lines after its heading up to the next `## ` heading or the link-reference block.
+- Section extraction rule (shared by the test and the workflow's awk): the lines after the `## [X.Y.Z]` heading, up to but excluding the next line starting with `## ` or matching `^\[[^]]+\]: ` (link reference). A section is valid if at least one of those lines is non-blank.
+- The `0.1.0` section names `get_memory_index` and scope priority explicitly; the dev-only `evals/` harness is not listed.
 - The `0.1.0` date is the PR's merge-intended date; the tag is pushed after merge. If they differ by a day, the date is not corrected (policy: the date is when the release was cut in the changelog).
 
 ### `tests/test_release.py` (unit)
@@ -67,7 +68,17 @@ def test_changelog_has_section_for_current_version() -> None
     # CHANGELOG.md has a line matching rf"## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}"
 def test_changelog_has_unreleased_section_above_releases() -> None
     # "## [Unreleased]" exists and its index < the current version heading's index
+def test_changelog_section_for_current_version_is_not_empty() -> None
+    # extraction rule above yields at least one non-blank line
+def test_changelog_has_link_reference_for_current_version() -> None
+    # a line equal to f"[{version}]: https://github.com/msiebert/wenchang/releases/tag/v{version}"
+def test_pinned_install_tags_match_version() -> None
+    # scan README.md, docs/releasing.md, site-src/*.md for
+    # r"git\+https://github\.com/msiebert/wenchang@(v[^\s\"'`)]+)"; every captured tag == f"v{version}";
+    # failures list "file: tag"; also assert at least one match overall (so the scan can't silently pass)
 ```
+
+`docs/releasing.md` does not exist when T1 lands; the pinned-tag test skips missing files from the list rather than failing on them, and the "at least one match" assertion holds via README and site-src once T4 lands. Expected T1 failing state: the four changelog tests fail (no `CHANGELOG.md`); the pinned-tag test fails (no pinned installs yet, so zero matches); the two version tests pass.
 
 ### `.github/workflows/release.yml`
 
@@ -78,6 +89,9 @@ on:
     tags: ["v*"]
 permissions:
   contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -91,9 +105,11 @@ jobs:
       - make check
       - uv build            # dist/wenchang-$VERSION-py3-none-any.whl, dist/wenchang-$VERSION.tar.gz
       - Smoke-install: uv venv "$RUNNER_TEMP/smoke"; uv pip install --python "$RUNNER_TEMP/smoke" dist/*.whl;
-        "$RUNNER_TEMP/smoke/bin/python" -c 'import sys, wenchang; sys.exit(wenchang.__version__ != sys.argv[1])' "$VERSION"
-      - Release notes: awk extracts the "## [$VERSION]" section of CHANGELOG.md to $RUNNER_TEMP/notes.md;
-        fail if it is empty
+        run from "$RUNNER_TEMP" (so the checkout's src/ is not on sys.path) a Python snippet that:
+        asserts wenchang.__version__ == importlib.metadata.version("wenchang") == "$VERSION", and
+        imports wenchang.core, wenchang.tools, wenchang.prompts, wenchang.storage.memory, wenchang.testing
+      - Release notes: awk applies the plan's extraction rule to CHANGELOG.md, writing $RUNNER_TEMP/notes.md;
+        fail if it has no non-blank line
       - gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME"
         --notes-file "$RUNNER_TEMP/notes.md"   (env GH_TOKEN: ${{ github.token }})
 ```
@@ -104,12 +120,14 @@ Version and tag checks run before `uv sync` and `make check` so a bad tag fails 
 
 - `docs/releasing.md` (new):
   - **Where releases live**: tags `vX.Y.Z`; GitHub Releases with wheel and sdist; not on PyPI.
-  - **Installing a release**: `pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`, `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`, the `uv add` equivalents, and installing the release wheel by URL.
+  - **Installing a release**: `pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`, `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`, the `uv add` equivalents, and the release wheel by URL: `pip install https://github.com/msiebert/wenchang/releases/download/v0.1.0/wenchang-0.1.0-py3-none-any.whl` and `pip install "wenchang[mcp] @ https://github.com/msiebert/wenchang/releases/download/v0.1.0/wenchang-0.1.0-py3-none-any.whl"`.
+  - **Changelog rule**: every user-visible PR adds an entry under `## [Unreleased]`.
   - **Versioning policy**: SemVer. Public surface = the documented Python API (`wenchang.core`, `.tools`, `.mcp`, `.prompts`, `.storage`, `.identity`, `.scope`, `.transport`, `.errors`, `.testing`), tool names/parameters/result and error shapes, and the stored file format and key layout. While `0.x`, a breaking change bumps minor and everything else bumps patch; from `1.0.0`, standard SemVer. Memory-prompt wording changes are at least minor and called out under `Changed`. Tags are never moved or deleted; a bad release is superseded by a patch.
-  - **Cutting a release**: (1) on a branch, bump `pyproject.toml` `version` and `src/wenchang/__init__.py` `__version__`; (2) in `CHANGELOG.md` move `Unreleased` entries under `## [X.Y.Z] - YYYY-MM-DD` and update the link references; (3) `make check`, open PR, merge to main; (4) `git fetch origin && git tag -a vX.Y.Z -m "wenchang X.Y.Z" origin/main && git push origin vX.Y.Z`; (5) watch the Release workflow; (6) verify a fresh-venv install by tag. Recovery: a tag runs the workflow file at the tagged commit. If the run failed before `gh release create`, fix on main, then delete the tag (`git push origin :refs/tags/vX.Y.Z`) and re-tag the new main commit; this is the one allowed tag move, because no release was published. If a release was created, never move the tag: for a transient failure after creation, delete the release (not the tag) and re-run; for a wrong release, ship the next patch version.
+  - **Cutting a release**: (1) on a branch, bump `pyproject.toml` `version` and `src/wenchang/__init__.py` `__version__`; (2) in `CHANGELOG.md` move `Unreleased` entries under `## [X.Y.Z] - YYYY-MM-DD` and update the link references; (3) update the pinned tag in README, `site-src/*.md`, and `docs/releasing.md`, then regenerate `site/` (`uv run scripts/build_site.py`); (4) `make check`, open the release PR, merge to main; (5) confirm the `[X.Y.Z]` section covers everything at the release PR's merge commit, then `git tag -a vX.Y.Z -m "wenchang X.Y.Z" <release PR merge commit>` and `git push origin vX.Y.Z`; (6) watch the Release workflow; (7) verify a fresh-venv install by tag. Recovery: a tag runs the workflow file at the tagged commit. If the run failed before `gh release create`, fix on main, then delete the tag (`git push origin :refs/tags/vX.Y.Z`) and re-tag the new main commit; this is the one allowed tag move, because no release was published. If a release was created, never move the tag: for a transient failure after creation, delete the release (not the tag) and re-run; for a wrong release, ship the next patch version.
 - `README.md`: new `## Install` section after the intro: pinned pip/uv commands for base and `[mcp]`, "not on PyPI", links to `docs/releasing.md` and `CHANGELOG.md`; the MCP section's `pip install 'wenchang[mcp]'` becomes the pinned form; Docs list gains `CHANGELOG.md` and `docs/releasing.md`.
-- `site-src/setup.md` (Install and "What you need"), `site-src/index.md` (both install snippets and the status line), `site-src/reference.md` (Status line): pinned `@v0.1.0` installs, "Python 3.11 or newer", "Releases are git tags with GitHub Releases; not on PyPI". Regenerate `site/` with `uv run scripts/build_site.py`.
-- `docs/adr/0041-tagged-releases.md`: decision, context, alternatives (PyPI, internal index, `importlib.metadata` / hatch dynamic version, no tag/main guard), consequences.
+- `AGENTS.md` Commands: add "Releasing: see docs/releasing.md".
+- `site-src/setup.md` (Install and "What you need"), `site-src/index.md` (both install snippets and the status line), `site-src/reference.md` (Status line and the `[testing]` install at line 325), `site-src/authorization.md` (`[testing]` install at line 61): pinned `@v0.1.0` installs (e.g. `"wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"`), "Python 3.11 or newer", "Releases are git tags with GitHub Releases; not on PyPI". Regenerate `site/` with `uv run scripts/build_site.py`.
+- `docs/adr/0041-tagged-releases.md` (number pre-assigned by the milestone plan, which reserves 0038–0043 for AIE-1291..1296): decision, context, alternatives (PyPI, internal index, `importlib.metadata` / hatch dynamic version, no tag/main guard), consequences.
 - `specs/AIE-1294-tagged-releases/review-pr.md`.
 
 ## Verification
@@ -127,10 +145,11 @@ CHANGELOG.md                        (new)
 tests/test_release.py               (new)
 docs/releasing.md                   (new)
 docs/adr/0041-tagged-releases.md    (new)
-README.md  site-src/{setup.md,index.md,reference.md}  site/ (regenerated)
+README.md  AGENTS.md  src/wenchang/__init__.py (docstring only)
+site-src/{setup.md,index.md,reference.md,authorization.md}  site/ (regenerated)
 ```
 
-`pyproject.toml` and `src/wenchang/__init__.py` need no change (already `0.1.0`).
+`pyproject.toml` needs no change (already `0.1.0`).
 
 ## Complexity Tracking
 
