@@ -3,8 +3,10 @@
 Covers AIE-1291, US4.
 """
 
+import copy
 import dataclasses
-from collections.abc import Callable, Sequence
+import pickle
+from collections.abc import Callable, Hashable, Sequence
 from typing import Any, cast
 
 import pytest
@@ -13,6 +15,7 @@ from purge_export_support import (
     NEIGHBOURS,
     READABLE_SUFFIXES,
     SEED_SUFFIXES,
+    LoggingCache,
     RecordingStorage,
     seed_entity,
     seed_many,
@@ -22,6 +25,7 @@ from purge_export_support import (
 )
 from wenchang.core import ExportedObject, MemoryStore
 from wenchang.errors import BackendUnavailableError, TransientReason
+from wenchang.index_cache import IndexCache
 from wenchang.storage import ListedObject
 from wenchang.version_token import VersionToken
 
@@ -281,6 +285,63 @@ def test_exported_object_is_read_only(which: int) -> None:
         cast(Any, o.metadata)["x"] = "y"
     with pytest.raises(dataclasses.FrozenInstanceError):
         cast(Any, o).data = b""
+
+
+def test_exported_object_is_unhashable() -> None:
+    """ExportedObject is declared unhashable and hash() of one raises
+    TypeError (AIE-1291, US4.11b, code review).
+    """
+    o = ExportedObject("user/u1/notes/a.md", b"data", {"a": "1"}, VersionToken("1"))
+
+    assert not isinstance(o, Hashable)
+    with pytest.raises(TypeError):
+        hash(o)
+
+
+_COPIERS: dict[str, Callable[[ExportedObject], object]] = {
+    "pickle": lambda o: pickle.loads(pickle.dumps(o)),
+    "deepcopy": copy.deepcopy,
+}
+
+
+@pytest.mark.parametrize("copier", list(_COPIERS.values()), ids=list(_COPIERS))
+def test_exported_object_survives_pickle_and_deepcopy(
+    copier: Callable[[ExportedObject], object],
+) -> None:
+    """An ExportedObject round-trips through pickle and copy.deepcopy equal to
+    the original, with read-only metadata (AIE-1291, US4.11b, code review).
+    """
+    original = ExportedObject(
+        "user/u1/notes/a.md", b"data", {"a": "1", "b": "2"}, VersionToken("1")
+    )
+
+    clone = copier(original)
+
+    assert type(clone) is ExportedObject
+    assert clone == original
+    with pytest.raises(TypeError):
+        cast(Any, clone.metadata)["x"] = "y"
+
+
+def test_export_makes_no_cache_calls() -> None:
+    """Export through a store with an index cache never calls the cache's get
+    or set (AIE-1291, US4.4, code review).
+    """
+    h = _seeded()
+    cache = LoggingCache(h.calls)
+    gets: list[str] = []
+
+    def get(key: str) -> str | None:
+        gets.append(key)
+        return cache.get(key)
+
+    store = MemoryStore(h, list_page_size=2, index_cache=IndexCache(get=get, set=cache.set))
+
+    exported = store.export("user", "u1")
+
+    assert len(exported) == 6
+    assert gets == []
+    assert [c for c in h.calls if c[0].startswith("cache.")] == []
 
 
 def test_export_propagates_list_page_failure() -> None:

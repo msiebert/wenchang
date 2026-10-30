@@ -481,7 +481,9 @@ the one planned piece.
   nothing. After `max_passes` non-empty passes, one more listing decides:
   empty returns, otherwise it raises `PurgeIncompleteError(scope,
   entity_id, passes)`, an `Exception` outside the `WenchangError` taxonomy
-  whose message names the scope, never the entity ID. `max_passes` bounds
+  whose message names the scope and pass count ("after 1 pass" / "after N
+  passes"), never the entity ID, and which pickles and copies with its
+  `scope`, `entity_id`, and `passes`. `max_passes` bounds
   restarts, not a single pass. The count is successful deletes, so a
   delete whose response was lost is not counted; re-running is safe. Purge
   calls `invalidate_index(scope, entity_id)` (ADR 0040) once after its last
@@ -492,7 +494,9 @@ the one planned piece.
   since listing; it is not a snapshot, never calls the index cache, and
   holds every object in memory. `ExportedObject(key, data, metadata,
   version)` is frozen, holding raw bytes and the stored metadata map as a
-  read-only copy; `Storage.put(o.key, o.data, o.metadata)` restores it.
+  read-only copy; it is unhashable and pickles or deep-copies by rebuilding
+  through its constructor. `Storage.put(o.key, o.data, o.metadata)`
+  restores it.
   Both cost about N sequential round trips on GCS for N objects.
   See
   [ADR 0007](docs/adr/0007-core-api-shape-and-storage-layer.md),
@@ -1364,13 +1368,13 @@ server, graders, and report end to end.
   `VersionConflictError`, since re-applying an append always succeeds and
   would duplicate a landed line on retry (see
   [ADR 0011](docs/adr/0011-append-line-version-guard.md)).
-- **Purge empties a prefix only if writers are stopped.** `purge` deletes
-  each object guarded on the version it listed and re-lists until a pass
-  finds nothing, so a concurrent write is never lost silently mid-pass: it
-  is deleted on a later pass or reported by `PurgeIncompleteError`. When
+- **A write concurrent with purge is either deleted on a later pass or
+  reported by `PurgeIncompleteError`.** `purge` deletes each object guarded
+  on the version it listed and re-lists until a pass finds nothing. When
   purge returns, the prefix was observed empty after its last delete; a
   write after that listing survives. Durable erasure means revoking the
-  entity's grant first, setting a finite index-cache `ttl` (ADR 0040), and
+  entity's grant first, setting a finite index-cache `ttl`
+  ([ADR 0040](docs/adr/0040-index-cache.md)), and
   matching the bucket's soft-delete and versioning policy to the retention
   obligation (see [ADR 0038](docs/adr/0038-entity-purge-and-export.md)).
 - **One lock, one token per file.** Content and metadata commit together;

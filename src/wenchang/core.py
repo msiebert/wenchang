@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import Final, NewType, cast
+from typing import ClassVar, Final, NewType, cast
 
 from wenchang.errors import (
     NotFoundError,
@@ -381,15 +381,22 @@ class MemoryIndex:
 
 @dataclass(frozen=True)
 class ExportedObject:
-    """One stored object under an entity's prefix, exactly as stored."""
+    """One stored object under an entity's prefix, exactly as stored. Unhashable."""
 
     key: str
     data: bytes
     metadata: Mapping[str, str]
     version: VersionToken
 
+    __hash__: ClassVar[None] = None  # pyright: ignore[reportIncompatibleMethodOverride]
+
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+    def __reduce__(
+        self,
+    ) -> tuple[type["ExportedObject"], tuple[str, bytes, dict[str, str], VersionToken]]:
+        return (type(self), (self.key, self.data, dict(self.metadata), self.version))
 
 
 class PurgeIncompleteError(Exception):
@@ -399,11 +406,14 @@ class PurgeIncompleteError(Exception):
         # The message omits the entity ID, which may identify a person.
         super().__init__(
             f"purge of an entity in scope {scope!r} did not finish: "
-            f"objects were still present after {passes} passes"
+            f"objects were still present after {passes} {'pass' if passes == 1 else 'passes'}"
         )
         self.scope = scope
         self.entity_id = entity_id
         self.passes = passes
+
+    def __reduce__(self) -> tuple[type["PurgeIncompleteError"], tuple[str, str, int]]:
+        return (type(self), (self.scope, self.entity_id, self.passes))
 
 
 class MemoryStore:
@@ -996,8 +1006,9 @@ class MemoryStore:
 
         Operator-only; not exposed to agents. Returns the number of deletes
         confirmed by storage, which excludes any whose response was lost;
-        re-running is safe. Stop the entity's writers first: the store is
-        guaranteed empty on return only if no writer ran concurrently.
+        re-running is safe. On return the prefix was observed empty after
+        the last delete; a write landing after that final listing survives,
+        so stop the entity's writers first for a durable erasure.
 
         Each pass lists the prefix from the start and conditionally deletes
         what it sees; passes repeat until one finds nothing. `max_passes`

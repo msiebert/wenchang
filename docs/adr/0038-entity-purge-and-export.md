@@ -5,7 +5,8 @@ Date: 2026-10-30
 ## Status
 
 Accepted. Deviates from [ADR 0005](0005-error-taxonomy-as-exceptions.md) for
-one operator-only error (see Deviation). Interacts with ADR 0040 (index cache).
+one operator-only error (see Deviation). Interacts with
+[ADR 0040](0040-index-cache.md) (index cache).
 
 ## Context
 
@@ -62,7 +63,8 @@ The `Storage` protocol has no unconditional delete
 9. **Export format.** `ExportedObject(key, data, metadata, version)` is a
    frozen dataclass: the full storage key, raw bytes, the stored flat
    metadata map (copied into a read-only `MappingProxyType`), and the
-   version. Nothing is parsed, so corrupt metadata, non-UTF-8 bodies, and
+   version. It is unhashable and pickles or deep-copies by rebuilding
+   through its constructor. Nothing is parsed, so corrupt metadata, non-UTF-8 bodies, and
    malformed keys are exported raw rather than dropped or raised. Restore
    with `Storage.put(o.key, o.data, o.metadata)`. Output is in ascending key
    order.
@@ -78,7 +80,7 @@ The `Storage` protocol has no unconditional delete
     held at once. AIE-1292's per-entity file cap does not bound it: `system/`
     files and malformed keys are not counted, the cap is soft and may be
     disabled, and direct storage puts bypass both it and `max_file_bytes`.
-13. **Index cache (ADR 0040).** Purge calls `invalidate_index(scope,
+13. **Index cache ([ADR 0040](0040-index-cache.md)).** Purge calls `invalidate_index(scope,
     entity_id)` exactly once, after its last storage call, on every exit
     path. On success a cache exception propagates and the delete count is
     lost (re-running returns 0 and invalidates again). If purge itself failed
@@ -107,8 +109,18 @@ The `Storage` protocol has no unconditional delete
 `PurgeIncompleteError` subclasses `Exception`, not `WenchangError`, outside
 the ADR 0005 taxonomy. The taxonomy classifies errors by what the agent
 should do next. This error is operator-only, never reaches an agent, and
-carries no agent guidance. It exposes `scope`, `entity_id`, and `passes`;
-its message names the scope and `passes`, never the entity ID.
+carries no agent guidance. It exposes `scope`, `entity_id`, and `passes`,
+and pickles and copies with all three; its message names the scope and
+`passes` ("after 1 pass" / "after N passes"), never the entity ID.
+
+### Known limitation
+
+The invalid-argument `ValueError` for `entity_id` echoes the value
+(`invalid entity_id: '...'`), so it can expose an entity ID that
+`PurgeIncompleteError` and the cache-failure log avoid. It is kept because
+the message is shared library-wide with `invalidate_index` and
+`get_memory_index` and is pinned by existing tests, including the transport
+conformance `MSG_INVALID_ENTITY`.
 
 ## Consequences
 

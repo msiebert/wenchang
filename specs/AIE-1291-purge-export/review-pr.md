@@ -22,14 +22,31 @@ existing `Storage` methods, with no storage, transport, tools, or MCP change.
 | US5.1–5.4 both backends | `EntityPurgeExportConformance` in `tests/storage_conformance.py`, run by `TestInMemoryEntityPurgeExport` (`tests/test_storage_memory.py`) and `TestGcsEntityPurgeExport` (`tests/integration/test_storage_gcs.py`) |
 | US6.1–6.2 not agent-facing; public names | `tests/test_core_api_surface.py`: `test_purge_and_export_are_not_agent_facing`, `test_public_names_importable` |
 
-Results: `make check` green (5603 passed, 18 skipped). `make
+Results: `make check` green (5614 passed, 18 skipped). `make
 test-integration` green (44 passed, 1 pre-existing skip); the 4 GCS
 `EntityPurgeExport` cases pass on fake-gcs-server, including the non-UTF-8
 body and corrupt-metadata round trip.
 
+Code-review fixes:
+
+- `PurgeIncompleteError` and `ExportedObject` define `__reduce__`, so they
+  pickle and copy intact; `ExportedObject` is declared unhashable.
+- The message reads "after 1 pass" when `passes == 1`.
+- `purge`'s docstring states the guarantee as observed-empty after the last
+  delete, with stop-writers-first for durable erasure.
+- New tests: `test_exported_object_is_unhashable`,
+  `test_exported_object_survives_pickle_and_deepcopy`,
+  `test_export_makes_no_cache_calls`, `test_purge_incomplete_message_singular_pass`,
+  `test_purge_incomplete_error_survives_pickle_and_copy`;
+  `test_cache_failure_after_failed_purge_is_logged` now covers backend,
+  incomplete, and interrupt failures, and the tombstone tests assert the
+  listing is present.
+
 ## Architecture / ADR changes
 
-- New [ADR 0038](../../docs/adr/0038-entity-purge-and-export.md).
+- New [ADR 0038](../../docs/adr/0038-entity-purge-and-export.md); purge's
+  cache interaction builds on
+  [ADR 0040](../../docs/adr/0040-index-cache.md).
 - `ARCHITECTURE.md`: bird's-eye view (seven core operations plus two
   operator-only methods), `storage` entry (new conformance mixin;
   `delete_if_version` still the only delete), `core` entry, a key invariant
@@ -55,7 +72,8 @@ body and corrupt-metadata round trip.
 
 ## Follow-ups
 
-- ADR 0040 and its ARCHITECTURE.md text land with AIE-1293; this branch
-  cites ADR 0040 by number only.
+- The invalid-`entity_id` `ValueError` echoes the value; kept because the
+  message is shared library-wide and pinned by existing tests (ADR 0038,
+  known limitation).
 - GCS soft delete and versioning retain purged bytes; bucket policy is left
   to adopters.

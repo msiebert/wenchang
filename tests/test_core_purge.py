@@ -4,7 +4,9 @@ index-cache invalidation.
 Covers AIE-1291, US1-US3.
 """
 
+import copy
 import logging
+import pickle
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -454,6 +456,40 @@ def test_purge_incomplete_message_omits_entity_id() -> None:
     assert SECRET_ENTITY not in str(excinfo.value)
 
 
+def test_purge_incomplete_message_singular_pass() -> None:
+    """With passes == 1 the message says "after 1 pass", not "passes"
+    (AIE-1291, US2.4e, code review).
+    """
+    message = str(PurgeIncompleteError("user", "u1", 1))
+
+    assert "after 1 pass" in message
+    assert "after 1 passes" not in message
+
+
+_COPIERS: dict[str, Callable[[PurgeIncompleteError], object]] = {
+    "pickle": lambda e: pickle.loads(pickle.dumps(e)),
+    "copy": copy.copy,
+}
+
+
+@pytest.mark.parametrize("copier", list(_COPIERS.values()), ids=list(_COPIERS))
+def test_purge_incomplete_error_survives_pickle_and_copy(
+    copier: Callable[[PurgeIncompleteError], object],
+) -> None:
+    """PurgeIncompleteError round-trips through pickle and copy.copy with its
+    type, fields, and message intact (AIE-1291, code review).
+    """
+    original = PurgeIncompleteError("user", "u1", 3)
+
+    clone = copier(original)
+
+    assert type(clone) is PurgeIncompleteError
+    assert clone.scope == "user"
+    assert clone.entity_id == "u1"
+    assert clone.passes == 3
+    assert str(clone) == str(original)
+
+
 def test_purge_incomplete_still_invalidates_index() -> None:
     """A purge that raises PurgeIncompleteError still tombstones the cached
     listing and replaces the token (AIE-1291, US2.4g).
@@ -465,9 +501,9 @@ def test_purge_incomplete_still_invalidates_index() -> None:
         store.purge("user", "u1")
 
     raw = cache.raw(listing_key("user", "u1"))
-    if raw is not None:
-        for secret in _secrets([PREFIX + s for s in VALID_SUFFIXES]):
-            assert secret not in raw
+    assert raw is not None
+    for secret in _secrets([PREFIX + s for s in VALID_SUFFIXES]):
+        assert secret not in raw
     assert cache.raw(token_key("user", "u1")) != token_before
 
 
@@ -539,9 +575,9 @@ def test_purge_tombstones_cached_listing() -> None:
     store.purge("user", "u1")
 
     raw = cache.raw(listing_key("user", "u1"))
-    if raw is not None:
-        for secret in _secrets([PREFIX + s for s in VALID_SUFFIXES]):
-            assert secret not in raw
+    assert raw is not None
+    for secret in _secrets([PREFIX + s for s in VALID_SUFFIXES]):
+        assert secret not in raw
 
 
 def test_purge_invalidates_once_after_last_storage_call() -> None:
@@ -581,10 +617,40 @@ def test_cache_failure_after_successful_purge_propagates() -> None:
     assert h.count("delete_if_version") == 6
 
 
-def test_cache_failure_after_failed_purge_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    """When purge fails and invalidation also fails, the purge error wins and
-    one WARNING names the scope and cache exception type, never the entity
-    ID (AIE-1291, US3.5).
+FailureSetup = Callable[[RecordingStorage], tuple[type[BaseException], BaseException | None]]
+
+
+def _fail_with_backend(h: RecordingStorage) -> tuple[type[BaseException], BaseException | None]:
+    error = BackendUnavailableError(TransientReason.UNAVAILABLE)
+    _raise_from_delete(h, 1, error)
+    return BackendUnavailableError, error
+
+
+def _fail_incomplete(h: RecordingStorage) -> tuple[type[BaseException], BaseException | None]:
+    _fresh_writer(h, f"user/{SECRET_ENTITY}/")
+    return PurgeIncompleteError, None
+
+
+def _fail_with_interrupt(h: RecordingStorage) -> tuple[type[BaseException], BaseException | None]:
+    error = KeyboardInterrupt()
+    _raise_from_delete(h, 1, error)
+    return KeyboardInterrupt, error
+
+
+_PURGE_FAILURES: dict[str, FailureSetup] = {
+    "backend_unavailable": _fail_with_backend,
+    "purge_incomplete": _fail_incomplete,
+    "keyboard_interrupt": _fail_with_interrupt,
+}
+
+
+@pytest.mark.parametrize("fail", list(_PURGE_FAILURES.values()), ids=list(_PURGE_FAILURES))
+def test_cache_failure_after_failed_purge_is_logged(
+    caplog: pytest.LogCaptureFixture, fail: FailureSetup
+) -> None:
+    """When purge fails (backend error, incomplete, or interrupt) and
+    invalidation also fails, the purge error wins and one WARNING names the
+    scope and cache exception type, never the entity ID (AIE-1291, US3.5).
     """
     caplog.set_level(logging.DEBUG)
     h = RecordingStorage()
@@ -592,13 +658,14 @@ def test_cache_failure_after_failed_purge_is_logged(caplog: pytest.LogCaptureFix
     cache = LoggingCache(h.calls)
     cache.set_raises = _CacheBoom("cache down")
     store, _ = _mc(h, cache)
-    error = BackendUnavailableError(TransientReason.UNAVAILABLE)
-    _raise_from_delete(h, 1, error)
+    expected_type, expected_error = fail(h)
 
-    with pytest.raises(BackendUnavailableError) as excinfo:
+    with pytest.raises(BaseException) as excinfo:
         store.purge("user", SECRET_ENTITY)
 
-    assert excinfo.value is error
+    assert type(excinfo.value) is expected_type
+    if expected_error is not None:
+        assert excinfo.value is expected_error
     warnings = [
         r for r in caplog.records if r.name == "wenchang.core" and r.levelno == logging.WARNING
     ]
