@@ -16,7 +16,7 @@ Files: `TO` = `tests/test_tools_observer.py`, `O` = `tests/test_observer.py`, `M
 | US1.4 all 7 tools, by attribute and `tools()[name]` | `TO::test_each_tool_produces_one_record_by_attribute_and_by_name` |
 | US1.5 defaults filled; positional == keyword | `TO::test_arguments_have_defaults_filled`, `TO::test_positional_and_keyword_calls_give_equal_arguments` |
 | US1.6 read-only deep copies | `TO::test_record_is_a_read_only_deep_copy` |
-| US1.7 arity / unknown keyword: no record | `TO::test_rejected_call_produces_no_record` |
+| US1.7 arity / unknown keyword: no record, no chained `__context__` | `TO::test_rejected_call_produces_no_record`, `TO::test_rejected_call_type_error_has_no_context` |
 | US1.8 observer runs on calling thread before return | `TO::test_observer_runs_on_calling_thread_before_return` |
 | US1.9 empty `sys.exc_info()` in observer | `TO::test_observer_sees_no_active_exception` |
 | US1.10 render failure recorded as `render_error`; raw value returned | `TO::test_render_failure_is_recorded_as_error` |
@@ -24,7 +24,7 @@ Files: `TO` = `tests/test_tools_observer.py`, `O` = `tests/test_observer.py`, `M
 | US2.2 raising observer on failure keeps the tool's exception | `TO::test_failing_observer_on_failure_keeps_tool_exception` |
 | US2.3 uncopyable arguments: logged, no record | `TO::test_uncopyable_arguments_are_logged_not_delivered` |
 | US2.4 no `"secret"` in logs, tracebacks, or chains | `TO::test_observer_failure_log_does_not_leak_tool_exception` |
-| US3.1 keyword-only `on_call=None`; `on_call` property | `TO::test_on_call_is_keyword_only_defaulting_to_none`, `TO::test_on_call_property_returns_the_observer` |
+| US3.1 keyword-only `on_call=None`; `on_call` property | `TO::test_on_call_is_keyword_only_defaulting_to_none`, `TO::test_on_call_property_returns_the_observer`, `TO::test_on_call_property_is_read_only` |
 | US3.2 default: behavior unchanged | `TO::test_no_observer_by_default`; existing `tests/test_tools*.py` (one approved allowlist line; see below) |
 | US3.3 bad / async observer `TypeError`; `bind_tools` before resolver | `TO::test_memory_tools_rejects_bad_observer`, `TO::test_bind_tools_rejects_bad_observer_before_resolving` |
 | US3.4 descriptions and signatures unchanged | `TO::test_descriptions_and_signatures_are_unchanged_by_observer` |
@@ -34,6 +34,7 @@ Files: `TO` = `tests/test_tools_observer.py`, `O` = `tests/test_observer.py`, `M
 | US4.4 MCP behavior unchanged | existing `tests/test_mcp_server.py`, passing unmodified |
 | US4.5 one record per MCP call, via `notify_observer` | `MS::test_one_mcp_call_delivers_one_record`, `MS::test_mcp_delivers_through_notify_observer` |
 | US4.6 `check_observer` / `notify_observer` | `O::test_check_observer_*` (3), `O::test_notify_*` (4) |
+| FR-007 `evals/server.py` rejects an MCP record without `request_id` | `tests/test_evals_server_request_id.py` |
 | Edges: `BaseException` passes through; duration excludes observer | `TO::test_base_exception_from_tool_propagates_without_record`, `TO::test_base_exception_from_observer_propagates`, `TO::test_duration_excludes_observer_time` |
 
 ## Architecture / ADR changes

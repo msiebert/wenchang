@@ -32,16 +32,15 @@ the optional `wenchang[testing]` extra. A thirteenth, `mcp`, is the host
 adapter that serves the tools and prompt from an MCP server; it is installed
 with the optional `wenchang[mcp]` extra, and nothing else imports it. A
 fourteenth, `observer`, is the dependency-free tool-call observer that
-`tools` and `mcp` share. Every
-module in the map below is implemented; the remote half of `transport` is
-the one planned piece.
+`tools` and `mcp` share. Every module in the map below is implemented; the
+remote half of `transport` is the one planned piece.
 
 ## Module map
 
 - **errors** — the exception hierarchy every core API function will raise:
-  `WenchangError` (base) and one class per category —
-  `RecoverableError`, `PermanentError`, `TransientError` — each fixing that
-  category's next-action guidance text. Concrete kinds: recoverable
+  `WenchangError` (base) and one class per category — `RecoverableError`,
+  `PermanentError`, `TransientError` — each fixing that category's
+  next-action guidance text. Concrete kinds: recoverable
   `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
   `NotFoundError`, `InvalidArgumentError`; permanent `RestrictedScopeError`,
   `ResolverFailureError`; transient `BackendUnavailableError`.
@@ -877,8 +876,10 @@ the one planned piece.
   `render_error` of it, and the caller still gets the raw value),
   `request_id=None`, and `duration_s` covering the tool method only. The
   observer is never called inside an `except` block, so it sees no active
-  exception. A call Python rejects (arity, unknown keyword), a non-`Exception`
-  `BaseException`, and an undecorated subclass override produce no record.
+  exception. A call Python rejects (arity, unknown keyword) and a
+  non-`Exception` `BaseException` produce no record. An undecorated subclass
+  override produces none either, unless it calls the decorated base method,
+  whose call is then recorded.
   The seven tools are methods. `TOOL_NAMES` is `("get_memory_index",
   "read_file", "list_prefix", "write_file", "append_line", "replace_fact",
   "delete_file")`, and `tools()` returns a fresh read-only mapping from

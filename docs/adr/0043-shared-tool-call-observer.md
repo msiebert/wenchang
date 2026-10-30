@@ -71,8 +71,9 @@ shared with MCP, and MCP behavior unchanged.
      keyword) raises `TypeError` with no record.
    - `BaseException`s that are not `Exception`s, from the tool or the
      observer, pass through uncaught with no record.
-   - A subclass that overrides a tool method without the decorator is not
-     observed.
+   - A subclass override of a tool method without the decorator is not
+     observed unless it calls the decorated base method, in which case the
+     base call is recorded.
    - Identity-resolution failures in `bind_tools` produce no record; they
      are not tool calls.
 

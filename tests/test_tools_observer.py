@@ -337,6 +337,20 @@ def test_rejected_call_produces_no_record(
     assert records == []
 
 
+def test_rejected_call_type_error_has_no_context() -> None:
+    """With an observer set, a call Python rejects raises a TypeError that
+    carries no chained exception as __context__ (AIE-1296, US1.7).
+    """
+    records: list[ToolCallRecord] = []
+    tools = _bind(_client(), records.append)
+
+    with pytest.raises(TypeError) as excinfo:
+        _loose(tools, "read_file")("user", "notes")
+
+    assert excinfo.value.__context__ is None
+    assert records == []
+
+
 def test_observer_runs_on_calling_thread_before_return() -> None:
     """The observer runs on the calling thread before the call returns or
     raises (AIE-1296, US1.8).
@@ -536,6 +550,17 @@ def test_on_call_property_returns_the_observer() -> None:
         MemoryTools(client, IDENTITY, POLICY, source=SOURCE, on_call=observer).on_call == observer
     )
     assert _bind(client, observer).on_call == observer
+
+
+def test_on_call_property_is_read_only() -> None:
+    """Assigning MemoryTools.on_call raises AttributeError (AIE-1296, US3.1)."""
+    records: list[ToolCallRecord] = []
+    tools = _bind(_client(), records.append)
+
+    with pytest.raises(AttributeError):
+        tools.on_call = records.append  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert tools.on_call == records.append
 
 
 def test_no_observer_by_default() -> None:

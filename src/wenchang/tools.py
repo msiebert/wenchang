@@ -129,10 +129,14 @@ def _observed(
         on_call = self.on_call
         if on_call is None:
             return method(self, *args, **kwargs)
+        bound: inspect.BoundArguments | None
         try:
             bound = signature.bind(*args, **kwargs)
         except TypeError:
-            # Python rejects the call itself; no record.
+            bound = None
+        if bound is None:
+            # Python rejects the call itself; no record. Called outside the
+            # except block so the caller's TypeError has no __context__.
             return method(self, *args, **kwargs)
         bound.apply_defaults()
         value = cast(_R, None)
