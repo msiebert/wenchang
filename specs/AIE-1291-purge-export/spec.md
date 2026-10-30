@@ -127,6 +127,11 @@ versions (documented only).
   and `user/u1/notes/bin.md` with non-UTF-8 bytes. Ascending key order:
   `notes/a.md`, `notes/b.md`, `notes/bin.md`, `odd-key`, `prefs/c.md`,
   `system/rules.md`.
+- `E_valid`: the same seed minus `user/u1/prefs/c.md` (5 objects), with
+  well-formed metadata (`metadata_to_map` of a valid `FileMetadata`) on
+  every object, so `get_memory_index` succeeds over it (`odd-key` is
+  skipped by listing; `notes/bin.md`'s body is never read). Every case that
+  caches the index before purging uses `E_valid`.
 - Neighbours: `user/u10/notes/a.md`, `user/u2/notes/a.md`,
   `project/u1/notes/a.md`, `user-archive/u1/notes/a.md`.
 - Tests that check a message or log omits the entity ID use a distinctive
@@ -155,25 +160,25 @@ versions (documented only).
 | 2.1 | seed data; `H` hook in the first `delete_if_version` call: `S.put("user/u1/aa/new.md", ...)` (sorts before the pass's cursor) | `purge` | returns 7; `aa/new.md` is gone (deleted on pass 2) |
 | 2.2 | seed data; `H` hook in the first `delete_if_version` call (key K = `notes/a.md`): `S.put(K, ...)` before delegating, so the guarded delete fails | `purge` | returns 6; K is gone (deleted at its new version on pass 2); no exception |
 | 2.3 | seed data; `H` hook in the first `delete_if_version` (key K): `S` deletes K before delegating | `purge` | returns 5; K is absent; no exception |
-| 2.4 | seed data; `H` hook in **every** `list_page` call under `user/u1/`, run **before** delegating: `S.put` one fresh key `user/u1/zz/fresh-{n:04d}.md` (`n` = call count; sorts after every seed key and every earlier fresh key, so after any cursor) | `purge` | raises `PurgeIncompleteError`; `H` recorded exactly `PURGE_MAX_PASSES + 1` `list_page` calls with `start_after=None` (5 passes + the check); `e.scope == "user"`, `e.entity_id == "u1"`, `e.passes == PURGE_MAX_PASSES` |
-| 2.4b | hook as 2.4 | `purge(..., max_passes=2)` | raises `PurgeIncompleteError` with `passes == 2`; exactly 3 `list_page` calls with `start_after=None`; `str(e)` contains `"2"` (the passed value, not the constant) |
+| 2.4 | seed data; `H` hook in **every** `list_page` call under `user/u1/`, run **before** delegating: `S.put` one fresh key `user/u1/zz/fresh-{n:04d}.md` with valid metadata (`metadata_to_map` of a valid `FileMetadata`) (`n` = call count; sorts after every seed key and every earlier fresh key, so after any cursor) | `purge` | raises `PurgeIncompleteError`; `H` recorded exactly `PURGE_MAX_PASSES + 1` `list_page` calls with `start_after=None` (5 passes + the check); `e.scope == "user"`, `e.entity_id == "u1"`, `e.passes == PURGE_MAX_PASSES` |
+| 2.4b | hook as 2.4 | `purge(..., max_passes=2)` | raises `PurgeIncompleteError` with `passes == 2`; exactly 3 `list_page` calls with `start_after=None`; `str(e)` contains `"after 2 passes"` (the passed value, not the constant) |
 | 2.4c | — | `purge(..., max_passes=x)` | `0`, `-1`: `ValueError("max_passes must be positive")`; `True`, `1.0`, `"3"`: `TypeError`; `H` recorded no call in either case |
 | 2.4d | seed data, no writer | `purge(..., max_passes=1)` | returns 6 (one deleting pass, then an empty check) |
 | 2.4e | seed data; `H` hook in the first `delete_if_version` call: `S.put("user/u1/aa/late.md", ...)` (sorts before the cursor, so pass 1 misses it) | `purge(..., max_passes=1)` | raises `PurgeIncompleteError` with `passes == 1` (the check finds `aa/late.md`) |
-| 2.4f | hook as 2.4, entity `("user", "ent-q7zx-erasure")` seeded like E | `purge` | `str(e)` contains `"user"` and not `"ent-q7zx-erasure"` |
-| 2.4g | hook as 2.4, using `MC` with `get_memory_index({"user": "u1"})` cached first | `MC.purge("user", "u1")` raises `PurgeIncompleteError` | the raw value at `user/u1`'s listing key contains none of the seed paths, descriptions, or aliases; the token key changed |
-| 2.5 | `MC`, index cached; `H` raises `BackendUnavailableError` from the 2nd `delete_if_version` call | `purge` | `BackendUnavailableError` propagates; the 1st delete stands; the entity's token key changed (next index re-lists `user/u1/`) |
-| 2.6 | `MC`, index cached; `H` raises `KeyboardInterrupt` from the first `delete_if_version` call | `purge` | `KeyboardInterrupt` propagates; the entity's token key changed |
+| 2.4f | entity `("user", "ent-q7zx-erasure")` seeded like E under `user/ent-q7zx-erasure/`; the 2.4 hook keyed on `list_page` calls under `user/ent-q7zx-erasure/`, writing `user/ent-q7zx-erasure/zz/fresh-{n:04d}.md` | `purge("user", "ent-q7zx-erasure")` | raises `PurgeIncompleteError`; `str(e)` contains `"user"` and not `"ent-q7zx-erasure"` |
+| 2.4g | `MC`, `E_valid` seeded; `MC.get_memory_index({"user": "u1"})` called (cached); **then** the 2.4 hook installed | `MC.purge("user", "u1")` raises `PurgeIncompleteError` | the raw value at `user/u1`'s listing key contains none of the `E_valid` paths, descriptions, or aliases; the token key changed |
+| 2.5 | `MC`, `E_valid` seeded, `MC.get_memory_index({"user": "u1"})` cached; then `H` set to raise `BackendUnavailableError` from the 2nd `delete_if_version` call | `purge` | `BackendUnavailableError` propagates; the 1st delete stands; the entity's token key changed (next index re-lists `user/u1/`) |
+| 2.6 | `MC`, `E_valid` seeded, index cached as in 2.5; then `H` set to raise `KeyboardInterrupt` from the first `delete_if_version` call | `purge` | `KeyboardInterrupt` propagates; the entity's token key changed |
 
 ### US3 — Index cache
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 3.1 | `MC`, seed data plus `project/u1/notes/a.md`; `get_memory_index({"user": "u1", "project": "u1"})` cached | `MC.purge("user", "u1")`, then index again | `user/u1` contributes no entries; `project/u1` entries unchanged |
-| 3.2 | same | after purge | the raw value at `user/u1`'s listing key contains none of the purged paths, descriptions, or aliases |
+| 3.1 | `MC`, `E_valid` plus `project/u1/notes/a.md` (valid metadata); `get_memory_index({"user": "u1", "project": "u1"})` cached | `MC.purge("user", "u1")`, then index again | `user/u1` contributes no entries; `project/u1` entries unchanged |
+| 3.2 | same as 3.1 (`E_valid`, index cached) | after purge | the raw value at `user/u1`'s listing key contains none of the purged paths, descriptions, or aliases |
 | 3.3 | `MC` over a cache wrapper that appends each `set(key, ...)` to `H`'s call log | `purge` | exactly one `set` on the entity's token key and one on its listing key (the tombstone), in that order, both after the last storage call `H` recorded |
-| 3.4 | `MC` with a cache whose `set` raises | `purge` | every seed object deleted, then the cache's exception propagates |
-| 3.5 | `MC` with a cache whose `set` raises, and `H` raising `BackendUnavailableError` from the first `delete_if_version`, entity `("user", "ent-q7zx-erasure")` | `purge` | `BackendUnavailableError` propagates (not the cache error); one WARNING on `wenchang.core` names the scope and the cache exception type; no record contains `"ent-q7zx-erasure"` |
+| 3.4 | `MC` with a cache whose `set` raises; seed data (E, 6 objects; no index call, so corrupt metadata is harmless) | `purge` | all 6 objects deleted, then the cache's exception propagates |
+| 3.5 | `MC` with a cache whose `set` raises; entity `("user", "ent-q7zx-erasure")` seeded like E under `user/ent-q7zx-erasure/` (no index call); `H` raising `BackendUnavailableError` from the first `delete_if_version` | `purge("user", "ent-q7zx-erasure")` | `BackendUnavailableError` propagates (not the cache error); one WARNING on `wenchang.core` names the scope and the cache exception type; no record contains `"ent-q7zx-erasure"` |
 | 3.6 | `M` (no cache) | `purge` | works as US1; `M.index_cache is None` |
 
 ### US4 — Export
