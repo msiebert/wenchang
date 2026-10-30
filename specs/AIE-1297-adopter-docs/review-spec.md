@@ -21,8 +21,8 @@ Docs and build script only; no `src/` change.
 | 6 | Status page | read | 0.1.0, Python 3.11+, tags + GitHub Releases, no PyPI, SemVer policy, changelog link, limitations as they are today |
 | 7 | Nav | read | Overview, Quickstart, Concepts, Integrate, Identity, Storage, Prompts, Reference, Walkthroughs, Status |
 | 8 | `site/memory-prompt.md` | compared to `build_memory_prompt(placeholders)` | equal; Prompts page embeds it |
-| 9 | HTTP auth example | built | run against a live MCP HTTP client; note removed |
-| 10 | Site | built twice; tests run | idempotent; nav, pages, sitemap, llms files, internal links/anchors, redirects, snippets all checked by tests |
+| 9 | HTTP auth example | run unchanged on fake-gcs-server | 5 cases driven by mcp 2.x streamable-HTTP client, recorded in review-pr.md; note removed (kept if run impossible) |
+| 10 | Site | built twice; tests run | idempotent; nav, pages, sitemap, llms files, no stale outputs, internal links/anchors, redirects, versions, install-line form, snippets (run or py_compile) all checked by tests |
 
 ## Key design decisions
 
@@ -30,12 +30,12 @@ Docs and build script only; no `src/` change.
 | -------- | ---------------------- | --- |
 | 13 pages; Integrate is a chooser page plus 3 children, shown in a sub-nav | One Integrate page with 3 sections | Issue asks for a page per path for llms.txt step 0 |
 | Short nav labels (Identity, Storage, Reference, Status) | Issue's full names | Ten full names don't fit one header row; titles keep full names |
-| Redirect stubs for setup/authorization/usage | Keep old slugs | "Examples" label must match file; old links shouldn't 404 |
+| Redirect stubs for setup/authorization/usage/caching; build deletes stale outputs | Keep old slugs | "Examples" label must match file; old links shouldn't 404 |
 | Generated `memory-prompt.md` with `{slot}` placeholders + drift test | Hand-pasted copy | Hand copy drifts from the library |
 | Tests read committed `site/` output (stdlib parsing) | Run the build in tests | Build needs markdown/pygments, not in dev deps |
 | Snippets executed by a test, with an explicit skip list | Untested snippets | New integrate/ops snippets must actually run |
 | Install lines unpinned URL form | Pin to v0.1.0 here | #55 owns pinning and its pin test, rebasing onto this |
-| HTTP example: one-off live run recorded in review-pr.md | Durable ASGI test | Snippet builds a real GCS client at import; one run satisfies the issue |
+| HTTP example: one live run of the unchanged snippet on fake-gcs-server, recorded in review-pr.md | Durable ASGI test; rewriting the snippet onto InMemoryStorage | Tests the published file as-is; one recorded run satisfies the issue |
 | No ADR | ADR 0044 | Build change is mechanical (page list, stubs, one generated file) |
 
 ## Files/modules to be touched
@@ -44,6 +44,7 @@ Docs and build script only; no `src/` change.
 - `scripts/build_site.py`; regenerated `site/**` incl. `memory-prompt.md`, `sitemap.xml`, redirect stubs
 - `site/llms.txt`
 - `tests/test_site.py`, `tests/test_site_snippets.py`
+- `AGENTS.md` (Commands: regenerate the site after prompt or site-src changes)
 
 ## Open questions / assumptions
 

@@ -66,15 +66,21 @@ and what `GcsStorage` passes for timeout/retry.
 - Memory prompt: the script puts `ROOT / "src"` on `sys.path` and imports
   `wenchang.prompts` (only stdlib dependencies; the PEP 723 env has no
   wenchang install, so this is the lazy-import exception, commented). It
-  writes `site/memory-prompt.md` = `build_memory_prompt(PLACEHOLDER_SLOTS) +
-  "\n"` with `PLACEHOLDER_SLOTS` using `"{field}"` for each of the four
-  fields. `<!--include-prompt-->` in a page source expands to that text in a
-  fenced `text` block.
+  writes `site/memory-prompt.md` = exactly
+  `build_memory_prompt(PLACEHOLDER_SLOTS)` (no added newline) with
+  `PLACEHOLDER_SLOTS` using `"{field}"` for each of the four fields.
+  `<!--include-prompt-->` in a page source expands to that text in a fenced
+  `text` block whose fence is one backtick longer than the longest backtick
+  run in the prompt (minimum 3).
+- Stale outputs: after writing, the build deletes any `site/*.html` not in
+  slugs ∪ `REDIRECTS` ∪ {`404`} and any `site/*.md` not in slugs ∪
+  `REDIRECTS` ∪ {`memory-prompt`}.
 - `llms-full.txt` header: page list built from `PAGES` nav labels.
 - `story_classes`/`stash_blocks` special-case `walkthroughs` instead of
   `usage`; `tool_cards` stays on `reference`.
-- `site/sitemap.xml` is generated from `PAGES` (13 URLs) instead of
-  hand-maintained. `robots.txt` unchanged.
+- `site/sitemap.xml` is generated from `PAGES` (13 URLs; `index` is the site
+  root URL, not `index.html`) instead of hand-maintained. `robots.txt`
+  unchanged.
 - CSS: `.subnav` styles only, reusing existing tokens. Nav must fit 10 items
   plus GitHub at desktop width; at <= 48rem the existing scrollable nav is
   kept.
@@ -97,21 +103,37 @@ reads committed files under `site/` and `site-src/`):
 | Test | Checks |
 | ---- | ------ |
 | `test_header_nav_order` | For each of the 13 `site/{slug}.html`, the `<nav class="site-nav">` link texts equal `NAV_LABELS + ["GitHub"]` (US8.2) |
-| `test_every_page_is_generated_and_listed` | `.html` + `.md` per slug; sitemap `<loc>`s equal the 13 URLs; `llms-full.txt` page markers in order; `llms.txt` links each `{slug}.md` (US8.3) |
-| `test_internal_links_resolve` | Every relative `href` in `site/*.html` (redirect stubs included) exists in `site/`; every fragment is an `id` in the target (US8.4) |
-| `test_redirect_stubs` | The three old `.html` files meta-refresh to the new page; old slugs absent from nav, sitemap, `llms.txt`, `llms-full.txt` (US8.5) |
+| `test_every_page_is_generated_and_listed` | `.html` + `.md` per slug; sitemap `<loc>`s equal the 13 URLs (`index` → site root); `llms-full.txt` page markers in order; `llms.txt` links each `{slug}.md` (US8.3) |
+| `test_no_stale_outputs` | `site/*.html` stems == slugs ∪ `REDIRECTS` ∪ {`404`}; `site/*.md` stems == slugs ∪ `REDIRECTS` ∪ {`memory-prompt`} (US8.7) |
+| `test_internal_links_resolve` | Every relative `href` in `site/*.html` (redirect stubs included) exists in `site/`; every fragment, including same-page `#frag`, is an `id` in the target. Skipped: absolute `http(s)://`, protocol-relative `//`, `mailto:`, and bare `#` (US8.4) |
+| `test_redirect_stubs` | The four old `.html` files (`setup`, `authorization`, `usage`, `caching`) meta-refresh to the new page; old slugs absent from nav, sitemap, `llms.txt`, `llms-full.txt` (US8.5) |
 | `test_llms_txt_step_zero` | The instructions list's first item starts `0.` and links the three integrate child pages (US1.1) |
-| `test_memory_prompt_matches_library` | `site/memory-prompt.md` equals `build_memory_prompt(placeholders) + "\n"`; failure message says to run `uv run scripts/build_site.py` (US7.2) |
-| `test_no_stale_claims` | `site-src/*.md` and `site/llms.txt` contain none of `"not run against a live MCP client"`, `"Python 3.12"`, `"3.12 or newer"`, `"3.12+"`; no "planned" in `status.md` limitations (US7.3-7.4, US6) |
+| `test_memory_prompt_matches_library` | `site/memory-prompt.md` equals `build_memory_prompt(placeholders)` byte for byte; failure message says to run `uv run scripts/build_site.py` (US7.2) |
+| `test_version_consistency` | `status.md` and `site/llms.txt` state `pyproject.toml`'s `version` and the `requires-python` floor (US8.8) |
+| `test_no_stale_claims` | `site-src/*.md` and `site/llms.txt` contain none of `"not run against a live MCP client"`, `"Python 3.12"`, `"3.12 or newer"`, `"3.12+"`; no "planned" in `status.md` limitations; no bare install (pip/uv install of `wenchang` without ` @ ` URL, same pattern as #55's `BARE_INSTALL_RE`); no `msiebert/wenchang.git`; no install command in `site-src/snippets/*.py` (US7.3-7.4, US6, FR-003) |
 | `test_stored_metadata_keys_documented` | `site-src/storage.md` names `last-updated`, `description`, `aliases`, `sources` as stored keys (US5.1) |
 
 HTML is parsed with `html.parser.HTMLParser`, not regex.
 
-`tests/test_site_snippets.py`: `RUNNABLE` and `SKIPPED` (name → reason) sets
-covering `site-src/snippets/*.py` exactly (a test asserts the union equals the
-directory listing and the sets are disjoint); each runnable snippet runs via
-`subprocess.run([sys.executable, path], timeout=60, cwd=tmp_path)` and must
-exit 0 (US8.6).
+`tests/test_site_snippets.py`: `RUNNABLE` (set) and `SKIPPED` (name →
+reason) covering `site-src/snippets/*.py` exactly (a test asserts the union
+equals the directory listing and the sets are disjoint). Reasons are one of
+"needs GCS", "needs a network server", "needs a third-party package". Each
+runnable snippet runs via `subprocess.run([sys.executable, path], timeout=60,
+cwd=tmp_path)` and must exit 0; each skipped snippet must `py_compile` (US8.6).
+Expected classification (the test-writer confirms against the merged
+snippets, including any siblings added):
+
+- `SKIPPED`: `setup_server.py`, `setup_seed.py` (needs GCS), `auth_http.py`
+  (needs GCS), `cache_redis.py` or any other snippet importing a package not
+  in the dev group (needs a third-party package).
+- `RUNNABLE`: `custom_bind.py`, `custom_embed.py`, `custom_store.py`,
+  `custom_conformance.py`, `prompt_slots.py`, `prompt_extra.py`,
+  `custom_observer.py`, `integrate_direct.py`, `ops_erase.py`, and any other
+  sibling snippet that runs offline.
+
+`integrate_direct.py` and `ops_erase.py` end in `assert`s on their outcomes
+(US8.6), so running them is a real check.
 
 These tests read `site/` as committed, so they fail until the build regenerates
 it. They also mean a future prompt-wording change must regenerate the site,
@@ -119,17 +141,29 @@ which the failure message says.
 
 ## HTTP example run (US7.3)
 
-A scratch script (not committed) imports `auth_http.py`'s resolver and slots,
-builds the same server on `InMemoryStorage`, serves it with
-`server.run("streamable-http")` on localhost, and drives it with mcp 2.x's
-streamable-HTTP client: Tianlong with `X-Project-Id` writes `project` (ok)
-and `organization` (`role_required`); Kuixing with no project header writes
-`organization` (ok) and has no `project` scope; a bad token gets the resolver
-failure. Output summarized in `review-pr.md`. Any snippet bug found is fixed.
+Run `auth_http.py` unchanged against fake-gcs-server: `make emulator-up`,
+create the bucket, then start the snippet with `STORAGE_EMULATOR_HOST=
+http://localhost:4443` and `WENCHANG_BUCKET` set (google-cloud-storage honors
+the emulator variable). A scratch client script (not committed) uses mcp
+2.x's streamable-HTTP client against `http://localhost:8000/mcp` with
+per-case headers for the five cases in spec US7.3. The exact commands and the
+output of each case go into `review-pr.md`. If the run cannot be done, the
+note stays on the page and `review-pr.md` says why. A snippet bug found here
+is fixed.
 
 ## Constraints
 
-- No version pins (see spec, Sequencing); no bare installs.
+- No version pins (see spec, Sequencing); no bare installs; install lines
+  only in `site-src/*.md` and `site/llms.txt`, as
+  `git+https://github.com/msiebert/wenchang` (no `.git`).
+- Storage page facts for US5.5/5a are verified at build time: the default
+  timeout and the retry policy google-cloud-storage applies to `upload` with
+  and without `if_generation_match` and to `delete` with it, and
+  `GcsStorage.get`'s 3-attempt generation-race loop.
+- AGENTS.md Commands: add "regenerate the site with
+  `uv run scripts/build_site.py` after changing prompts or `site-src/`".
+- The PR description notes that `make check` now depends on committed
+  generated output under `site/`.
 - Comments in snippets and the build script describe current state; no issue
   IDs in site-src or code.
 - `make check` green; `uv run scripts/build_site.py` idempotent.

@@ -58,8 +58,10 @@ Top nav (short labels; page titles carry the long names):
 This matches the issue's suggested order. Labels are shortened to fit one
 header row; the PR states this.
 
-Old URLs `setup.html`, `authorization.html`, `usage.html` become redirect
-stubs to `quickstart.html`, `identity.html`, `walkthroughs.html`.
+Old URLs `setup.html`, `authorization.html`, `usage.html`, `caching.html`
+become redirect stubs to `quickstart.html`, `identity.html`,
+`walkthroughs.html`, `storage.html`. Links into moved pages are retargeted
+(e.g. `caching.md`'s `setup.md#seed` becomes `quickstart.md#seed`).
 
 ## User Scenarios & Testing
 
@@ -84,6 +86,9 @@ shipped code:
 
 1. Installing the base package with no extra is enough
    (`"wenchang @ git+https://github.com/msiebert/wenchang"`).
+1a. Tools are plain Python methods on `MemoryTools` (`tools.tools()` maps
+   name to bound method; `tools.descriptions()` gives descriptions); nothing
+   is registered anywhere until the adopter does it.
 2. `bind_tools` resolves identity once and returns a `MemoryTools` for that
    identity, so a multi-tenant service binds per request (or per session),
    never once per process.
@@ -143,10 +148,19 @@ shipped code:
    consistency requirements.
 4. The per-entity file cap (AIE-1292): 500 by default, `None` disables, soft,
    creates only, `system/` excluded, `FileQuotaExceededError`.
-5. Timeouts and retries: wenchang exposes no timeout or retry setting; GCS
-   calls use google-cloud-storage defaults (stated as verified in
-   `src/wenchang/storage/gcs.py` at build time), and failures surface as
+5. Timeouts and retries: wenchang exposes no timeout or retry setting.
+   `GcsStorage.get` retries a generation race (object replaced between its
+   metadata and body reads) up to 3 times; every other call uses
+   google-cloud-storage defaults. The page states the default timeout and the
+   conditional-retry behavior (unconditional `put` is not retried;
+   `put_if_version` and `delete_if_version`, which carry generation
+   preconditions, are), each verified against `src/wenchang/storage/gcs.py`
+   and the installed google-cloud-storage at build time. Failures surface as
    `BackendUnavailableError`.
+5a. `metadata_from_map` requires all four keys, so an object written out of
+   band (e.g. `gcloud storage cp`) without them fails reads and indexing with
+   `MetadataFormatError`; the page says to write through the store or set all
+   four keys.
 6. Bucket and IAM setup, and the one-bucket access model, moved or linked
    from Quickstart.
 
@@ -167,13 +181,21 @@ known limitations moved from Reference, each described as it is today (no
 2. **Given** `site/memory-prompt.md`, **When** compared to
    `build_memory_prompt(PromptSlots(purpose="{purpose}",
    scope_guidance="{scope_guidance}", seed_areas="{seed_areas}",
-   systems_of_record="{systems_of_record}"))` plus a trailing newline, **Then**
-   they are equal; the Prompts page embeds that text in a "The full prompt"
-   section and links the raw file; llms.txt links it.
-3. **Given** the HTTP auth example, **When** the build is done, **Then** it has
-   been run against a live MCP streamable-HTTP client (result recorded in
-   `review-pr.md`) and the "not run against a live MCP client" note is gone; if
-   it cannot be run, the note moves into a visible callout on the page.
+   systems_of_record="{systems_of_record}"))`, **Then** they are equal byte
+   for byte (no added newline); the Prompts page embeds that text in a "The
+   full prompt" section inside a fence longer than any backtick run in the
+   prompt, and links the raw file; llms.txt links it.
+3. **Given** the HTTP auth example, **When** the build is done, **Then**
+   `auth_http.py`, unchanged, has been run against fake-gcs-server
+   (`make emulator-up`, `STORAGE_EMULATOR_HOST`, `WENCHANG_BUCKET`, bucket
+   created) and driven with mcp 2.x's streamable-HTTP client through five
+   cases: Tianlong with `X-Project-Id` writes `project` (ok); Tianlong writes
+   `organization` (`RestrictedScopeError`, `role_required`); Kuixing with no
+   project header writes `organization` (ok); Kuixing names `project`
+   (`InvalidArgumentError`, not granted); a bad token
+   (`ResolverFailureError`). The commands and output are recorded in
+   `review-pr.md` and the "not run against a live MCP client" note is
+   removed. If the run cannot be done, the note stays.
 4. **Given** any page or llms.txt, **When** read, **Then** it says Python 3.11
    or newer (matching `requires-python`), never 3.12.
 
@@ -183,8 +205,10 @@ known limitations moved from Reference, each described as it is today (no
    and regenerates `site/`; a second run produces no diff.
 2. **Given** every generated page, **When** its header nav is read, **Then**
    labels are, in order, the 10 nav labels above plus `GitHub`.
-3. **Given** the 13 slugs, **When** `site/` is checked, **Then** each has
-   `.html` and `.md`, `sitemap.xml` lists exactly those 13 URLs,
+3. **Given** the 13 slugs (`caching` is folded into `storage` and is not a
+   slug), **When** `site/` is checked, **Then** each has `.html` and `.md`,
+   `sitemap.xml` lists exactly those 13 URLs (`index` as the site root
+   `https://msiebert.github.io/wenchang/`),
    `llms-full.txt` has a `<!-- page: {slug}.md -->` marker for each in order,
    and `llms.txt` links each `.md`.
 4. **Given** every relative `href` in `site/*.html`, **When** resolved,
@@ -196,8 +220,19 @@ known limitations moved from Reference, each described as it is today (no
    new page and is not in the nav, sitemap, or llms files.
 6. **Given** each Python snippet in `site-src/snippets/`, **When** run with
    the test interpreter, **Then** it exits 0, unless it is on an explicit skip
-   list with a reason (it needs GCS or a network server); every snippet is on
-   exactly one of the two lists.
+   list with a reason (needs GCS, needs a network server, or needs a
+   third-party package not in the dev group); skipped snippets still
+   `py_compile`; every snippet is on exactly one of the two lists.
+   `integrate_direct.py` and `ops_erase.py` `assert` their outcomes (a
+   rendered result and a rendered error; export contents, purge count, and
+   an empty prefix afterwards).
+7. **Given** `site/`, **When** listed, **Then** the `.html` files are exactly
+   the 13 slugs, the `REDIRECTS` keys, and `404`; the `.md` files are exactly
+   the 13 slugs, the `REDIRECTS` keys, and `memory-prompt`. The build deletes
+   generated `.html`/`.md` outputs outside those sets.
+8. **Given** the Status page and `site/llms.txt`, **When** their version and
+   Python floor are read, **Then** they equal `pyproject.toml`'s `version`
+   and `requires-python` floor.
 
 ### User Story 9 - Sibling docs are absorbed, not duplicated (P1)
 
@@ -221,13 +256,20 @@ known limitations moved from Reference, each described as it is today (no
 - **FR-001**: Pages, slugs, and nav order as in "Target navigation".
 - **FR-002**: Every scope item and smaller fix in AIE-1297 is addressed as in
   US1-US7, matching code on `main` after the five sibling PRs.
-- **FR-003**: No install line pins a version; none is bare (no URL).
+- **FR-003**: Install lines appear only in `site-src/*.md` and
+  `site/llms.txt`, never in snippets or HTML includes. Each uses exactly
+  `git+https://github.com/msiebert/wenchang` (no `.git`, no `@vX.Y.Z`). None is
+  bare (no URL); this fixes the existing bare `pip install
+  "wenchang[testing]"` lines (`authorization.md:61`, `reference.md:325`).
 - **FR-004**: `scripts/build_site.py` supports nav children, redirect stubs,
   and the generated memory prompt; the `llms-full.txt` header lists pages from
   `PAGES` rather than a hard-coded string.
 - **FR-005**: `tests/test_site.py` and `tests/test_site_snippets.py` cover
-  US7.2, US7.4 and US8.2-8.6; `make check` passes.
+  US7.2, US7.4, US8.2-8.8, and FR-003; `make check` passes. `make check`
+  thereby depends on committed generated output; the PR description says so.
 - **FR-006**: No `src/` change.
+- **FR-007**: AGENTS.md Commands gains a line: regenerate the site with
+  `uv run scripts/build_site.py` after changing prompts or `site-src/`.
 
 ## Success Criteria
 
