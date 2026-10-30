@@ -323,22 +323,28 @@ The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mir
 
 ### Telemetry {#telemetry}
 
-`on_call`, if given, receives a `wenchang.mcp.ToolCallRecord` after every memory tool call:
+Both entry points take an `on_call` observer: `register_memory_tools(..., on_call=...)` and `build_server` for MCP, and `bind_tools(..., on_call=...)` (or `MemoryTools(..., on_call=...)`) for direct calls. It receives a `wenchang.observer.ToolCallRecord` after every memory tool call. `wenchang.mcp` re-exports `ToolCallRecord`.
 
-| Field | Meaning |
-| --- | --- |
-| `tool` | Registered tool name, prefix included. |
-| `arguments` | The arguments the wrapper received (read-only mapping). |
-| `result` | A copy of the payload sent to the client (read-only mapping). |
-| `is_error` | Whether the payload is a rendered error. |
-| `request_id` | The MCP request's ID. |
-| `duration_s` | Wall time of the wrapper, on a monotonic clock. |
+| Field | MCP | Direct call |
+| --- | --- | --- |
+| `tool` | Registered tool name, prefix included. | Bare method name, such as `read_file`. |
+| `arguments` | The arguments the wrapper received. | Every parameter by name, defaults filled. |
+| `result` | A copy of the payload sent to the client. | `render_result` of the return value, or `render_error` of the raised error. |
+| `is_error` | Whether `result` is a rendered error. | Same. |
+| `request_id` | The MCP request's ID, for correlating records that arrive in completion order. | `None`. |
+| `duration_s` | Wall time of the wrapper (credentials, binding, the tool, rendering). | Wall time of the tool method only. |
 
-The callback runs on worker threads, so it must be a plain function, fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain memory content, so treat them as sensitive.
+`arguments` and `result` are read-only deep copies, and `duration_s` uses a monotonic clock. Calls rejected during argument validation never produce a record.
+
+`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.
+
+This observer logs and counts calls without recording arguments or results:
+
+<!--include python custom_observer.py-->
 
 ### Using the tools without MCP {#bind}
 
-`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)` resolves the identity and returns a `MemoryTools` for one session. `tools.tools()` is the seven bound methods by name, and `tools.descriptions()` is the description for each. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` in `wenchang.tools` produce the JSON-safe dicts the MCP adapter returns.
+`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)` resolves the identity and returns a `MemoryTools` for one session. `on_call` is a tool-call observer; see [Telemetry](#telemetry). `tools.tools()` is the seven bound methods by name, and `tools.descriptions()` is the description for each. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` in `wenchang.tools` produce the JSON-safe dicts the MCP adapter returns.
 
 <!--include python custom_bind.py-->
 
