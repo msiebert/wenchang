@@ -15,12 +15,15 @@ and delete. Without a cache, nothing changes.
 | 1 | no cache | index twice | lists every call (unchanged) |
 | 2 | cache, no writes | index twice | 2nd call: zero `list_page` calls, equal result |
 | 3 | cached index | write / append / replace / delete, or a mutation whose storage call raised | next index reflects it; only that entity re-lists |
-| 4 | reader mid-listing when a writer commits | reader stores its stale listing | next index still reflects the write |
+| 4 | reader mid-listing when a writer commits; or a reader runs between a writer's storage call starting and its invalidation | reader stores its stale listing | next index still reflects the write (deterministic hooks) |
+| 4b | only the token or only the listing key evicted / expired; racing token creation | index | re-lists when needed, never serves stale |
+| 4c | two storage roots, one cache, distinct `key_prefix` | write in each | isolated |
 | 5 | two writer threads + a reader on one entity | join | final cached index == uncached index |
 | 6 | two stores sharing storage + cache | one writes | the other's next index sees it |
 | 7 | write by a store without the cache | before / after `ttl` | stale / fresh; `invalidate_index` fixes immediately |
-| 8 | cache `get`/`set` raises | index or write | succeeds from storage, warning logged |
-| 9 | garbage in cache | index | miss, re-list |
+| 8 | cache `get`/`set` raises, or `get` returns `bytes` | index or write | succeeds from storage, warning logged (scope only, no entity ID) |
+| 9 | garbage, foreign-entity, invalid, or duplicate paths in a cached value | index | miss, re-list |
+| 9b | `invalidate_index` | raw cache value | old entries tombstoned |
 | 10 | `TransportConformance` on a cached store | run | passes |
 
 ## Key design decisions
@@ -40,18 +43,23 @@ and delete. Without a cache, nothing changes.
 - New tests: `tests/test_index_cache.py`, `tests/test_core_index_cache.py`, cached conformance run.
 - `docs/adr/0040-index-cache.md`, `ARCHITECTURE.md`.
 
+| `invalidate_index` tombstones the listing; mutations only replace the token | Tombstone on every mutation | Purges must not leave descriptions in the adopter's cache; for ordinary writes the old value is never served and is soon overwritten, so one `set` suffices |
+
 ## Open questions / assumptions
 
-- Public `MemoryStore.invalidate_index(scope, entity_id)` (also the hook for
-  AIE-1291) — assumed acceptable as a public addition.
-- Swallow-and-log on cache errors (vs. raising). Assumed; ttl is the backstop.
-- `ttl` defaults to `None` (no expiry). Alternative: require a ttl. Assumed
-  optional, with the ADR recommending one.
+Settled by the orchestrator (2026-10-30): public `invalidate_index` (the
+AIE-1291 hook); swallow-and-log on cache errors; `ttl` optional, default
+`None`; per-key linearizability documented as a requirement.
+
 - Writers that bypass the cache (seeding job, another `MemoryStore` without
   it, direct GCS) are stale up to `ttl` unless they call `invalidate_index`.
 
 ## Risks
 
+- `ttl=None` plus a swallowed invalidation failure or an out-of-band writer
+  leaves an entity stale with no bound. Docs recommend a finite `ttl`.
 - A cache without per-key linearizability (async replicas) weakens freshness to the ttl bound.
+- Cached values hold descriptions and aliases, and keys hold entity IDs; the
+  adopter's cache inherits the store's data-handling obligations (ADR 0040).
 - Large entities produce large cache values (bounded by file count × metadata size).
 - Two Redis round-trips per entity on a hit; still far cheaper than a GCS list.

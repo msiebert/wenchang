@@ -56,7 +56,12 @@ not `str` → `TypeError`; then `ttl <= timedelta(0)` → `ValueError`.
 Contract (docstring): `get` returns the value last `set` for the key, or
 `None` if absent or expired. `set` stores with expiry `ttl` from now (`None`:
 no expiry). Both must be linearizable per key; neither is required to be
-atomic across keys. Values are opaque `str`s.
+atomic across keys. Values are opaque `str`s. Both callables are required
+(`set` is how the library invalidates). The docstring also states: with
+`ttl=None`, a failed (swallowed) invalidation or a write that bypasses the
+cache leaves an entity stale with no bound, so use a finite `ttl` in
+production; keys carry no storage identity, so stores over different
+storage roots sharing one cache need distinct `key_prefix`es.
 
 ```python
 class InMemoryIndexCache:
@@ -70,7 +75,8 @@ An entry set at clock time `t0` with `ttl` is returned while
 `clock() < t0 + ttl` and is `None` (and dropped) once `clock() >= t0 + ttl`.
 Usage: `cache = InMemoryIndexCache(); IndexCache(get=cache.get, set=cache.set, ttl=timedelta(minutes=5))`.
 For tests and single-process adopters only; multi-instance hosts need a
-shared cache.
+shared cache. The docstring states that expired entries are dropped only
+when read, and with `ttl=None` the cache grows without bound.
 
 ### `src/wenchang/core.py`
 
@@ -91,7 +97,10 @@ class MemoryStore:
   `TypeError`; failing `is_valid_segment` → `ValueError(f"invalid scope:
   {scope!r}")` / `ValueError(f"invalid entity_id: {entity_id!r}")`, checked
   before any cache call. No cache → returns `None`. Otherwise
-  `set(token_key, uuid4().hex, ttl)`; an exception from `set` propagates.
+  `set(token_key, uuid4().hex, ttl)`, then `set(listing_key, TOMBSTONE,
+  ttl)`; an exception from either `set` propagates (the second is not
+  attempted if the first raises). `TOMBSTONE` is a private constant
+  (`'{"tombstone":true}'`) that decodes as a miss and holds no entry data.
 - Seven core method signatures are unchanged (the transport
   `inspect.signature` parity test must still pass).
 
@@ -104,9 +113,12 @@ class MemoryStore:
   `{"token": str, "entries": [{"path": str, "version": str, "description": str, "aliases": [str], "sources": [str] (sorted), "last_updated": datetime.isoformat()}]}`.
   `last_updated` keeps its stored offset (round-trips exactly with
   `datetime.fromisoformat`), so a hit builds `FileEntry`/`FileMetadata`
-  equal to the uncached one. Decode failure of any kind (bad JSON, missing
-  key, wrong type, `FileMetadata` construction error, naive datetime,
-  `VersionToken`/path not `str`) → treated as a miss.
+  equal to the uncached one. Decode failure of any kind → treated as a
+  miss: bad JSON, the tombstone, missing key, wrong type, `FileMetadata`
+  construction error, naive datetime, `version`/`path` not `str`, a `path`
+  failing `is_valid_path`, a `path` not starting with that entity's
+  `build_prefix(scope, entity_id)`, or a `path` repeated within the
+  listing.
 - Encode failure (any `Exception`) → logged, not stored; the index call
   continues.
 
@@ -128,9 +140,12 @@ entries exactly as today. A `MetadataFormatError` or
 `BackendUnavailableError` during listing propagates; nothing is stored for
 that entity.
 
-`_cache_get` / `_cache_set` catch `Exception` (not `BaseException`), log
-`WARNING` on `logging.getLogger("wenchang.core")` naming the key and the
-exception type, and return `None` / do nothing.
+`_cache_get(scope, key)` / `_cache_set(scope, key, value)` catch
+`Exception` (not `BaseException`), log `WARNING` on
+`logging.getLogger("wenchang.core")` naming the scope and the exception
+type (never the key or entity ID), and return `None` / do nothing.
+`_cache_get` also logs a WARNING (scope and result type) and returns `None`
+when `get` returns anything whose real type is not `str` (e.g. `bytes`).
 
 **Why it is safe**: a listing is tagged with a token observed (read or
 written) before the listing began. A writer replaces the token only after
@@ -152,25 +167,43 @@ error). Called in a `finally` around every `put_if_version` /
 returned or raised, before the method returns or raises. It never replaces
 or masks the method's own result or exception.
 
-`invalidate_index` (public, propagating) is the hook for AIE-1291's purge
-and for adopters' out-of-band writers.
+Mutations replace only the token (one `set`); they do not tombstone the
+listing, since its old value is never served and the next index call for
+the entity overwrites it. `invalidate_index` (public, propagating, also
+tombstones) is the hook for AIE-1291's purge and for adopters' out-of-band
+writers.
 
 ## Test plan (files)
 
 - `tests/test_index_cache.py` — US1.1–1.4, US8.1–8.3.
-- `tests/test_core_index_cache.py` — US1.5–1.6, US2–US7, using a test-local
-  `Storage` wrapper over `InMemoryStorage` that counts `list_page` calls by
-  prefix and can run a callback inside `list_page` or raise from
-  `put_if_version`/`delete_if_version`; `caplog` for warnings; threads +
-  `threading.Barrier` for 5.3.
+- `tests/test_core_index_cache.py` — US1.5–1.6, US2–US7, using:
+  - a test-local `Storage` wrapper over `InMemoryStorage` that counts
+    `list_page` calls by prefix, can run a callback inside `list_page`
+    after the inner result is captured, can run a callback inside
+    `put_if_version`/`delete_if_version` before delegating, and can raise
+    from them;
+  - a test-local cache wrapper `W` over `InMemoryIndexCache` that can run
+    a callback inside `get`/`set` for a key (before delegating), delete a
+    single key, return a scripted value from `get`, and record values set;
+  - `caplog` for warnings; threads + `threading.Barrier` for 5.3 (smoke
+    test only; the deterministic cases carry the proof).
+  Cache keys are built in tests from the documented format
+  (`f"{key_prefix}v1:token:{scope}/{entity_id}"`, `...v1:listing:...`).
 - `tests/test_transport_conformance_cached.py` (or a second subclass in the
   existing reference run) — US8.4.
 
 ## Docs
 
 - `docs/adr/0040-index-cache.md`: decision, rejected alternatives, token
-  protocol and proof sketch, ttl bound, consistency requirement, failure
-  policy, out-of-band writers, `invalidate_index` hook.
+  protocol and proof sketch, ttl bound (and that `ttl=None` is unbounded
+  after a failed invalidation or out-of-band write; finite ttl recommended),
+  consistency requirement, failure policy, out-of-band writers,
+  `invalidate_index` hook and tombstone, distinct `key_prefix` per storage
+  root, compatibility with constitution principle V (derived copy of
+  listing metadata, never content, never written ahead of storage, every
+  miss/failure falls back to storage), privacy (values hold descriptions,
+  aliases, sources; keys hold scope names and entity IDs; logs never name
+  entity IDs).
 - `ARCHITECTURE.md`: new `index_cache` module entry; `core` entry gains
   `index_cache` and `invalidate_index`; concurrency section notes the cache.
 - `specs/AIE-1293-index-cache/review-pr.md`.

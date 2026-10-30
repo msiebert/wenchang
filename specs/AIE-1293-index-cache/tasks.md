@@ -12,7 +12,8 @@ Tests first for each task; implementation never edits `tests/`.
 - [ ] T3 — Invalidation. Tests: US4, US6.1–6.3. Implement `_invalidate_path`
   in a `finally` around every `put_if_version`/`delete_if_version`, and
   public `invalidate_index`.
-- [ ] T4 — Concurrency. Tests: US5 (deterministic hook tests 5.1, 5.2, 5.4,
-  5.5; threaded 5.3). Expected to pass on T2+T3; fix implementation if not.
+- [ ] T4 — Concurrency. Tests: US5 (deterministic hook tests 5.1, 5.2,
+  5.4–5.11, which carry the proof; threaded 5.3 as a smoke test). Expected
+  to pass on T2+T3; fix implementation if not.
 - [ ] T5 — Conformance with cache. Test: US8.4.
 - [ ] T6 — Docs: ADR 0040, ARCHITECTURE.md, review-pr.md. `make check` green.
