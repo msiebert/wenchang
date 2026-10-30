@@ -41,21 +41,25 @@ class ExportedObject:
 
 class PurgeIncompleteError(Exception):
     """Objects were still present under the prefix after the final pass."""
-    def __init__(self, scope: str, entity_id: str) -> None
+    def __init__(self, scope: str, entity_id: str, passes: int) -> None
     scope: str
     entity_id: str
+    passes: int
     # message: f"purge of {scope!r} did not finish: objects kept appearing
-    #           under the entity's prefix after {PURGE_MAX_PASSES} passes"
+    #           under the entity's prefix after {passes} passes"
     # (names the scope, never the entity ID, matching ADR 0040's log rule)
 
 
 class MemoryStore:
-    def purge(self, scope: str, entity_id: str) -> int
+    def purge(self, scope: str, entity_id: str, *, max_passes: int = PURGE_MAX_PASSES) -> int
     def export(self, scope: str, entity_id: str) -> tuple[ExportedObject, ...]
 ```
 
-The constant is public as `PURGE_MAX_PASSES` so tests assert the exact pass
-count without hardcoding 5.
+`PURGE_MAX_PASSES` is the public default for purge's keyword-only
+`max_passes`. A `max_passes` whose real type is not `int`, or is a `bool`,
+→ `TypeError`; `< 1` → `ValueError("max_passes must be positive")`. Checked
+with the argument checks below (all `TypeError`s first), before any storage
+or cache call.
 
 ### Argument validation (both methods, before any storage or cache call)
 
@@ -72,7 +76,7 @@ any `ValueError`.
 prefix = build_prefix(scope, entity_id)
 deleted = 0
 try:
-    for pass in range(PURGE_MAX_PASSES):
+    for pass in range(max_passes):
         found = False
         start_after = None
         loop:
@@ -84,14 +88,16 @@ try:
                 except PreconditionFailedError: pass   # changed or gone; next pass sees it
             start_after = page[-1].key
             if len(page) < list_page_size: break
-        if not found: return deleted   # (via the finally below)
-    raise PurgeIncompleteError(scope, entity_id)
-finally:
-    invalidate (see below)
+        if not found: return deleted
+    if not storage.list_page(prefix, None, 1): return deleted   # final check
+    raise PurgeIncompleteError(scope, entity_id, max_passes)
+(wrapped for invalidation; see below)
 ```
 
 - A pass that lists nothing ends the purge. With no concurrent writer:
-  one deleting pass plus one empty pass.
+  one deleting pass plus one empty pass (or, with `max_passes=1`, one
+  deleting pass plus the empty final check). Total listings starting at
+  `start_after=None` never exceed `max_passes + 1`.
 - `start_after` continues past keys already handled in this pass, so a
   failed delete is not retried within the pass (no hot loop on one key).
 - `BackendUnavailableError` (or any other exception) from `list_page` or

@@ -38,8 +38,12 @@ library, exposed to operators, not to agents.
   prefix listing and deletes each object at its listed version (a
   precondition failure — the object changed or is already gone — is
   skipped; the next pass sees the current state). Purge returns once a pass
-  lists nothing. After `PURGE_MAX_PASSES = 5` passes that each still found
-  objects, it raises `PurgeIncompleteError`. Guarantee: when `purge`
+  lists nothing. It makes at most `max_passes` passes (keyword-only,
+  default `PURGE_MAX_PASSES = 5`); if all of them found objects, a final
+  check lists the prefix once more (limit 1) and, if anything is still
+  there, raises `PurgeIncompleteError` (so `max_passes=1` with no
+  concurrent writer succeeds: one deleting pass, then an empty check).
+  Guarantee: when `purge`
   returns, the prefix was observed empty after every delete it made; a
   write that lands after that final listing survives. Callers needing a
   durable erasure stop writers to the entity first (revoke the grant), then
@@ -108,7 +112,11 @@ counts calls.
 | 2.1 | `H` hook in the first `delete_if_version` call: `S.put` a new object `user/u1/notes/new.md` | `purge` | returns normally; `new.md` is gone (deleted on a later pass); return value counts it |
 | 2.2 | `H` hook in the first `delete_if_version` call for key K: `S.put(K, ...)` (rewrites K, so the guarded delete fails) | `purge` | K is gone afterwards (deleted at its new version on the next pass); no exception |
 | 2.3 | `H` hook in the first `delete_if_version` for key K: `S` deletes K first (already gone) | `purge` | no exception; K is absent; K is not counted |
-| 2.4 | `H` hook in every `list_page` for `user/u1/` that `S.put`s a fresh key under `user/u1/` | `purge` | raises `PurgeIncompleteError` after exactly `PURGE_MAX_PASSES` passes (counted as listings that start at `start_after=None`); its `scope`, `entity_id` attributes match; its message names the scope but not the entity ID; with a cache configured, the entity's listing key holds no purged data afterwards |
+| 2.4 | `H` hook in every `list_page` for `user/u1/` that `S.put`s a fresh key under `user/u1/` | `purge` | raises `PurgeIncompleteError` after exactly `PURGE_MAX_PASSES` passes plus the final check (`PURGE_MAX_PASSES + 1` listings starting at `start_after=None`); its `scope`, `entity_id`, and `passes == PURGE_MAX_PASSES` attributes match; its message names the scope but not the entity ID; with a cache configured, the entity's listing key holds no purged data afterwards |
+| 2.4b | hook as 2.4 | `purge(..., max_passes=2)` | raises `PurgeIncompleteError` with `passes == 2` after 3 listings starting at `start_after=None` |
+| 2.4c | — | `purge(..., max_passes=x)`: `0`, `-1` | `ValueError("max_passes must be positive")`, no storage call; `True`, `1.0`, `"3"`: `TypeError`, no storage call |
+| 2.4d | seed data, no writer | `purge(..., max_passes=1)` | returns 6 (one deleting pass, then an empty check) |
+| 2.4e | `H` hook that `S.put`s a fresh key during the 1st pass's `list_page` only | `purge(..., max_passes=1)` | raises `PurgeIncompleteError` (the check finds the fresh key) |
 | 2.5 | `H` whose `delete_if_version` raises `BackendUnavailableError` on the 2nd call, with a cache configured and the index cached | `purge` | `BackendUnavailableError` propagates; the 1st delete stands; the entity's cache token was replaced (next index re-lists) |
 | 2.6 | `H` hook in the first `delete_if_version` that raises `KeyboardInterrupt`, cache configured and index cached | `purge` | `KeyboardInterrupt` propagates; the entity's cache token was replaced |
 

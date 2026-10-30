@@ -26,7 +26,7 @@ operator-only: no agent tool, no transport method.
 | Decision | Alternatives rejected | Why |
 | -------- | ---------------------- | --- |
 | Build both in `core` from existing `list_page` / `get` / `delete_if_version`; no storage protocol change | New `Storage.delete(key)` or `delete_prefix(prefix)` | The protocol deliberately has no unconditional delete; version-guarded deletes never remove an object version purge didn't list, and the existing methods already run on both backends |
-| Purge in passes until a pass lists nothing, capped at 5, then `PurgeIncompleteError` | Single pass; unbounded loop | One pass misses mid-purge writes; an unbounded loop can spin forever under a live writer. Documented guarantee: the prefix was seen empty after purge's last delete; durable erasure needs writers stopped first |
+| Purge in passes until a pass lists nothing; at most `max_passes` (default `PURGE_MAX_PASSES = 5`) deleting passes, then a final check listing, then `PurgeIncompleteError` | Single pass; unbounded loop | One pass misses mid-purge writes; an unbounded loop can spin forever under a live writer. Documented guarantee: the prefix was seen empty after purge's last delete; durable erasure needs writers stopped first |
 | `PurgeIncompleteError(Exception)` in `core`, not in the `WenchangError` taxonomy | `TransientError` subclass | Taxonomy errors carry agent-facing guidance; this is operator-only |
 | Export returns raw objects (`key`, `bytes`, raw metadata map, `version`) | Parsed `MemoryFile`s; skip or raise on corrupt objects | Lossless, never drops or raises on malformed data, and restores with `Storage.put` byte-for-byte |
 | Export returns a tuple, paging internally | Iterator/streaming; caller-driven cursor | Entity size is bounded (file cap AIE-1292 × file size); a tuple keeps errors eager and the API simple |
@@ -41,10 +41,10 @@ operator-only: no agent tool, no transport method.
 
 ## Open questions / assumptions
 
-- No storage interface change. If reviewers want a GCS batch-delete path for
-  large entities, that's a new `Storage` method (follow-up).
-- Pass cap of 5, made public as `PURGE_MAX_PASSES`, not configurable.
-- `export` name kept generic (vs `export_entity`), mirroring `purge`.
+- Resolved by the orchestrator: no storage interface change (a GCS batch
+  delete would be a follow-up); the name stays `export`; the pass cap is the
+  public default `PURGE_MAX_PASSES = 5`, which a keyword-only `max_passes`
+  overrides.
 
 ## Risks
 
