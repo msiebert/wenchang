@@ -38,6 +38,7 @@ CacheSet = Callable[[str, str, timedelta | None], None]
 
 DEFAULT_KEY_PREFIX: Final = "wenchang:index:"
 
+
 @dataclass(frozen=True)
 class IndexCache:
     get: CacheGet
