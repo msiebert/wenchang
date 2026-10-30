@@ -38,9 +38,16 @@ equal.
    section and link reference for it, so drift fails `make check` rather than
    the release.
 4. **Install instructions pin the current version, and a test checks them.**
-   `README.md`, `docs/releasing.md`, and `site-src/*.md` show concrete
+   `README.md`, `docs/releasing.md`, `site/llms.txt`, and `site-src/*.md` show concrete
    `@v{version}` pins. The same test fails on any wenchang git URL or release
    asset URL with another version, and on any bare install with no URL.
+   Code docstrings and error messages name the extra (`wenchang[mcp]`) and
+   point to `docs/releasing.md` rather than pinning a version.
+6. **The sdist is curated.** `[tool.hatch.build.targets.sdist]` includes only
+   `src/`, `tests/`, `README.md`, `LICENSE`, `CHANGELOG.md`, and
+   `pyproject.toml`. It builds the same wheel; the full test suite needs the
+   repo (the dev-only `evals/` package, agent docs, ADRs) and runs from a
+   checkout, not the sdist.
 5. **Changelog and versioning policy.** `CHANGELOG.md` follows Keep a
    Changelog; every user-visible PR adds an `[Unreleased]` entry. SemVer
    applies to the documented Python API, the tool contract, and the stored
@@ -54,8 +61,8 @@ equal.
 - Adopters pin a meaningful version and read what changed in the changelog.
 - A release bumps the version in two files; the test catches a missed one.
 - Every release PR also bumps the pinned tag in the README, the site sources,
-  and `docs/releasing.md`, and regenerates `site/`. The test catches a missed
-  pin.
+  the hand-maintained `site/llms.txt`, and `docs/releasing.md`, and
+  regenerates `site/`. The test catches a missed pin.
 - A tag runs the workflow file as it exists at the tagged commit. A workflow
   bug found on the first run of a tag needs a fix on `main` and a re-tag; this
   is allowed only while no GitHub Release exists for the tag.

@@ -14,8 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 GIT_URL_RE = re.compile(r"git\+https://github\.com/msiebert/wenchang(@v[^\s\"'`)<]*)?")
+# An install of wenchang by name with no direct URL: optional flags, optional
+# extras and version specifier, and no " @ " after the requirement.
 BARE_INSTALL_RE = re.compile(
-    r"(?:pip install|uv add|uv pip install)\s+(['\"]?)wenchang(?:\[[^\]]*\])?\1(?!\s*@)"
+    r"(?:pip install|uv add|uv pip install|uv tool install)(?:\s+-\S+)*\s+(['\"]?)"
+    r"wenchang(?:\[[^\]]*\])?(?![\[\w.-])(?:\s*[<>=!~]=?[^\s'\"`]*)?\1(?!\s*@)"
 )
 RELEASE_ASSET_RE = re.compile(
     r"releases/download/v([^/\s\"'`)<]+)/wenchang-([^-\s\"'`)<]+?)(?:-py3|\.tar\.gz)"
@@ -97,13 +100,38 @@ def test_changelog_has_link_reference_for_current_version() -> None:
     assert expected in _changelog_lines(), f"CHANGELOG.md is missing {expected!r}"
 
 
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        ("pip install wenchang", True),
+        ("pip install 'wenchang[mcp]'", True),
+        ('pip install -U "wenchang[testing]"', True),
+        ("pip install --upgrade wenchang>=0.1", True),
+        ('uv add "wenchang==0.1.0"', True),
+        ("uv tool install wenchang", True),
+        ("uv pip install wenchang[mcp]", True),
+        ('pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"', False),
+        ("pip install wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0", False),
+        ("pip install wenchang @ https://example.com/wenchang-0.1.0-py3-none-any.whl", False),
+        ("pip install wenchang-other", False),
+    ],
+)
+def test_bare_install_pattern(text: str, flagged: bool) -> None:
+    """The pin test flags installs of wenchang by name without a URL, with or without
+    flags, extras, and version specifiers (AIE-1294, US3.3).
+    """
+    assert bool(BARE_INSTALL_RE.search(text)) is flagged
+
+
 def test_install_instructions_pin_current_version() -> None:
-    """Every install instruction in README.md, docs/releasing.md, and site-src/*.md
-    pins the current release tag (AIE-1294, US3.3).
+    """Every install instruction in README.md, docs/releasing.md, site/llms.txt, and
+    site-src/*.md pins the current release tag (AIE-1294, US3.3).
     """
     version = _project_version()
-    named = [ROOT / "README.md", ROOT / "docs" / "releasing.md"]
-    files = named + sorted((ROOT / "site-src").glob("*.md"))
+    named = [ROOT / "README.md", ROOT / "docs" / "releasing.md", ROOT / "site" / "llms.txt"]
+    site_src = sorted((ROOT / "site-src").glob("*.md"))
+    assert site_src, "site-src/*.md matched no files"
+    files = named + site_src
 
     failures: list[str] = []
     git_url_matches = 0

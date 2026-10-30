@@ -6,7 +6,7 @@ instructions. Every tool call reads the caller's credentials from the
 request, binds that caller's own MemoryTools, forwards the call, and returns
 render_result or render_error output.
 
-Requires the optional extra: pip install 'wenchang[mcp]'.
+Requires the optional extra: install wenchang[mcp]; see docs/releasing.md.
 """
 
 import copy
@@ -23,14 +23,17 @@ from typing import Any, Final, TypeAlias, TypeVar, cast
 
 # mcp is an optional dependency; tell a missing install from an incompatible one.
 if importlib.util.find_spec("mcp") is None:
-    raise ImportError("wenchang.mcp requires the optional 'mcp' extra: pip install 'wenchang[mcp]'")
+    raise ImportError(
+        "wenchang.mcp requires the optional 'mcp' extra: install wenchang[mcp]; "
+        "see docs/releasing.md"
+    )
 try:
     from mcp.server.mcpserver import Context, MCPServer
     from mcp.types import CallToolResult, TextContent
 except ImportError as exc:
     raise ImportError(
         "wenchang.mcp requires mcp>=2.2,<3, and the installed mcp is incompatible: "
-        "pip install 'wenchang[mcp]'"
+        "install wenchang[mcp]; see docs/releasing.md"
     ) from exc
 
 import wenchang

@@ -20,6 +20,8 @@ pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 
 With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
+Without the MCP adapter, install the base package: `pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`, or `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
+
 What changed in each release is in the [changelog](https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md).
 
 ## 2. Create the bucket {#bucket}

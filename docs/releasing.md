@@ -39,6 +39,12 @@ Every PR with a user-visible change adds an entry under `## [Unreleased]` in
 `Deprecated`, `Removed`, `Fixed`, `Security`). Internal-only changes, such as
 the dev-only `evals/` harness, need no entry.
 
+A version's section runs from its `## [X.Y.Z] - YYYY-MM-DD` heading to the
+next `## ` heading or the first line that starts with `[` and contains `]: `
+(the link references at the bottom). An entry line of that shape would cut
+the release notes short, so don't start an entry with a bracketed link
+definition.
+
 ## Versioning policy
 
 wenchang follows [Semantic Versioning](https://semver.org/). The public
@@ -74,8 +80,8 @@ stored memory stop working as before.
    bottom: `[Unreleased]` compares from the new tag, and `[X.Y.Z]` links to its
    release page.
 3. Update the pinned tag in every install instruction: `README.md`,
-   `site-src/*.md`, and this file. Then regenerate the site with
-   `uv run scripts/build_site.py`. `make check` fails if any install
+   `site-src/*.md`, `site/llms.txt` (hand-maintained, not generated), and
+   this file. Then regenerate the site with `uv run scripts/build_site.py`. `make check` fails if any install
    instruction pins a different version.
 4. Run `make check`, open the release PR, and merge it to `main`.
 5. Confirm the `[X.Y.Z]` changelog section covers everything at the release
