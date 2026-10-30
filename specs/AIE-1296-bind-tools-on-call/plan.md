@@ -15,14 +15,29 @@ __all__ = ["ToolCallObserver", "ToolCallRecord", "check_observer", "notify_obser
 
 @dataclass(frozen=True)
 class ToolCallRecord:
-    tool: str                       # registered tool name (MCP: prefix included; bind_tools: bare name)
-    arguments: Mapping[str, object] # read-only deep copy, every parameter by name, defaults filled
-    result: Mapping[str, object]    # read-only deep copy of render_result / render_error output
+    tool: str
+    arguments: Mapping[str, object]
+    result: Mapping[str, object]
     is_error: bool
-    request_id: str | None          # MCP request id; None for direct (bind_tools) calls
-    duration_s: float               # monotonic wall time of the observed call
+    request_id: str | None
+    duration_s: float
 
 ToolCallObserver: TypeAlias = Callable[[ToolCallRecord], None]
+```
+
+The `ToolCallRecord` docstring defines each field per entry point:
+
+| Field | MCP (`wenchang.mcp`) | Direct (`bind_tools` / `MemoryTools`) |
+| ----- | -------------------- | ------------------------------------- |
+| `tool` | registered name, prefix included | bare method name |
+| `arguments` | what the wrapper received | every parameter by name, defaults filled |
+| `result` | copy of the `structured_content` payload | `render_result(value)`, or `render_error(exc)` for a tool or render failure |
+| `request_id` | the MCP request id (always a `str`) | `None` |
+| `duration_s` | credentials + `bind_tools` + tool + render | the tool method only |
+
+Both entry points use read-only deep copies of `arguments` and `result`. Records compare by value and are unhashable.
+
+```python
 
 def check_observer(on_call: object) -> None:
     """Raise TypeError unless on_call is None or a plain (non-async) callable."""
@@ -84,15 +99,22 @@ def bind_tools(
 Per-call behavior when `on_call` is set, for each of the seven tool methods:
 
 1. Bind the call's arguments to the method signature (excluding `self`) with defaults applied. If binding fails, make the call as-is (Python raises `TypeError`) with no record.
-2. `started = time.monotonic()`; run the tool.
+2. `started = time.monotonic()`; run the tool inside `try: ... except Exception as exc:`. The `except` block only stores the exception; nothing else runs in it.
 3. `duration_s = time.monotonic() - started`.
-4. Success: `result = render_result(value)`, `is_error = False`. `Exception`: `result = render_error(exc)`, `is_error = True`. Rendering is inside the guarded path (a rendering failure is logged and skipped like an observer failure).
-5. `notify_observer(on_call, _log, tool=<method name>, arguments=<bound mapping>, result=..., is_error=..., request_id=None, duration_s=...)`.
-6. Return the tool's value, or re-raise the original exception object (bare `raise` semantics; the observer's exception must not become its `__context__`).
+4. After leaving the `except` block:
+   - On failure: `result = render_error(exc)`, `is_error = True`.
+   - On success: `result = render_result(value)`, `is_error = False`. If `render_result` raises, the wrapper catches it the same way (store, leave the block) and uses `result = render_error(render_exc)`, `is_error = True`, matching MCP's `_run`. The caller still gets the raw value.
+5. `notify_observer(on_call, _log, tool=<method name>, arguments=<bound mapping>, result=..., is_error=..., request_id=None, duration_s=...)`. This runs outside any `except` block, so `sys.exc_info()` is empty inside the observer, and an observer exception has no `__context__` linking it to the tool's exception.
+6. Return the tool's value, or `raise exc` (the original object). A `finally` clears the stored exception locals so they don't form a reference cycle.
 
 When `on_call` is `None`, the tool runs with no binding, timing, or rendering.
 
-Mechanism (implementer's choice, constrained): a private decorator on the seven methods using `functools.wraps`, so `__doc__` (read by `tool_descriptions`), `__name__`, and `inspect.signature` stay identical. No change to tool bodies.
+Mechanism: a private decorator on the seven methods using `functools.wraps`, so `__doc__` (read by `tool_descriptions`), `__name__`, and `inspect.signature` stay identical. No change to tool bodies.
+
+- `inspect.signature` is computed once, at decoration time.
+- For pyright strict, the decorator is annotated `(Callable[Concatenate[MemoryTools, _P], _R]) -> Callable[Concatenate[MemoryTools, _P], _R]`, and the wrapper is `cast` to that type, so bound-method calls keep their parameter types.
+- `check_observer` runs after the existing checks in `MemoryTools.__init__`, so existing error precedence is unchanged.
+- A subclass that overrides a tool method without the decorator is not observed. This is documented in ADR 0043.
 
 ### `wenchang.mcp`
 
@@ -101,6 +123,11 @@ Mechanism (implementer's choice, constrained): a private decorator on the seven 
 - `call()` keeps its timing boundary (credentials + `bind_tools` + tool) and replaces the inline record construction and try/except with `notify_observer(on_call, _log, tool=tool, arguments=arguments, result=payload, is_error=is_error, request_id=ctx.request_id, duration_s=duration)`.
 - `_run` keeps calling `bind_tools` **without** `on_call`.
 - Annotations of `on_call` parameters become `ToolCallObserver | None` (same type).
+- Behavior narrowing: record construction (deep copies) now happens inside `notify_observer`'s guard, so a deep-copy failure is logged and swallowed instead of propagating. This is intended and unreachable in practice.
+
+### `evals/server.py`
+
+`TraceCall.request_id` (`evals/graders.py`) stays `str`. At `evals/server.py:327`, narrow `r.record.request_id` with an explicit `if request_id is None: raise RuntimeError(...)` before building `TraceCall`, because MCP records always carry an id. Without this, pyright strict fails once `request_id` is `str | None`.
 
 ## Module boundaries
 
@@ -117,4 +144,10 @@ Mechanism (implementer's choice, constrained): a private decorator on the seven 
 ## Docs
 
 - ARCHITECTURE.md: module map entry for `wenchang.observer`; `MemoryTools`/`bind_tools` signatures; the MCP `on_call` section points at the shared record and notes `request_id` is `None` for direct calls.
-- ADR 0043 `docs/adr/0043-shared-tool-call-observer.md`; amend ADR 0027 decision 10 with a pointer to 0043 (record moved, `request_id` widened).
+- ADR 0043 `docs/adr/0043-shared-tool-call-observer.md`; amend ADR 0027 decision 10 with a pointer to 0043 (record moved, `request_id` widened). ADR 0043 must record:
+  - `request_id: str | None`;
+  - each entry point's duration boundary;
+  - the render-failure behavior;
+  - the MCP deep-copy narrowing;
+  - that the observer is not called inside `except`;
+  - that undecorated subclass overrides are not observed.
