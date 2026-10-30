@@ -30,16 +30,17 @@ the runtime: the executable conformance suites an adopter runs against
 their own identity resolver and their own transport client, installed with
 the optional `wenchang[testing]` extra. A thirteenth, `mcp`, is the host
 adapter that serves the tools and prompt from an MCP server; it is installed
-with the optional `wenchang[mcp]` extra, and nothing else imports it. Every
-module in the map below is implemented; the remote half of `transport` is
-the one planned piece.
+with the optional `wenchang[mcp]` extra, and nothing else imports it. A
+fourteenth, `observer`, is the dependency-free tool-call observer that
+`tools` and `mcp` share. Every module in the map below is implemented; the
+remote half of `transport` is the one planned piece.
 
 ## Module map
 
 - **errors** — the exception hierarchy every core API function will raise:
-  `WenchangError` (base) and one class per category —
-  `RecoverableError`, `PermanentError`, `TransientError` — each fixing that
-  category's next-action guidance text. Concrete kinds: recoverable
+  `WenchangError` (base) and one class per category — `RecoverableError`,
+  `PermanentError`, `TransientError` — each fixing that category's
+  next-action guidance text. Concrete kinds: recoverable
   `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
   `NotFoundError`, `InvalidArgumentError`; permanent `RestrictedScopeError`,
   `ResolverFailureError`; transient `BackendUnavailableError`.
@@ -822,6 +823,19 @@ the one planned piece.
   [ADR 0021](docs/adr/0021-transport-conformance-harness.md),
   [ADR 0023](docs/adr/0023-transport-conformance-cases.md), and
   [ADR 0024](docs/adr/0024-append-replace-aliases-description.md).
+- **observer** — the tool-call observer shared by `tools` and `mcp`
+  (`wenchang.observer`); it imports only the stdlib, so it works without
+  the `[mcp]` extra. `ToolCallRecord(tool, arguments, result, is_error,
+  request_id, duration_s)` is a frozen dataclass; its docstring defines
+  each field per entry point. `request_id` is the MCP request id under MCP
+  and `None` for direct calls. `ToolCallObserver` is
+  `Callable[[ToolCallRecord], None]`. `check_observer(on_call)` raises
+  `TypeError` unless `on_call` is `None` or a plain (non-async) callable.
+  `notify_observer(on_call, logger, *, tool, arguments, result, is_error,
+  request_id, duration_s)` builds the record with read-only deep copies of
+  `arguments` and `result` and calls `on_call`; any `Exception` from either
+  step is logged at `ERROR` on `logger`, naming the tool, and swallowed. See
+  [ADR 0043](docs/adr/0043-shared-tool-call-observer.md).
 - **tools** — the agent-facing tool layer: thin verbs over a
   `TransportClient`, carrying no judgment. The description a host shows
   the agent for each tool comes from `descriptions()` (below), built from
@@ -832,8 +846,8 @@ the one planned piece.
   version-conflict rule, since a host that loads tool schemas on demand
   may show it alone (see
   [ADR 0025](docs/adr/0025-prompt-layer-sections-and-slots.md) decision
-  11). `MemoryTools(client, identity, policy, *, source, product=None)`
-  is one session: a resolved `Identity`, the adopter's `ScopePolicy`, the
+  11). `MemoryTools(client, identity, policy, *, source, product=None,
+  on_call=None)` is one session: a resolved `Identity`, the adopter's `ScopePolicy`, the
   client, the calling surface's name, stamped as `source` on every write
   and not settable by the agent, and optionally the product the memory
   serves. Constructor arguments are adopter-side, checked in argument
@@ -842,14 +856,30 @@ the one planned piece.
   a `product` that is neither `str` nor `None` raises `TypeError`; an
   empty `source`, or a `product` that after `str.__str__` and `str.strip`
   is empty, spans more than one line (any `str.splitlines` boundary), or
-  is not UTF-8 encodable, raises `ValueError`. All five are read-only
-  properties. `bind_tools(client, resolver, credentials, policy, *,
-  source, product=None)` is the only function in the layer that takes
-  credentials: it passes them to `resolve_identity` and returns a
-  `MemoryTools`, retaining nothing; a resolution failure is the permanent
-  `ResolverFailureError`, raised before `source` or `product` is checked.
+  is not UTF-8 encodable, raises `ValueError`; `on_call` is then checked
+  with `check_observer`. All six are read-only properties.
+  `bind_tools(client, resolver, credentials, policy, *, source,
+  product=None, on_call=None)` is the only function in the layer that takes
+  credentials: it checks `on_call` first, passes the credentials to
+  `resolve_identity`, and returns a `MemoryTools`, retaining nothing; a
+  resolution failure is the permanent `ResolverFailureError`, raised before
+  `source` or `product` is checked.
   A host serving many sessions binds one `MemoryTools` per session; the
   client may be shared.
+  With `on_call` set, each of the seven tool methods (wrapped by a private
+  decorator that keeps docstrings and signatures) delivers one
+  `ToolCallRecord` per call through `notify_observer` (logger
+  `wenchang.tools`), on the calling thread, before returning the tool's
+  value or re-raising its exception object. The record has the bare tool
+  name, every parameter by name with defaults filled, `render_result(value)`
+  or `render_error(exc)` (a `render_result` failure is recorded as
+  `render_error` of it, and the caller still gets the raw value),
+  `request_id=None`, and `duration_s` covering the tool method only. The
+  observer is never called inside an `except` block, so it sees no active
+  exception. A call Python rejects (arity, unknown keyword) and a
+  non-`Exception` `BaseException` produce no record. An undecorated subclass
+  override produces none either, unless it calls the decorated base method,
+  whose call is then recorded.
   The seven tools are methods. `TOOL_NAMES` is `("get_memory_index",
   "read_file", "list_prefix", "write_file", "append_line", "replace_fact",
   "delete_file")`, and `tools()` returns a fresh read-only mapping from
@@ -989,11 +1019,12 @@ the one planned piece.
   The layer is framework-agnostic and adds no runtime dependency; mounting
   it on a host server is a host adapter's job, done for MCP by `mcp`
   below. It imports from `wenchang`
-  only `core`, `errors`, `file_format`, `identity`, `paths`, `scope`,
-  `transport`, and `version_token`, and none of `core`, `scope`,
+  only `core`, `errors`, `file_format`, `identity`, `observer`, `paths`,
+  `scope`, `transport`, and `version_token`, and none of `core`, `scope`,
   `identity`, or `transport` imports it. See
-  [ADR 0022](docs/adr/0022-tool-layer.md) and
-  [ADR 0026](docs/adr/0026-product-identity.md).
+  [ADR 0022](docs/adr/0022-tool-layer.md),
+  [ADR 0026](docs/adr/0026-product-identity.md), and
+  [ADR 0043](docs/adr/0043-shared-tool-call-observer.md).
 - **prompts** — the instruction text layered over the tools: a subpackage
   (`wenchang.prompts`) that turns library-owned section text plus four
   adopter-supplied text slots into one markdown prompt. Its public names
@@ -1096,10 +1127,17 @@ the one planned piece.
        `ResolverFailureError` without the original exception, and logs one
        `WARNING` naming the tool and the exception's type only. An `internal`
        error is logged on logger `wenchang.mcp`.
-  - **`on_call`**, if given, receives a `ToolCallRecord(tool, arguments,
-    result, is_error, request_id, duration_s)` with a deep-copied result
-    after every wrapper call. `request_id` is the MCP request's id, for
-    correlating records that arrive in completion order.
+  - **`on_call`**, if given, receives the shared
+    `wenchang.observer.ToolCallRecord` (re-exported here) after every
+    wrapper call, delivered through `notify_observer` on logger
+    `wenchang.mcp`. `tool` is the registered name; `result` is a copy of
+    the `structured_content` payload; `request_id` is the MCP request's id
+    (always set; it is `None` only for direct `bind_tools` calls), for
+    correlating records that arrive in completion order; `duration_s`
+    covers credentials, `bind_tools`, the tool, and rendering. MCP does not
+    pass `on_call` into `bind_tools`, so each call yields one record,
+    including credential and resolver failures (see
+    [ADR 0043](docs/adr/0043-shared-tool-call-observer.md)).
   - **Startup checks.** Every argument, the prefix rule (1 to 64 of
     `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
     (which fail under `python -OO`), and name or URI collisions with what
@@ -1175,7 +1213,9 @@ suite) and on `core`, `errors`, `file_format`, `paths`, and `transport`
 agent-facing layer: it registers `tools` on an MCP server, serves the text
 `prompts` assembles, and also imports the `wenchang` package root (for
 `__version__`), `identity`, `scope`, `transport`, `errors`, `version_token`,
-and `core` types for its signatures; nothing depends on it.
+and `core` types for its signatures; nothing depends on it. `observer` is
+dependency-free and omitted; `tools` and `mcp` both deliver tool-call
+records through it.
 
 ### Outside the library: `evals/`
 

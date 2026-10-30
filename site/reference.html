@@ -862,44 +862,100 @@
 </code></pre></div>
 
 <h3 id="telemetry">Telemetry<a class="headerlink" href="#telemetry" title="Link to this section">#</a></h3>
-<p><code>on_call</code>, if given, receives a <code>wenchang.mcp.ToolCallRecord</code> after every memory tool call:</p>
+<p>Both entry points take an <code>on_call</code> observer: <code>register_memory_tools(..., on_call=...)</code> and <code>build_server</code> for MCP, and <code>bind_tools(..., on_call=...)</code> (or <code>MemoryTools(..., on_call=...)</code>) for direct calls. It receives a <code>wenchang.observer.ToolCallRecord</code> after every memory tool call. <code>wenchang.mcp</code> re-exports <code>ToolCallRecord</code>.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
 <th>Field</th>
-<th>Meaning</th>
+<th>MCP</th>
+<th>Direct call</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>tool</code></td>
 <td>Registered tool name, prefix included.</td>
+<td>Bare method name, such as <code>read_file</code>.</td>
 </tr>
 <tr>
 <td><code>arguments</code></td>
-<td>The arguments the wrapper received (read-only mapping).</td>
+<td>The arguments the wrapper received.</td>
+<td>Every parameter by name, defaults filled.</td>
 </tr>
 <tr>
 <td><code>result</code></td>
-<td>A copy of the payload sent to the client (read-only mapping).</td>
+<td>A copy of the payload sent to the client.</td>
+<td><code>render_result</code> of the return value, or <code>render_error</code> of the raised error.</td>
 </tr>
 <tr>
 <td><code>is_error</code></td>
-<td>Whether the payload is a rendered error.</td>
+<td>Whether <code>result</code> is a rendered error.</td>
+<td>Same.</td>
 </tr>
 <tr>
 <td><code>request_id</code></td>
-<td>The MCP request's ID.</td>
+<td>The MCP request's ID, for correlating records that arrive in completion order.</td>
+<td><code>None</code>.</td>
 </tr>
 <tr>
 <td><code>duration_s</code></td>
-<td>Wall time of the wrapper, on a monotonic clock.</td>
+<td>Wall time of the wrapper (credentials, binding, the tool, rendering).</td>
+<td>Wall time of the tool method only.</td>
 </tr>
 </tbody>
 </table></div>
-<p>The callback runs on worker threads, so it must be a plain function, fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain memory content, so treat them as sensitive.</p>
+<p><code>arguments</code> and <code>result</code> are read-only deep copies, and <code>duration_s</code> uses a monotonic clock. Calls rejected during argument validation never produce a record.</p>
+<p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.</p>
+<p>This observer logs and counts calls without recording arguments or results:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span><span class="p">,</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">suppress</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NotFoundError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.observer</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"inkwell.memory"</span><span class="p">)</span>
+
+<span class="c1"># Stand-ins for your metrics client: a call counter and per-tool latencies.</span>
+<span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+<span class="n">calls</span><span class="p">:</span> <span class="n">Counter</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
+<span class="n">latencies</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">on_call</span><span class="p">(</span><span class="n">record</span><span class="p">:</span> <span class="n">ToolCallRecord</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># arguments and result carry memory content; log only the call's shape.</span>
+    <span class="n">category</span> <span class="o">=</span> <span class="n">record</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"category"</span><span class="p">)</span> <span class="k">if</span> <span class="n">record</span><span class="o">.</span><span class="n">is_error</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+        <span class="s2">"memory tool=</span><span class="si">%s</span><span class="s2"> is_error=</span><span class="si">%s</span><span class="s2"> category=</span><span class="si">%s</span><span class="s2"> duration_s=</span><span class="si">%.3f</span><span class="s2">"</span><span class="p">,</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span>
+        <span class="n">category</span><span class="p">,</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">with</span> <span class="n">lock</span><span class="p">:</span>  <span class="c1"># under MCP, observers run on worker threads</span>
+        <span class="n">calls</span><span class="p">[(</span><span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">category</span> <span class="ow">or</span> <span class="s2">"ok"</span><span class="p">))]</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">latencies</span><span class="p">[</span><span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">)</span>
+
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
+<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">on_call</span><span class="o">=</span><span class="n">on_call</span><span class="p">)</span>
+
+<span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span>  <span class="c1"># on_call has run by the time this returns</span>
+<span class="k">with</span> <span class="n">suppress</span><span class="p">(</span><span class="n">NotFoundError</span><span class="p">):</span>  <span class="c1"># on_call sees it first: is_error=True, category=recoverable</span>
+    <span class="n">tools</span><span class="o">.</span><span class="n">read_file</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"csv"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">calls</span><span class="p">)</span>
+</code></pre></div>
+
 <h3 id="bind">Using the tools without MCP<a class="headerlink" href="#bind" title="Link to this section">#</a></h3>
-<p><code>wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)</code> resolves the identity and returns a <code>MemoryTools</code> for one session. <code>tools.tools()</code> is the seven bound methods by name, and <code>tools.descriptions()</code> is the description for each. Register each tool with its description from <code>descriptions()</code> rather than its docstring. <code>render_result</code> and <code>render_error</code> in <code>wenchang.tools</code> produce the JSON-safe dicts the MCP adapter returns.</p>
+<p><code>wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)</code> resolves the identity and returns a <code>MemoryTools</code> for one session. <code>on_call</code> is a tool-call observer; see <a href="#telemetry">Telemetry</a>. <code>tools.tools()</code> is the seven bound methods by name, and <code>tools.descriptions()</code> is the description for each. Register each tool with its description from <code>descriptions()</code> rather than its docstring. <code>render_result</code> and <code>render_error</code> in <code>wenchang.tools</code> produce the JSON-safe dicts the MCP adapter returns.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
