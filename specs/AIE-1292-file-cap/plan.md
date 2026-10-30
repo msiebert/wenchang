@@ -15,6 +15,7 @@ class FileQuotaExceededError(RecoverableError):
     """A create would put an entity over its file-count limit."""
 
     def __init__(self, path: str, limit: int) -> None: ...
+
     path: str
     limit: int
 ```
@@ -41,6 +42,7 @@ Cannot create a new file: memory for this entity is at its limit of 3 files (sys
 
 ```python
 DEFAULT_MAX_FILES_PER_ENTITY: int = 500
+
 
 class MemoryStore:
     def __init__(

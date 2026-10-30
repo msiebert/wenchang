@@ -230,8 +230,10 @@ class MemoryTools:
         Pass `expected_version=None` to create a file, or the version you read to replace one.
         `description` (one line) and `aliases` replace the stored values; they are not merged.
         Content over the per-file byte ceiling is rejected with the current size and the limit;
-        shorten it and retry. A version conflict is routine: merge your change into the content it
-        returns and retry with its version.
+        shorten it and retry. Creating a file fails once the scope holds its file limit; add to an
+        existing file instead, or merge files and delete the extras with delete_file, then retry.
+        A version conflict is routine: merge your change into the content it returns and retry
+        with its version.
         """
         path = self._path(scope, area, name)
         check_write(path, self._identity, self._policy)
