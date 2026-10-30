@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caching the wenchang memory index</title>
+<meta name="description" content="An optional adopter-supplied cache for get_memory_index: the IndexCache get and set contract, a Redis example, invalidate_index for out-of-band writers, failure handling, and the staleness and privacy limits.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/caching.html">
+<link rel="alternate" type="text/markdown" href="caching.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Caching the wenchang memory index">
+<meta property="og:description" content="An optional adopter-supplied cache for get_memory_index: the IndexCache get and set contract, a Redis example, invalidate_index for out-of-band writers, failure handling, and the staleness and privacy limits.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/caching.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Caching the wenchang memory index">
+<meta name="twitter:description" content="An optional adopter-supplied cache for get_memory_index: the IndexCache get and set contract, a Redis example, invalidate_index for out-of-band writers, failure handling, and the staleness and privacy limits.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-caching">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="setup.html">Setup</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="authorization.html">Authorization</a></li>
+<li><a href="caching.html" aria-current="page">Caching</a></li>
+<li><a href="usage.html">Examples</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/caching.md</span> <a href="caching.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#contract">What you provide</a>
+</li>
+<li><a href="#redis">A Redis example</a>
+</li>
+<li><a href="#in-memory">In-process cache</a>
+</li>
+<li><a href="#invalidate">Writes that bypass the cache</a>
+</li>
+<li><a href="#failures">When the cache fails</a>
+</li>
+<li><a href="#limits">Guarantees and limits</a>
+</li>
+</ul></details></nav>
+<h1 id="caching-the-index">Caching the index<a class="headerlink" href="#caching-the-index" title="Link to this section">#</a></h1>
+<p><code>get_memory_index</code> lists storage every time it is called. For each scope in the caller's scope map, it pages through every object under that scope's <code>{scope}/{entity_id}/</code> prefix. Hosts call it at the start of every session, and the cost grows with the number of files.</p>
+<p>You can give <code>MemoryStore</code> a cache to avoid that. The cache is optional, and without one nothing changes. With one, the store caches each entity's listing separately, and every write or delete through the store invalidates that entity's entry. Ordering, the size cap, and <code>capped</code> are still worked out on each call, so a cached index has the same shape as an uncached one.</p>
+<p>wenchang does not ship a cache server. You supply two functions over the cache you already run, such as Redis.</p>
+<h2 id="contract">What you provide<a class="headerlink" href="#contract" title="Link to this section">#</a></h2>
+<p><code>wenchang.index_cache.IndexCache(get, set, ttl=None, key_prefix="wenchang:index:")</code> is a frozen configuration object.</p>
+<ul>
+<li><strong><code>get(key) -&gt; str | None</code></strong> returns the value last set for <code>key</code>, or <code>None</code> if it is absent or expired.</li>
+<li><strong><code>set(key, value, ttl) -&gt; None</code></strong> stores <code>value</code> under <code>key</code>, expiring <code>ttl</code> (a <code>timedelta</code>) from now. <code>ttl</code> is <code>None</code> for no expiry.</li>
+<li><strong><code>ttl</code></strong> is passed unchanged to every <code>set</code>. It must be positive if given.</li>
+<li><strong><code>key_prefix</code></strong> starts every key the store writes.</li>
+</ul>
+<p>Both functions are required: <code>set</code> is how the store invalidates, so a read-only cache cannot work. Keys and values are opaque strings. Do not parse them.</p>
+<p>Pass it to the store:</p>
+<div class="highlight"><pre><span></span><code><span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=...</span><span class="p">,</span> <span class="nb">set</span><span class="o">=...</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">)))</span>
+</code></pre></div>
+
+<p><code>store.index_cache</code> returns the configured cache, or <code>None</code>.</p>
+<h2 id="redis">A Redis example<a class="headerlink" href="#redis" title="Link to this section">#</a></h2>
+<p>This adapter uses redis-py. It is an illustration, not something wenchang depends on: install the client yourself (<code>pip install redis</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">redis</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">google.cloud</span><span class="w"> </span><span class="kn">import</span> <span class="n">storage</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.index_cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexCache</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.gcs</span><span class="w"> </span><span class="kn">import</span> <span class="n">GcsStorage</span>
+
+<span class="c1"># decode_responses=True makes get return str, which the cache must return.</span>
+<span class="n">r</span> <span class="o">=</span> <span class="n">redis</span><span class="o">.</span><span class="n">Redis</span><span class="o">.</span><span class="n">from_url</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"REDIS_URL"</span><span class="p">],</span> <span class="n">decode_responses</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cache_get</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cache_set</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ttl</span><span class="p">:</span> <span class="n">timedelta</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">ttl</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">r</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">r</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">px</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">ttl</span> <span class="o">//</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">milliseconds</span><span class="o">=</span><span class="mi">1</span><span class="p">)))</span>
+
+
+<span class="n">index_cache</span> <span class="o">=</span> <span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=</span><span class="n">cache_get</span><span class="p">,</span> <span class="nb">set</span><span class="o">=</span><span class="n">cache_set</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">))</span>
+
+<span class="n">bucket</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">"my-gcp-project"</span><span class="p">)</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_BUCKET"</span><span class="p">])</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span>
+    <span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">),</span>
+    <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"project"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">),</span>
+    <span class="n">index_cache</span><span class="o">=</span><span class="n">index_cache</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>Points to notice:</p>
+<ul>
+<li><strong><code>get</code> must return <code>str</code>.</strong> redis-py returns <code>bytes</code> unless the client is created with <code>decode_responses=True</code>. If you share a client that does not decode, decode in <code>get</code> instead: <code>value = r.get(key)</code>, then <code>return None if value is None else value.decode()</code>. A <code>bytes</code> result is not an error, but the store treats it as a miss and logs a warning on every call, so the cache never helps.</li>
+<li><strong><code>set</code> maps <code>ttl</code> to an expiry.</strong> A finite <code>ttl</code> becomes <code>px</code> in milliseconds. <code>None</code> stores the key with no expiry.</li>
+<li><strong>One Redis primary is enough.</strong> The cache needs each key's <code>get</code> and <code>set</code> to be linearizable, which a single primary provides. See <a href="#limits">Guarantees and limits</a> for replicas.</li>
+</ul>
+<h2 id="in-memory">In-process cache<a class="headerlink" href="#in-memory" title="Link to this section">#</a></h2>
+<p><code>wenchang.index_cache.InMemoryIndexCache</code> is a thread-safe cache held in one process, for tests and single-process hosts:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">timedelta</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.index_cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexCache</span><span class="p">,</span> <span class="n">InMemoryIndexCache</span>
+
+<span class="n">cache</span> <span class="o">=</span> <span class="n">InMemoryIndexCache</span><span class="p">()</span>
+<span class="n">index_cache</span> <span class="o">=</span> <span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">get</span><span class="p">,</span> <span class="nb">set</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">set</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">5</span><span class="p">))</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">index_cache</span><span class="p">)</span>
+</code></pre></div>
+
+<p>It drops expired entries only when they are read, so with <code>ttl=None</code> it grows without bound. A host that runs several instances needs a shared cache: each instance's in-process cache misses the other instances' writes.</p>
+<h2 id="invalidate">Writes that bypass the cache<a class="headerlink" href="#invalidate" title="Link to this section">#</a></h2>
+<p><code>write_file</code>, <code>append_line</code>, <code>replace_fact</code>, and <code>delete_file</code> on a store that has the cache invalidate the entity themselves, whether the storage call succeeded or raised. Anything else that changes files in the bucket does not. That includes:</p>
+<ul>
+<li>a seeding job or admin tool,</li>
+<li>another <code>MemoryStore</code> built without the cache (such as the seed script in <a href="setup.html#seed">Setup</a>),</li>
+<li>a direct write through <code>gcloud</code> or the GCS API.</li>
+</ul>
+<p>The simplest fix is to give those writers the same <code>IndexCache</code>. Otherwise, after they finish, call <code>MemoryStore.invalidate_index(scope, entity_id)</code> on a store that has the cache:</p>
+<div class="highlight"><pre><span></span><code><span class="n">seed_store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">))</span>  <span class="c1"># no cache, so its writes do not invalidate</span>
+<span class="c1"># ... seed_store writes under organization/o-hanlin-press/ ...</span>
+<span class="n">cached_store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">),</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">index_cache</span><span class="p">)</span>
+<span class="n">cached_store</span><span class="o">.</span><span class="n">invalidate_index</span><span class="p">(</span><span class="s2">"organization"</span><span class="p">,</span> <span class="s2">"o-hanlin-press"</span><span class="p">)</span>
+</code></pre></div>
+
+<p>The next <code>get_memory_index</code> that includes that entity lists storage again. <code>invalidate_index</code> also overwrites the entity's cached listing, so deleted descriptions and aliases do not stay in your cache. A purge calls it once all of its deletes finish.</p>
+<p><code>invalidate_index</code> raises <code>TypeError</code> for a non-<code>str</code> argument and <code>ValueError</code> for an invalid scope or entity ID, before touching the cache. It does nothing on a store with no cache. Unlike the store's own invalidation, it does not swallow cache errors: if <code>set</code> raises, so does <code>invalidate_index</code>, because the caller asked for the invalidation and should know it did not happen.</p>
+<p>A writer that does not invalidate leaves the entity stale until its next write through the cached store, or until <code>ttl</code> expires.</p>
+<h2 id="failures">When the cache fails<a class="headerlink" href="#failures" title="Link to this section">#</a></h2>
+<p>The cache never makes a memory operation fail.</p>
+<ul>
+<li>If <code>get</code> raises, or returns something that is not a <code>str</code>, the store logs a warning and lists storage as if nothing were cached.</li>
+<li>If <code>set</code> raises, the store logs a warning and skips the store or invalidation. Writes still return their normal result.</li>
+</ul>
+<p>Warnings go to the <code>wenchang.core</code> logger. They name the scope and the exception or result type, never the entity ID or the key. An exception that is not an <code>Exception</code> subclass (such as <code>KeyboardInterrupt</code>) still propagates. Storage errors while listing propagate as they do without a cache, and nothing is cached for that entity.</p>
+<p>A swallowed invalidation failure leaves the entity's old listing in place, and only <code>ttl</code> bounds how long it is served. Watch for these warnings.</p>
+<h2 id="limits">Guarantees and limits<a class="headerlink" href="#limits" title="Link to this section">#</a></h2>
+<p>The store keeps a random generation token for each entity. A reader records the token before listing storage and tags its cached listing with it. Every write replaces the token after its storage call, so a listing taken before that write is never served afterwards, even if it is stored late. What this does not cover:</p>
+<ul>
+<li><strong><code>ttl=None</code> means unbounded staleness.</strong> Tokens cannot detect a write that did not invalidate: an out-of-band write, or an invalidation whose <code>set</code> failed. With a finite <code>ttl</code>, such an entity is stale for at most <code>ttl</code>. With <code>ttl=None</code>, it stays stale until something invalidates it or your cache evicts the key. Use a finite <code>ttl</code> in production.</li>
+<li><strong>Timed-out writes.</strong> A write that raised <code>BackendUnavailableError</code> (for example a timeout) may still commit in GCS after the store has replaced the token. A reader in between can cache the listing from before the commit under the new token. That listing is served until the entity's next write or invalidation, or until <code>ttl</code> expires.</li>
+<li><strong>Deleted metadata can linger, unserved.</strong> A reader that listed before a delete can store its pre-delete listing after the delete overwrote it. Its tag is stale, so it is never served, but it stays in your cache until the entity is indexed again or <code>ttl</code> expires. If you have erasure obligations, a finite <code>ttl</code> is required, not just recommended.</li>
+<li><strong>Per-key linearizable <code>get</code> and <code>set</code>.</strong> A cache where a <code>get</code> can miss an earlier <code>set</code> to the same key, such as one reading from asynchronous replicas, bounds freshness only by <code>ttl</code>. Operations do not need to be atomic across keys.</li>
+<li><strong>One <code>key_prefix</code> per storage root.</strong> Keys do not identify the bucket. Stores over different buckets or roots that share one cache need distinct prefixes, and no prefix may be a string prefix of another (<code>"a:"</code> and <code>"a:b:"</code> collide, because scope and entity names may contain <code>:</code>). End each prefix in a delimiter and keep them distinct. This is not checked at runtime.</li>
+<li><strong>Large entities make large values.</strong> A cached listing holds one entry per file in the entity.</li>
+</ul>
+<div class="callout callout-warn"><strong>The cache holds memory metadata.</strong> Cached values contain each file's description, aliases, and sources. Keys contain scope names and entity IDs, which are often user IDs. Your cache inherits the same data-handling obligations as the bucket. File content is never cached.</div>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="authorization.html"><small>Previous</small>Authorization</a><a rel="next" href="usage.html"><small>Next</small>Examples</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#contract">What you provide</a>
+</li>
+<li><a href="#redis">A Redis example</a>
+</li>
+<li><a href="#in-memory">In-process cache</a>
+</li>
+<li><a href="#invalidate">Writes that bypass the cache</a>
+</li>
+<li><a href="#failures">When the cache fails</a>
+</li>
+<li><a href="#limits">Guarantees and limits</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="caching.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>
