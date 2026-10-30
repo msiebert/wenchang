@@ -872,6 +872,36 @@ def test_missing_file_is_rendered_recoverable() -> None:
     _assert_no_path_keys(json.loads(_text(result)))
 
 
+def test_create_at_file_cap_is_rendered_recoverable() -> None:
+    """A write_file create through register_memory_tools on a store at its file
+    cap returns isError with FileQuotaExceededError and the cap as limit
+    (AIE-1292, US5.6).
+    """
+    transport = InProcessClient(MemoryStore(InMemoryStorage(), max_files_per_entity=2))
+    prompt = build_memory_prompt(REFERENCE_SLOTS)
+    server = _adopter_server(prompt)
+    register_memory_tools(server, prompt=prompt, **_kwargs(client=transport))
+
+    async def body(client: Client) -> list[CallToolResult]:
+        return [
+            await _call(client, "write_file", "alice", **_write_args(name))
+            for name in ("one", "two", "three")
+        ]
+
+    first, second, third = _with_client(server, body)
+
+    assert first.is_error is False
+    assert second.is_error is False
+    assert third.is_error is True
+    payload = _payload(third)
+    assert payload["error"] == "FileQuotaExceededError"
+    assert payload["category"] == "recoverable"
+    assert payload["limit"] == 2
+    assert (payload["scope"], payload["area"], payload["name"]) == ("user", "notes", "three")
+    assert json.loads(_text(third)) == payload
+    _assert_no_path_keys(payload)
+
+
 def test_credential_extraction_failure_leaks_nothing(caplog: pytest.LogCaptureFixture) -> None:
     """A raising credentials_from_context renders a permanent
     ResolverFailureError, and the exception text appears in neither the result

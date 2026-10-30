@@ -41,9 +41,14 @@ remote half of `transport` is the one planned piece.
   `WenchangError` (base) and one class per category — `RecoverableError`,
   `PermanentError`, `TransientError` — each fixing that category's
   next-action guidance text. Concrete kinds: recoverable
-  `VersionConflictError`, `OversizeWriteError`, `ReplaceFactMatchError`,
-  `NotFoundError`, `InvalidArgumentError`; permanent `RestrictedScopeError`,
-  `ResolverFailureError`; transient `BackendUnavailableError`.
+  `VersionConflictError`, `OversizeWriteError`, `FileQuotaExceededError`,
+  `ReplaceFactMatchError`, `NotFoundError`, `InvalidArgumentError`;
+  permanent `RestrictedScopeError`, `ResolverFailureError`; transient
+  `BackendUnavailableError`. `FileQuotaExceededError(path, limit)` (a
+  `limit < 1` raises `ValueError`) names the location and file limit, says
+  `system/` files are not counted, and tells the agent to add to an
+  existing file, or merge files and delete the extras, then retry (see
+  [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)).
   `InvalidArgumentError(argument, detail)` is raised only by the tool layer
   for a rejected agent-supplied argument. `argument` names it (a non-`str`
   raises `TypeError`, an empty one `ValueError`; a `str` subclass is stored
@@ -160,11 +165,12 @@ remote half of `transport` is the one planned piece.
   `_map_backend_error` like the rest of `GcsStorage`. `list_page(prefix,
   start_after, limit)` returns `ListedObject(key, metadata, version)` for
   keys starting with `prefix` (plain string match), ascending by key, at
-  most `limit`, strictly after `start_after` when given (exclusive), never
-  reading object bodies; metadata mappings are copies. `InMemoryStorage`
-  sorts and slices in memory; `GcsStorage` uses `list_blobs(prefix=...,
-  start_offset=start_after, max_results=limit + 1)`, dropping a key equal to
-  `start_after` (GCS's `start_offset` is inclusive) before truncating to
+  most `limit` (fewer only when the listing is exhausted), strictly after
+  `start_after` when given (exclusive), never reading object bodies;
+  metadata mappings are copies. `InMemoryStorage` sorts and slices in
+  memory; `GcsStorage` uses `list_blobs(prefix=...,
+  start_offset=start_after, max_results=limit + 1)`, dropping a key equal
+  to `start_after` (GCS's `start_offset` is inclusive) before truncating to
   `limit`; call and iteration errors go through the same
   `_map_backend_error` as the rest of `GcsStorage`. See
   [ADR 0003](docs/adr/0003-storage-interface-with-in-memory-fake-and-gcs-emulator.md),
@@ -173,7 +179,8 @@ remote half of `transport` is the one planned piece.
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
   [ADR 0012](docs/adr/0012-delete-file.md).
 - **core** — `MemoryStore(storage, *, max_file_bytes=16384, clock=...,
-  list_page_size=100, index_max_bytes=65536, scope_priority=())`,
+  list_page_size=100, index_max_bytes=65536, scope_priority=(),
+  max_files_per_entity=500)`,
   holding the core API as methods on one object so operations share
   configuration such as the size limit and index cap; `max_file_bytes`
   must be positive, `clock` (default current UTC) is injectable for tests
@@ -194,6 +201,10 @@ remote half of `transport` is the one planned piece.
   then, per normalized member in order, `ValueError("invalid
   scope_priority entry: ...")` if it fails `is_valid_segment` and
   `ValueError("duplicate scope_priority entry: ...")` if already seen.
+  `max_files_per_entity` (default `DEFAULT_MAX_FILES_PER_ENTITY = 500`,
+  `None` disables it, read-only property) caps the files per entity; a
+  non-`None` value `<= 0` raises `ValueError` after the `index_max_bytes`
+  check, with no type check (`True` is a cap of 1).
   `read_file(path) -> MemoryFile` is
   implemented: it validates the path, fetches the object, and returns
   content, metadata, path, and version token. `write_file(path, content,
@@ -202,7 +213,19 @@ remote half of `transport` is the one planned piece.
   check and before the size check, without consulting storage), and rejects
   content whose UTF-8 encoding exceeds `max_file_bytes` with
   `OversizeWriteError` (checked before storage is consulted). On create
-  (`expected_version=None`) it stores `metadata.sources | {source}`. On
+  (`expected_version=None`) it stores `metadata.sources | {source}`. After
+  the size check, a create outside the `system/` area with a non-`None` cap
+  counts the well-formed, non-`system/` keys under `build_prefix(scope,
+  entity_id)` through `Storage.list_page` (not `list_prefix`, so corrupt
+  metadata elsewhere cannot block it), in pages of `max(limit - count,
+  list_page_size)`, stopping at `limit`; keys listed per create are at most
+  `limit` + uncounted keys + `list_page_size`. At the cap it reads the
+  path: an existing file raises `VersionConflictError` with its current
+  content and version (after decoding and `metadata_from_map`, as on the
+  conflict path), an absent one `FileQuotaExceededError(path, limit)`. No
+  other operation consults the cap. The count and put are not atomic, so
+  racing creates can exceed the cap by at most the number racing at the
+  boundary (see [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)). On
   replace it first reads the current object — a missing file raises
   `NotFoundError(FILE_ABSENT)`, a version mismatch seen at that read raises
   `VersionConflictError(path, current_content, current_version)`, and
@@ -1078,7 +1101,7 @@ remote half of `transport` is the one planned piece.
   adopter's `scope_guidance` must say which of its scopes are shared and
   which are private; the library cannot check this. Division of labor with
   `tools`: tool docstrings own per-call mechanics (argument meaning, error
-  repair, the slug rule, the byte ceiling), the prompt owns judgment
+  repair, the slug rule, the byte ceiling, the file cap), the prompt owns judgment
   (what to write, where, with which tool, and when to ask), and the slots
   state only deployment facts (which scopes exist and their rules, seed
   area names, which systems hold canonical information), leaving generic
@@ -1312,6 +1335,14 @@ server, graders, and report end to end.
   content whose UTF-8 encoding exceeds the store's `max_file_bytes` (default
   16384, configurable, exactly the limit allowed) before consulting storage;
   the ceiling counts content bytes only, never metadata.
+- **A per-entity file cap bounds creates only.** `write_file` with
+  `expected_version=None` outside `system/` fails with
+  `FileQuotaExceededError` once `{scope}/{entity_id}/` holds
+  `max_files_per_entity` (default 500, `None` disables, inclusive)
+  well-formed non-`system/` files; replaces, appends, fact edits, deletes,
+  and reads never consult it. It is enforced in `core`, so every transport
+  applies it, and it is soft: concurrent creates can exceed it (see
+  [ADR 0039](docs/adr/0039-file-count-cap-per-entity.md)).
 - **`last-updated` is stamped by `core`, not the caller.** Every write path
   sets `metadata.last_updated` from the store's injectable clock, overriding
   whatever the caller supplied, so the field stays reliable for index
@@ -1423,11 +1454,13 @@ cause. Defined in `wenchang.errors` (see [ADR
 - **Recoverable** (`RecoverableError`) — the error carries its own repair
   material (e.g. `VersionConflictError` returns current content and
   version; `OversizeWriteError` returns current size and limit;
-  `ReplaceFactMatchError` returns content, version, and match count;
-  `NotFoundError` distinguishes an invalid path from a valid path with no
-  file yet; `InvalidArgumentError`, raised only by the tool layer, names
-  the agent-supplied argument to correct, and for an ungranted scope lists
-  the available scopes). The agent corrects and retries in the same turn.
+  `FileQuotaExceededError` returns the per-entity file limit and says to
+  add to an existing file or merge and delete; `ReplaceFactMatchError`
+  returns content, version, and match count; `NotFoundError` distinguishes
+  an invalid path from a valid path with no file yet;
+  `InvalidArgumentError`, raised only by the tool layer, names the
+  agent-supplied argument to correct, and for an ungranted scope lists the
+  available scopes). The agent corrects and retries in the same turn.
 - **Permanent** (`PermanentError`) — stop, do not retry
   (`RestrictedScopeError` for a `system/` write (`SYSTEM_READ_ONLY`), a
   role-gated scope the caller's role is not permitted to write
