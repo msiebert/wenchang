@@ -6,7 +6,7 @@
 
 **Created**: 2026-10-30
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: Adopters can only pin wenchang to a commit SHA. Decide where releases go, set the version in `pyproject.toml` and document the versioning policy, add a release workflow that builds and tags, and add a changelog. Acceptance: a tagged release exists and installs by version; release steps are documented.
 

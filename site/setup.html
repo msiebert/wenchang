@@ -72,16 +72,17 @@
 <p>wenchang is a library. It has no command line tool, no ready-made server, and no configuration file. You write a short <code>server.py</code>.</p>
 <h2 id="needs">What you need<a class="headerlink" href="#needs" title="Link to this section">#</a></h2>
 <ul>
-<li>Python 3.12 or newer.</li>
+<li>Python 3.11 or newer.</li>
 <li>A GCP project and a GCS bucket for memory files.</li>
 <li>An MCP client that can launch a stdio server, such as Claude Code.</li>
 </ul>
 <h2 id="install">1. Install<a class="headerlink" href="#install" title="Link to this section">#</a></h2>
-<p>wenchang is not on PyPI. Install it from git into the environment the server will run in. The <code>mcp</code> extra adds the MCP adapter (<code>mcp&gt;=2.2,&lt;3</code>).</p>
-<div class="highlight"><pre><span></span><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+<p>wenchang is not on PyPI. Each release is a git tag with a GitHub Release. Install a release by its tag into the environment the server will run in. The <code>mcp</code> extra adds the MCP adapter (<code>mcp&gt;=2.2,&lt;3</code>).</p>
+<div class="highlight"><pre><span></span><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 </code></pre></div>
 
-<p>With uv: <code>uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code>.</p>
+<p>With uv: <code>uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code>.</p>
+<p>What changed in each release is in the <a href="https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md">changelog</a>.</p>
 <h2 id="bucket">2. Create the bucket<a class="headerlink" href="#bucket" title="Link to this section">#</a></h2>
 <p>Memory files are objects in one bucket. Create it and give your credentials access:</p>
 <div class="highlight"><pre><span></span><code>gcloud storage buckets create gs://hanlin-inkwell-memory --project my-gcp-project --location us-central1 --uniform-bucket-level-access

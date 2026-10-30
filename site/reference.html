@@ -921,7 +921,7 @@
 </code></pre></div>
 
 <h3 id="conformance">Conformance suites<a class="headerlink" href="#conformance" title="Link to this section">#</a></h3>
-<p><code>pip install "wenchang[testing]"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
+<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
 <ul>
 <li><strong><code>ResolverConformance[C]</code></strong> checks an <code>IdentityResolver</code>. Supply fixtures <code>resolver</code>, <code>valid_credentials</code>, <code>invalid_credentials</code> (call <code>pytest.skip</code> if your resolver accepts everything), <code>policy</code>, <code>expected_scopes</code>, and <code>known_roles</code>.</li>
 <li><strong><code>TransportConformance</code></strong> checks a <code>TransportClient</code>. Supply fixtures <code>client</code> (fresh and empty per test), <code>source</code>, <code>scope_map</code> (at least two writable scopes), <code>max_file_bytes</code> (at least 64), <code>index_max_bytes</code> (at least 1024), <code>scope_priority</code>, and <code>list_page_size</code>. Within one test the client's writes must stamp strictly increasing <code>last_updated</code> values.</li>
@@ -1032,7 +1032,7 @@
 
 <h2 id="limitations">Limitations and status<a class="headerlink" href="#limitations" title="Link to this section">#</a></h2>
 <ul>
-<li><strong>Status.</strong> Version 0.1.0, MIT license, Python 3.12 or newer. Installed from git; no PyPI release is documented.</li>
+<li><strong>Status.</strong> Version 0.1.0, MIT license, Python 3.11 or newer. Releases are git tags with GitHub Releases; not on PyPI.</li>
 <li><strong>A library, not a server.</strong> There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script. The only server in the repository is the dev-only eval server (<code>python -m evals.server</code>), which uses in-memory storage.</li>
 <li><strong>No content search.</strong> Files are found through <code>description</code> and <code>aliases</code>. The quality of that metadata is what makes recall work.</li>
 <li><strong>Not snapshots.</strong> <code>list_prefix</code> and <code>get_memory_index</code> are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear.</li>

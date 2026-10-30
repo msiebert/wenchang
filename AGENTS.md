@@ -15,6 +15,7 @@ filesystem of markdown files in GCS, exposed as tools.
 - `/run-evals` — live behavioral evals, in a session launched with
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" "Edit(evals/runs/**)" --settings '{"includeGitInstructions": false}'`;
   never part of `make check` (ADR 0028)
+- Releasing — see [docs/releasing.md](docs/releasing.md)
 
 ## Workflow
 

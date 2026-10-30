@@ -11,10 +11,10 @@
 
 wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.
 
-Install (not on PyPI yet):
+Install a release (not on PyPI; each release is a git tag):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Setup](setup.md) covers that.
@@ -139,7 +139,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - A remote transport. The tools talk to storage in the same process.
 - Storage other than GCS, apart from an in-memory fake for tests.
 
-Version 0.1.0, MIT license, Python 3.12 or newer. See the [reference](reference.md#limitations) for known limits.
+Version 0.1.0, MIT license, Python 3.11 or newer. See the [reference](reference.md#limitations) for known limits.
 
 ---
 
@@ -156,19 +156,21 @@ wenchang is a library. It has no command line tool, no ready-made server, and no
 
 ## What you need
 
-- Python 3.12 or newer.
+- Python 3.11 or newer.
 - A GCP project and a GCS bucket for memory files.
 - An MCP client that can launch a stdio server, such as Claude Code.
 
 ## 1. Install
 
-wenchang is not on PyPI. Install it from git into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
+wenchang is not on PyPI. Each release is a git tag with a GitHub Release. Install a release by its tag into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
-With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
+
+What changed in each release is in the [changelog](https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md).
 
 ## 2. Create the bucket
 
@@ -718,7 +720,7 @@ The prompt also has to match the policy. If only admins can write `organization`
 
 ## Test your resolver
 
-`pip install "wenchang[testing]"` adds pytest mixins in `wenchang.testing`. Subclass `ResolverConformance` and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an `Identity`, invalid ones give a `ResolutionFailure`, results are consistent, roles are known, and writes follow your policy. Details are in the [reference](reference.md#conformance).
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds pytest mixins in `wenchang.testing`. Subclass `ResolverConformance` and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an `Identity`, invalid ones give a `ResolutionFailure`, results are consistent, roles are known, and writes follow your policy. Details are in the [reference](reference.md#conformance).
 
 ---
 
@@ -1635,7 +1637,7 @@ print(tools.get_memory_index())
 
 ### Conformance suites
 
-`pip install "wenchang[testing]"` adds `pytest` and two mixins in `wenchang.testing`:
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds `pytest` and two mixins in `wenchang.testing`:
 
 - **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
 - **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values.
@@ -1748,7 +1750,7 @@ class TestMyClient(TransportConformance):
 
 ## Limitations and status
 
-- **Status.** Version 0.1.0, MIT license, Python 3.12 or newer. Installed from git; no PyPI release is documented.
+- **Status.** Version 0.1.0, MIT license, Python 3.11 or newer. Releases are git tags with GitHub Releases; not on PyPI.
 - **A library, not a server.** There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script. The only server in the repository is the dev-only eval server (`python -m evals.server`), which uses in-memory storage.
 - **No content search.** Files are found through `description` and `aliases`. The quality of that metadata is what makes recall work.
 - **Not snapshots.** `list_prefix` and `get_memory_index` are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear.

@@ -322,7 +322,7 @@ The callback runs on worker threads, so it must be a plain function, fast, and t
 
 ### Conformance suites {#conformance}
 
-`pip install "wenchang[testing]"` adds `pytest` and two mixins in `wenchang.testing`:
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds `pytest` and two mixins in `wenchang.testing`:
 
 - **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
 - **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values.
@@ -333,7 +333,7 @@ Name your subclasses with a `Test` prefix. This example passes against the shipp
 
 ## Limitations and status {#limitations}
 
-- **Status.** Version 0.1.0, MIT license, Python 3.12 or newer. Installed from git; no PyPI release is documented.
+- **Status.** Version 0.1.0, MIT license, Python 3.11 or newer. Releases are git tags with GitHub Releases; not on PyPI.
 - **A library, not a server.** There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script. The only server in the repository is the dev-only eval server (`python -m evals.server`), which uses in-memory storage.
 - **No content search.** Files are found through `description` and `aliases`. The quality of that metadata is what makes recall work.
 - **Not snapshots.** `list_prefix` and `get_memory_index` are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear.
