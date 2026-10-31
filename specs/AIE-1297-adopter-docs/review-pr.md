@@ -100,13 +100,34 @@ was wrong:
 - The site-nav CSS changes go beyond `.subnav`: `overflow-x: auto` and tighter
   padding. Together they remove the horizontal scroll at widths of 800-1013px.
 - Each redirect stub also has a `location.replace` script that keeps the
-  `#fragment`.
+  `#fragment`. Old anchors keep working: `storage.md` has empty alias `<div
+  id>`s in html-only blocks for the old `caching.html` and `operations.html`
+  ids (`#contract`, `#failures`, `#limits`, `#cache`, `#gcs`,
+  `#limitations`). `reference.html` gets an inline script, generated from a
+  per-page `anchor_moves` map in `PAGES`, that sends old fragments for
+  sections that moved (`#paths`, `#bind`, `#embed`, `#file-cap`, and so on)
+  to their new page. The build fails if a moved id still exists on the page
+  or its target id is missing.
+- **Resolver behaviour, verified in `src/`.** An `async def resolve` is never
+  awaited: `resolve_identity` gets a coroutine and raises
+  `ResolverFailureError("Resolver X returned coroutine, ...")` on both paths
+  (MCP calls `bind_tools` per tool call). A raising resolver gives a message
+  naming the exception type; a raising `credentials_from_context` gives the
+  fixed "Credentials could not be read from the request." The resolver runs
+  on every tool call over MCP and once per `bind_tools` call otherwise. The
+  docs now say so on identity, reference, integrate-without-mcp, and index.
+- **Threads.** `integrate-without-mcp.md#threads` lists what can be shared.
+  wenchang's own objects are safe (no mutable state after construction, or a
+  lock). `storage.Client` is not documented as thread-safe, so the page tells
+  adopters to use one client per thread, including on the MCP path through a
+  forwarding `TransportClient`. This replaces the earlier "client must be
+  thread-safe" lines.
 - Ruff formats the Python blocks in the generated `site/*.md` files, so
   embedded snippets must already be ruff-formatted.
 
 ## Verification
 
-- `make check`: 5810 passed, 18 skipped, 46 deselected.
+- `make check`: 5813 passed, 18 skipped, 46 deselected.
 - `uv run scripts/build_site.py` run twice: no diff.
 - Screenshots at 1280px and 375px wide, for `integrate-without-mcp` and
   `storage`:
@@ -144,3 +165,15 @@ The objects in the bucket afterwards store the metadata keys `last-updated`,
   transient rather than `internal`.
 - #55 (AIE-1294) pins the install lines and adds `CHANGELOG.md` and
   `docs/releasing.md`.
+- Thread safety of a shared `google.cloud.storage.Client` is unverified.
+  google-cloud-storage 3.14.1, google-auth 2.58.0, and requests 2.34.2 do not
+  document it in their installed source. All of a client's requests go through
+  one `AuthorizedSession` that the client creates lazily, without a lock
+  (`google/cloud/client/__init__.py`, `_http`). The MCP adapter shares one
+  client across its worker threads (`anyio.to_thread.run_sync` in mcp's
+  `func_metadata.py`), so every MCP deployment on `GcsStorage` relies on it.
+  Options: a threaded test against fake-gcs-server, or a per-thread client
+  option in `GcsStorage` or the adapter.
+- `register_memory_tools` rejects an async `credentials_from_context` up front
+  but not an async `resolve`, which fails on every call instead. Consider the
+  same check for the resolver.

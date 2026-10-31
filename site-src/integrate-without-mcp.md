@@ -27,9 +27,11 @@ If you have already resolved the identity yourself, `MemoryTools(client, identit
 
 `bind_tools` calls your resolver once and fixes that identity for the object's lifetime. A multi-tenant service binds per request, or per session if a session has one caller, never once per process. Binding runs the resolver and builds a small object.
 
-The store, the client, the resolver, and the policy are built once per process and shared.
+The store, the client, the resolver, and the policy are built once per process and shared, except where [Threads](#threads) says otherwise.
 
-If the resolver returns a `ResolutionFailure` or raises, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
+If the resolver returns a `ResolutionFailure` or raises, or `resolve` is `async`, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
+
+The multi-tenant resolver on [Identity](identity.md#example) works here unchanged. Build its `Credentials` from your request and pass them to `bind_tools`; [The same resolver without MCP](identity.md#direct) shows the call.
 
 ## Tool schemas {#schemas}
 
@@ -38,7 +40,7 @@ If the resolver returns a `ResolutionFailure` or raises, `bind_tools` raises `Re
 | Field | Type | Contents |
 | --- | --- | --- |
 | `name` | string | The bare tool name, such as `read_file`. |
-| `description` | string | The tool's description, the same as `tool_descriptions(product)[name]`. |
+| `description` | string | The tool's description, the same as `wenchang.tools.tool_descriptions(product)[name]`. |
 | `input` | dict | JSON Schema of the tool's arguments, with defaults for optional ones. |
 | `output` | dict | JSON Schema of the `render_result` payload on success. |
 | `error` | dict | JSON Schema of the `render_error` payload on failure; the same as `error_schema()`. |
@@ -67,7 +69,30 @@ This binds per request with an in-memory store, dispatches each call by name wit
 
 ## Threads and async hosts {#threads}
 
-Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS round trips; `get_memory_index` lists every object in the caller's entities unless an [index cache](storage.md#index-cache) serves it. If your host runs tool calls from several threads, the store and client you share must be safe to call from several threads; `InMemoryStorage` is. An async host runs each call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`, so it does not block the event loop.
+Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS round trips; `get_memory_index` lists every object in the caller's entities unless an [index cache](storage.md#index-cache) serves it. This section applies to the MCP paths too: the MCP adapter runs tool calls concurrently on worker threads and calls one `client` from all of them.
+
+### What can be shared {#shared}
+
+| Object | Across threads |
+| --- | --- |
+| `MemoryStore` | Safe. It sets its fields once in the constructor and never changes them. All its state lives in its storage and its index cache. |
+| `InProcessClient` | Safe. It holds only its store. |
+| `MemoryTools` | Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request. |
+| `InMemoryStorage`, `InMemoryIndexCache` | Safe. Each guards its state with a lock. |
+| `GcsStorage` | Adds no state of its own: it holds the bucket and builds a new `Blob` for every call. Every call goes through the bucket's `storage.Client`. |
+| `google.cloud.storage.Client` and its `Bucket` | Not guaranteed. See below. |
+| Your resolver, `IndexCache` functions, `on_call`, and `clock` | Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads. |
+
+The index cache's generation tokens already handle readers and writers racing on one entity, across threads and processes; your `get` and `set` need only be safe to call concurrently and linearizable per key ([Guarantees and limits](storage.md#cache-limits)).
+
+**`storage.Client` is not documented as thread-safe.** google-cloud-storage 3.14.1 sends every request from a client through one `google.auth.transport.requests.AuthorizedSession`, a `requests.Session` the client creates on first use without a lock. Neither google-cloud-storage, google-auth, nor requests, as installed, says that one session is safe to share across threads, and wenchang's tests do not cover one client shared across threads. To stay within what is documented, give each thread its own `storage.Client`:
+
+- **Direct calls.** Build the `storage.Client`, bucket, `GcsStorage`, `MemoryStore`, and `InProcessClient` once per thread, for example in a `threading.local`. Give every store the same `IndexCache`, so a write on one thread invalidates the index the others read.
+- **MCP.** Pass as `client` a `TransportClient` whose seven methods forward to a per-thread `InProcessClient` built the same way. The protocol is only those seven methods, so a small forwarding class satisfies it.
+
+### Async hosts {#async}
+
+An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`. Call `bind_tools` in a worker thread too, `tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")`, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an `async def resolve` is never awaited, and `bind_tools` raises `ResolverFailureError` ([Identity](identity.md#contract)).
 
 ## Observing calls {#on-call}
 

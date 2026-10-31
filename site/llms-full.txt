@@ -133,7 +133,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 **You provide:**
 
 - Authentication: verifying who is calling.
-- Authorization: mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call and trusts its answer.
+- Authorization: mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call over MCP, or once per `bind_tools` call without MCP, and trusts its answer.
 - A GCS bucket and credentials.
 - The server process: where it runs and how clients reach it.
 - Any content filtering beyond what the prompt asks for.
@@ -481,7 +481,7 @@ Every file has an opaque `version` (the GCS generation under `GcsStorage`). Ever
 | Files per entity | 500 files, `system/` not counted; see [Files per entity](storage.md#file-cap) | `MemoryStore(max_files_per_entity=...)` |
 | `replace_fact` attempts | 3 | fixed |
 
-When the index overflows its budget, the remaining files are reported under `capped` by area, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+When the index overflows its budget, the remaining files are reported under `capped`, one row per area with the number of files left out in `omitted`, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
 
 ---
 
@@ -531,8 +531,8 @@ Every argument is keyword-only. `build_server` checks them all before it creates
 | Argument | Required | What it does |
 | --- | --- | --- |
 | `slots` | yes | A `PromptSlots`. The server's `instructions` are `build_memory_prompt(slots)`. See [Customizing the prompts](prompts.md). |
-| `client` | yes | A `TransportClient`, normally `InProcessClient(MemoryStore(...))`. Tool calls run concurrently on worker threads, so it must be thread-safe. |
-| `resolver` | yes | Your `IdentityResolver`. It runs on every tool call. See [Identity](identity.md). |
+| `client` | yes | A `TransportClient`, normally `InProcessClient(MemoryStore(...))`. Tool calls run concurrently on worker threads and share it. See [Threads](integrate-without-mcp.md#threads) for what is safe to share. |
+| `resolver` | yes | Your `IdentityResolver`. On this path it runs on every tool call. Its `resolve` must be a plain synchronous method. See [Identity](identity.md). |
 | `policy` | yes | A `ScopePolicy`: the roles that may write each scope. |
 | `credentials_from_context` | yes | A plain (non-async) function that takes the MCP request `Context` and returns the raw credentials your resolver verifies. See [Credentials](#credentials). |
 | `source` | yes | The surface name added to each written file's `sources` metadata. Non-empty. |
@@ -656,7 +656,7 @@ Any invalid argument also raises before anything is registered.
 
 ## Credentials and observing calls
 
-Each tool call reads credentials with your `credentials_from_context`, resolves them, and binds that caller's tools, exactly as on a [new server](integrate-new-server.md#credentials). Your own auth middleware can reject a request before it reaches wenchang; whatever reaches `credentials_from_context` still goes through your resolver. Tool calls run concurrently on worker threads, so `client` must be thread-safe.
+Each tool call reads credentials with your `credentials_from_context`, resolves them, and binds that caller's tools, exactly as on a [new server](integrate-new-server.md#credentials). Your own auth middleware can reject a request before it reaches wenchang; whatever reaches `credentials_from_context` still goes through your resolver. Tool calls run concurrently on worker threads and share `client`; see [Threads](integrate-without-mcp.md#threads) for what is safe to share.
 
 `on_call` behaves as on a new server: `tool` is the registered name, prefix included, `request_id` is the MCP request's ID, and the observer runs on worker threads. See [Observing calls](integrate-new-server.md#on-call) and the [field reference](reference.md#telemetry).
 
@@ -701,9 +701,11 @@ If you have already resolved the identity yourself, `MemoryTools(client, identit
 
 `bind_tools` calls your resolver once and fixes that identity for the object's lifetime. A multi-tenant service binds per request, or per session if a session has one caller, never once per process. Binding runs the resolver and builds a small object.
 
-The store, the client, the resolver, and the policy are built once per process and shared.
+The store, the client, the resolver, and the policy are built once per process and shared, except where [Threads](#threads) says otherwise.
 
-If the resolver returns a `ResolutionFailure` or raises, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
+If the resolver returns a `ResolutionFailure` or raises, or `resolve` is `async`, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
+
+The multi-tenant resolver on [Identity](identity.md#example) works here unchanged. Build its `Credentials` from your request and pass them to `bind_tools`; [The same resolver without MCP](identity.md#direct) shows the call.
 
 ## Tool schemas
 
@@ -712,7 +714,7 @@ If the resolver returns a `ResolutionFailure` or raises, `bind_tools` raises `Re
 | Field | Type | Contents |
 | --- | --- | --- |
 | `name` | string | The bare tool name, such as `read_file`. |
-| `description` | string | The tool's description, the same as `tool_descriptions(product)[name]`. |
+| `description` | string | The tool's description, the same as `wenchang.tools.tool_descriptions(product)[name]`. |
 | `input` | dict | JSON Schema of the tool's arguments, with defaults for optional ones. |
 | `output` | dict | JSON Schema of the `render_result` payload on success. |
 | `error` | dict | JSON Schema of the `render_error` payload on failure; the same as `error_schema()`. |
@@ -806,7 +808,8 @@ class TokenResolver:
         return Identity(grants={"user": ScopeGrant(user_id, "owner")})
 
 
-# Built once per process and shared by every request; both must be thread-safe.
+# Built once per process and shared by every request. InMemoryStorage is safe to share
+# across threads; see the Threads section before sharing a GcsStorage.
 client = InProcessClient(MemoryStore(InMemoryStorage()))
 resolver = TokenResolver()
 policy = ScopePolicy({})
@@ -893,7 +896,30 @@ print(created["version"], missing["message"])
 
 ## Threads and async hosts
 
-Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS round trips; `get_memory_index` lists every object in the caller's entities unless an [index cache](storage.md#index-cache) serves it. If your host runs tool calls from several threads, the store and client you share must be safe to call from several threads; `InMemoryStorage` is. An async host runs each call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`, so it does not block the event loop.
+Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS round trips; `get_memory_index` lists every object in the caller's entities unless an [index cache](storage.md#index-cache) serves it. This section applies to the MCP paths too: the MCP adapter runs tool calls concurrently on worker threads and calls one `client` from all of them.
+
+### What can be shared
+
+| Object | Across threads |
+| --- | --- |
+| `MemoryStore` | Safe. It sets its fields once in the constructor and never changes them. All its state lives in its storage and its index cache. |
+| `InProcessClient` | Safe. It holds only its store. |
+| `MemoryTools` | Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request. |
+| `InMemoryStorage`, `InMemoryIndexCache` | Safe. Each guards its state with a lock. |
+| `GcsStorage` | Adds no state of its own: it holds the bucket and builds a new `Blob` for every call. Every call goes through the bucket's `storage.Client`. |
+| `google.cloud.storage.Client` and its `Bucket` | Not guaranteed. See below. |
+| Your resolver, `IndexCache` functions, `on_call`, and `clock` | Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads. |
+
+The index cache's generation tokens already handle readers and writers racing on one entity, across threads and processes; your `get` and `set` need only be safe to call concurrently and linearizable per key ([Guarantees and limits](storage.md#cache-limits)).
+
+**`storage.Client` is not documented as thread-safe.** google-cloud-storage 3.14.1 sends every request from a client through one `google.auth.transport.requests.AuthorizedSession`, a `requests.Session` the client creates on first use without a lock. Neither google-cloud-storage, google-auth, nor requests, as installed, says that one session is safe to share across threads, and wenchang's tests do not cover one client shared across threads. To stay within what is documented, give each thread its own `storage.Client`:
+
+- **Direct calls.** Build the `storage.Client`, bucket, `GcsStorage`, `MemoryStore`, and `InProcessClient` once per thread, for example in a `threading.local`. Give every store the same `IndexCache`, so a write on one thread invalidates the index the others read.
+- **MCP.** Pass as `client` a `TransportClient` whose seven methods forward to a per-thread `InProcessClient` built the same way. The protocol is only those seven methods, so a small forwarding class satisfies it.
+
+### Async hosts
+
+An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`. Call `bind_tools` in a worker thread too, `tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")`, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an `async def resolve` is never awaited, and `bind_tools` raises `ResolverFailureError` ([Identity](identity.md#contract)).
 
 ## Observing calls
 
@@ -978,7 +1004,7 @@ In the legend, Wenchang's two attendants are Tianlong, who cannot hear, and Diya
 
 ## How identity flows
 
-Every tool call goes through the same chain, on every integration path:
+Every tool call is checked against the same chain, on every integration path. Over MCP the whole chain runs on every tool call. Without MCP, credentials are resolved once per `bind_tools` call, and the path and policy checks run on every tool call:
 
 ```
 credentials          raw, untrusted data from the request
@@ -986,6 +1012,7 @@ credentials          raw, untrusted data from the request
    |  or your code passes them         (direct: bind_tools(..., credentials, ...))
    v
 resolver.resolve(credentials)          verifies them; returns Identity or ResolutionFailure
+   |                                   (MCP: every tool call; direct: once per bind_tools call)
    v
 Identity                               scope -> ScopeGrant(entity_id, role)
    v
@@ -1010,7 +1037,7 @@ The agent passes only `scope`, `area`, and `name`. The entity ID always comes fr
 Three pieces plug in.
 
 1. **`credentials_from_context(ctx)`** reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, `ctx.headers` holds the request headers. On stdio it is `None`, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to `bind_tools` yourself.
-2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`).
+2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`). `resolve` must be a plain synchronous method. wenchang never awaits it, so an `async def resolve` returns a coroutine, and every call fails with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure.") on every integration path.
 3. **A `ScopePolicy`** mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The `system/` area is read-only in every scope regardless.
 
 Under MCP, every tool call runs all three. Without MCP, the resolver runs once per `bind_tools` call, which is why you [bind per request](integrate-without-mcp.md#per-request). The agent never sees credentials and never passes an entity ID. It passes `scope`, `area`, and `name`, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.
@@ -1159,15 +1186,35 @@ Points to notice:
 
 - **The user ID comes from the token, never from a header.** The project does come from a header, so the resolver checks membership before granting it. Treat every header as a request, not a fact.
 - **`verify_token` and `project_role` are yours.** They stand for your identity provider or session store and your membership database. The stubs only make the file run.
-- **The resolver does not raise.** A bad credential is a `ResolutionFailure`. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, or `credentials_from_context` raises, the call fails with a permanent "memory unavailable" error that names only the exception type.
-- **Under MCP the resolver runs on every tool call.** Cache inside it if verification is expensive, and expire cache entries with the token.
+- **The resolver does not raise.** A bad credential is a `ResolutionFailure`. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, the call fails with a permanent `ResolverFailureError` whose message names only the exception's type, such as "Resolver MembershipResolver raised KeyError."
+- **`credentials_from_context` should not raise either.** If it does, the call fails with a permanent `ResolverFailureError` with a fixed message, "Credentials could not be read from the request.", and only the exception's type is logged, since its message may carry the credential.
+- **Under MCP the resolver runs on every tool call.** Without MCP it runs once per `bind_tools` call. Cache inside it if verification is expensive, and expire cache entries with the token.
 - **Entity IDs are path segments.** They must be non-empty and must not contain `/`, a backslash, or control characters. Use stable IDs. If a user's ID changes, their old files are still under the old ID.
+
+### The same resolver without MCP
+
+`MembershipResolver` and `Credentials` from this example work unchanged with `bind_tools`. Read the token and project header from your own request, build `Credentials` from them, and pass it as `credentials`. Bind once per request:
+
+```python
+tools = bind_tools(
+    client,
+    MembershipResolver(verify_token, project_role),
+    Credentials(token=bearer_token, project_id=request.headers.get("x-project-id")),
+    policy,
+    source="inkwell-api",
+    product="Inkwell",
+)
+```
+
+`bearer_token` and `request` stand for your framework's request. A bad token makes `bind_tools` raise `ResolverFailureError` with your detail. See [Integrate without MCP](integrate-without-mcp.md#per-request).
 
 ## Behavior to expect
 
 | Situation | Result |
 | --- | --- |
 | Resolver returns `ResolutionFailure` | Permanent error carrying your detail. No memory for that call. |
+| Resolver raises, or `resolve` is `async` | `ResolverFailureError` naming the exception type, or saying it returned a coroutine. |
+| `credentials_from_context` raises | `ResolverFailureError`: "Credentials could not be read from the request." |
 | Agent names a scope the caller has no grant for | `InvalidArgumentError` listing the scopes that are available. |
 | Tianlong (a `member`) writes `organization` | `RestrictedScopeError`, reason `role_required`, with the permitted roles. |
 | Anyone writes `system/` | `RestrictedScopeError`, reason `system_read_only`. |
@@ -1197,7 +1244,7 @@ How wenchang uses a GCS bucket, what that costs, and how to erase or export one 
 
 ## The bucket
 
-Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`.
+Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. google-cloud-storage does not document its `Client` as thread-safe, so read [Threads](integrate-without-mcp.md#threads) before you share one `GcsStorage` across threads, as the MCP adapter does.
 
 wenchang finds credentials through Application Default Credentials: locally `gcloud auth application-default login`, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. `roles/storage.objectUser` on the bucket grants those. Operator jobs that [purge](#erase) need the same permissions.
 
@@ -1222,9 +1269,13 @@ Tool results and the index show the last one as `last_updated`, with an undersco
 
 ### Writing objects out of band
 
-Reads and listings parse all four keys and require every one. An object written another way, such as `gcloud storage cp` or the GCS console, without them fails with `MetadataFormatError`: reading that file fails, and so do `list_prefix` and `get_memory_index` for every caller whose grants include that entity. The agent sees an `internal` error naming the key.
+Reads and listings parse all four keys and require every one. An object written another way, such as `gcloud storage cp` or the GCS console, without them raises `MetadataFormatError`, which the agent sees as an `internal` error naming a missing key, such as `aliases: missing required key`. How far that reaches depends on the tool:
 
-Write through a `MemoryStore`, as the [seed script](quickstart.md#seed) does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; [invalidate](#invalidate) the entity afterwards.
+- **`read_file`** of that file fails. Other files read normally.
+- **`list_prefix`** fails only for a page that includes that object. Earlier pages of the same scope or area succeed.
+- **`get_memory_index`** fails outright for every caller whose grants include that entity, because it lists every object in every granted entity before it builds anything. The caller gets no index at all, not even for its other scopes.
+
+To fix it, set all four keys on the object or delete it. To avoid it, write through a `MemoryStore`, as the [seed script](quickstart.md#seed) does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; [invalidate](#invalidate) the entity afterwards.
 
 ## Files per entity
 
@@ -1428,6 +1479,7 @@ To erase one user, for example under a GDPR erasure request:
 2. **Export**, if you need to hand the data over or keep a copy.
 3. **Purge** the prefix, on a store configured like your server's, including its `index_cache`, so the purge invalidates the cached index. The cache needs a finite `ttl` for erasure; see [Guarantees and limits](#cache-limits).
 4. **Clear retained bytes.** Purge removes live objects only. See [Deleted bytes in GCS](#deleted-bytes).
+5. **Check shared scopes.** Purge does not touch facts about the user in `project` or `organization`. See [Facts in shared scopes](#shared-scopes).
 
 ```python
 import logging
@@ -1492,6 +1544,13 @@ assert not storage.list_page("user/u-tianlong/", None, 1)  # nothing left under 
 assert not tools.get_memory_index().entries  # the cached listing was invalidated
 ```
 
+### Facts in shared scopes
+
+`purge` removes one entity's prefix and nothing else: for a user, everything under `user/{user_id}/`. Facts about that user that the agent filed in a `project` or `organization` scope are under that project's or organization's prefix, so they survive. Nothing in a shared file attributes a fact to the user it is about or the user who wrote it: `sources` records surfaces, not people. wenchang cannot find those facts for you.
+
+- **Review the shared entities.** `export` each project and organization the user belonged to, review the files, then rewrite the affected files through a `MemoryStore` or purge the entity.
+- **Keep personal data out of shared scopes.** Say in the prompt's [`scope_guidance`](prompts.md#scope-guidance) that personal details about a person go in `user`, never in `project` or `organization`. The prompt is the only control: no tool checks content.
+
 ### How purge works
 
 A pass lists the prefix from the start and deletes each object it sees, guarded on the listed version. An object that changed or vanished in the meantime is left for the next pass. Passes repeat until one lists nothing.
@@ -1524,13 +1583,20 @@ Purge removes live objects only. A bucket's soft-delete policy (7 days by defaul
 | `metadata` | The stored metadata map, read-only, with the [stored keys](#metadata). |
 | `version` | The storage version token. |
 
-Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, `put` each object back through the same storage the store uses, then invalidate the entity's cached index:
+Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, `put` each object back through the same storage the store uses, then invalidate the entity's cached index. This round trip writes two files, exports and purges them, and restores them. The asserts show that keys, bytes, and metadata come back unchanged, that each object gets a new version, and that the files read back through the store:
 
 ```python
 from collections.abc import Iterable
+from datetime import timedelta
 
 from wenchang.core import ExportedObject, MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.index_cache import IndexCache, InMemoryIndexCache
+from wenchang.scope import ScopePolicy
 from wenchang.storage import Storage
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.tools import bind_tools
+from wenchang.transport import InProcessClient
 
 
 def restore(
@@ -1540,6 +1606,44 @@ def restore(
         storage.put(o.key, o.data, o.metadata)
     # Direct puts bypass the index cache.
     store.invalidate_index("user", user_id)
+
+
+# The server's store configuration; the storage is the one the store wraps.
+storage = InMemoryStorage()
+cache = InMemoryIndexCache()
+store = MemoryStore(
+    storage, index_cache=IndexCache(get=cache.get, set=cache.set, ttl=timedelta(minutes=10))
+)
+
+identity = Identity(grants={"user": ScopeGrant("u-tianlong", "owner")})
+tools = bind_tools(
+    InProcessClient(store), SandboxResolver(identity), None, ScopePolicy({}), source="inkwell-cli"
+)
+for area, name, line, aliases in [
+    ("preferences", "prose-style", "- [stated] Close third person.\n", ["voice"]),
+    ("workflows", "drafting", "- [stated] Drafts in the morning.\n", []),
+]:
+    tools.write_file("user", area, name, line, name, aliases, None)
+
+backup = store.export("user", "u-tianlong")
+store.purge("user", "u-tianlong")
+assert not tools.get_memory_index().entries  # gone, and the empty listing is cached
+
+restore(storage, store, backup, "u-tianlong")
+
+restored = store.export("user", "u-tianlong")
+assert [(o.key, o.data, dict(o.metadata)) for o in restored] == [
+    (o.key, o.data, dict(o.metadata)) for o in backup
+]
+assert all(r.version != b.version for r, b in zip(restored, backup, strict=True))  # new versions
+
+prose = tools.read_file("user", "preferences", "prose-style")
+assert prose.content == "- [stated] Close third person.\n"
+assert prose.metadata.aliases == ("voice",) and prose.metadata.sources == {"inkwell-cli"}
+assert [e.path for e in tools.get_memory_index().entries] == [
+    "user/u-tianlong/workflows/drafting.md",
+    "user/u-tianlong/preferences/prose-style.md",
+]  # the cached empty listing was invalidated
 ```
 
 - **A backup, not a snapshot.** Each object is internally consistent, but an object deleted between listing and `get` is omitted, and one written after its page was listed may be missing. Stop writers for a consistent export. Export never touches the index cache.
@@ -2011,6 +2115,8 @@ Returns `{"ok": true}`. Errors: `VersionConflictError`, `NotFoundError`, `Restri
 - `ToolSchema`: `name`, `description`, `input`, `output`, and `error`, the last three JSON Schema draft 2020-12 dicts.
 - `error_schema() -> dict`: the schema shared by every `render_error` payload.
 
+`wenchang.tools.tool_descriptions(product=None) -> Mapping[str, str]` returns each tool's description by name, in `TOOL_NAMES` order, without binding a session. With `product`, each first line names it. It is the same text as `ToolSchema.description` and `MemoryTools.descriptions()`.
+
 [Tool schemas](integrate-without-mcp.md#schemas) explains each field and how to register the tools with them.
 
 ## The memory prompt resource
@@ -2064,6 +2170,21 @@ Every failure renders through `render_error`. Over MCP it is the payload of an e
 | `ResolverFailureError` | permanent | The identity could not be resolved, or `credentials_from_context` raised. Memory is unavailable for the session. | none |
 | `BackendUnavailableError` | transient | The storage backend timed out or is unreachable. | `reason` (`timeout` or `unavailable`) |
 
+### InvalidArgumentError
+
+`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
+
+```json
+{
+  "error": "InvalidArgumentError",
+  "category": "recoverable",
+  "message": "Argument scope is invalid: scope 'project' is not available in this session; available scopes: organization, user. ...",
+  "argument": "scope"
+}
+```
+
+The tools raise it with `argument` set to one of their own parameter names: `scope`, `area`, `name`, `content`, `description`, `aliases`, `line`, `old_string`, `new_string`, `expected_version`, or `cursor`. You can raise it from your own dispatch code too, as the [direct example](integrate-without-mcp.md#example) does for a missing or unknown argument.
+
 Notes:
 
 - The tool layer builds each path from the caller's own grants, so over MCP an ungranted scope is reported as `InvalidArgumentError` (naming the available scopes); `not_granted` is raised by the core path check.
@@ -2076,7 +2197,7 @@ Notes:
 
 `wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Scope names and entity IDs must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`). The role must be non-empty. `identity.scope_map` is scope name to entity ID. `identity.entity_id(scope)` and `identity.role(scope)` raise `KeyError` if the scope is not granted.
 
-`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
+`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited, so an `async def resolve` makes every call fail with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with `bind_tools` alike. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
 
 `wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. `policy.permitted_roles(scope)` returns the set or `None`.
 
@@ -2119,7 +2240,7 @@ print(store.index_max_bytes, store.scope_priority)
 Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
 
 - **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.
-- **`InMemoryStorage()`** in `wenchang.storage.memory` is a thread-safe fake for tests and trials.
+- **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
 
 Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).
 
@@ -2137,11 +2258,11 @@ Not agent tools, and not on `TransportClient` or `MemoryTools`. See [Erasing an 
 
 ### Transport
 
-The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.
+The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The MCP adapter calls one client from concurrent worker threads. What is safe to share across threads is under [Threads](integrate-without-mcp.md#threads).
 
 ### Telemetry
 
-Every entry point takes an `on_call` observer: `build_server` and `register_memory_tools` for MCP, and `bind_tools` (or `MemoryTools`) for direct calls. It receives a `wenchang.observer.ToolCallRecord` after every memory tool call. `wenchang.mcp` re-exports `ToolCallRecord`. How to use it on each path: [new server](integrate-new-server.md#on-call), [existing server](integrate-existing-server.md#calls), [without MCP](integrate-without-mcp.md#on-call).
+An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported by `wenchang.mcp`) after each memory tool call. How to use it on each path: [new server](integrate-new-server.md#on-call), [existing server](integrate-existing-server.md#calls), [without MCP](integrate-without-mcp.md#on-call).
 
 | Field | MCP | Direct call |
 | --- | --- | --- |
@@ -2152,9 +2273,7 @@ Every entry point takes an `on_call` observer: `build_server` and `register_memo
 | `request_id` | The MCP request's ID, for correlating records that arrive in completion order. | `None`. |
 | `duration_s` | Wall time of the wrapper (credentials, binding, the tool, rendering). | Wall time of the tool method only. |
 
-`arguments` and `result` are read-only deep copies, and `duration_s` uses a monotonic clock. Calls rejected during argument validation never produce a record.
-
-`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.
+`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.
 
 ### Conformance suites
 
@@ -2808,7 +2927,7 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 - **Reads are never role-restricted.** A caller can read any area (including `system/`) of any scope it holds a grant for. `ScopePolicy` gates writes only.
 - **Privacy is prompt-level.** The prompt tells the agent to refuse financial account numbers, health diagnoses, and anything indicating the user is a minor, and to be stricter in shared scopes. No tool checks content, so a successful write does not mean the content was safe.
 - **Behavior depends on the agent.** Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.
-- **Concurrency is the caller's concern.** MCP tool calls run concurrently on worker threads, so the transport client and `on_call` must be thread-safe. Direct calls are synchronous and block on storage.
+- **Concurrency is the caller's concern.** MCP tool calls run concurrently on worker threads and share one client. wenchang's own objects are safe to share, but google-cloud-storage does not document `storage.Client` as thread-safe; see [Threads](integrate-without-mcp.md#threads). Direct calls are synchronous and block on storage.
 - **The file cap is soft.** Concurrent creates in one entity can pass `max_files_per_entity`; see [Files per entity](storage.md#file-cap).
 - **No timeout or retry settings.** `GcsStorage` uses google-cloud-storage's defaults. A GCS outage that outlasts its retries raises an unmapped `RetryError`, which the agent sees as an `internal` error, not a `transient` one; see [Timeouts and retries](storage.md#retries).
 

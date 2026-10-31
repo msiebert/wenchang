@@ -79,7 +79,7 @@ Any invalid argument also raises before anything is registered.
 
 ## Credentials and observing calls
 
-Each tool call reads credentials with your `credentials_from_context`, resolves them, and binds that caller's tools, exactly as on a [new server](integrate-new-server.md#credentials). Your own auth middleware can reject a request before it reaches wenchang; whatever reaches `credentials_from_context` still goes through your resolver. Tool calls run concurrently on worker threads, so `client` must be thread-safe.
+Each tool call reads credentials with your `credentials_from_context`, resolves them, and binds that caller's tools, exactly as on a [new server](integrate-new-server.md#credentials). Your own auth middleware can reject a request before it reaches wenchang; whatever reaches `credentials_from_context` still goes through your resolver. Tool calls run concurrently on worker threads and share `client`; see [Threads](integrate-without-mcp.md#threads) for what is safe to share.
 
 `on_call` behaves as on a new server: `tool` is the registered name, prefix included, `request_id` is the MCP request's ID, and the observer runs on worker threads. See [Observing calls](integrate-new-server.md#on-call) and the [field reference](reference.md#telemetry).
 

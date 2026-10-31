@@ -58,6 +58,9 @@
 <li><a href="#contract">What you provide</a>
 </li>
 <li><a href="#example">A complete example</a>
+<ul>
+<li><a href="#direct">The same resolver without MCP</a></li>
+</ul>
 </li>
 <li><a href="#behavior">Behavior to expect</a>
 </li>
@@ -70,12 +73,13 @@
 <p>wenchang does not authenticate anyone. You decide who the caller is. wenchang takes your answer and enforces it: the caller can only reach the scopes and entities you grant, and can only write the scopes your policy allows.</p>
 <p>In the legend, Wenchang's two attendants are Tianlong, who cannot hear, and Diya, who cannot speak. That way no secret gets out. A resolver is the same arrangement in Python.</p>
 <h2 id="flow">How identity flows<a class="headerlink" href="#flow" title="Link to this section">#</a></h2>
-<p>Every tool call goes through the same chain, on every integration path:</p>
+<p>Every tool call is checked against the same chain, on every integration path. Over MCP the whole chain runs on every tool call. Without MCP, credentials are resolved once per <code>bind_tools</code> call, and the path and policy checks run on every tool call:</p>
 <div class="highlight"><pre><span></span><code>credentials          raw, untrusted data from the request
    |  credentials_from_context(ctx)    (MCP: runs on every tool call)
    |  or your code passes them         (direct: bind_tools(..., credentials, ...))
    v
 resolver.resolve(credentials)          verifies them; returns Identity or ResolutionFailure
+   |                                   (MCP: every tool call; direct: once per bind_tools call)
    v
 Identity                               scope -&gt; ScopeGrant(entity_id, role)
    v
@@ -130,7 +134,7 @@ ScopePolicy                            may this role write this scope?
 <p>Three pieces plug in.</p>
 <ol>
 <li><strong><code>credentials_from_context(ctx)</code></strong> reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, <code>ctx.headers</code> holds the request headers. On stdio it is <code>None</code>, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to <code>bind_tools</code> yourself.</li>
-<li><strong>A resolver</strong> with one method, <code>resolve(credentials) -&gt; Identity | ResolutionFailure</code>. It verifies the credentials and returns an <code>Identity</code>: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Roles are your own words (<code>owner</code>, <code>member</code>, <code>admin</code>).</li>
+<li><strong>A resolver</strong> with one method, <code>resolve(credentials) -&gt; Identity | ResolutionFailure</code>. It verifies the credentials and returns an <code>Identity</code>: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Roles are your own words (<code>owner</code>, <code>member</code>, <code>admin</code>). <code>resolve</code> must be a plain synchronous method. wenchang never awaits it, so an <code>async def resolve</code> returns a coroutine, and every call fails with <code>ResolverFailureError</code> ("Resolver ... returned coroutine, not Identity or ResolutionFailure.") on every integration path.</li>
 <li><strong>A <code>ScopePolicy</code></strong> mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The <code>system/</code> area is read-only in every scope regardless.</li>
 </ol>
 <p>Under MCP, every tool call runs all three. Without MCP, the resolver runs once per <code>bind_tools</code> call, which is why you <a href="integrate-without-mcp.html#per-request">bind per request</a>. The agent never sees credentials and never passes an entity ID. It passes <code>scope</code>, <code>area</code>, and <code>name</code>, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.</p>
@@ -276,10 +280,24 @@ ScopePolicy                            may this role write this scope?
 <ul>
 <li><strong>The user ID comes from the token, never from a header.</strong> The project does come from a header, so the resolver checks membership before granting it. Treat every header as a request, not a fact.</li>
 <li><strong><code>verify_token</code> and <code>project_role</code> are yours.</strong> They stand for your identity provider or session store and your membership database. The stubs only make the file run.</li>
-<li><strong>The resolver does not raise.</strong> A bad credential is a <code>ResolutionFailure</code>. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, or <code>credentials_from_context</code> raises, the call fails with a permanent "memory unavailable" error that names only the exception type.</li>
-<li><strong>Under MCP the resolver runs on every tool call.</strong> Cache inside it if verification is expensive, and expire cache entries with the token.</li>
+<li><strong>The resolver does not raise.</strong> A bad credential is a <code>ResolutionFailure</code>. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, the call fails with a permanent <code>ResolverFailureError</code> whose message names only the exception's type, such as "Resolver MembershipResolver raised KeyError."</li>
+<li><strong><code>credentials_from_context</code> should not raise either.</strong> If it does, the call fails with a permanent <code>ResolverFailureError</code> with a fixed message, "Credentials could not be read from the request.", and only the exception's type is logged, since its message may carry the credential.</li>
+<li><strong>Under MCP the resolver runs on every tool call.</strong> Without MCP it runs once per <code>bind_tools</code> call. Cache inside it if verification is expensive, and expire cache entries with the token.</li>
 <li><strong>Entity IDs are path segments.</strong> They must be non-empty and must not contain <code>/</code>, a backslash, or control characters. Use stable IDs. If a user's ID changes, their old files are still under the old ID.</li>
 </ul>
+<h3 id="direct">The same resolver without MCP<a class="headerlink" href="#direct" title="Link to this section">#</a></h3>
+<p><code>MembershipResolver</code> and <code>Credentials</code> from this example work unchanged with <code>bind_tools</code>. Read the token and project header from your own request, build <code>Credentials</code> from them, and pass it as <code>credentials</code>. Bind once per request:</p>
+<div class="highlight"><pre><span></span><code><span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span>
+    <span class="n">client</span><span class="p">,</span>
+    <span class="n">MembershipResolver</span><span class="p">(</span><span class="n">verify_token</span><span class="p">,</span> <span class="n">project_role</span><span class="p">),</span>
+    <span class="n">Credentials</span><span class="p">(</span><span class="n">token</span><span class="o">=</span><span class="n">bearer_token</span><span class="p">,</span> <span class="n">project_id</span><span class="o">=</span><span class="n">request</span><span class="o">.</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"x-project-id"</span><span class="p">)),</span>
+    <span class="n">policy</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-api"</span><span class="p">,</span>
+    <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p><code>bearer_token</code> and <code>request</code> stand for your framework's request. A bad token makes <code>bind_tools</code> raise <code>ResolverFailureError</code> with your detail. See <a href="integrate-without-mcp.html#per-request">Integrate without MCP</a>.</p>
 <h2 id="behavior">Behavior to expect<a class="headerlink" href="#behavior" title="Link to this section">#</a></h2>
 <div class="table-wrap"><table>
 <thead>
@@ -292,6 +310,14 @@ ScopePolicy                            may this role write this scope?
 <tr>
 <td>Resolver returns <code>ResolutionFailure</code></td>
 <td>Permanent error carrying your detail. No memory for that call.</td>
+</tr>
+<tr>
+<td>Resolver raises, or <code>resolve</code> is <code>async</code></td>
+<td><code>ResolverFailureError</code> naming the exception type, or saying it returned a coroutine.</td>
+</tr>
+<tr>
+<td><code>credentials_from_context</code> raises</td>
+<td><code>ResolverFailureError</code>: "Credentials could not be read from the request."</td>
 </tr>
 <tr>
 <td>Agent names a scope the caller has no grant for</td>
@@ -322,6 +348,9 @@ ScopePolicy                            may this role write this scope?
 <li><a href="#contract">What you provide</a>
 </li>
 <li><a href="#example">A complete example</a>
+<ul>
+<li><a href="#direct">The same resolver without MCP</a></li>
+</ul>
 </li>
 <li><a href="#behavior">Behavior to expect</a>
 </li>

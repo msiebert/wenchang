@@ -131,6 +131,8 @@ Returns `{"ok": true}`. Errors: `VersionConflictError`, `NotFoundError`, `Restri
 - `ToolSchema`: `name`, `description`, `input`, `output`, and `error`, the last three JSON Schema draft 2020-12 dicts.
 - `error_schema() -> dict`: the schema shared by every `render_error` payload.
 
+`wenchang.tools.tool_descriptions(product=None) -> Mapping[str, str]` returns each tool's description by name, in `TOOL_NAMES` order, without binding a session. With `product`, each first line names it. It is the same text as `ToolSchema.description` and `MemoryTools.descriptions()`.
+
 [Tool schemas](integrate-without-mcp.md#schemas) explains each field and how to register the tools with them.
 
 ## The memory prompt resource
@@ -184,6 +186,21 @@ Every failure renders through `render_error`. Over MCP it is the payload of an e
 | `ResolverFailureError` | permanent | The identity could not be resolved, or `credentials_from_context` raised. Memory is unavailable for the session. | none |
 | `BackendUnavailableError` | transient | The storage backend timed out or is unreachable. | `reason` (`timeout` or `unavailable`) |
 
+### InvalidArgumentError
+
+`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
+
+```json
+{
+  "error": "InvalidArgumentError",
+  "category": "recoverable",
+  "message": "Argument scope is invalid: scope 'project' is not available in this session; available scopes: organization, user. ...",
+  "argument": "scope"
+}
+```
+
+The tools raise it with `argument` set to one of their own parameter names: `scope`, `area`, `name`, `content`, `description`, `aliases`, `line`, `old_string`, `new_string`, `expected_version`, or `cursor`. You can raise it from your own dispatch code too, as the [direct example](integrate-without-mcp.md#example) does for a missing or unknown argument.
+
 Notes:
 
 - The tool layer builds each path from the caller's own grants, so over MCP an ungranted scope is reported as `InvalidArgumentError` (naming the available scopes); `not_granted` is raised by the core path check.
@@ -196,7 +213,7 @@ Notes:
 
 `wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Scope names and entity IDs must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`). The role must be non-empty. `identity.scope_map` is scope name to entity ID. `identity.entity_id(scope)` and `identity.role(scope)` raise `KeyError` if the scope is not granted.
 
-`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
+`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited, so an `async def resolve` makes every call fail with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with `bind_tools` alike. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
 
 `wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. `policy.permitted_roles(scope)` returns the set or `None`.
 
@@ -239,7 +256,7 @@ print(store.index_max_bytes, store.scope_priority)
 Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
 
 - **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.
-- **`InMemoryStorage()`** in `wenchang.storage.memory` is a thread-safe fake for tests and trials.
+- **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
 
 Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).
 
@@ -257,11 +274,11 @@ Not agent tools, and not on `TransportClient` or `MemoryTools`. See [Erasing an 
 
 ### Transport
 
-The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.
+The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The MCP adapter calls one client from concurrent worker threads. What is safe to share across threads is under [Threads](integrate-without-mcp.md#threads).
 
 ### Telemetry
 
-Every entry point takes an `on_call` observer: `build_server` and `register_memory_tools` for MCP, and `bind_tools` (or `MemoryTools`) for direct calls. It receives a `wenchang.observer.ToolCallRecord` after every memory tool call. `wenchang.mcp` re-exports `ToolCallRecord`. How to use it on each path: [new server](integrate-new-server.md#on-call), [existing server](integrate-existing-server.md#calls), [without MCP](integrate-without-mcp.md#on-call).
+An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported by `wenchang.mcp`) after each memory tool call. How to use it on each path: [new server](integrate-new-server.md#on-call), [existing server](integrate-existing-server.md#calls), [without MCP](integrate-without-mcp.md#on-call).
 
 | Field | MCP | Direct call |
 | --- | --- | --- |
@@ -272,9 +289,7 @@ Every entry point takes an `on_call` observer: `build_server` and `register_memo
 | `request_id` | The MCP request's ID, for correlating records that arrive in completion order. | `None`. |
 | `duration_s` | Wall time of the wrapper (credentials, binding, the tool, rendering). | Wall time of the tool method only. |
 
-`arguments` and `result` are read-only deep copies, and `duration_s` uses a monotonic clock. Calls rejected during argument validation never produce a record.
-
-`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.
+`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.
 
 ### Conformance suites
 

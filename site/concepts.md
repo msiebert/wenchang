@@ -78,7 +78,7 @@ Every file has an opaque `version` (the GCS generation under `GcsStorage`). Ever
 | Files per entity | 500 files, `system/` not counted; see [Files per entity](storage.md#file-cap) | `MemoryStore(max_files_per_entity=...)` |
 | `replace_fact` attempts | 3 | fixed |
 
-When the index overflows its budget, the remaining files are reported under `capped` by area, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+When the index overflows its budget, the remaining files are reported under `capped`, one row per area with the number of files left out in `omitted`, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
 
 ---
 

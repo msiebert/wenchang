@@ -18,8 +18,8 @@ Every argument is keyword-only. `build_server` checks them all before it creates
 | Argument | Required | What it does |
 | --- | --- | --- |
 | `slots` | yes | A `PromptSlots`. The server's `instructions` are `build_memory_prompt(slots)`. See [Customizing the prompts](prompts.md). |
-| `client` | yes | A `TransportClient`, normally `InProcessClient(MemoryStore(...))`. Tool calls run concurrently on worker threads, so it must be thread-safe. |
-| `resolver` | yes | Your `IdentityResolver`. It runs on every tool call. See [Identity](identity.md). |
+| `client` | yes | A `TransportClient`, normally `InProcessClient(MemoryStore(...))`. Tool calls run concurrently on worker threads and share it. See [Threads](integrate-without-mcp.md#threads) for what is safe to share. |
+| `resolver` | yes | Your `IdentityResolver`. On this path it runs on every tool call. Its `resolve` must be a plain synchronous method. See [Identity](identity.md). |
 | `policy` | yes | A `ScopePolicy`: the roles that may write each scope. |
 | `credentials_from_context` | yes | A plain (non-async) function that takes the MCP request `Context` and returns the raw credentials your resolver verifies. See [Credentials](#credentials). |
 | `source` | yes | The surface name added to each written file's `sources` metadata. Non-empty. |

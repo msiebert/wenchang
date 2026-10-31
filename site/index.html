@@ -234,7 +234,7 @@ project/p-ninth-examination/characters/lin-qiao.md
 <h3 id="you-provide">You provide<a class="headerlink" href="#you-provide" title="Link to this section">#</a></h3>
 <ul>
 <li><strong>Authentication.</strong> Verifying who is calling.</li>
-<li><strong>Authorization.</strong> Mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call and trusts its answer.</li>
+<li><strong>Authorization.</strong> Mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call over MCP, or once per <code>bind_tools</code> call without MCP, and trusts its answer.</li>
 <li>A GCS bucket and credentials.</li>
 <li>The server process: where it runs and how clients reach it.</li>
 <li>Any content filtering beyond what the prompt asks for.</li>

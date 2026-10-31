@@ -4,7 +4,7 @@ How wenchang uses a GCS bucket, what that costs, and how to erase or export one 
 
 ## The bucket {#bucket}
 
-Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`.
+Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. google-cloud-storage does not document its `Client` as thread-safe, so read [Threads](integrate-without-mcp.md#threads) before you share one `GcsStorage` across threads, as the MCP adapter does.
 
 wenchang finds credentials through Application Default Credentials: locally `gcloud auth application-default login`, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. `roles/storage.objectUser` on the bucket grants those. Operator jobs that [purge](#erase) need the same permissions.
 
@@ -34,9 +34,13 @@ Tool results and the index show the last one as `last_updated`, with an undersco
 
 ### Writing objects out of band {#out-of-band}
 
-Reads and listings parse all four keys and require every one. An object written another way, such as `gcloud storage cp` or the GCS console, without them fails with `MetadataFormatError`: reading that file fails, and so do `list_prefix` and `get_memory_index` for every caller whose grants include that entity. The agent sees an `internal` error naming the key.
+Reads and listings parse all four keys and require every one. An object written another way, such as `gcloud storage cp` or the GCS console, without them raises `MetadataFormatError`, which the agent sees as an `internal` error naming a missing key, such as `aliases: missing required key`. How far that reaches depends on the tool:
 
-Write through a `MemoryStore`, as the [seed script](quickstart.md#seed) does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; [invalidate](#invalidate) the entity afterwards.
+- **`read_file`** of that file fails. Other files read normally.
+- **`list_prefix`** fails only for a page that includes that object. Earlier pages of the same scope or area succeed.
+- **`get_memory_index`** fails outright for every caller whose grants include that entity, because it lists every object in every granted entity before it builds anything. The caller gets no index at all, not even for its other scopes.
+
+To fix it, set all four keys on the object or delete it. To avoid it, write through a `MemoryStore`, as the [seed script](quickstart.md#seed) does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; [invalidate](#invalidate) the entity afterwards.
 
 ## Files per entity {#file-cap}
 
@@ -73,6 +77,11 @@ You can give `MemoryStore` a cache for `get_memory_index`. The cache is optional
 
 wenchang does not ship a cache server. You supply two functions over the cache you already run, such as Redis.
 
+<!--html-->
+
+<div id="contract" class="anchor-alias"></div>
+
+<!--/html-->
 ### What you provide {#cache-contract}
 
 `wenchang.index_cache.IndexCache(get, set, ttl=None, key_prefix="wenchang:index:")` is a frozen configuration object.
@@ -143,6 +152,11 @@ The next `get_memory_index` that includes that entity lists storage again. `inva
 
 A writer that does not invalidate leaves the entity stale until its next write through the cached store, or until `ttl` expires.
 
+<!--html-->
+
+<div id="failures" class="anchor-alias"></div>
+
+<!--/html-->
 ### When the cache fails {#cache-failures}
 
 The cache never makes a memory operation fail.
@@ -154,6 +168,11 @@ Warnings go to the `wenchang.core` logger. They name the scope and the exception
 
 A swallowed invalidation failure leaves the entity's old listing in place, and only `ttl` bounds how long it is served. Watch for these warnings.
 
+<!--html-->
+
+<div id="limits" class="anchor-alias"></div>
+
+<!--/html-->
 ### Guarantees and limits {#cache-limits}
 
 The store keeps a random generation token for each entity. A reader records the token before listing storage and tags its cached listing with it. Every write replaces the token after its storage call, so a listing taken before that write is never served afterwards, even if it is stored late. What this does not cover:
@@ -211,8 +230,16 @@ To erase one user, for example under a GDPR erasure request:
 2. **Export**, if you need to hand the data over or keep a copy.
 3. **Purge** the prefix, on a store configured like your server's, including its `index_cache`, so the purge invalidates the cached index. The cache needs a finite `ttl` for erasure; see [Guarantees and limits](#cache-limits).
 4. **Clear retained bytes.** Purge removes live objects only. See [Deleted bytes in GCS](#deleted-bytes).
+5. **Check shared scopes.** Purge does not touch facts about the user in `project` or `organization`. See [Facts in shared scopes](#shared-scopes).
 
 <!--include python ops_erase.py-->
+
+### Facts in shared scopes {#shared-scopes}
+
+`purge` removes one entity's prefix and nothing else: for a user, everything under `user/{user_id}/`. Facts about that user that the agent filed in a `project` or `organization` scope are under that project's or organization's prefix, so they survive. Nothing in a shared file attributes a fact to the user it is about or the user who wrote it: `sources` records surfaces, not people. wenchang cannot find those facts for you.
+
+- **Review the shared entities.** `export` each project and organization the user belonged to, review the files, then rewrite the affected files through a `MemoryStore` or purge the entity.
+- **Keep personal data out of shared scopes.** Say in the prompt's [`scope_guidance`](prompts.md#scope-guidance) that personal details about a person go in `user`, never in `project` or `organization`. The prompt is the only control: no tool checks content.
 
 ### How purge works {#purge}
 
@@ -227,10 +254,25 @@ A pass lists the prefix from the start and deletes each object it sees, guarded 
 - **Arguments are checked first.** A non-`str` `scope` or `entity_id`, or a non-`int` `max_passes`, raises `TypeError`. An invalid segment or `max_passes` below 1 raises `ValueError`. Neither touches storage or the cache.
 - **Cost.** N objects take N sequential deletes, roughly N round trips on GCS.
 
+<!--html-->
+
+<div id="cache" class="anchor-alias"></div>
+
+<!--/html-->
 Purge calls [`invalidate_index`](#invalidate) once, after its last storage call, whether it succeeded or failed. On success a cache error propagates and the delete count is lost; re-running returns 0 and invalidates again. On failure a cache error is logged to `wenchang.core` and the purge's own exception is raised. A reader that listed before the purge can still store its pre-purge listing in your cache. It is never served, but it stays until the entity is indexed again or `ttl` expires.
 
+<!--html-->
+
+<div id="limitations" class="anchor-alias"></div>
+
+<!--/html-->
 An invalid `entity_id` is echoed in the `ValueError` message (`invalid entity_id: '...'`), the same message `invalidate_index` and `get_memory_index` raise. If entity IDs identify people, do not log that message as is.
 
+<!--html-->
+
+<div id="gcs" class="anchor-alias"></div>
+
+<!--/html-->
 ### Deleted bytes in GCS {#deleted-bytes}
 
 Purge removes live objects only. A bucket's soft-delete policy (7 days by default on new GCS buckets) and object versioning keep deleted bytes recoverable for their retention window. Set both to match your retention obligation: `gcloud storage buckets update gs://BUCKET --clear-soft-delete` disables soft delete.
@@ -246,7 +288,7 @@ Purge removes live objects only. A bucket's soft-delete policy (7 days by defaul
 | `metadata` | The stored metadata map, read-only, with the [stored keys](#metadata). |
 | `version` | The storage version token. |
 
-Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, `put` each object back through the same storage the store uses, then invalidate the entity's cached index:
+Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, `put` each object back through the same storage the store uses, then invalidate the entity's cached index. This round trip writes two files, exports and purges them, and restores them. The asserts show that keys, bytes, and metadata come back unchanged, that each object gets a new version, and that the files read back through the store:
 
 <!--include python ops_restore.py-->
 

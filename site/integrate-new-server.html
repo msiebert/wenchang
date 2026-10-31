@@ -88,12 +88,12 @@
 <tr>
 <td><code>client</code></td>
 <td>yes</td>
-<td>A <code>TransportClient</code>, normally <code>InProcessClient(MemoryStore(...))</code>. Tool calls run concurrently on worker threads, so it must be thread-safe.</td>
+<td>A <code>TransportClient</code>, normally <code>InProcessClient(MemoryStore(...))</code>. Tool calls run concurrently on worker threads and share it. See <a href="integrate-without-mcp.html#threads">Threads</a> for what is safe to share.</td>
 </tr>
 <tr>
 <td><code>resolver</code></td>
 <td>yes</td>
-<td>Your <code>IdentityResolver</code>. It runs on every tool call. See <a href="identity.html">Identity</a>.</td>
+<td>Your <code>IdentityResolver</code>. On this path it runs on every tool call. Its <code>resolve</code> must be a plain synchronous method. See <a href="identity.html">Identity</a>.</td>
 </tr>
 <tr>
 <td><code>policy</code></td>

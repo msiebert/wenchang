@@ -21,7 +21,8 @@ class TokenResolver:
         return Identity(grants={"user": ScopeGrant(user_id, "owner")})
 
 
-# Built once per process and shared by every request; both must be thread-safe.
+# Built once per process and shared by every request. InMemoryStorage is safe to share
+# across threads; see the Threads section before sharing a GcsStorage.
 client = InProcessClient(MemoryStore(InMemoryStorage()))
 resolver = TokenResolver()
 policy = ScopePolicy({})

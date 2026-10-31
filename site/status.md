@@ -33,7 +33,7 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 - **Reads are never role-restricted.** A caller can read any area (including `system/`) of any scope it holds a grant for. `ScopePolicy` gates writes only.
 - **Privacy is prompt-level.** The prompt tells the agent to refuse financial account numbers, health diagnoses, and anything indicating the user is a minor, and to be stricter in shared scopes. No tool checks content, so a successful write does not mean the content was safe.
 - **Behavior depends on the agent.** Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.
-- **Concurrency is the caller's concern.** MCP tool calls run concurrently on worker threads, so the transport client and `on_call` must be thread-safe. Direct calls are synchronous and block on storage.
+- **Concurrency is the caller's concern.** MCP tool calls run concurrently on worker threads and share one client. wenchang's own objects are safe to share, but google-cloud-storage does not document `storage.Client` as thread-safe; see [Threads](integrate-without-mcp.md#threads). Direct calls are synchronous and block on storage.
 - **The file cap is soft.** Concurrent creates in one entity can pass `max_files_per_entity`; see [Files per entity](storage.md#file-cap).
 - **No timeout or retry settings.** `GcsStorage` uses google-cloud-storage's defaults. A GCS outage that outlasts its retries raises an unmapped `RetryError`, which the agent sees as an `internal` error, not a `transient` one; see [Timeouts and retries](storage.md#retries).
 

@@ -114,6 +114,23 @@ PAGES = [
         "title": "Tool and error reference",
         "description": "The seven memory tools with exact parameters and returns, tool schemas, the prompt resource, the error taxonomy, and the Python API.",
         "toc": True,
+        # Sections that moved to other pages: old #fragment -> new page#fragment.
+        "anchor_moves": {
+            "concepts": "concepts.html",
+            "paths": "concepts.html#paths",
+            "scopes": "concepts.html#scopes",
+            "areas": "concepts.html#areas",
+            "names": "concepts.html#names",
+            "system": "concepts.html#system",
+            "facts": "concepts.html#facts",
+            "metadata": "concepts.html#metadata",
+            "concurrency": "concepts.html#concurrency",
+            "limits": "concepts.html#limits",
+            "file-cap": "storage.html#file-cap",
+            "embed": "integrate-existing-server.html#register",
+            "bind": "integrate-without-mcp.html#methods",
+            "limitations": "status.html#limitations",
+        },
     },
     {
         "slug": "walkthroughs",
@@ -598,6 +615,11 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
         )
     page_nav = f'<nav class="page-nav" aria-label="Pages">{"".join(links)}</nav>'
 
+    moves = ""
+    if "anchor_moves" in page:
+        mapping = json.dumps(page["anchor_moves"], separators=(",", ":"))
+        moves = f"<script>(function(){{var t={mapping}[location.hash.slice(1)];if(t)location.replace(t)}})()</script>\n"
+
     md_href = f"{slug}.md"
     return f"""<!doctype html>
 <html lang="en">
@@ -626,7 +648,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 <link rel="stylesheet" href="{HANZI_FONT}">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
-{jsonld}</head>
+{moves}{jsonld}</head>
 <body class="page-{slug}">
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
@@ -782,6 +804,22 @@ def remove_stale() -> None:
             path.unlink()
 
 
+def check_anchor_moves() -> None:
+    """Fail the build if a moved anchor still exists on its page or its target is missing."""
+    errors = []
+    for page in PAGES:
+        own = (OUT / f"{page['slug']}.html").read_text()
+        for old, target in page.get("anchor_moves", {}).items():
+            if f'id="{old}"' in own:
+                errors.append(f"{page['slug']}.html#{old} still exists")
+            name, _, frag = target.partition("#")
+            path = OUT / name
+            if not path.is_file() or (frag and f'id="{frag}"' not in path.read_text()):
+                errors.append(f"{page['slug']}.html#{old} -> {target}: no such target")
+    if errors:
+        sys.exit("anchor_moves:\n" + "\n".join(errors))
+
+
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     twins = {}
@@ -809,6 +847,7 @@ def main() -> None:
     for name in ASSETS:
         (OUT / name).write_bytes((SRC / name).read_bytes())
     remove_stale()
+    check_anchor_moves()
     print("generated", SLUGS, "redirects", list(REDIRECTS))
 
 

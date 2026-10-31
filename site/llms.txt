@@ -8,15 +8,15 @@ wenchang is a library, not a service: there is no CLI, console script, or ready-
 
 To install and wire wenchang for your user:
 
-0. Ask which path applies: a new MCP server (follow steps 1-8 and [integrate-new-server.md](https://msiebert.github.io/wenchang/integrate-new-server.md)), an existing mcp 2.x `MCPServer` (see [integrate-existing-server.md](https://msiebert.github.io/wenchang/integrate-existing-server.md)), or no MCP, such as another tool framework or a direct model API loop (see [integrate-without-mcp.md](https://msiebert.github.io/wenchang/integrate-without-mcp.md); install the base package `pip install "wenchang @ git+https://github.com/msiebert/wenchang"`). The MCP paths need mcp 2.x `MCPServer`; FastMCP and mcp 1.x servers do not work. Steps 1-8 are the new-server path.
+0. Ask which path applies: a new MCP server (follow steps 1-8 and [integrate-new-server.md](https://msiebert.github.io/wenchang/integrate-new-server.md)), an existing mcp 2.x `MCPServer` (see [integrate-existing-server.md](https://msiebert.github.io/wenchang/integrate-existing-server.md)), or no MCP, such as another tool framework or a direct model API loop (see [integrate-without-mcp.md](https://msiebert.github.io/wenchang/integrate-without-mcp.md); install the base package `pip install "wenchang @ git+https://github.com/msiebert/wenchang"`). The MCP paths need mcp 2.x `MCPServer`; FastMCP and mcp 1.x servers do not work. Steps 1-8 are the new-server path; steps 3, 4, and 8 apply to every path.
 1. Confirm Python 3.11+, a GCP project, and an MCP client that can launch a stdio server (for example Claude Code).
 2. Install from git: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`. The `mcp` extra installs `mcp>=2.2,<3`.
-3. Ask the user which scopes they need (for example `user`, `project`, `organization`), which are shared, and which roles may write each.
-4. Create a GCS bucket and make sure Application Default Credentials can read, create, delete, and list objects in it.
+3. (Every path.) Ask the user which scopes they need (for example `user`, `project`, `organization`), which are shared, and which roles may write each.
+4. (Every path.) Create a GCS bucket and make sure Application Default Credentials can read, create, delete, and list objects in it.
 5. Create `server.py` from the Quickstart page: `PromptSlots` (purpose, scope_guidance, seed_areas), `MemoryStore(GcsStorage(bucket))`, an identity resolver, a `ScopePolicy`, then `wenchang.mcp.build_server(...)` and `server.run("stdio")`. Use `InMemoryStorage` only for trials.
 6. Register it: `claude mcp add memory -e KEY=value -- /path/to/python /path/to/server.py`, or add it under `mcpServers` in `.mcp.json`.
 7. Verify the server lists seven tools: get_memory_index, read_file, list_prefix, write_file, append_line, replace_fact, delete_file (prefixed with `{tool_prefix}_` if configured). The memory prompt is the server's instructions and the resource `wenchang://memory-prompt`.
-8. When using memory: call get_memory_index first each session; pass the version you read as expected_version on every write (null creates); never write to the `system/` area; never store financial account numbers, health diagnoses, or anything indicating the user is a minor.
+8. (Every path.) When using memory: call get_memory_index first each session; pass the version you read as expected_version on every write (null creates); never write to the `system/` area; never store financial account numbers, health diagnoses, or anything indicating the user is a minor.
 
 ## Docs
 

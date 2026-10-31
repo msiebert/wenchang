@@ -6,7 +6,7 @@ In the legend, Wenchang's two attendants are Tianlong, who cannot hear, and Diya
 
 ## How identity flows
 
-Every tool call goes through the same chain, on every integration path:
+Every tool call is checked against the same chain, on every integration path. Over MCP the whole chain runs on every tool call. Without MCP, credentials are resolved once per `bind_tools` call, and the path and policy checks run on every tool call:
 
 ```
 credentials          raw, untrusted data from the request
@@ -14,6 +14,7 @@ credentials          raw, untrusted data from the request
    |  or your code passes them         (direct: bind_tools(..., credentials, ...))
    v
 resolver.resolve(credentials)          verifies them; returns Identity or ResolutionFailure
+   |                                   (MCP: every tool call; direct: once per bind_tools call)
    v
 Identity                               scope -> ScopeGrant(entity_id, role)
    v
@@ -38,7 +39,7 @@ The agent passes only `scope`, `area`, and `name`. The entity ID always comes fr
 Three pieces plug in.
 
 1. **`credentials_from_context(ctx)`** reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, `ctx.headers` holds the request headers. On stdio it is `None`, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to `bind_tools` yourself.
-2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`).
+2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`). `resolve` must be a plain synchronous method. wenchang never awaits it, so an `async def resolve` returns a coroutine, and every call fails with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure.") on every integration path.
 3. **A `ScopePolicy`** mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The `system/` area is read-only in every scope regardless.
 
 Under MCP, every tool call runs all three. Without MCP, the resolver runs once per `bind_tools` call, which is why you [bind per request](integrate-without-mcp.md#per-request). The agent never sees credentials and never passes an entity ID. It passes `scope`, `area`, and `name`, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.
@@ -187,15 +188,35 @@ Points to notice:
 
 - **The user ID comes from the token, never from a header.** The project does come from a header, so the resolver checks membership before granting it. Treat every header as a request, not a fact.
 - **`verify_token` and `project_role` are yours.** They stand for your identity provider or session store and your membership database. The stubs only make the file run.
-- **The resolver does not raise.** A bad credential is a `ResolutionFailure`. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, or `credentials_from_context` raises, the call fails with a permanent "memory unavailable" error that names only the exception type.
-- **Under MCP the resolver runs on every tool call.** Cache inside it if verification is expensive, and expire cache entries with the token.
+- **The resolver does not raise.** A bad credential is a `ResolutionFailure`. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, the call fails with a permanent `ResolverFailureError` whose message names only the exception's type, such as "Resolver MembershipResolver raised KeyError."
+- **`credentials_from_context` should not raise either.** If it does, the call fails with a permanent `ResolverFailureError` with a fixed message, "Credentials could not be read from the request.", and only the exception's type is logged, since its message may carry the credential.
+- **Under MCP the resolver runs on every tool call.** Without MCP it runs once per `bind_tools` call. Cache inside it if verification is expensive, and expire cache entries with the token.
 - **Entity IDs are path segments.** They must be non-empty and must not contain `/`, a backslash, or control characters. Use stable IDs. If a user's ID changes, their old files are still under the old ID.
+
+### The same resolver without MCP
+
+`MembershipResolver` and `Credentials` from this example work unchanged with `bind_tools`. Read the token and project header from your own request, build `Credentials` from them, and pass it as `credentials`. Bind once per request:
+
+```python
+tools = bind_tools(
+    client,
+    MembershipResolver(verify_token, project_role),
+    Credentials(token=bearer_token, project_id=request.headers.get("x-project-id")),
+    policy,
+    source="inkwell-api",
+    product="Inkwell",
+)
+```
+
+`bearer_token` and `request` stand for your framework's request. A bad token makes `bind_tools` raise `ResolverFailureError` with your detail. See [Integrate without MCP](integrate-without-mcp.md#per-request).
 
 ## Behavior to expect
 
 | Situation | Result |
 | --- | --- |
 | Resolver returns `ResolutionFailure` | Permanent error carrying your detail. No memory for that call. |
+| Resolver raises, or `resolve` is `async` | `ResolverFailureError` naming the exception type, or saying it returned a coroutine. |
+| `credentials_from_context` raises | `ResolverFailureError`: "Credentials could not be read from the request." |
 | Agent names a scope the caller has no grant for | `InvalidArgumentError` listing the scopes that are available. |
 | Tianlong (a `member`) writes `organization` | `RestrictedScopeError`, reason `role_required`, with the permitted roles. |
 | Anyone writes `system/` | `RestrictedScopeError`, reason `system_read_only`. |

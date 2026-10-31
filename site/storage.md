@@ -4,7 +4,7 @@ How wenchang uses a GCS bucket, what that costs, and how to erase or export one 
 
 ## The bucket
 
-Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`.
+Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. google-cloud-storage does not document its `Client` as thread-safe, so read [Threads](integrate-without-mcp.md#threads) before you share one `GcsStorage` across threads, as the MCP adapter does.
 
 wenchang finds credentials through Application Default Credentials: locally `gcloud auth application-default login`, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. `roles/storage.objectUser` on the bucket grants those. Operator jobs that [purge](#erase) need the same permissions.
 
@@ -29,9 +29,13 @@ Tool results and the index show the last one as `last_updated`, with an undersco
 
 ### Writing objects out of band
 
-Reads and listings parse all four keys and require every one. An object written another way, such as `gcloud storage cp` or the GCS console, without them fails with `MetadataFormatError`: reading that file fails, and so do `list_prefix` and `get_memory_index` for every caller whose grants include that entity. The agent sees an `internal` error naming the key.
+Reads and listings parse all four keys and require every one. An object written another way, such as `gcloud storage cp` or the GCS console, without them raises `MetadataFormatError`, which the agent sees as an `internal` error naming a missing key, such as `aliases: missing required key`. How far that reaches depends on the tool:
 
-Write through a `MemoryStore`, as the [seed script](quickstart.md#seed) does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; [invalidate](#invalidate) the entity afterwards.
+- **`read_file`** of that file fails. Other files read normally.
+- **`list_prefix`** fails only for a page that includes that object. Earlier pages of the same scope or area succeed.
+- **`get_memory_index`** fails outright for every caller whose grants include that entity, because it lists every object in every granted entity before it builds anything. The caller gets no index at all, not even for its other scopes.
+
+To fix it, set all four keys on the object or delete it. To avoid it, write through a `MemoryStore`, as the [seed script](quickstart.md#seed) does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; [invalidate](#invalidate) the entity afterwards.
 
 ## Files per entity
 
@@ -235,6 +239,7 @@ To erase one user, for example under a GDPR erasure request:
 2. **Export**, if you need to hand the data over or keep a copy.
 3. **Purge** the prefix, on a store configured like your server's, including its `index_cache`, so the purge invalidates the cached index. The cache needs a finite `ttl` for erasure; see [Guarantees and limits](#cache-limits).
 4. **Clear retained bytes.** Purge removes live objects only. See [Deleted bytes in GCS](#deleted-bytes).
+5. **Check shared scopes.** Purge does not touch facts about the user in `project` or `organization`. See [Facts in shared scopes](#shared-scopes).
 
 ```python
 import logging
@@ -299,6 +304,13 @@ assert not storage.list_page("user/u-tianlong/", None, 1)  # nothing left under 
 assert not tools.get_memory_index().entries  # the cached listing was invalidated
 ```
 
+### Facts in shared scopes
+
+`purge` removes one entity's prefix and nothing else: for a user, everything under `user/{user_id}/`. Facts about that user that the agent filed in a `project` or `organization` scope are under that project's or organization's prefix, so they survive. Nothing in a shared file attributes a fact to the user it is about or the user who wrote it: `sources` records surfaces, not people. wenchang cannot find those facts for you.
+
+- **Review the shared entities.** `export` each project and organization the user belonged to, review the files, then rewrite the affected files through a `MemoryStore` or purge the entity.
+- **Keep personal data out of shared scopes.** Say in the prompt's [`scope_guidance`](prompts.md#scope-guidance) that personal details about a person go in `user`, never in `project` or `organization`. The prompt is the only control: no tool checks content.
+
 ### How purge works
 
 A pass lists the prefix from the start and deletes each object it sees, guarded on the listed version. An object that changed or vanished in the meantime is left for the next pass. Passes repeat until one lists nothing.
@@ -331,13 +343,20 @@ Purge removes live objects only. A bucket's soft-delete policy (7 days by defaul
 | `metadata` | The stored metadata map, read-only, with the [stored keys](#metadata). |
 | `version` | The storage version token. |
 
-Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, `put` each object back through the same storage the store uses, then invalidate the entity's cached index:
+Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, `put` each object back through the same storage the store uses, then invalidate the entity's cached index. This round trip writes two files, exports and purges them, and restores them. The asserts show that keys, bytes, and metadata come back unchanged, that each object gets a new version, and that the files read back through the store:
 
 ```python
 from collections.abc import Iterable
+from datetime import timedelta
 
 from wenchang.core import ExportedObject, MemoryStore
+from wenchang.identity import Identity, SandboxResolver, ScopeGrant
+from wenchang.index_cache import IndexCache, InMemoryIndexCache
+from wenchang.scope import ScopePolicy
 from wenchang.storage import Storage
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.tools import bind_tools
+from wenchang.transport import InProcessClient
 
 
 def restore(
@@ -347,6 +366,44 @@ def restore(
         storage.put(o.key, o.data, o.metadata)
     # Direct puts bypass the index cache.
     store.invalidate_index("user", user_id)
+
+
+# The server's store configuration; the storage is the one the store wraps.
+storage = InMemoryStorage()
+cache = InMemoryIndexCache()
+store = MemoryStore(
+    storage, index_cache=IndexCache(get=cache.get, set=cache.set, ttl=timedelta(minutes=10))
+)
+
+identity = Identity(grants={"user": ScopeGrant("u-tianlong", "owner")})
+tools = bind_tools(
+    InProcessClient(store), SandboxResolver(identity), None, ScopePolicy({}), source="inkwell-cli"
+)
+for area, name, line, aliases in [
+    ("preferences", "prose-style", "- [stated] Close third person.\n", ["voice"]),
+    ("workflows", "drafting", "- [stated] Drafts in the morning.\n", []),
+]:
+    tools.write_file("user", area, name, line, name, aliases, None)
+
+backup = store.export("user", "u-tianlong")
+store.purge("user", "u-tianlong")
+assert not tools.get_memory_index().entries  # gone, and the empty listing is cached
+
+restore(storage, store, backup, "u-tianlong")
+
+restored = store.export("user", "u-tianlong")
+assert [(o.key, o.data, dict(o.metadata)) for o in restored] == [
+    (o.key, o.data, dict(o.metadata)) for o in backup
+]
+assert all(r.version != b.version for r, b in zip(restored, backup, strict=True))  # new versions
+
+prose = tools.read_file("user", "preferences", "prose-style")
+assert prose.content == "- [stated] Close third person.\n"
+assert prose.metadata.aliases == ("voice",) and prose.metadata.sources == {"inkwell-cli"}
+assert [e.path for e in tools.get_memory_index().entries] == [
+    "user/u-tianlong/workflows/drafting.md",
+    "user/u-tianlong/preferences/prose-style.md",
+]  # the cached empty listing was invalidated
 ```
 
 - **A backup, not a snapshot.** Each object is internally consistent, but an object deleted between listing and `get` is omitted, and one written after its page was listed may be missing. Stop writers for a consistent export. Export never touches the index cache.

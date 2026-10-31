@@ -66,6 +66,10 @@
 <li><a href="#example">A complete example</a>
 </li>
 <li><a href="#threads">Threads and async hosts</a>
+<ul>
+<li><a href="#shared">What can be shared</a></li>
+<li><a href="#async">Async hosts</a></li>
+</ul>
 </li>
 <li><a href="#on-call">Observing calls</a>
 </li>
@@ -90,8 +94,9 @@
 <p>If you have already resolved the identity yourself, <code>MemoryTools(client, identity, policy, *, source, product=None, on_call=None)</code> builds the same object from an <code>Identity</code>.</p>
 <h2 id="per-request">Bind per request<a class="headerlink" href="#per-request" title="Link to this section">#</a></h2>
 <p><code>bind_tools</code> calls your resolver once and fixes that identity for the object's lifetime. A multi-tenant service binds per request, or per session if a session has one caller, never once per process. Binding runs the resolver and builds a small object.</p>
-<p>The store, the client, the resolver, and the policy are built once per process and shared.</p>
-<p>If the resolver returns a <code>ResolutionFailure</code> or raises, <code>bind_tools</code> raises <code>ResolverFailureError</code> (permanent). Render it like any tool error. The model then has no memory for that request.</p>
+<p>The store, the client, the resolver, and the policy are built once per process and shared, except where <a href="#threads">Threads</a> says otherwise.</p>
+<p>If the resolver returns a <code>ResolutionFailure</code> or raises, or <code>resolve</code> is <code>async</code>, <code>bind_tools</code> raises <code>ResolverFailureError</code> (permanent). Render it like any tool error. The model then has no memory for that request.</p>
+<p>The multi-tenant resolver on <a href="identity.html#example">Identity</a> works here unchanged. Build its <code>Credentials</code> from your request and pass them to <code>bind_tools</code>; <a href="identity.html#direct">The same resolver without MCP</a> shows the call.</p>
 <h2 id="schemas">Tool schemas<a class="headerlink" href="#schemas" title="Link to this section">#</a></h2>
 <p><code>wenchang.schemas.tool_schemas(product=None)</code> returns a read-only mapping from tool name to <code>ToolSchema</code>, one per tool, in <code>TOOL_NAMES</code> order. Give these to your framework instead of writing argument models by hand. <code>error_schema()</code> returns the schema shared by every <code>render_error</code> payload.</p>
 <div class="table-wrap"><table>
@@ -111,7 +116,7 @@
 <tr>
 <td><code>description</code></td>
 <td>string</td>
-<td>The tool's description, the same as <code>tool_descriptions(product)[name]</code>.</td>
+<td>The tool's description, the same as <code>wenchang.tools.tool_descriptions(product)[name]</code>.</td>
 </tr>
 <tr>
 <td><code>input</code></td>
@@ -211,7 +216,8 @@
         <span class="k">return</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
 
 
-<span class="c1"># Built once per process and shared by every request; both must be thread-safe.</span>
+<span class="c1"># Built once per process and shared by every request. InMemoryStorage is safe to share</span>
+<span class="c1"># across threads; see the Threads section before sharing a GcsStorage.</span>
 <span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
 <span class="n">resolver</span> <span class="o">=</span> <span class="n">TokenResolver</span><span class="p">()</span>
 <span class="n">policy</span> <span class="o">=</span> <span class="n">ScopePolicy</span><span class="p">({})</span>
@@ -297,7 +303,54 @@
 </code></pre></div>
 
 <h2 id="threads">Threads and async hosts<a class="headerlink" href="#threads" title="Link to this section">#</a></h2>
-<p>Calls are synchronous. Under <code>GcsStorage</code> each one blocks on one or more GCS round trips; <code>get_memory_index</code> lists every object in the caller's entities unless an <a href="storage.html#index-cache">index cache</a> serves it. If your host runs tool calls from several threads, the store and client you share must be safe to call from several threads; <code>InMemoryStorage</code> is. An async host runs each call in a worker thread, for example <code>await asyncio.to_thread(method, **arguments)</code>, so it does not block the event loop.</p>
+<p>Calls are synchronous. Under <code>GcsStorage</code> each one blocks on one or more GCS round trips; <code>get_memory_index</code> lists every object in the caller's entities unless an <a href="storage.html#index-cache">index cache</a> serves it. This section applies to the MCP paths too: the MCP adapter runs tool calls concurrently on worker threads and calls one <code>client</code> from all of them.</p>
+<h3 id="shared">What can be shared<a class="headerlink" href="#shared" title="Link to this section">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Across threads</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MemoryStore</code></td>
+<td>Safe. It sets its fields once in the constructor and never changes them. All its state lives in its storage and its index cache.</td>
+</tr>
+<tr>
+<td><code>InProcessClient</code></td>
+<td>Safe. It holds only its store.</td>
+</tr>
+<tr>
+<td><code>MemoryTools</code></td>
+<td>Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request.</td>
+</tr>
+<tr>
+<td><code>InMemoryStorage</code>, <code>InMemoryIndexCache</code></td>
+<td>Safe. Each guards its state with a lock.</td>
+</tr>
+<tr>
+<td><code>GcsStorage</code></td>
+<td>Adds no state of its own: it holds the bucket and builds a new <code>Blob</code> for every call. Every call goes through the bucket's <code>storage.Client</code>.</td>
+</tr>
+<tr>
+<td><code>google.cloud.storage.Client</code> and its <code>Bucket</code></td>
+<td>Not guaranteed. See below.</td>
+</tr>
+<tr>
+<td>Your resolver, <code>IndexCache</code> functions, <code>on_call</code>, and <code>clock</code></td>
+<td>Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The index cache's generation tokens already handle readers and writers racing on one entity, across threads and processes; your <code>get</code> and <code>set</code> need only be safe to call concurrently and linearizable per key (<a href="storage.html#cache-limits">Guarantees and limits</a>).</p>
+<p><strong><code>storage.Client</code> is not documented as thread-safe.</strong> google-cloud-storage 3.14.1 sends every request from a client through one <code>google.auth.transport.requests.AuthorizedSession</code>, a <code>requests.Session</code> the client creates on first use without a lock. Neither google-cloud-storage, google-auth, nor requests, as installed, says that one session is safe to share across threads, and wenchang's tests do not cover one client shared across threads. To stay within what is documented, give each thread its own <code>storage.Client</code>:</p>
+<ul>
+<li><strong>Direct calls.</strong> Build the <code>storage.Client</code>, bucket, <code>GcsStorage</code>, <code>MemoryStore</code>, and <code>InProcessClient</code> once per thread, for example in a <code>threading.local</code>. Give every store the same <code>IndexCache</code>, so a write on one thread invalidates the index the others read.</li>
+<li><strong>MCP.</strong> Pass as <code>client</code> a <code>TransportClient</code> whose seven methods forward to a per-thread <code>InProcessClient</code> built the same way. The protocol is only those seven methods, so a small forwarding class satisfies it.</li>
+</ul>
+<h3 id="async">Async hosts<a class="headerlink" href="#async" title="Link to this section">#</a></h3>
+<p>An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example <code>await asyncio.to_thread(method, **arguments)</code>. Call <code>bind_tools</code> in a worker thread too, <code>tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")</code>, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an <code>async def resolve</code> is never awaited, and <code>bind_tools</code> raises <code>ResolverFailureError</code> (<a href="identity.html#contract">Identity</a>).</p>
 <h2 id="on-call">Observing calls<a class="headerlink" href="#on-call" title="Link to this section">#</a></h2>
 <p><code>bind_tools(..., on_call=...)</code> delivers one <code>ToolCallRecord</code> per tool call. On this path:</p>
 <ul>
@@ -378,6 +431,10 @@
 <li><a href="#example">A complete example</a>
 </li>
 <li><a href="#threads">Threads and async hosts</a>
+<ul>
+<li><a href="#shared">What can be shared</a></li>
+<li><a href="#async">Async hosts</a></li>
+</ul>
 </li>
 <li><a href="#on-call">Observing calls</a>
 </li>

@@ -141,8 +141,9 @@ shipped code:
    restore; GDPR erasure steps; bucket soft delete and object versioning keep
    deleted bytes for their retention window; the index cache needs a finite
    `ttl` for erasure.
-3. Index cost: each session's index is capped at `index_max_bytes` (65536
-   bytes of rendered JSON by default) of the model's context, and building it
+3. Index cost: each session's index is capped at `index_max_bytes` (65536 by
+   default), measured as the UTF-8 bytes of each entry's path, stored
+   metadata keys and values, and version (not rendered JSON), and building it
    lists every object under every granted `{scope}/{entity_id}/` prefix unless
    an `IndexCache` (AIE-1293) serves it; how to configure the cache and its
    consistency requirements.
@@ -151,12 +152,16 @@ shipped code:
 5. Timeouts and retries: wenchang exposes no timeout or retry setting.
    `GcsStorage.get` retries a generation race (object replaced between its
    metadata and body reads) up to 3 times; every other call uses
-   google-cloud-storage defaults. The page states the default timeout and the
-   conditional-retry behavior (unconditional `put` is not retried;
-   `put_if_version` and `delete_if_version`, which carry generation
-   preconditions, are), each verified against `src/wenchang/storage/gcs.py`
-   and the installed google-cloud-storage at build time. Failures surface as
-   `BackendUnavailableError`.
+   google-cloud-storage defaults: a 60 s timeout per request, and retry
+   behavior that depends on the major version. On 2.x an unconditional `put`
+   is not retried; on 3.x (the locked version) every call is retried.
+   `put_if_version` and `delete_if_version` are retried on both. The page
+   gives a 2.x/3.x table, verified against `src/wenchang/storage/gcs.py` and
+   the installed library. Timeouts and unreachable backends that the storage
+   layer maps surface as `BackendUnavailableError`; an outage that outlasts
+   the retry deadline raises google.api_core's `RetryError`, which is not
+   mapped, so the agent sees an `internal` error. The page and the Status
+   limitations state this as it is today.
 5a. `metadata_from_map` requires all four keys, so an object written out of
    band (e.g. `gcloud storage cp`) without them fails reads and indexing with
    `MetadataFormatError`; the page says to write through the store or set all

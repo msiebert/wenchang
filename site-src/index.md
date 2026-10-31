@@ -283,7 +283,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 ### You provide
 
 - **Authentication.** Verifying who is calling.
-- **Authorization.** Mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call and trusts its answer.
+- **Authorization.** Mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call over MCP, or once per `bind_tools` call without MCP, and trusts its answer.
 - A GCS bucket and credentials.
 - The server process: where it runs and how clients reach it.
 - Any content filtering beyond what the prompt asks for.
@@ -313,7 +313,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 **You provide:**
 
 - Authentication: verifying who is calling.
-- Authorization: mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call and trusts its answer.
+- Authorization: mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call over MCP, or once per `bind_tools` call without MCP, and trusts its answer.
 - A GCS bucket and credentials.
 - The server process: where it runs and how clients reach it.
 - Any content filtering beyond what the prompt asks for.

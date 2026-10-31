@@ -2,6 +2,7 @@
 (AIE-1297, US8.6).
 """
 
+import ast
 import py_compile
 import subprocess
 import sys
@@ -63,6 +64,17 @@ def test_runnable_snippet_exits_zero(name: str, tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, f"{name} exited {result.returncode}:\n{result.stderr}"
+
+
+@pytest.mark.parametrize("name", ["integrate_direct.py", "ops_erase.py", "ops_restore.py"])
+def test_outcome_snippets_assert(name: str) -> None:
+    """An outcome snippet checks its result with at least one assert
+    (AIE-1297, US8.6).
+    """
+    tree = ast.parse((SNIPPETS / name).read_text(), filename=name)
+    assert any(isinstance(node, ast.Assert) for node in ast.walk(tree)), (
+        f"{name} has no assert statement"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(SKIPPED))

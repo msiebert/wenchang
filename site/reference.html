@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
+<script>(function(){var t={"concepts":"concepts.html","paths":"concepts.html#paths","scopes":"concepts.html#scopes","areas":"concepts.html#areas","names":"concepts.html#names","system":"concepts.html#system","facts":"concepts.html#facts","metadata":"concepts.html#metadata","concurrency":"concepts.html#concurrency","limits":"concepts.html#limits","file-cap":"storage.html#file-cap","embed":"integrate-existing-server.html#register","bind":"integrate-without-mcp.html#methods","limitations":"status.html#limitations"}[location.hash.slice(1)];if(t)location.replace(t)})()</script>
 </head>
 <body class="page-reference">
 <a class="skip-link" href="#main">Skip to content</a>
@@ -69,6 +70,9 @@
 <li><a href="#resource">The memory prompt resource</a>
 </li>
 <li><a href="#errors">Errors</a>
+<ul>
+<li><a href="#invalid-argument">InvalidArgumentError</a></li>
+</ul>
 </li>
 <li><a href="#configuration">Configuration</a>
 <ul>
@@ -481,6 +485,7 @@
 <li><code>ToolSchema</code>: <code>name</code>, <code>description</code>, <code>input</code>, <code>output</code>, and <code>error</code>, the last three JSON Schema draft 2020-12 dicts.</li>
 <li><code>error_schema() -&gt; dict</code>: the schema shared by every <code>render_error</code> payload.</li>
 </ul>
+<p><code>wenchang.tools.tool_descriptions(product=None) -&gt; Mapping[str, str]</code> returns each tool's description by name, in <code>TOOL_NAMES</code> order, without binding a session. With <code>product</code>, each first line names it. It is the same text as <code>ToolSchema.description</code> and <code>MemoryTools.descriptions()</code>.</p>
 <p><a href="integrate-without-mcp.html#schemas">Tool schemas</a> explains each field and how to register the tools with them.</p>
 <h2 id="resource">The memory prompt resource<a class="headerlink" href="#resource" title="Link to this section">#</a></h2>
 <p>The server exposes the assembled memory prompt as an MCP resource:</p>
@@ -623,6 +628,17 @@
 </tr>
 </tbody>
 </table></div>
+<h3 id="invalid-argument">InvalidArgumentError<a class="headerlink" href="#invalid-argument" title="Link to this section">#</a></h3>
+<p><code>wenchang.errors.InvalidArgumentError(argument, detail)</code> names the rejected argument. <code>argument</code> must be a non-empty <code>str</code> (<code>TypeError</code> or <code>ValueError</code> otherwise). The message is <code>Argument {argument} is invalid: {detail}</code>, followed by the recoverable guidance. It renders as <code>error</code>, <code>category</code> (<code>recoverable</code>), <code>message</code>, and <code>argument</code>, with no location fields:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"InvalidArgumentError"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Argument scope is invalid: scope 'project' is not available in this session; available scopes: organization, user. ..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"argument"</span><span class="p">:</span><span class="w"> </span><span class="s2">"scope"</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The tools raise it with <code>argument</code> set to one of their own parameter names: <code>scope</code>, <code>area</code>, <code>name</code>, <code>content</code>, <code>description</code>, <code>aliases</code>, <code>line</code>, <code>old_string</code>, <code>new_string</code>, <code>expected_version</code>, or <code>cursor</code>. You can raise it from your own dispatch code too, as the <a href="integrate-without-mcp.html#example">direct example</a> does for a missing or unknown argument.</p>
 <p>Notes:</p>
 <ul>
 <li>The tool layer builds each path from the caller's own grants, so over MCP an ungranted scope is reported as <code>InvalidArgumentError</code> (naming the available scopes); <code>not_granted</code> is raised by the core path check.</li>
@@ -632,7 +648,7 @@
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Link to this section">#</a></h2>
 <h3 id="identity-types">Identity types<a class="headerlink" href="#identity-types" title="Link to this section">#</a></h3>
 <p><code>wenchang.identity.Identity(grants)</code> is what a resolver returns: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Scope names and entity IDs must be valid path segments (non-empty, no <code>/</code>, no backslash, no control characters, not <code>.</code> or <code>..</code>). The role must be non-empty. <code>identity.scope_map</code> is scope name to entity ID. <code>identity.entity_id(scope)</code> and <code>identity.role(scope)</code> raise <code>KeyError</code> if the scope is not granted.</p>
-<p><code>IdentityResolver[C]</code> is a protocol with one method, <code>resolve(credentials: C) -&gt; Identity | ResolutionFailure</code>. It must not raise, and the <code>detail</code> of a <code>ResolutionFailure</code> is shown to the agent. <code>SandboxResolver(identity)</code> returns one fixed identity for any credentials, for sandboxes and tests.</p>
+<p><code>IdentityResolver[C]</code> is a protocol with one method, <code>resolve(credentials: C) -&gt; Identity | ResolutionFailure</code>. It must not raise, and the <code>detail</code> of a <code>ResolutionFailure</code> is shown to the agent. <code>resolve</code> must be a plain synchronous method: it is never awaited, so an <code>async def resolve</code> makes every call fail with <code>ResolverFailureError</code> ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with <code>bind_tools</code> alike. It runs on every tool call over MCP, and once per <code>bind_tools</code> call without MCP. <code>SandboxResolver(identity)</code> returns one fixed identity for any credentials, for sandboxes and tests.</p>
 <p><code>wenchang.scope.ScopePolicy(write_roles)</code> maps a scope to the <code>frozenset</code> of roles allowed to write it. A scope absent from the mapping is unrestricted. <code>policy.permitted_roles(scope)</code> returns the set or <code>None</code>.</p>
 <h3 id="store-options">Store options<a class="headerlink" href="#store-options" title="Link to this section">#</a></h3>
 <p><code>wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=(), max_files_per_entity=500, index_cache=None)</code>. The three size options must be positive. <code>max_files_per_entity</code> caps the non-<code>system/</code> files per entity and must be positive or <code>None</code> (no cap); see <a href="storage.html#file-cap">Files per entity</a>. <code>index_cache</code> is an optional <code>IndexCache</code>; see <a href="storage.html#index-cache">The index cache</a>. <code>scope_priority</code> entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and <code>system/</code> areas always come first. <code>clock</code> returns timezone-aware datetimes and stamps <code>last_updated</code>; pass a fixed one in tests. A write over <code>max_file_bytes</code> raises <code>OversizeWriteError</code>.</p>
@@ -690,7 +706,7 @@
 <p>Backends may raise <code>BackendUnavailableError</code> for timeouts and outages. Two ship with the library:</p>
 <ul>
 <li><strong><code>GcsStorage(bucket)</code></strong> in <code>wenchang.storage.gcs</code> takes a <code>google.cloud.storage.Bucket</code>. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.</li>
-<li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a thread-safe fake for tests and trials.</li>
+<li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a fake for tests and trials. It holds a lock, so it is safe to share across threads.</li>
 </ul>
 <p>Object keys, the stored metadata keys, timeouts, and retries are on <a href="storage.html#metadata">Storage and operations</a>.</p>
 <h3 id="operator">Operator methods<a class="headerlink" href="#operator" title="Link to this section">#</a></h3>
@@ -703,9 +719,9 @@
 <h3 id="index-cache">Index cache<a class="headerlink" href="#index-cache" title="Link to this section">#</a></h3>
 <p><code>wenchang.index_cache.IndexCache(get, set, ttl=None, key_prefix="wenchang:index:")</code>, where <code>get(key) -&gt; str | None</code> and <code>set(key, value, ttl) -&gt; None</code>. <code>InMemoryIndexCache()</code> provides both for one process. See <a href="storage.html#index-cache">The index cache</a>.</p>
 <h3 id="transport">Transport<a class="headerlink" href="#transport" title="Link to this section">#</a></h3>
-<p>The tool layer calls a <code>wenchang.transport.TransportClient</code>, a protocol that mirrors <code>MemoryStore</code>'s seven operations. <code>InProcessClient(store)</code> calls a <code>MemoryStore</code> directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.</p>
+<p>The tool layer calls a <code>wenchang.transport.TransportClient</code>, a protocol that mirrors <code>MemoryStore</code>'s seven operations. <code>InProcessClient(store)</code> calls a <code>MemoryStore</code> directly and is the only client shipped. The MCP adapter calls one client from concurrent worker threads. What is safe to share across threads is under <a href="integrate-without-mcp.html#threads">Threads</a>.</p>
 <h3 id="telemetry">Telemetry<a class="headerlink" href="#telemetry" title="Link to this section">#</a></h3>
-<p>Every entry point takes an <code>on_call</code> observer: <code>build_server</code> and <code>register_memory_tools</code> for MCP, and <code>bind_tools</code> (or <code>MemoryTools</code>) for direct calls. It receives a <code>wenchang.observer.ToolCallRecord</code> after every memory tool call. <code>wenchang.mcp</code> re-exports <code>ToolCallRecord</code>. How to use it on each path: <a href="integrate-new-server.html#on-call">new server</a>, <a href="integrate-existing-server.html#calls">existing server</a>, <a href="integrate-without-mcp.html#on-call">without MCP</a>.</p>
+<p>An <code>on_call</code> observer receives a <code>wenchang.observer.ToolCallRecord</code> (re-exported by <code>wenchang.mcp</code>) after each memory tool call. How to use it on each path: <a href="integrate-new-server.html#on-call">new server</a>, <a href="integrate-existing-server.html#calls">existing server</a>, <a href="integrate-without-mcp.html#on-call">without MCP</a>.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -747,8 +763,7 @@
 </tr>
 </tbody>
 </table></div>
-<p><code>arguments</code> and <code>result</code> are read-only deep copies, and <code>duration_s</code> uses a monotonic clock. Calls rejected during argument validation never produce a record.</p>
-<p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.</p>
+<p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.</p>
 <h3 id="conformance">Conformance suites<a class="headerlink" href="#conformance" title="Link to this section">#</a></h3>
 <p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
 <ul>
@@ -879,6 +894,9 @@
 <li><a href="#resource">The memory prompt resource</a>
 </li>
 <li><a href="#errors">Errors</a>
+<ul>
+<li><a href="#invalid-argument">InvalidArgumentError</a></li>
+</ul>
 </li>
 <li><a href="#configuration">Configuration</a>
 <ul>
