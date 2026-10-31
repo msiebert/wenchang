@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integrate: an existing mcp 2.x server</title>
+<meta name="description" content="Add the memory tools and prompt resource to an MCPServer you already run with register_memory_tools and memory_instructions.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/integrate-existing-server.html">
+<link rel="alternate" type="text/markdown" href="integrate-existing-server.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Integrate: an existing mcp 2.x server">
+<meta property="og:description" content="Add the memory tools and prompt resource to an MCPServer you already run with register_memory_tools and memory_instructions.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/integrate-existing-server.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Integrate: an existing mcp 2.x server">
+<meta name="twitter:description" content="Add the memory tools and prompt resource to an MCPServer you already run with register_memory_tools and memory_instructions.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-integrate-existing-server">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html" aria-current="page">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/integrate-existing-server.md</span> <a href="integrate-existing-server.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<nav class="subnav" aria-label="Integration paths"><ul><li><a href="integrate.html">Choose a path</a></li><li><a href="integrate-new-server.html">New MCP server</a></li><li><a href="integrate-existing-server.html" aria-current="page">Existing MCP server</a></li><li><a href="integrate-without-mcp.html">Without MCP</a></li></ul></nav>
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#register">Register the tools</a>
+</li>
+<li><a href="#prompt">The prompt</a>
+</li>
+<li><a href="#collisions">Name collisions</a>
+</li>
+<li><a href="#calls">Credentials and observing calls</a>
+</li>
+<li><a href="#next">Next</a>
+</li>
+</ul></details></nav>
+<h1 id="integrate-an-existing-mcp-2x-server">Integrate: an existing mcp 2.x server<a class="headerlink" href="#integrate-an-existing-mcp-2x-server" title="Link to this section">#</a></h1>
+<p><code>build_server</code> creates a new server. To add memory to an <code>MCPServer</code> you already run, with your own tools, auth, and middleware, call <code>wenchang.mcp.register_memory_tools(server, ...)</code>. It adds the seven memory tools and the <code>wenchang://memory-prompt</code> resource to that server.</p>
+<div class="callout callout-warn"><strong>Compatibility: mcp 2.x <code>MCPServer</code> only.</strong> The <code>mcp</code> extra installs <code>mcp&gt;=2.2,&lt;3</code>, and the adapter targets <code>mcp.server.mcpserver.MCPServer</code>. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing <code>wenchang.mcp</code> raises <code>ImportError</code>, and <code>register_memory_tools</code> raises <code>TypeError("server must be an MCPServer, not ...")</code> for any other server type, before it registers anything. For another framework, see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</div>
+
+<p>Install with the extra: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code>.</p>
+<h2 id="register">Register the tools<a class="headerlink" href="#register" title="Link to this section">#</a></h2>
+<p><code>register_memory_tools</code> takes the server, then keyword arguments: <code>prompt</code>, <code>client</code>, <code>resolver</code>, <code>policy</code>, <code>credentials_from_context</code>, <code>source</code>, and optionally <code>product</code>, <code>tool_prefix</code>, and <code>on_call</code>. They mean the same as for <a href="integrate-new-server.html#arguments"><code>build_server</code></a>, except that you pass the prompt text instead of the slots.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span><span class="p">,</span> <span class="n">MCPServer</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span><span class="p">,</span> <span class="n">memory_instructions</span><span class="p">,</span> <span class="n">register_memory_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptSlots</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"inkwell.calls"</span><span class="p">)</span>
+
+<span class="n">slots</span> <span class="o">=</span> <span class="n">PromptSlots</span><span class="p">(</span>
+    <span class="n">purpose</span><span class="o">=</span><span class="s2">"You have persistent memory of your work helping an author write a novel."</span><span class="p">,</span>
+    <span class="n">scope_guidance</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"There is one scope, user, and it is private to the author you are talking with."</span>
+    <span class="p">),</span>
+    <span class="n">seed_areas</span><span class="o">=</span><span class="s2">"- user: preferences, workflows, research</span><span class="se">\n\n</span><span class="s2">Every scope also has a `system/` area."</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">identity</span> <span class="o">=</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">credentials_from_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Over HTTP, return the raw credential and let your resolver verify it.</span>
+    <span class="c1"># ctx.headers is None on stdio.</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">headers</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"authorization"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">on_call</span><span class="p">(</span><span class="n">record</span><span class="p">:</span> <span class="n">ToolCallRecord</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Runs on worker threads after every call; keep it fast and thread-safe.</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2"> error=</span><span class="si">%s</span><span class="s2"> </span><span class="si">%.3f</span><span class="s2">s"</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">)</span>
+
+
+<span class="n">prompt</span> <span class="o">=</span> <span class="n">memory_instructions</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span>
+
+<span class="c1"># Your existing server, with your own tools and middleware.</span>
+<span class="n">server</span> <span class="o">=</span> <span class="n">MCPServer</span><span class="p">(</span><span class="s2">"hanlin-tools"</span><span class="p">,</span> <span class="n">instructions</span><span class="o">=</span><span class="n">prompt</span><span class="p">)</span>
+
+<span class="n">register_memory_tools</span><span class="p">(</span>
+    <span class="n">server</span><span class="p">,</span>
+    <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>
+    <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">())),</span>
+    <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({}),</span>
+    <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"hanlin-tools"</span><span class="p">,</span>
+    <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
+    <span class="n">tool_prefix</span><span class="o">=</span><span class="s2">"inkwell"</span><span class="p">,</span>  <span class="c1"># tools are registered as inkwell_read_file, inkwell_write_file, ...</span>
+    <span class="n">on_call</span><span class="o">=</span><span class="n">on_call</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<h2 id="prompt">The prompt<a class="headerlink" href="#prompt" title="Link to this section">#</a></h2>
+<p>The agent needs the memory prompt as well as the tools. <code>memory_instructions(slots)</code> returns it. Pass the same text as the server's <code>instructions</code> and as <code>prompt</code>; <code>prompt</code> is what the <code>wenchang://memory-prompt</code> resource serves, for clients that ignore <code>instructions</code>. If your server already has instructions, include the memory prompt in them; <a href="prompts.html#fixed">Customizing the prompts</a> shows how to append sections of your own.</p>
+<p>After registering, <code>register_memory_tools</code> checks the server's <code>instructions</code>. If they do not contain <code>prompt</code>, it logs a warning on the <code>wenchang.mcp</code> logger and registers anyway.</p>
+<h2 id="collisions">Name collisions<a class="headerlink" href="#collisions" title="Link to this section">#</a></h2>
+<p><code>MCPServer</code> only logs a duplicate tool or resource, so <code>register_memory_tools</code> checks first. If any memory tool name or the resource URI is already registered on the server, it raises <code>ValueError("cannot register memory tools: already registered on the server: ...")</code>, naming each collision, and registers nothing. Set <code>tool_prefix</code> to register the tools as <code>{tool_prefix}_read_file</code> and so on. The resource URI has no prefix, so a server holds one memory prompt resource.</p>
+<p>Any invalid argument also raises before anything is registered.</p>
+<h2 id="calls">Credentials and observing calls<a class="headerlink" href="#calls" title="Link to this section">#</a></h2>
+<p>Each tool call reads credentials with your <code>credentials_from_context</code>, resolves them, and binds that caller's tools, exactly as on a <a href="integrate-new-server.html#credentials">new server</a>. Your own auth middleware can reject a request before it reaches wenchang; whatever reaches <code>credentials_from_context</code> still goes through your resolver. Tool calls run concurrently on worker threads, so <code>client</code> must be thread-safe.</p>
+<p><code>on_call</code> behaves as on a new server: <code>tool</code> is the registered name, prefix included, <code>request_id</code> is the MCP request's ID, and the observer runs on worker threads. See <a href="integrate-new-server.html#on-call">Observing calls</a> and the <a href="reference.html#telemetry">field reference</a>.</p>
+<h2 id="next">Next<a class="headerlink" href="#next" title="Link to this section">#</a></h2>
+<ul>
+<li><a href="identity.html">Identity and multi-tenant auth</a>: the resolver behind <code>credentials_from_context</code>.</li>
+<li><a href="integrate-without-mcp.html">Integrate without MCP</a>: the same tools in another framework.</li>
+</ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="integrate-new-server.html"><small>Previous</small>New MCP server</a><a rel="next" href="integrate-without-mcp.html"><small>Next</small>Without MCP</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#register">Register the tools</a>
+</li>
+<li><a href="#prompt">The prompt</a>
+</li>
+<li><a href="#collisions">Name collisions</a>
+</li>
+<li><a href="#calls">Credentials and observing calls</a>
+</li>
+<li><a href="#next">Next</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="integrate-existing-server.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

@@ -13,7 +13,7 @@
 <p class="hero-lede">wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.</p>
 
 <pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code></pre>
-<p class="install-note">Not on PyPI yet. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="setup.html">Setup</a> covers that.</p>
+<p class="install-note">Not on PyPI. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="quickstart.html">Quickstart</a> covers that.</p>
 
 </div>
 </section>
@@ -22,13 +22,13 @@
 <!--md-->
 wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.
 
-Install (not on PyPI yet):
+Install (not on PyPI):
 
 ```
 pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
 ```
 
-The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Setup](setup.md) covers that.
+The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Quickstart](quickstart.md) covers that.
 
 <!--/md-->
 <!--html-->
@@ -159,13 +159,40 @@ Every scope also has a `system/` area. You fill it with curated content. The age
 <!--/html-->
 ## How you use it {#use}
 
-wenchang is a library. You write a short Python script that assembles a server, then point your agent's MCP client at it.
+wenchang is a library. You put its tools in front of your agent in one of three ways, all sharing the same store, identity rules, and prompt. [Choose an integration path](integrate.md) compares them.
+
+<!--html-->
+<div class="card-grid" markdown="1">
+<div class="card" markdown="1">
+
+**A new MCP server.** A short script builds a server with `build_server` and runs it over stdio or HTTP, for Claude Code or any MCP client. [New MCP server](integrate-new-server.md)
+
+</div>
+<div class="card" markdown="1">
+
+**An existing MCP server.** `register_memory_tools` adds the tools and prompt resource to an mcp 2.x `MCPServer` you already run. [Existing MCP server](integrate-existing-server.md)
+
+</div>
+<div class="card" markdown="1">
+
+**Without MCP.** `bind_tools` returns the tools as Python methods for your own framework, with JSON Schemas from `tool_schemas`. [Without MCP](integrate-without-mcp.md)
+
+</div>
+</div>
+<!--/html-->
+<!--md-->
+- **A new MCP server.** A short script builds a server with `build_server` and runs it over stdio or HTTP, for Claude Code or any MCP client. [New MCP server](integrate-new-server.md)
+- **An existing MCP server.** `register_memory_tools` adds the tools and prompt resource to an mcp 2.x `MCPServer` you already run. [Existing MCP server](integrate-existing-server.md)
+- **Without MCP.** `bind_tools` returns the tools as Python methods for your own framework, with JSON Schemas from `tool_schemas`. [Without MCP](integrate-without-mcp.md)
+<!--/md-->
+
+The quickest start is a stdio server in Claude Code:
 
 <!--html-->
 <ol class="steps" markdown="1">
 <li markdown="1">
 
-**Install it** and create a GCS bucket for memory files. [Setup](setup.md#install)
+**Install it** and create a GCS bucket for memory files. [Quickstart](quickstart.md#install)
 
 </li>
 <li markdown="1">
@@ -184,12 +211,12 @@ server = build_server(
 server.run("stdio")
 ```
 
-[Setup](setup.md#server)
+[Quickstart](quickstart.md#server)
 
 </li>
 <li markdown="1">
 
-**Register it with your MCP client.** For Claude Code, `claude mcp add memory -- python server.py`. [Setup](setup.md#client)
+**Register it with your MCP client.** For Claude Code, `claude mcp add memory -- python server.py`. [Quickstart](quickstart.md#client)
 
 </li>
 <li markdown="1">
@@ -199,13 +226,13 @@ server.run("stdio")
 </li>
 <li markdown="1">
 
-**Plug in your own auth** when more than one person uses the server. [Authorization](authorization.md)
+**Plug in your own auth** when more than one person uses the server. [Identity and multi-tenant auth](identity.md)
 
 </li>
 </ol>
 <!--/html-->
 <!--md-->
-1. **Install it** and create a GCS bucket for memory files. [Setup](setup.md#install)
+1. **Install it** and create a GCS bucket for memory files. [Quickstart](quickstart.md#install)
 2. **Write the server script.** It picks the storage, says who the caller is, and builds the MCP server:
 
     ```python
@@ -220,10 +247,10 @@ server.run("stdio")
     server.run("stdio")
     ```
 
-    [Setup](setup.md#server)
-3. **Register it with your MCP client.** For Claude Code, `claude mcp add memory -- python server.py`. [Setup](setup.md#client)
+    [Quickstart](quickstart.md#server)
+3. **Register it with your MCP client.** For Claude Code, `claude mcp add memory -- python server.py`. [Quickstart](quickstart.md#client)
 4. **Tune the prompts.** Four text slots tell the agent what your product is, which scopes exist, and which areas to start with. [Customizing the prompts](prompts.md)
-5. **Plug in your own auth** when more than one person uses the server. [Authorization](authorization.md)
+5. **Plug in your own auth** when more than one person uses the server. [Identity and multi-tenant auth](identity.md)
 <!--/md-->
 <!--html-->
 
@@ -248,7 +275,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - The memory prompt that teaches the agent how to use them.
 - The layer that writes to long-term storage (GCS), with versioned writes and size limits.
 - Enforcement of your scope rules: the `system/` area is read-only, and restricted scopes accept only the roles you name.
-- An MCP adapter, so the tools work in any MCP client.
+- An MCP adapter, so the tools work in any MCP client, and JSON Schemas for other tool frameworks.
 
 </div>
 <div class="card" markdown="1">
@@ -281,7 +308,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - The memory prompt that teaches the agent how to use them.
 - The layer that writes to long-term storage (GCS), with versioned writes and size limits.
 - Enforcement of your scope rules: the `system/` area is read-only, and restricted scopes accept only the roles you name.
-- An MCP adapter, so the tools work in any MCP client.
+- An MCP adapter, so the tools work in any MCP client, and JSON Schemas for other tool frameworks.
 
 **You provide:**
 
@@ -299,7 +326,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - Storage other than GCS, apart from an in-memory fake for tests.
 <!--/md-->
 
-Version 0.1.0, MIT license, Python 3.12 or newer. See the [reference](reference.md#limitations) for known limits.
+Version 0.1.0, MIT license, Python 3.11 or newer. See [Status and compatibility](status.md#limitations) for known limits.
 <!--html-->
 
 </section>

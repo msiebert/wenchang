@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status and compatibility</title>
+<meta name="description" content="Version, license, Python and mcp requirements, the release and versioning policy, and known limitations.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/status.html">
+<link rel="alternate" type="text/markdown" href="status.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Status and compatibility">
+<meta property="og:description" content="Version, license, Python and mcp requirements, the release and versioning policy, and known limitations.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/status.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Status and compatibility">
+<meta name="twitter:description" content="Version, license, Python and mcp requirements, the release and versioning policy, and known limitations.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-status">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html" aria-current="page">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/status.md</span> <a href="status.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#version">Version and requirements</a>
+</li>
+<li><a href="#releases">Releases and versioning</a>
+</li>
+<li><a href="#limitations">Known limitations</a>
+</li>
+</ul></details></nav>
+<h1 id="status-and-compatibility">Status and compatibility<a class="headerlink" href="#status-and-compatibility" title="Link to this section">#</a></h1>
+<h2 id="version">Version and requirements<a class="headerlink" href="#version" title="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Version</td>
+<td>0.1.0</td>
+</tr>
+<tr>
+<td>License</td>
+<td>MIT</td>
+</tr>
+<tr>
+<td>Python</td>
+<td>Python 3.11 or newer</td>
+</tr>
+<tr>
+<td>Dependencies</td>
+<td><code>google-cloud-storage&gt;=2.18</code></td>
+</tr>
+<tr>
+<td><code>mcp</code> extra</td>
+<td><code>mcp&gt;=2.2,&lt;3</code>, for <code>wenchang.mcp</code>. Targets <code>mcp.server.mcpserver.MCPServer</code> only; FastMCP and mcp 1.x servers do not work.</td>
+</tr>
+<tr>
+<td><code>testing</code> extra</td>
+<td><code>pytest&gt;=8.3</code>, for the conformance suites in <code>wenchang.testing</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>wenchang is installed from git. It is not published on PyPI. The base package works without the <code>mcp</code> extra; see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</p>
+<h2 id="releases">Releases and versioning<a class="headerlink" href="#releases" title="Link to this section">#</a></h2>
+<p>Releases are git tags named <code>vX.Y.Z</code>, each with a GitHub Release. There is no PyPI release. Changes are recorded in <a href="https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the Keep a Changelog format, and the release process is in <a href="https://github.com/msiebert/wenchang/blob/main/docs/releasing.md"><code>docs/releasing.md</code></a>.</p>
+<p>Versions follow SemVer over the public surface: the modules, functions, classes, arguments, tool names and schemas, error payloads, and stored format documented on this site.</p>
+<ul>
+<li>While the major version is 0, a breaking change bumps the minor version, and any other change bumps the patch version.</li>
+<li>A change to the shipped prompt wording is at least a minor release, because it can change what agents store.</li>
+<li>A tag is never moved once released.</li>
+</ul>
+<h2 id="limitations">Known limitations<a class="headerlink" href="#limitations" title="Link to this section">#</a></h2>
+<ul>
+<li><strong>A library, not a server.</strong> There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script or tool registration. The only server in the repository is the dev-only eval server (<code>python -m evals.server</code>), which uses in-memory storage.</li>
+<li><strong>GCS only.</strong> <code>GcsStorage</code> is the only durable backend. <code>InMemoryStorage</code> is a fake for tests and trials.</li>
+<li><strong>No remote transport.</strong> The only <code>TransportClient</code> is <code>InProcessClient</code>, which calls a <code>MemoryStore</code> in the same process. Tools and storage access always run in your process.</li>
+<li><strong>No content search.</strong> Files are found through <code>description</code> and <code>aliases</code>. The quality of that metadata is what makes recall work.</li>
+<li><strong>Not snapshots.</strong> <code>list_prefix</code> and <code>get_memory_index</code> are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear. <code>export</code> has the same property.</li>
+<li><strong>Reads are never role-restricted.</strong> A caller can read any area (including <code>system/</code>) of any scope it holds a grant for. <code>ScopePolicy</code> gates writes only.</li>
+<li><strong>Privacy is prompt-level.</strong> The prompt tells the agent to refuse financial account numbers, health diagnoses, and anything indicating the user is a minor, and to be stricter in shared scopes. No tool checks content, so a successful write does not mean the content was safe.</li>
+<li><strong>Behavior depends on the agent.</strong> Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.</li>
+<li><strong>Concurrency is the caller's concern.</strong> MCP tool calls run concurrently on worker threads, so the transport client and <code>on_call</code> must be thread-safe. Direct calls are synchronous and block on storage.</li>
+<li><strong>The file cap is soft.</strong> Concurrent creates in one entity can pass <code>max_files_per_entity</code>; see <a href="storage.html#file-cap">Files per entity</a>.</li>
+<li><strong>No timeout or retry settings.</strong> <code>GcsStorage</code> uses google-cloud-storage's defaults. A GCS outage that outlasts its retries raises an unmapped <code>RetryError</code>, which the agent sees as an <code>internal</code> error, not a <code>transient</code> one; see <a href="storage.html#retries">Timeouts and retries</a>.</li>
+</ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="walkthroughs.html"><small>Previous</small>Walkthroughs</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#version">Version and requirements</a>
+</li>
+<li><a href="#releases">Releases and versioning</a>
+</li>
+<li><a href="#limitations">Known limitations</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="status.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

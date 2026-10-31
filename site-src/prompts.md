@@ -2,7 +2,7 @@
 
 The agent behaves the way the memory prompt tells it to. wenchang ships most of that prompt and leaves four slots for you to fill in. You also choose how the tools are named and described.
 
-You can read the finished prompt in two places: it is the MCP server's `instructions`, and it is the resource `wenchang://memory-prompt`. In Python, `build_memory_prompt(slots)` returns it as markdown with `##` headings and no top-level heading, so a host can nest it in its own system prompt.
+You can read the finished prompt in two places: it is the MCP server's `instructions`, and it is the resource `wenchang://memory-prompt`. In Python, `build_memory_prompt(slots)` returns it as markdown with `##` headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. [The full prompt](#full-prompt) shows the whole text.
 
 ## The four slots {#slots}
 
@@ -60,12 +60,18 @@ You cannot edit these sections through the slots. The prompt is a plain string, 
 
 Behavior depends on the model reading the text, and small wording changes can shift it. The repository has a behavioral eval harness that runs scripted scenarios against a real agent and grades what it stored. If you rewrite or extend prompt text, run scenarios of your own against it. See `evals/` in the repository.
 
+## The full prompt {#full-prompt}
+
+This is `build_memory_prompt` with each slot shown as its `{field}` placeholder. The section headings are the ones in the table above. The same text is available as a raw file: [memory-prompt.md](memory-prompt.md).
+
+<!--include-prompt-->
+
 ## Names on the tools {#naming}
 
-Three arguments, accepted by `build_server` and `register_memory_tools`, name your deployment.
+Three arguments name your deployment. `build_server` and `register_memory_tools` take all three; without MCP, `bind_tools` takes `product` and `source`, and `tool_schemas` takes `product`.
 
 - **`product`** (optional) puts your product's name in the first line of each tool description, so each tool says whose memory it is. With `product="Inkwell"`, `append_line` begins "Add one fact line to the end of an existing Inkwell memory file." Without it, descriptions are the tools' docstrings. It must be one non-empty line.
 - **`tool_prefix`** (optional) registers the tools as `{tool_prefix}_get_memory_index`, `{tool_prefix}_read_file`, and so on. Use it if the server already has tools with those names, or if one server hosts several memories. It must be 1 to 64 letters, digits, `_` or `-`, starting and ending with a letter or digit.
 - **`source`** (required) is the surface name written to each file's `sources` metadata. It does not appear in the prompt.
 
-Next: [Authorization](authorization.md).
+Next: [Identity and multi-tenant auth](identity.md).

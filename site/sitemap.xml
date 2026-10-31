@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://msiebert.github.io/wenchang/</loc></url>
-  <url><loc>https://msiebert.github.io/wenchang/setup.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/quickstart.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/concepts.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/integrate.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/integrate-new-server.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/integrate-existing-server.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/integrate-without-mcp.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/identity.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/storage.html</loc></url>
   <url><loc>https://msiebert.github.io/wenchang/prompts.html</loc></url>
-  <url><loc>https://msiebert.github.io/wenchang/authorization.html</loc></url>
-  <url><loc>https://msiebert.github.io/wenchang/caching.html</loc></url>
-  <url><loc>https://msiebert.github.io/wenchang/operations.html</loc></url>
-  <url><loc>https://msiebert.github.io/wenchang/usage.html</loc></url>
   <url><loc>https://msiebert.github.io/wenchang/reference.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/walkthroughs.html</loc></url>
+  <url><loc>https://msiebert.github.io/wenchang/status.html</loc></url>
 </urlset>

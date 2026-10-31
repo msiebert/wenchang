@@ -12,6 +12,7 @@ filesystem of markdown files in GCS, exposed as tools.
 - `make test` — all non-integration tests (`pytest -m "not integration"`)
 - `make test-integration` — integration tests against fake-gcs-server (`make emulator-up` first)
 - `make check` — lint + typecheck + test; the definition-of-done gate
+- `uv run scripts/build_site.py` — regenerate the site after changing prompts or `site-src/`
 - `/run-evals` — live behavioral evals, in a session launched with
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude --permission-mode dontAsk --mcp-config evals/mcp.json --strict-mcp-config --allowedTools mcp__wenchang "Bash(uv run python -m evals *)" "Edit(evals/runs/**)" --settings '{"includeGitInstructions": false}'`;
   never part of `make check` (ADR 0028)

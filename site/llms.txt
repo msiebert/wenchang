@@ -1,35 +1,42 @@
 # wenchang
 
-> A memory store that AI agents write to on their own judgment. A Python library that gives an agent a virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools (over MCP or directly) with versioned writes and scope-based write rules. Version 0.1.0, MIT license, Python 3.12+.
+> A memory store that AI agents write to on their own judgment. A Python library that gives an agent a virtual filesystem of markdown files in Google Cloud Storage, exposed as seven tools (over MCP or directly) with versioned writes and scope-based write rules. Version 0.1.0, MIT license, Python 3.11+.
 
-wenchang is a library, not a service: there is no CLI, console script, or ready-made server. You write a short server script. It is installed from git; there is no PyPI release. The agent chooses what to remember and where to file it. Files are found through `description` and `aliases` metadata, and there is no content search. wenchang does not authenticate callers: you supply a resolver that maps credentials to an identity. Repository: https://github.com/msiebert/wenchang
+wenchang is a library, not a service: there is no CLI, console script, or ready-made server. You write a short server script, or register the tools with your own framework. It is installed from git; there is no PyPI release. The agent chooses what to remember and where to file it. Files are found through `description` and `aliases` metadata, and there is no content search. wenchang does not authenticate callers: you supply a resolver that maps credentials to an identity. Repository: https://github.com/msiebert/wenchang
 
 ## Instructions for AI agents
 
 To install and wire wenchang for your user:
 
-1. Confirm Python 3.12+, a GCP project, and an MCP client that can launch a stdio server (for example Claude Code).
+0. Ask which path applies: a new MCP server (follow steps 1-8 and [integrate-new-server.md](https://msiebert.github.io/wenchang/integrate-new-server.md)), an existing mcp 2.x `MCPServer` (see [integrate-existing-server.md](https://msiebert.github.io/wenchang/integrate-existing-server.md)), or no MCP, such as another tool framework or a direct model API loop (see [integrate-without-mcp.md](https://msiebert.github.io/wenchang/integrate-without-mcp.md); install the base package `pip install "wenchang @ git+https://github.com/msiebert/wenchang"`). The MCP paths need mcp 2.x `MCPServer`; FastMCP and mcp 1.x servers do not work. Steps 1-8 are the new-server path.
+1. Confirm Python 3.11+, a GCP project, and an MCP client that can launch a stdio server (for example Claude Code).
 2. Install from git: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`. The `mcp` extra installs `mcp>=2.2,<3`.
 3. Ask the user which scopes they need (for example `user`, `project`, `organization`), which are shared, and which roles may write each.
 4. Create a GCS bucket and make sure Application Default Credentials can read, create, delete, and list objects in it.
-5. Create `server.py` from the Setup page: `PromptSlots` (purpose, scope_guidance, seed_areas), `MemoryStore(GcsStorage(bucket))`, an identity resolver, a `ScopePolicy`, then `wenchang.mcp.build_server(...)` and `server.run("stdio")`. Use `InMemoryStorage` only for trials.
+5. Create `server.py` from the Quickstart page: `PromptSlots` (purpose, scope_guidance, seed_areas), `MemoryStore(GcsStorage(bucket))`, an identity resolver, a `ScopePolicy`, then `wenchang.mcp.build_server(...)` and `server.run("stdio")`. Use `InMemoryStorage` only for trials.
 6. Register it: `claude mcp add memory -e KEY=value -- /path/to/python /path/to/server.py`, or add it under `mcpServers` in `.mcp.json`.
 7. Verify the server lists seven tools: get_memory_index, read_file, list_prefix, write_file, append_line, replace_fact, delete_file (prefixed with `{tool_prefix}_` if configured). The memory prompt is the server's instructions and the resource `wenchang://memory-prompt`.
 8. When using memory: call get_memory_index first each session; pass the version you read as expected_version on every write (null creates); never write to the `system/` area; never store financial account numbers, health diagnoses, or anything indicating the user is a minor.
 
 ## Docs
 
-- [Overview](https://msiebert.github.io/wenchang/index.md): what wenchang is, how the index, tools, scopes, and areas work, and what the library does and does not provide
-- [Setup](https://msiebert.github.io/wenchang/setup.md): install, GCS bucket, a complete server script, MCP client configuration, seeding curated content
-- [Prompts](https://msiebert.github.io/wenchang/prompts.md): the four prompt slots, the fixed prompt sections, product, tool_prefix, and source
-- [Authorization](https://msiebert.github.io/wenchang/authorization.md): credentials from the request, identity resolver, scope policy, and a per-user, per-project HTTP example
-- [Caching](https://msiebert.github.io/wenchang/caching.md): an optional cache for get_memory_index (IndexCache get/set/ttl, a Redis example, invalidate_index for writers that bypass the cache, staleness and privacy limits)
-- [Purge & export](https://msiebert.github.io/wenchang/operations.md): operator-only MemoryStore.purge and export for erasing or handing over one entity (stop writers first, max_passes and PurgeIncompleteError, index cache and GCS soft-delete interactions, raw export and restore)
-- [Examples](https://msiebert.github.io/wenchang/usage.md): six scenarios from a novelist's writing assistant (recall, timeline append with a version conflict, correcting a fact, deleting a subplot, read-only house style, refusing an account number) with real tool-call JSON and memory files
-- [Reference](https://msiebert.github.io/wenchang/reference.md): path and file format, the seven tools with exact parameters and returns, configuration, error taxonomy, limitations
+- [Overview](https://msiebert.github.io/wenchang/index.md): what wenchang is, how the index, tools, scopes, and areas work, the three integration paths, and what the library does and does not provide
+- [Quickstart](https://msiebert.github.io/wenchang/quickstart.md): install, GCS bucket, a complete stdio server script, Claude Code configuration, seeding curated content, running without GCS
+- [Concepts](https://msiebert.github.io/wenchang/concepts.md): path shape, scopes, areas, names, the system/ area, fact lines, file metadata, optimistic concurrency, limits
+- [Integrate](https://msiebert.github.io/wenchang/integrate.md): choosing between a new MCP server, an existing MCP server, and no MCP
+- [Integrate: a new MCP server](https://msiebert.github.io/wenchang/integrate-new-server.md): every build_server argument, stdio and streamable HTTP, credentials_from_context, on_call
+- [Integrate: an existing mcp 2.x server](https://msiebert.github.io/wenchang/integrate-existing-server.md): register_memory_tools, memory_instructions, name collisions, the mcp 2.x compatibility requirement
+- [Integrate without MCP](https://msiebert.github.io/wenchang/integrate-without-mcp.md): bind_tools per request, tool_schemas, render_result and render_error, threads and async hosts, on_call
+- [Identity](https://msiebert.github.io/wenchang/identity.md): how credentials become scopes and entity IDs, the resolver and scope policy, a multi-tenant HTTP example, resolver conformance tests
+- [Storage](https://msiebert.github.io/wenchang/storage.md): bucket and IAM, object keys and stored metadata keys, the per-entity file cap, index cost and the index cache, timeouts and retries, purge, export, and restore
+- [Prompts](https://msiebert.github.io/wenchang/prompts.md): the four prompt slots, the fixed prompt sections, the full prompt, product, tool_prefix, and source
+- [Reference](https://msiebert.github.io/wenchang/reference.md): the seven tools with exact parameters and returns, tool schemas, the prompt resource, the error taxonomy, the Python API
+- [Walkthroughs](https://msiebert.github.io/wenchang/walkthroughs.md): six scenarios from a novelist's writing assistant (recall, timeline append with a version conflict, correcting a fact, deleting a subplot, read-only house style, refusing an account number) with real tool-call JSON and memory files
+- [Status](https://msiebert.github.io/wenchang/status.md): version, requirements, release and versioning policy, known limitations
 
 ## Optional
 
+- [Full memory prompt](https://msiebert.github.io/wenchang/memory-prompt.md): the complete prompt text with each slot as a `{field}` placeholder
 - [Full documentation in one file](https://msiebert.github.io/wenchang/llms-full.txt): all pages concatenated as Markdown
 - [Reference adopter](https://github.com/msiebert/wenchang/blob/main/evals/reference_adopter.py): a worked slots, policy, and identity configuration (a different domain from the examples here)
 - [Behavioral eval scenarios](https://github.com/msiebert/wenchang/tree/main/evals/scenarios): scripted scenarios that grade the memory prompt against a real agent

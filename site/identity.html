@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Identity and multi-tenant auth</title>
+<meta name="description" content="How a caller&#x27;s credentials become scopes, entity IDs, and roles: credentials_from_context, the resolver, Identity, ScopePolicy, and a multi-tenant HTTP example.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/identity.html">
+<link rel="alternate" type="text/markdown" href="identity.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Identity and multi-tenant auth">
+<meta property="og:description" content="How a caller&#x27;s credentials become scopes, entity IDs, and roles: credentials_from_context, the resolver, Identity, ScopePolicy, and a multi-tenant HTTP example.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/identity.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Identity and multi-tenant auth">
+<meta name="twitter:description" content="How a caller&#x27;s credentials become scopes, entity IDs, and roles: credentials_from_context, the resolver, Identity, ScopePolicy, and a multi-tenant HTTP example.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-identity">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html" aria-current="page">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/identity.md</span> <a href="identity.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#flow">How identity flows</a>
+</li>
+<li><a href="#contract">What you provide</a>
+</li>
+<li><a href="#example">A complete example</a>
+</li>
+<li><a href="#behavior">Behavior to expect</a>
+</li>
+<li><a href="#transports">Transports</a>
+</li>
+<li><a href="#testing">Test your resolver</a>
+</li>
+</ul></details></nav>
+<h1 id="identity-and-multi-tenant-auth">Identity and multi-tenant auth<a class="headerlink" href="#identity-and-multi-tenant-auth" title="Link to this section">#</a></h1>
+<p>wenchang does not authenticate anyone. You decide who the caller is. wenchang takes your answer and enforces it: the caller can only reach the scopes and entities you grant, and can only write the scopes your policy allows.</p>
+<p>In the legend, Wenchang's two attendants are Tianlong, who cannot hear, and Diya, who cannot speak. That way no secret gets out. A resolver is the same arrangement in Python.</p>
+<h2 id="flow">How identity flows<a class="headerlink" href="#flow" title="Link to this section">#</a></h2>
+<p>Every tool call goes through the same chain, on every integration path:</p>
+<div class="highlight"><pre><span></span><code>credentials          raw, untrusted data from the request
+   |  credentials_from_context(ctx)    (MCP: runs on every tool call)
+   |  or your code passes them         (direct: bind_tools(..., credentials, ...))
+   v
+resolver.resolve(credentials)          verifies them; returns Identity or ResolutionFailure
+   v
+Identity                               scope -&gt; ScopeGrant(entity_id, role)
+   v
+path                                   {scope}/{entity_id}/{area}/{name}.md, from the grant
+   v
+ScopePolicy                            may this role write this scope?
+</code></pre></div>
+
+<p>The agent passes only <code>scope</code>, <code>area</code>, and <code>name</code>. The entity ID always comes from the caller's grant, so a caller cannot name another tenant's path. Reads need only a grant; writes also need a role the policy allows.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>What it owns</th>
+<th>In an org, project, and user deployment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Credentials</td>
+<td>Whatever the request carries. Never trusted on their own.</td>
+<td>A bearer token, plus an <code>X-Project-Id</code> header naming the open project.</td>
+</tr>
+<tr>
+<td><code>credentials_from_context</code> (MCP) or the caller (direct)</td>
+<td>Getting credentials out of the request. No verification.</td>
+<td>Reads the <code>Authorization</code> and <code>X-Project-Id</code> headers.</td>
+</tr>
+<tr>
+<td><code>IdentityResolver</code></td>
+<td>Verifying credentials and deciding the grants. Must not raise.</td>
+<td>Verifies the token with your identity provider, then checks project membership in your database.</td>
+</tr>
+<tr>
+<td><code>Identity</code></td>
+<td>One <code>ScopeGrant(entity_id, role)</code> per scope the caller may use.</td>
+<td><code>user</code>: the user's ID, role <code>owner</code>. <code>project</code>: the project's ID, the user's role on it. <code>organization</code>: the org's ID, <code>member</code> or <code>admin</code>.</td>
+</tr>
+<tr>
+<td>Path</td>
+<td>Where a file lives, built from the grant.</td>
+<td><code>user/u-tianlong/...</code>, <code>project/p-ninth-examination/...</code>, <code>organization/o-hanlin-press/...</code>.</td>
+</tr>
+<tr>
+<td><code>ScopePolicy</code></td>
+<td>Which roles may write each scope. Unlisted scopes are open to any grant.</td>
+<td><code>organization</code> writable by <code>admin</code> and <code>owner</code> only.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="contract">What you provide<a class="headerlink" href="#contract" title="Link to this section">#</a></h2>
+<p>Three pieces plug in.</p>
+<ol>
+<li><strong><code>credentials_from_context(ctx)</code></strong> reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, <code>ctx.headers</code> holds the request headers. On stdio it is <code>None</code>, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to <code>bind_tools</code> yourself.</li>
+<li><strong>A resolver</strong> with one method, <code>resolve(credentials) -&gt; Identity | ResolutionFailure</code>. It verifies the credentials and returns an <code>Identity</code>: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Roles are your own words (<code>owner</code>, <code>member</code>, <code>admin</code>).</li>
+<li><strong>A <code>ScopePolicy</code></strong> mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The <code>system/</code> area is read-only in every scope regardless.</li>
+</ol>
+<p>Under MCP, every tool call runs all three. Without MCP, the resolver runs once per <code>bind_tools</code> call, which is why you <a href="integrate-without-mcp.html#per-request">bind per request</a>. The agent never sees credentials and never passes an entity ID. It passes <code>scope</code>, <code>area</code>, and <code>name</code>, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.</p>
+<h2 id="example">A complete example<a class="headerlink" href="#example" title="Link to this section">#</a></h2>
+<p>The example is a novelist's assistant served over HTTP to an author (Tianlong), an editor (Diya), and the press's editor-in-chief (Kuixing). Each request carries a bearer token and, optionally, a project header. The server has three scopes:</p>
+<ul>
+<li><code>user</code>: the caller's own ID from the verified token.</li>
+<li><code>project</code>: the manuscript named in <code>X-Project-Id</code>, if the caller is a member of it. Tianlong is its <code>author</code> and Diya its <code>editor</code>. A request with no project header gets no <code>project</code> scope, which is what Kuixing's requests look like.</li>
+<li><code>organization</code>: the caller's publisher, Hanlin Press, writable only by admins and owners. Kuixing is an <code>admin</code>. Tianlong and Diya are <code>member</code>s and can read it but not write it.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">google.cloud</span><span class="w"> </span><span class="kn">import</span> <span class="n">storage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">ResolutionFailure</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_server</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptSlots</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.gcs</span><span class="w"> </span><span class="kn">import</span> <span class="n">GcsStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Claims</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""What your identity provider says about a verified token."""</span>
+
+    <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">org_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">org_role</span><span class="p">:</span> <span class="nb">str</span>  <span class="c1"># "member" or "admin"</span>
+
+
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Credentials</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""What the request carries. Both fields are untrusted until the resolver checks them."""</span>
+
+    <span class="n">token</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">project_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MembershipResolver</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Turns a request's credentials into the caller's grants. Must not raise."""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">verify_token</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">],</span> <span class="n">Claims</span> <span class="o">|</span> <span class="kc">None</span><span class="p">],</span>
+        <span class="n">project_role</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">],</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_verify_token</span> <span class="o">=</span> <span class="n">verify_token</span>  <span class="c1"># your IdP or session store</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_project_role</span> <span class="o">=</span> <span class="n">project_role</span>  <span class="c1"># your membership database</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">credentials</span><span class="p">:</span> <span class="n">Credentials</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Identity</span> <span class="o">|</span> <span class="n">ResolutionFailure</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">credentials</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ResolutionFailure</span><span class="p">(</span><span class="s2">"Missing bearer token."</span><span class="p">)</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_verify_token</span><span class="p">(</span><span class="n">credentials</span><span class="o">.</span><span class="n">token</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">claims</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ResolutionFailure</span><span class="p">(</span><span class="s2">"Invalid or expired token."</span><span class="p">)</span>
+        <span class="n">grants</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">claims</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">),</span>
+            <span class="s2">"organization"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">claims</span><span class="o">.</span><span class="n">org_id</span><span class="p">,</span> <span class="n">claims</span><span class="o">.</span><span class="n">org_role</span><span class="p">),</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="n">credentials</span><span class="o">.</span><span class="n">project_id</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># The project comes from a header, so check the user belongs to it.</span>
+            <span class="n">role</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_project_role</span><span class="p">(</span><span class="n">claims</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">credentials</span><span class="o">.</span><span class="n">project_id</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">role</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">ResolutionFailure</span><span class="p">(</span><span class="s2">"Not a member of the requested project."</span><span class="p">)</span>
+            <span class="n">grants</span><span class="p">[</span><span class="s2">"project"</span><span class="p">]</span> <span class="o">=</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">credentials</span><span class="o">.</span><span class="n">project_id</span><span class="p">,</span> <span class="n">role</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="n">grants</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">credentials_from_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Credentials</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">headers</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">headers</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"authorization"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">auth</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">"Bearer "</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">Credentials</span><span class="p">(</span><span class="n">token</span><span class="o">=</span><span class="n">auth</span><span class="o">.</span><span class="n">removeprefix</span><span class="p">(</span><span class="s2">"Bearer "</span><span class="p">),</span> <span class="n">project_id</span><span class="o">=</span><span class="n">headers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"x-project-id"</span><span class="p">))</span>
+
+
+<span class="c1"># Stand-ins so the file runs; replace both with calls to your own systems.</span>
+<span class="n">TOKENS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"tok-tianlong"</span><span class="p">:</span> <span class="n">Claims</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"o-hanlin-press"</span><span class="p">,</span> <span class="s2">"member"</span><span class="p">),</span>  <span class="c1"># author</span>
+    <span class="s2">"tok-diya"</span><span class="p">:</span> <span class="n">Claims</span><span class="p">(</span><span class="s2">"u-diya"</span><span class="p">,</span> <span class="s2">"o-hanlin-press"</span><span class="p">,</span> <span class="s2">"member"</span><span class="p">),</span>  <span class="c1"># editor</span>
+    <span class="s2">"tok-kuixing"</span><span class="p">:</span> <span class="n">Claims</span><span class="p">(</span><span class="s2">"u-kuixing"</span><span class="p">,</span> <span class="s2">"o-hanlin-press"</span><span class="p">,</span> <span class="s2">"admin"</span><span class="p">),</span>  <span class="c1"># editor-in-chief</span>
+<span class="p">}</span>
+<span class="n">PROJECT_ROLES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"p-ninth-examination"</span><span class="p">):</span> <span class="s2">"author"</span><span class="p">,</span>
+    <span class="p">(</span><span class="s2">"u-diya"</span><span class="p">,</span> <span class="s2">"p-ninth-examination"</span><span class="p">):</span> <span class="s2">"editor"</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">verify_token</span><span class="p">(</span><span class="n">token</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Claims</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">TOKENS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">project_role</span><span class="p">(</span><span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">project_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">PROJECT_ROLES</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">user_id</span><span class="p">,</span> <span class="n">project_id</span><span class="p">))</span>
+
+
+<span class="c1"># Only admins and owners may write the organization scope.</span>
+<span class="n">policy</span> <span class="o">=</span> <span class="n">ScopePolicy</span><span class="p">({</span><span class="s2">"organization"</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">"admin"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">})})</span>
+
+<span class="n">bucket</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">"my-gcp-project"</span><span class="p">)</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_BUCKET"</span><span class="p">])</span>
+
+<span class="n">server</span> <span class="o">=</span> <span class="n">build_server</span><span class="p">(</span>
+    <span class="n">slots</span><span class="o">=</span><span class="n">PromptSlots</span><span class="p">(</span>
+        <span class="n">purpose</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"You have persistent memory of your work helping an author write a novel: reference "</span>
+            <span class="s2">"it and save to it with these tools whenever you work on a manuscript."</span>
+        <span class="p">),</span>
+        <span class="n">scope_guidance</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"There are three scopes. `user` is private to the person you are talking with. "</span>
+            <span class="s2">"`project` is the manuscript, shared by its author, co-author, and editor; any of "</span>
+            <span class="s2">"them may write it. `organization` is Hanlin Press, shared by every author and editor "</span>
+            <span class="s2">"there; only editors-in-chief may write it. Writes to `user` and `project` need no "</span>
+            <span class="s2">"ask. If a new fact contradicts one stored in a shared scope, show the stored fact "</span>
+            <span class="s2">"and ask which to keep. If no project is open, you have no `project` scope."</span>
+        <span class="p">),</span>
+        <span class="n">seed_areas</span><span class="o">=</span><span class="p">(</span>
+            <span class="s2">"- user: preferences, workflows</span><span class="se">\n</span><span class="s2">"</span>
+            <span class="s2">"- project: characters, plot, timeline, style</span><span class="se">\n</span><span class="s2">"</span>
+            <span class="s2">"- organization: conventions</span><span class="se">\n\n</span><span class="s2">"</span>
+            <span class="s2">"Every scope also has a `system/` area."</span>
+        <span class="p">),</span>
+    <span class="p">),</span>
+    <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span>
+        <span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">),</span> <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"project"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">))</span>
+    <span class="p">),</span>
+    <span class="n">resolver</span><span class="o">=</span><span class="n">MembershipResolver</span><span class="p">(</span><span class="n">verify_token</span><span class="p">,</span> <span class="n">project_role</span><span class="p">),</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">policy</span><span class="p">,</span>
+    <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-web"</span><span class="p">,</span>
+    <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">server</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">"streamable-http"</span><span class="p">,</span> <span class="n">host</span><span class="o">=</span><span class="s2">"0.0.0.0"</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>  <span class="c1"># behind your TLS proxy</span>
+</code></pre></div>
+
+<p>Points to notice:</p>
+<ul>
+<li><strong>The user ID comes from the token, never from a header.</strong> The project does come from a header, so the resolver checks membership before granting it. Treat every header as a request, not a fact.</li>
+<li><strong><code>verify_token</code> and <code>project_role</code> are yours.</strong> They stand for your identity provider or session store and your membership database. The stubs only make the file run.</li>
+<li><strong>The resolver does not raise.</strong> A bad credential is a <code>ResolutionFailure</code>. The detail is shown to the agent, so never put a token or secret in it. If the resolver raises anyway, or <code>credentials_from_context</code> raises, the call fails with a permanent "memory unavailable" error that names only the exception type.</li>
+<li><strong>Under MCP the resolver runs on every tool call.</strong> Cache inside it if verification is expensive, and expire cache entries with the token.</li>
+<li><strong>Entity IDs are path segments.</strong> They must be non-empty and must not contain <code>/</code>, a backslash, or control characters. Use stable IDs. If a user's ID changes, their old files are still under the old ID.</li>
+</ul>
+<h2 id="behavior">Behavior to expect<a class="headerlink" href="#behavior" title="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Resolver returns <code>ResolutionFailure</code></td>
+<td>Permanent error carrying your detail. No memory for that call.</td>
+</tr>
+<tr>
+<td>Agent names a scope the caller has no grant for</td>
+<td><code>InvalidArgumentError</code> listing the scopes that are available.</td>
+</tr>
+<tr>
+<td>Tianlong (a <code>member</code>) writes <code>organization</code></td>
+<td><code>RestrictedScopeError</code>, reason <code>role_required</code>, with the permitted roles.</td>
+</tr>
+<tr>
+<td>Anyone writes <code>system/</code></td>
+<td><code>RestrictedScopeError</code>, reason <code>system_read_only</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<div class="callout callout-warn"><strong>Reads are not restricted by role.</strong> A caller can read every area, including <code>system/</code>, of every scope it holds a grant for. <code>ScopePolicy</code> gates writes only. If a scope should not be readable by some people, do not grant it to them.</div>
+
+<p>The prompt also has to match the policy. If only admins can write <code>organization</code>, say that in <code>scope_guidance</code>, or the agent will try and fail. See <a href="prompts.html#scope-guidance">Customizing the prompts</a>.</p>
+<h2 id="transports">Transports<a class="headerlink" href="#transports" title="Link to this section">#</a></h2>
+<p>The example serves streamable HTTP, where each request carries its own credentials. On stdio, one process serves one session, so credentials come from the process environment. <a href="integrate-new-server.html#transports">Transports</a> covers both. To add the tools to a server you already run, with your own auth in front, see <a href="integrate-existing-server.html">Integrate: an existing mcp 2.x server</a>.</p>
+<h2 id="testing">Test your resolver<a class="headerlink" href="#testing" title="Link to this section">#</a></h2>
+<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"</code> adds pytest mixins in <code>wenchang.testing</code>. Subclass <code>ResolverConformance</code> and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an <code>Identity</code>, invalid ones give a <code>ResolutionFailure</code>, results are consistent, roles are known, and writes follow your policy. Details are in the <a href="reference.html#conformance">reference</a>.</p>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="integrate-without-mcp.html"><small>Previous</small>Without MCP</a><a rel="next" href="storage.html"><small>Next</small>Storage</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#flow">How identity flows</a>
+</li>
+<li><a href="#contract">What you provide</a>
+</li>
+<li><a href="#example">A complete example</a>
+</li>
+<li><a href="#behavior">Behavior to expect</a>
+</li>
+<li><a href="#transports">Transports</a>
+</li>
+<li><a href="#testing">Test your resolver</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="identity.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

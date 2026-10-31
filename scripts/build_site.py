@@ -8,7 +8,8 @@ site/ is generated output, committed as-is and served by GitHub Pages. Edit
 site-src/ (one Markdown source per page, style.css, site.js,
 favicon.svg, seal.svg, lattice.svg, snippets/*.py) or this script, then regenerate with
 `uv run scripts/build_site.py`. The files in site-src/snippets/ are the Python
-examples embedded in the pages.
+examples embedded in the pages. site/memory-prompt.md is generated from
+wenchang.prompts, so regenerate after changing the prompt too.
 """
 
 # ruff: noqa: E501
@@ -17,6 +18,7 @@ import difflib
 import html
 import json
 import re
+import sys
 from pathlib import Path
 
 import markdown
@@ -40,56 +42,104 @@ PAGES = [
         "toc": False,
     },
     {
-        "slug": "setup",
-        "nav": "Setup",
-        "title": "Set up the wenchang MCP server",
-        "description": "Install wenchang, create a GCS bucket, write a server script, register it with Claude Code or another MCP client, and seed curated content.",
+        "slug": "quickstart",
+        "nav": "Quickstart",
+        "title": "Quickstart: a memory MCP server in Claude Code",
+        "description": "Install wenchang, create a GCS bucket, write a stdio MCP server script, register it with Claude Code, and seed curated content.",
+        "toc": True,
+    },
+    {
+        "slug": "concepts",
+        "nav": "Concepts",
+        "title": "Concepts: paths, scopes, files, versions, limits",
+        "description": "How wenchang addresses memory files: path shape, scopes, areas, names, the system/ area, fact lines, file metadata, optimistic concurrency, and limits.",
+        "toc": True,
+    },
+    {
+        "slug": "integrate",
+        "nav": "Integrate",
+        "subnav": "Choose a path",
+        "title": "Choose an integration path",
+        "description": "Three ways to give an agent wenchang memory: a new MCP server, an existing mcp 2.x server, or your own tool framework without MCP.",
+        "toc": False,
+    },
+    {
+        "slug": "integrate-new-server",
+        "nav": "New MCP server",
+        "parent": "integrate",
+        "title": "Integrate: a new MCP server",
+        "description": "build_server arguments, stdio and streamable HTTP, credentials_from_context, product, tool_prefix, source, and on_call.",
+        "toc": True,
+    },
+    {
+        "slug": "integrate-existing-server",
+        "nav": "Existing MCP server",
+        "parent": "integrate",
+        "title": "Integrate: an existing mcp 2.x server",
+        "description": "Add the memory tools and prompt resource to an MCPServer you already run with register_memory_tools and memory_instructions.",
+        "toc": True,
+    },
+    {
+        "slug": "integrate-without-mcp",
+        "nav": "Without MCP",
+        "parent": "integrate",
+        "title": "Integrate without MCP",
+        "description": "Call the memory tools as Python methods from your own tool framework: bind_tools per request, tool_schemas, render_result and render_error, threading, and on_call.",
+        "toc": True,
+    },
+    {
+        "slug": "identity",
+        "nav": "Identity",
+        "title": "Identity and multi-tenant auth",
+        "description": "How a caller's credentials become scopes, entity IDs, and roles: credentials_from_context, the resolver, Identity, ScopePolicy, and a multi-tenant HTTP example.",
+        "toc": True,
+    },
+    {
+        "slug": "storage",
+        "nav": "Storage",
+        "title": "Storage and operations",
+        "description": "Bucket and IAM setup, object keys and metadata, the per-entity file cap, index cost and the index cache, timeouts and retries, and purging and exporting an entity.",
         "toc": True,
     },
     {
         "slug": "prompts",
         "nav": "Prompts",
-        "title": "Customizing the wenchang prompts",
-        "description": "The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.",
-        "toc": True,
-    },
-    {
-        "slug": "authorization",
-        "nav": "Authorization",
-        "title": "Authorization in wenchang",
-        "description": "Plug in your own authentication: credentials from the request, an identity resolver, and a scope policy, with a per-user and per-project example over HTTP.",
-        "toc": True,
-    },
-    {
-        "slug": "caching",
-        "nav": "Caching",
-        "title": "Caching the wenchang memory index",
-        "description": "An optional adopter-supplied cache for get_memory_index: the IndexCache get and set contract, a Redis example, invalidate_index for out-of-band writers, failure handling, and the staleness and privacy limits.",
-        "toc": True,
-    },
-    {
-        "slug": "operations",
-        "nav": "Purge & export",
-        "title": "Purging and exporting a wenchang entity",
-        "description": "Operator-only MemoryStore.purge and export: erasing everything stored for one entity, the purge guarantee and PurgeIncompleteError, index cache and GCS soft-delete interactions, and raw export and restore.",
-        "toc": True,
-    },
-    {
-        "slug": "usage",
-        "nav": "Examples",
-        "title": "Examples: wenchang tool calls and memory files",
-        "description": "Six walkthroughs of a novelist's writing assistant, with real tool calls and memory files: recall across sessions, a timeline append and an editing conflict, correcting a detail, cutting a subplot, house style from the system area, and refusing an account number.",
+        "title": "Customizing the prompts",
+        "description": "The four prompt slots, the fixed prompt sections, the full prompt text, and the product, tool_prefix, and source settings.",
         "toc": True,
     },
     {
         "slug": "reference",
         "nav": "Reference",
-        "title": "Reference: wenchang tools, file format, configuration, and errors",
-        "description": "The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.",
+        "title": "Tool and error reference",
+        "description": "The seven memory tools with exact parameters and returns, tool schemas, the prompt resource, the error taxonomy, and the Python API.",
+        "toc": True,
+    },
+    {
+        "slug": "walkthroughs",
+        "nav": "Walkthroughs",
+        "title": "Walkthroughs",
+        "description": "Six walkthroughs of a novelist's writing assistant, with real tool calls and memory files: recall across sessions, a timeline append and an editing conflict, correcting a detail, cutting a subplot, house style from the system area, and refusing an account number.",
+        "toc": True,
+    },
+    {
+        "slug": "status",
+        "nav": "Status",
+        "title": "Status and compatibility",
+        "description": "Version, license, Python and mcp requirements, the release and versioning policy, and known limitations.",
         "toc": True,
     },
 ]
 SLUGS = [p["slug"] for p in PAGES]
+TOP = [p for p in PAGES if "parent" not in p]
+# Old slugs kept as redirect stubs to the page that replaced them.
+REDIRECTS = {
+    "setup": "quickstart",
+    "authorization": "identity",
+    "usage": "walkthroughs",
+    "caching": "storage",
+    "operations": "storage",
+}
 ASSETS = ("style.css", "site.js", "favicon.svg", "seal.svg", "lattice.svg")
 
 HANZI_FONT = "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap"
@@ -113,7 +163,33 @@ def select(text: str, keep: str) -> str:
     return text
 
 
+def memory_prompt() -> str:
+    """The memory prompt with each slot shown as its `{field}` placeholder."""
+    # The PEP 723 environment does not install wenchang, so import it from src/
+    # at call time; wenchang.prompts needs only the standard library.
+    sys.path.insert(0, str(ROOT / "src"))
+    from wenchang.prompts import PromptSlots, build_memory_prompt
+
+    slots = PromptSlots(
+        purpose="{purpose}",
+        scope_guidance="{scope_guidance}",
+        seed_areas="{seed_areas}",
+        systems_of_record="{systems_of_record}",
+    )
+    return build_memory_prompt(slots)
+
+
+def fenced(text: str, lang: str) -> str:
+    """A fenced block one backtick longer than the longest backtick run in `text`."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}{lang}\n{text.rstrip(chr(10))}\n{fence}"
+
+
 def includes(text: str) -> str:
+    if "<!--include-prompt-->" in text:
+        text = text.replace("<!--include-prompt-->", fenced(memory_prompt(), "text"))
+
     def code(m: re.Match[str]) -> str:
         lang, name = m.group(1), m.group(2)
         lines = (SNIPS / name).read_text().rstrip("\n").split("\n")
@@ -133,8 +209,13 @@ def md_twin(slug: str) -> str:
     text = includes(text)
     text = re.sub(r"[ \t]*\{#[\w-]+\}[ \t]*$", "", text, flags=re.M)
     text = re.sub(r"^\{: [^}]*\}\n", "", text, flags=re.M)
-    parts = re.split(r"(```.*?```)", text, flags=re.S)
-    text = "".join(p if p.startswith("```") else re.sub(r"\n{3,}", "\n\n", p) for p in parts)
+    # Collapse blank-line runs outside fenced blocks only.
+    text = re.sub(
+        r"^[ \t]*(`{3,}).*?^[ \t]*\1[ \t]*$|\n{3,}",
+        lambda m: m.group(0) if m.group(1) else "\n\n",
+        text,
+        flags=re.S | re.M,
+    )
     text = text.strip() + "\n"
     url = BASE if slug == "index" else f"{BASE}{slug}.html"
     text += f"\n---\n\nHTML version: <{url}>\n"
@@ -390,7 +471,7 @@ def render_html_body(slug: str) -> tuple[str, list[dict]]:
     text = select((SRC / f"{slug}.md").read_text(), "html")
     text = includes(text)
     stash: dict[str, str] = {}
-    if slug == "usage":
+    if slug == "walkthroughs":
         text, stash = stash_blocks(text)
     for s in SLUGS:
         text = re.sub(
@@ -410,7 +491,7 @@ def render_html_body(slug: str) -> tuple[str, list[dict]]:
     body = md.convert(text)
     for key, rendered in stash.items():
         body = body.replace(f"<p>{key}</p>", rendered)
-    if slug == "usage":
+    if slug == "walkthroughs":
         body = story_classes(body)
     if slug == "reference":
         body = tool_cards(body)
@@ -463,17 +544,36 @@ def page_href(slug: str) -> str:
     return "index.html" if slug == "index" else f"{slug}.html"
 
 
+def page_url(slug: str) -> str:
+    return BASE if slug == "index" else f"{BASE}{slug}.html"
+
+
+def subnav_html(slug: str, parent: str) -> str:
+    """Links to a section's landing page and its children, marking the current one."""
+    items = []
+    for p in PAGES:
+        if p["slug"] != parent and p.get("parent") != parent:
+            continue
+        cur = ' aria-current="page"' if p["slug"] == slug else ""
+        label = p.get("subnav", p["nav"])
+        items.append(f'<li><a href="{page_href(p["slug"])}"{cur}>{label}</a></li>')
+    return f'<nav class="subnav" aria-label="Integration paths"><ul>{"".join(items)}</ul></nav>'
+
+
 def page_html(page: dict, body: str, tokens: list[dict]) -> str:
     slug = page["slug"]
-    url = BASE if slug == "index" else f"{BASE}{slug}.html"
+    url = page_url(slug)
     desc = html.escape(page["description"], quote=True)
     title = html.escape(page["title"])
+    section = page.get("parent", slug)
     nav = []
-    for p in PAGES:
+    for p in TOP:
         href = page_href(p["slug"])
-        cur = ' aria-current="page"' if p["slug"] == slug else ""
+        cur = ' aria-current="page"' if p["slug"] == section else ""
         nav.append(f'<li><a href="{href}"{cur}>{p["nav"]}</a></li>')
     nav.append(f'<li><a href="{REPO}">GitHub</a></li>')
+    has_children = any(p.get("parent") == section for p in PAGES)
+    subnav = subnav_html(slug, section) if has_children else ""
     toc = ""
     inline_toc = ""
     if page["toc"] and tokens:
@@ -542,6 +642,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 <div class="{page_cls}">
 <main id="main" class="content">
 <p class="md-link"><span class="path">wenchang/{md_href}</span> <a href="{md_href}" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+{subnav}
 {inline_toc}
 {body}
 {page_nav}
@@ -568,11 +669,11 @@ def page_404() -> str:
     def url(p: dict) -> str:
         return "/wenchang/" + ("" if p["slug"] == "index" else page_href(p["slug"]))
 
-    nav404 = "\n".join(f'<li><a href="{url(p)}">{p["nav"]}</a></li>' for p in PAGES)
+    nav404 = "\n".join(f'<li><a href="{url(p)}">{p["nav"]}</a></li>' for p in TOP)
     list404 = "\n".join(
         '<li><span class="gutter" aria-hidden="true"></span><span class="fact">'
         f'<a href="{url(p)}">{p["nav"]}</a></span></li>'
-        for p in PAGES
+        for p in TOP
     )
     # Absolute paths: GitHub Pages serves this file for any missing URL depth.
     return f"""<!doctype html>
@@ -634,6 +735,53 @@ def page_404() -> str:
 """
 
 
+def redirect_html(old: str, new: str) -> str:
+    target = page_href(new)
+    title = html.escape(next(p["title"] for p in PAGES if p["slug"] == new))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moved: {title}</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="{page_url(new)}">
+<meta http-equiv="refresh" content="0; url={target}">
+<script>location.replace("{target}" + location.hash)</script>
+</head>
+<body>
+<p>This page moved to <a href="{target}">{title}</a>.</p>
+</body>
+</html>
+"""
+
+
+def redirect_md(new: str) -> str:
+    title = next(p["title"] for p in PAGES if p["slug"] == new)
+    return f"This page moved to [{title}]({BASE}{new}.md).\n"
+
+
+def sitemap_xml() -> str:
+    urls = "".join(f"  <url><loc>{page_url(p['slug'])}</loc></url>\n" for p in PAGES)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{urls}</urlset>\n"
+    )
+
+
+def remove_stale() -> None:
+    """Delete generated pages that no longer correspond to a page, stub, or prompt."""
+    keep_html = {*SLUGS, *REDIRECTS, "404"}
+    keep_md = {*SLUGS, *REDIRECTS, "memory-prompt"}
+    for path in OUT.glob("*.html"):
+        if path.stem not in keep_html:
+            path.unlink()
+    for path in OUT.glob("*.md"):
+        if path.stem not in keep_md:
+            path.unlink()
+
+
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     twins = {}
@@ -643,18 +791,25 @@ def main() -> None:
         (OUT / f"{slug}.html").write_text(page_html(page, body, tokens))
         twins[slug] = md_twin(slug)
         (OUT / f"{slug}.md").write_text(twins[slug])
+    for old, new in REDIRECTS.items():
+        (OUT / f"{old}.html").write_text(redirect_html(old, new))
+        (OUT / f"{old}.md").write_text(redirect_md(new))
+    (OUT / "memory-prompt.md").write_text(memory_prompt())
+    names = ", ".join(p["nav"] for p in PAGES)
     full = [
         "# wenchang: full documentation\n",
-        "> Persistent, self-organizing memory for AI agents. This file concatenates the pages of https://msiebert.github.io/wenchang/ (overview, setup, prompts, authorization, caching, purge & export, examples, reference) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
+        f"> Persistent, self-organizing memory for AI agents. This file concatenates the pages of {BASE} ({names}) as Markdown. Page boundaries are marked with `<!-- page: NAME -->`.\n",
     ]
     for page in PAGES:
         full.append(f"\n<!-- page: {page['slug']}.md -->\n")
         full.append(twins[page["slug"]])
     (OUT / "llms-full.txt").write_text("\n".join(full))
+    (OUT / "sitemap.xml").write_text(sitemap_xml())
     (OUT / "404.html").write_text(page_404())
     for name in ASSETS:
         (OUT / name).write_bytes((SRC / name).read_bytes())
-    print("generated", [p["slug"] for p in PAGES])
+    remove_stale()
+    print("generated", SLUGS, "redirects", list(REDIRECTS))
 
 
 if __name__ == "__main__":
