@@ -2273,6 +2273,8 @@ An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported
 | `request_id` | The MCP request's ID, for correlating records that arrive in completion order. | `None`. |
 | `duration_s` | Wall time of the wrapper (credentials, binding, the tool, rendering). | Wall time of the tool method only. |
 
+`arguments` and `result` are read-only mappings (`MappingProxyType`) built from deep copies, so an observer can't change what the tool or client sees.
+
 `on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.
 
 ### Conformance suites
