@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quickstart: a memory MCP server in Claude Code</title>
+<meta name="description" content="Install wenchang, create a GCS bucket, write a stdio MCP server script, register it with Claude Code, and seed curated content.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/quickstart.html">
+<link rel="alternate" type="text/markdown" href="quickstart.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Quickstart: a memory MCP server in Claude Code">
+<meta property="og:description" content="Install wenchang, create a GCS bucket, write a stdio MCP server script, register it with Claude Code, and seed curated content.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/quickstart.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Quickstart: a memory MCP server in Claude Code">
+<meta name="twitter:description" content="Install wenchang, create a GCS bucket, write a stdio MCP server script, register it with Claude Code, and seed curated content.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-quickstart">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html" aria-current="page">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/quickstart.md</span> <a href="quickstart.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#needs">What you need</a>
+</li>
+<li><a href="#install">1. Install</a>
+</li>
+<li><a href="#bucket">2. Create the bucket</a>
+</li>
+<li><a href="#server">3. Write the server</a>
+</li>
+<li><a href="#client">4. Register it with your client</a>
+</li>
+<li><a href="#try">5. Try it</a>
+</li>
+<li><a href="#seed">Seed curated content</a>
+</li>
+<li><a href="#local">Run it without GCS</a>
+</li>
+<li><a href="#next">Next</a>
+</li>
+</ul></details></nav>
+<h1 id="quickstart">Quickstart<a class="headerlink" href="#quickstart" title="Link to this section">#</a></h1>
+<p>This page takes you from nothing to a stdio MCP server that stores memory in GCS and works in Claude Code. The setup is for one developer or a small team that trusts each other. For a server with real users, finish here and then read <a href="identity.html">Identity and multi-tenant auth</a>. To add memory to a server or tool framework you already run, see <a href="integrate.html">Choose an integration path</a>.</p>
+<p>wenchang is a library. It has no command line tool, no ready-made server, and no configuration file. You write a short <code>server.py</code>.</p>
+<h2 id="needs">What you need<a class="headerlink" href="#needs" title="Link to this section">#</a></h2>
+<ul>
+<li>Python 3.11 or newer.</li>
+<li>A GCP project and a GCS bucket for memory files.</li>
+<li>An MCP client that can launch a stdio server, such as Claude Code.</li>
+</ul>
+<h2 id="install">1. Install<a class="headerlink" href="#install" title="Link to this section">#</a></h2>
+<p>wenchang is not on PyPI. Install it from git into the environment the server will run in. The <code>mcp</code> extra adds the MCP adapter (<code>mcp&gt;=2.2,&lt;3</code>).</p>
+<div class="highlight"><pre><span></span><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+</code></pre></div>
+
+<p>With uv: <code>uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code>.</p>
+<p>Without MCP, the base package is enough: <code>pip install "wenchang @ git+https://github.com/msiebert/wenchang"</code>. See <a href="integrate-without-mcp.html">Integrate without MCP</a>.</p>
+<div class="callout callout-warn"><strong>Compatibility: mcp 2.x <code>MCPServer</code> only.</strong> The <code>mcp</code> extra installs <code>mcp&gt;=2.2,&lt;3</code>, and the adapter targets <code>mcp.server.mcpserver.MCPServer</code>. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing <code>wenchang.mcp</code> raises <code>ImportError</code>, and <code>register_memory_tools</code> raises <code>TypeError("server must be an MCPServer, not ...")</code> for any other server type. For another framework, see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</div>
+
+<h2 id="bucket">2. Create the bucket<a class="headerlink" href="#bucket" title="Link to this section">#</a></h2>
+<p>Memory files are objects in one bucket. Create it and give your credentials access:</p>
+<div class="highlight"><pre><span></span><code>gcloud storage buckets create gs://hanlin-inkwell-memory --project my-gcp-project --location us-central1 --uniform-bucket-level-access
+gcloud auth application-default login
+gcloud storage buckets add-iam-policy-binding gs://hanlin-inkwell-memory --member user:tianlong@example.com --role roles/storage.objectUser
+</code></pre></div>
+
+<p>wenchang finds credentials through Application Default Credentials, and the server's identity needs <code>roles/storage.objectUser</code> on the bucket. <a href="storage.html#bucket">Storage and operations</a> covers the permissions, the one-bucket access model, and soft delete.</p>
+<h2 id="server">3. Write the server<a class="headerlink" href="#server" title="Link to this section">#</a></h2>
+<p>This <code>server.py</code> uses GCS storage, three scopes (the author, the manuscript, the publisher), and settings from environment variables.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">google.cloud</span><span class="w"> </span><span class="kn">import</span> <span class="n">storage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_server</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptSlots</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.gcs</span><span class="w"> </span><span class="kn">import</span> <span class="n">GcsStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">slots</span> <span class="o">=</span> <span class="n">PromptSlots</span><span class="p">(</span>
+    <span class="n">purpose</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"You have persistent memory of your work helping an author write a novel: reference it "</span>
+        <span class="s2">"and save to it with these tools whenever you work on a manuscript."</span>
+    <span class="p">),</span>
+    <span class="n">scope_guidance</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"There are three scopes. `user` is private to the author you are talking with. "</span>
+        <span class="s2">"`project` is the manuscript, shared by everyone working on it; any of them may write it. "</span>
+        <span class="s2">"`organization` is Hanlin Press, shared by every author and editor there; only "</span>
+        <span class="s2">"editors-in-chief may write it. Writes to `user` and `project` need no ask. If a new fact "</span>
+        <span class="s2">"contradicts one stored in a shared scope, show the stored fact and ask which to keep."</span>
+    <span class="p">),</span>
+    <span class="n">seed_areas</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">"- user: preferences, workflows</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- project: characters, plot, timeline, style</span><span class="se">\n</span><span class="s2">"</span>
+        <span class="s2">"- organization: conventions</span><span class="se">\n\n</span><span class="s2">"</span>
+        <span class="s2">"Every scope also has a `system/` area."</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+
+<span class="c1"># Each person sets their own WENCHANG_USER. Everyone on a manuscript shares WENCHANG_PROJECT.</span>
+<span class="n">identity</span> <span class="o">=</span> <span class="n">Identity</span><span class="p">(</span>
+    <span class="n">grants</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_USER"</span><span class="p">],</span> <span class="s2">"owner"</span><span class="p">),</span>
+        <span class="s2">"project"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_PROJECT"</span><span class="p">],</span> <span class="s2">"member"</span><span class="p">),</span>
+        <span class="s2">"organization"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_ORG"</span><span class="p">],</span> <span class="s2">"member"</span><span class="p">),</span>
+    <span class="p">}</span>
+<span class="p">)</span>
+
+<span class="c1"># Application Default Credentials; the bucket must already exist.</span>
+<span class="n">bucket</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">"my-gcp-project"</span><span class="p">)</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_BUCKET"</span><span class="p">])</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">),</span> <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"project"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">credentials_from_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="kc">None</span>  <span class="c1"># SandboxResolver ignores credentials.</span>
+
+
+<span class="n">server</span> <span class="o">=</span> <span class="n">build_server</span><span class="p">(</span>
+    <span class="n">slots</span><span class="o">=</span><span class="n">slots</span><span class="p">,</span>
+    <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">store</span><span class="p">),</span>
+    <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span>
+    <span class="c1"># Only editors-in-chief (admins) write organization.</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({</span><span class="s2">"organization"</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">"admin"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">})}),</span>
+    <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"claude-code"</span><span class="p">,</span>
+    <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">server</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">"stdio"</span><span class="p">)</span>
+</code></pre></div>
+
+<p>What each part does:</p>
+<ul>
+<li><strong><code>PromptSlots</code></strong> is the text that tells the agent about your deployment. See <a href="prompts.html">Customizing the prompts</a>.</li>
+<li><strong><code>Identity</code></strong> says who the caller is: one <code>ScopeGrant(entity_id, role)</code> per scope. The entity ID becomes the second path segment, so this user's private files live under <code>user/&lt;their id&gt;/</code>. Here the identity comes from the environment and is trusted. <a href="identity.html">Identity and multi-tenant auth</a> replaces this with a resolver that verifies each request.</li>
+<li><strong><code>MemoryStore</code></strong> applies the rules (size limits, versioned writes, index order) on top of a <code>Storage</code>. <code>GcsStorage</code> is the storage that talks to your bucket. <code>scope_priority</code> decides which scopes the size-capped startup index keeps first.</li>
+<li><strong><code>InProcessClient</code></strong> connects the tools to the store in the same process.</li>
+<li><strong><code>ScopePolicy</code></strong> lists the roles that may write a scope. Here only <code>admin</code> and <code>owner</code> may write <code>organization</code>, and the identity above is a plain <code>member</code>, so the agent can read the press's files and cannot change them. Scopes not listed are open to anyone with a grant. Writes to <code>system/</code> are always refused.</li>
+<li><strong><code>source</code></strong> is recorded in each file's <code>sources</code> metadata, so you can tell which app wrote what. <strong><code>product</code></strong> puts your product's name in each tool description.</li>
+</ul>
+<p>Check that it builds, without starting it:</p>
+<div class="highlight"><pre><span></span><code>WENCHANG_USER=u-tianlong WENCHANG_PROJECT=p-ninth-examination WENCHANG_ORG=o-hanlin-press WENCHANG_BUCKET=hanlin-inkwell-memory python -c "import server; print(server.server)"
+</code></pre></div>
+
+<h2 id="client">4. Register it with your client<a class="headerlink" href="#client" title="Link to this section">#</a></h2>
+<p>A stdio MCP client starts the server as a child process. Give it the interpreter that has wenchang installed, an absolute path to the script, and the environment the script reads.</p>
+<p>For Claude Code, put this in the project's <code>.mcp.json</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"memory"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/path/to/venv/bin/python"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"/path/to/server.py"</span><span class="p">],</span>
+<span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"WENCHANG_BUCKET"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hanlin-inkwell-memory"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"WENCHANG_ORG"</span><span class="p">:</span><span class="w"> </span><span class="s2">"o-hanlin-press"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"WENCHANG_PROJECT"</span><span class="p">:</span><span class="w"> </span><span class="s2">"p-ninth-examination"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"WENCHANG_USER"</span><span class="p">:</span><span class="w"> </span><span class="s2">"u-tianlong"</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>WENCHANG_USER</code> differs per person, so in a shared repo keep that one out of <code>.mcp.json</code> and set it per person. The same registration from the command line, for just you:</p>
+<div class="highlight"><pre><span></span><code>claude mcp add memory -e WENCHANG_BUCKET=hanlin-inkwell-memory -e WENCHANG_ORG=o-hanlin-press -e WENCHANG_PROJECT=p-ninth-examination -e WENCHANG_USER=u-tianlong -- /path/to/venv/bin/python /path/to/server.py
+</code></pre></div>
+
+<p>The server sends the memory prompt as its <code>instructions</code>, and also serves it as the resource <code>wenchang://memory-prompt</code> for clients that ignore <code>instructions</code>. In Claude Code the tools show up as <code>mcp__memory__get_memory_index</code>, <code>mcp__memory__read_file</code>, and so on. <code>/mcp</code> shows whether the server connected.</p>
+<h2 id="try">5. Try it<a class="headerlink" href="#try" title="Link to this section">#</a></h2>
+<p>Tell the agent something worth keeping:</p>
+<blockquote>
+<p>Lin Qiao has grey eyes and grew up in Yunmen, a river town.</p>
+</blockquote>
+<p>It should call <code>get_memory_index</code>, then write a file. Start a new session and ask for a scene with Lin Qiao. It should read the index, open the file, and use what it saved. Look at what was stored:</p>
+<div class="highlight"><pre><span></span><code>gcloud storage ls --recursive gs://hanlin-inkwell-memory/project/p-ninth-examination/
+</code></pre></div>
+
+<p>Each object is a markdown file. The description and aliases are in the object's custom metadata. If nothing is written, check that the agent listed the memory tools and read the server's <code>instructions</code>. Memory is only as good as the prompt, so also read <a href="prompts.html">Customizing the prompts</a>.</p>
+<h2 id="seed">Seed curated content<a class="headerlink" href="#seed" title="Link to this section">#</a></h2>
+<p>The <code>system/</code> area holds content that people maintain. Here that is Hanlin Press's house style. The agent can read it but cannot write it. You write it with a script that uses the store directly, which has no <code>system/</code> restriction.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">google.cloud</span><span class="w"> </span><span class="kn">import</span> <span class="n">storage</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.file_format</span><span class="w"> </span><span class="kn">import</span> <span class="n">FileMetadata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.gcs</span><span class="w"> </span><span class="kn">import</span> <span class="n">GcsStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">bucket</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">"my-gcp-project"</span><span class="p">)</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_BUCKET"</span><span class="p">])</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">)))</span>
+
+<span class="c1"># Goes through the store directly, so it may write system/.</span>
+<span class="n">path</span> <span class="o">=</span> <span class="n">build_path</span><span class="p">(</span><span class="s2">"organization"</span><span class="p">,</span> <span class="s2">"o-hanlin-press"</span><span class="p">,</span> <span class="s2">"system"</span><span class="p">,</span> <span class="s2">"house-style"</span><span class="p">)</span>
+<span class="n">client</span><span class="o">.</span><span class="n">write_file</span><span class="p">(</span>
+    <span class="n">path</span><span class="p">,</span>
+    <span class="s2">"- [system] Dialogue uses double quotation marks.</span><span class="se">\n</span><span class="s2">"</span>
+    <span class="s2">"- [system] Spelling follows British English.</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span>
+    <span class="n">FileMetadata</span><span class="p">(</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">"Hanlin Press house style"</span><span class="p">,</span>
+        <span class="n">aliases</span><span class="o">=</span><span class="p">(</span><span class="s2">"style guide"</span><span class="p">,</span> <span class="s2">"house style"</span><span class="p">),</span>
+        <span class="n">sources</span><span class="o">=</span><span class="nb">frozenset</span><span class="p">(),</span>
+        <span class="n">last_updated</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">),</span>
+    <span class="p">),</span>
+    <span class="kc">None</span><span class="p">,</span>  <span class="c1"># create; pass the current version to replace</span>
+    <span class="n">source</span><span class="o">=</span><span class="s2">"seed-job"</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>Seeded files appear in the agent's index like any others, and the <code>system/</code> entries come first.</p>
+<h2 id="local">Run it without GCS<a class="headerlink" href="#local" title="Link to this section">#</a></h2>
+<p>For development, <code>InMemoryStorage()</code> from <code>wenchang.storage.memory</code> replaces <code>GcsStorage(bucket)</code>. Everything is lost when the process exits, and a stdio server starts a fresh process for every client session, so it forgets between sessions.</p>
+<p>To test against the real GCS API locally, run the emulator the repository's integration tests use:</p>
+<div class="highlight"><pre><span></span><code>docker run -d --rm --name wenchang-fake-gcs -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443
+</code></pre></div>
+
+<p>Then point the client at it:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">google.auth.credentials</span><span class="w"> </span><span class="kn">import</span> <span class="n">AnonymousCredentials</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">google.cloud</span><span class="w"> </span><span class="kn">import</span> <span class="n">storage</span>
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span>
+    <span class="n">project</span><span class="o">=</span><span class="s2">"test"</span><span class="p">,</span>
+    <span class="n">credentials</span><span class="o">=</span><span class="n">AnonymousCredentials</span><span class="p">(),</span>
+    <span class="n">client_options</span><span class="o">=</span><span class="p">{</span><span class="s2">"api_endpoint"</span><span class="p">:</span> <span class="s2">"http://localhost:4443"</span><span class="p">},</span>
+<span class="p">)</span>
+<span class="n">bucket</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="s2">"wenchang-dev"</span><span class="p">)</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">bucket</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+    <span class="n">bucket</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">create_bucket</span><span class="p">(</span><span class="s2">"wenchang-dev"</span><span class="p">)</span>
+</code></pre></div>
+
+<h2 id="next">Next<a class="headerlink" href="#next" title="Link to this section">#</a></h2>
+<ul>
+<li><a href="prompts.html">Customizing the prompts</a>: tell the agent about your scopes and areas.</li>
+<li><a href="identity.html">Identity and multi-tenant auth</a>: serve many users over HTTP.</li>
+<li><a href="integrate-new-server.html">Integrate: a new MCP server</a>: every <code>build_server</code> argument, and stdio or HTTP.</li>
+<li><a href="storage.html">Storage and operations</a>: costs, limits, and erasing a user's memory.</li>
+</ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="index.html"><small>Previous</small>Overview</a><a rel="next" href="concepts.html"><small>Next</small>Concepts</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#needs">What you need</a>
+</li>
+<li><a href="#install">1. Install</a>
+</li>
+<li><a href="#bucket">2. Create the bucket</a>
+</li>
+<li><a href="#server">3. Write the server</a>
+</li>
+<li><a href="#client">4. Register it with your client</a>
+</li>
+<li><a href="#try">5. Try it</a>
+</li>
+<li><a href="#seed">Seed curated content</a>
+</li>
+<li><a href="#local">Run it without GCS</a>
+</li>
+<li><a href="#next">Next</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="quickstart.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

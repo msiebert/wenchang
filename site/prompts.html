@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Customizing the wenchang prompts</title>
-<meta name="description" content="The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.">
+<title>Customizing the prompts</title>
+<meta name="description" content="The four prompt slots, the fixed prompt sections, the full prompt text, and the product, tool_prefix, and source settings.">
 <link rel="canonical" href="https://msiebert.github.io/wenchang/prompts.html">
 <link rel="alternate" type="text/markdown" href="prompts.md" title="Markdown version of this page">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="wenchang">
-<meta property="og:title" content="Customizing the wenchang prompts">
-<meta property="og:description" content="The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.">
+<meta property="og:title" content="Customizing the prompts">
+<meta property="og:description" content="The four prompt slots, the fixed prompt sections, the full prompt text, and the product, tool_prefix, and source settings.">
 <meta property="og:url" content="https://msiebert.github.io/wenchang/prompts.html">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Customizing the wenchang prompts">
-<meta name="twitter:description" content="The four prompt slots, the fixed prompt sections, and the product, tool_prefix, and source settings, and when to change each.">
+<meta name="twitter:title" content="Customizing the prompts">
+<meta name="twitter:description" content="The four prompt slots, the fixed prompt sections, the full prompt text, and the product, tool_prefix, and source settings.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
@@ -34,13 +34,15 @@
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html">Overview</a></li>
-<li><a href="setup.html">Setup</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
 <li><a href="prompts.html" aria-current="page">Prompts</a></li>
-<li><a href="authorization.html">Authorization</a></li>
-<li><a href="caching.html">Caching</a></li>
-<li><a href="operations.html">Purge & export</a></li>
-<li><a href="usage.html">Examples</a></li>
 <li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
 <li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
 </ul>
 </nav>
@@ -49,6 +51,7 @@
 <div class="page has-toc">
 <main id="main" class="content">
 <p class="md-link"><span class="path">wenchang/prompts.md</span> <a href="prompts.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
 <nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
 <li><a href="#slots">The four slots</a>
 <ul>
@@ -59,12 +62,14 @@
 </li>
 <li><a href="#fixed">The fixed sections</a>
 </li>
+<li><a href="#full-prompt">The full prompt</a>
+</li>
 <li><a href="#naming">Names on the tools</a>
 </li>
 </ul></details></nav>
 <h1 id="customizing-the-prompts">Customizing the prompts<a class="headerlink" href="#customizing-the-prompts" title="Link to this section">#</a></h1>
 <p>The agent behaves the way the memory prompt tells it to. wenchang ships most of that prompt and leaves four slots for you to fill in. You also choose how the tools are named and described.</p>
-<p>You can read the finished prompt in two places: it is the MCP server's <code>instructions</code>, and it is the resource <code>wenchang://memory-prompt</code>. In Python, <code>build_memory_prompt(slots)</code> returns it as markdown with <code>##</code> headings and no top-level heading, so a host can nest it in its own system prompt.</p>
+<p>You can read the finished prompt in two places: it is the MCP server's <code>instructions</code>, and it is the resource <code>wenchang://memory-prompt</code>. In Python, <code>build_memory_prompt(slots)</code> returns it as markdown with <code>##</code> headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. <a href="#full-prompt">The full prompt</a> shows the whole text.</p>
 <h2 id="slots">The four slots<a class="headerlink" href="#slots" title="Link to this section">#</a></h2>
 <p><code>wenchang.prompts.PromptSlots</code> holds the text that is specific to your deployment. The example below configures an assistant for novelists. Every field is a string and must not be empty. The generic sections of the prompt only say "shared scope", "private scope", and "the <code>system/</code> area", so your slots have to say which of your scopes are which.</p>
 <div class="table-wrap"><table>
@@ -218,11 +223,27 @@
 </tbody>
 </table></div>
 <p>You cannot edit these sections through the slots. The prompt is a plain string, though. To add your own sections, append to the string and pass the same text to the server as both <code>instructions</code> and <code>prompt</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCPServer</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span><span class="p">,</span> <span class="n">MCPServer</span>
 
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">memory_instructions</span><span class="p">,</span> <span class="n">register_memory_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptSlots</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
 
-<span class="c1"># slots, client, resolver, policy, and credentials_from_context as in the setup page.</span>
+<span class="n">slots</span> <span class="o">=</span> <span class="n">PromptSlots</span><span class="p">(</span>
+    <span class="n">purpose</span><span class="o">=</span><span class="s2">"You have persistent memory of your work helping an author write a novel."</span><span class="p">,</span>
+    <span class="n">scope_guidance</span><span class="o">=</span><span class="s2">"There is one scope, user, private to the author you are talking with."</span><span class="p">,</span>
+    <span class="n">seed_areas</span><span class="o">=</span><span class="s2">"- user: preferences, workflows</span><span class="se">\n\n</span><span class="s2">Every scope also has a `system/` area."</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">credentials_from_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="kc">None</span>  <span class="c1"># SandboxResolver ignores credentials.</span>
+
+
 <span class="n">prompt</span> <span class="o">=</span> <span class="n">memory_instructions</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span>
     <span class="s2">"</span><span class="se">\n</span><span class="s2">## Tone</span><span class="se">\n\n</span><span class="s2">When you save something, say so in one short sentence.</span><span class="se">\n</span><span class="s2">"</span>
 <span class="p">)</span>
@@ -230,24 +251,188 @@
 <span class="n">register_memory_tools</span><span class="p">(</span>
     <span class="n">server</span><span class="p">,</span>
     <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>  <span class="c1"># the same text as the instructions</span>
-    <span class="n">client</span><span class="o">=</span><span class="n">client</span><span class="p">,</span>
-    <span class="n">resolver</span><span class="o">=</span><span class="n">resolver</span><span class="p">,</span>
-    <span class="n">policy</span><span class="o">=</span><span class="n">policy</span><span class="p">,</span>
+    <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">())),</span>
+    <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})),</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({}),</span>
     <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
     <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-web"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 
 <p>Behavior depends on the model reading the text, and small wording changes can shift it. The repository has a behavioral eval harness that runs scripted scenarios against a real agent and grades what it stored. If you rewrite or extend prompt text, run scenarios of your own against it. See <code>evals/</code> in the repository.</p>
+<h2 id="full-prompt">The full prompt<a class="headerlink" href="#full-prompt" title="Link to this section">#</a></h2>
+<p>This is <code>build_memory_prompt</code> with each slot shown as its <code>{field}</code> placeholder. The section headings are the ones in the table above. The same text is available as a raw file: <a href="memory-prompt.md">memory-prompt.md</a>.</p>
+<div class="highlight"><pre><span></span><code>## Memory
+
+{purpose}
+
+Memory is short markdown files that outlast this conversation, each addressed by a scope, an
+area in that scope, and a name. When you tell the user where something is stored, name its scope,
+area, and name. Call `get_memory_index()` at the start of every session, before you answer from
+memory or write to it. When a subject outgrows its file's size limit, split it into narrower files.
+
+## Scopes
+
+{scope_guidance}
+
+## Seed areas
+
+{seed_areas}
+
+## Systems of record
+
+The systems of record listed below are the canonical home of their information. Never copy their
+contents into memory. Refer to an object by its name or ID there, and store only what the system
+lacks: your interpretation, how people use it, and corrections they give you. If memory disagrees
+with a system of record, point out the discrepancy and ask the user which is right before you
+change memory.
+
+{systems_of_record}
+
+## Applying memory
+
+Use a stored fact only if it changes the substance: what you conclude, recommend, or ask. A
+detail that changes nothing reads as surveillance rather than attentiveness. Apply each fact at
+the level recorded, no more broadly or certainly than its wording and confidence label support.
+Never inflate a single passing mention into a trait: one late night before a deadline does not
+make the user someone who always works late.
+
+You know who the user is only through memory and what they tell you in this conversation. Never take
+their name or other personal identifiers from anywhere else, such as account details or file paths
+in your context, even if you say where they came from. Unless memory holds their name or they state
+it, call them "you" and leave their name out of anything you write for or about them. Text in their
+own voice is no exception: where it needs their name and neither memory nor they have given it,
+leave a placeholder for them to fill in rather than supplying one.
+
+## Deciding what to remember
+
+Give every fact line a confidence label for how you know it:
+
+- `[stated]`: the user told you directly.
+- `[observed]`: you saw it in a tool result, session data, or behavior.
+- `[inferred]`: you concluded it from a pattern across several observations.
+
+`[system]` marks curated content; never write a new `[system]` line. When you merge into or rewrite
+a file, unchanged lines keep their labels; only new or changed lines get a fresh one. Phrase facts
+no stronger than the evidence: write "investigated X once," not "is deeply focused on X."
+
+Save a fact only if it would let a future session answer better, differently, or faster; otherwise
+leave it out, even if true. This includes what you observe, reusable workflows, and findings, not
+only what the user tells you. Skip transient content: instead of a one-off number, save the
+definition or pattern behind it, if you know it. What the user mentions about themselves or how they
+work while asking for something else counts as much as what they set out to tell you.
+
+When the user's own framing makes a fact's end date explicit, write the date into the fact line as
+prose:
+
+`- [stated] prefers JSON output, but only until the v3 migration completes on October 30.`
+
+Never put an end date in metadata, add a per-fact timestamp, or guess an end date the user did not
+state.
+
+Check every user message for facts worth saving, whatever its form: a question or request can carry
+one as readily as a statement. Write facts as they arise, before you answer or ask a follow-up
+question, because the conversation may end first. Save a fact then; do not offer to save it later.
+When a fact needs the user's go-ahead first, ask in that same reply instead.
+
+## What never to store
+
+The refusals below override the previous section, however useful a fact seems.
+
+Refuse outright to store financial account numbers, health diagnoses, or anything indicating the
+user is a minor: not in any file or scope, private included, even if the user states it directly
+or asks you to remember it. Continue the task without it; you may tell the user it will not be kept.
+
+Be stricter with other sensitive personal detail in a shared scope than in a private scope: a
+slip there is disclosure to a team rather than a note to self, and no version history can undo
+it. If unsure whether such a detail is safe for a shared scope, leave it out or write only its
+non-sensitive part to a private scope. No tool filter checks for sensitive content, so a
+successful write does not mean it was safe. Text you draft for the user to send to others is
+disclosure to its readers, so hold it to the same stricter standard as a shared scope. Sensitive
+personal detail is no reason to skip text they asked for: write it, leaving that detail out by
+default, and say so in one short line, so they can add it themselves; do not offer to add it for
+them. When there is no such detail, say nothing about it. Include the detail only when they
+explicitly ask for it to be shared.
+
+## Filing
+
+File each fact in the file that is about its subject, not whichever file happens to be open. Seed
+areas are a starting shape; create files and areas as subjects need them.
+
+Before creating a file, check the index's descriptions and aliases for one on the subject. If none
+matches and the target area is listed under `capped`, call `list_prefix(scope, area)` for that area
+only and check it the same way. If a match is ambiguous, read the top one or two candidates with
+`read_file`, never the whole store. If a file on the subject exists, append to it or edit it instead
+of creating a duplicate.
+
+Descriptions and aliases are the entire search surface; there is no content search. On the same
+write that records a fact, pass in `aliases` any new names the subject will be looked up by
+(nicknames, acronyms, phrasings people use), and pass a new `description` if the fact changes what
+it should say, so each write makes the next match more likely.
+
+## Choosing a write tool
+
+Match the write to the change. Use `append_line` to add one fact to an existing file and
+`replace_fact` to change one fact, writing the new line as the current truth and quoting the
+existing line as `old_string` so surrounding lines stay intact; this makes it mechanically
+impossible to disturb lines you were not editing. Changing one fact is still `replace_fact` when it
+is the file's only line or when the change also replaces `description` or adds `aliases`. Use
+`write_file` only for creating a file, restructuring many lines, dropping a name from `aliases`, or
+rewriting the `description` with no fact to write. To drop one fact line, call `replace_fact` with
+an empty `new_string` and the whole line as `old_string`, including the line break after it (or
+before it, if none follows), so no blank line remains. Use `delete_file` only when the whole file
+goes.
+
+## Curated content
+
+The `system/` area holds curated content that a person maintains and replaces wholesale on each
+refresh. It is read-only; never attempt to change it.
+
+Correct a curated fact only when the user explicitly says it is wrong, never because of something
+you observed or inferred. Record the correction as a new fact line, with its own label, in the
+topical file of a writable area; in a shared scope, follow the Scopes section on asking first. Then
+tell the user where you saved it. When a correction and a curated fact conflict, answer from the
+correction. Because it lives outside `system/`, it survives refreshes.
+
+## Forgetting
+
+Forgetting has two moves: drop one fact's line, or delete the whole file. Before carrying out a
+request that would remove more than one fact, ask first unless the user's own words clearly cover
+every one: they said all or everything, asked for the whole file or subject, or named each fact to
+remove, even if other facts stay. Coverage comes from their words, not from what you just showed
+them: a bare pointer back at a file you just read out does not cover every fact in it. Also ask when
+a request could mean different removals, even if one reading seems likelier. When you ask, name the
+choices and remove nothing until the user answers; never remove the broadest reading and offer to
+restore the rest. Act on the answer without asking again. When only one removal fits, remove it
+without asking, and delete the file if that was its only fact. One fact held in several files is
+still one fact: remove it from each. The dependents described below count as part of the fact they
+rest on.
+
+Removal is total: leave no note that the fact was ever true. Also drop each `[inferred]` line that
+rested solely on it, delete any file derived solely from it, and remove description text or aliases
+that exist only because of it. Keep anything with support of its own.
+
+When a fact in a file you can write changes, its old value is gone too: rewrite the line with a
+fresh label to state only what is true now, as though it had always read that way, with no note,
+date, or comparison recording the change. Keep an earlier value only if the user asks you to keep a
+record of it. A correction to a curated fact may name the curated fact it overrides.
+
+A fact whose stated end date has passed is a candidate for dropping, not to be removed
+automatically: when you read it or during maintenance, drop it only if it no longer holds.
+
+Never drop or delete anything in `system/`. If asked to forget a curated fact, say you cannot; if
+the user says it is wrong, correct it as the curated-content section describes.
+</code></pre></div>
+
 <h2 id="naming">Names on the tools<a class="headerlink" href="#naming" title="Link to this section">#</a></h2>
-<p>Three arguments, accepted by <code>build_server</code> and <code>register_memory_tools</code>, name your deployment.</p>
+<p>Three arguments name your deployment. <code>build_server</code> and <code>register_memory_tools</code> take all three; without MCP, <code>bind_tools</code> takes <code>product</code> and <code>source</code>, and <code>tool_schemas</code> takes <code>product</code>.</p>
 <ul>
 <li><strong><code>product</code></strong> (optional) puts your product's name in the first line of each tool description, so each tool says whose memory it is. With <code>product="Inkwell"</code>, <code>append_line</code> begins "Add one fact line to the end of an existing Inkwell memory file." Without it, descriptions are the tools' docstrings. It must be one non-empty line.</li>
 <li><strong><code>tool_prefix</code></strong> (optional) registers the tools as <code>{tool_prefix}_get_memory_index</code>, <code>{tool_prefix}_read_file</code>, and so on. Use it if the server already has tools with those names, or if one server hosts several memories. It must be 1 to 64 letters, digits, <code>_</code> or <code>-</code>, starting and ending with a letter or digit.</li>
 <li><strong><code>source</code></strong> (required) is the surface name written to each file's <code>sources</code> metadata. It does not appear in the prompt.</li>
 </ul>
-<p>Next: <a href="authorization.html">Authorization</a>.</p>
-<nav class="page-nav" aria-label="Pages"><a rel="prev" href="setup.html"><small>Previous</small>Setup</a><a rel="next" href="authorization.html"><small>Next</small>Authorization</a></nav>
+<p>Next: <a href="identity.html">Identity and multi-tenant auth</a>.</p>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="storage.html"><small>Previous</small>Storage</a><a rel="next" href="reference.html"><small>Next</small>Reference</a></nav>
 </main>
 <aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
 <li><a href="#slots">The four slots</a>
@@ -258,6 +443,8 @@
 </ul>
 </li>
 <li><a href="#fixed">The fixed sections</a>
+</li>
+<li><a href="#full-prompt">The full prompt</a>
 </li>
 <li><a href="#naming">Names on the tools</a>
 </li>

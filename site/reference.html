@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reference: wenchang tools, file format, configuration, and errors</title>
-<meta name="description" content="The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.">
+<title>Tool and error reference</title>
+<meta name="description" content="The seven memory tools with exact parameters and returns, tool schemas, the prompt resource, the error taxonomy, and the Python API.">
 <link rel="canonical" href="https://msiebert.github.io/wenchang/reference.html">
 <link rel="alternate" type="text/markdown" href="reference.md" title="Markdown version of this page">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="wenchang">
-<meta property="og:title" content="Reference: wenchang tools, file format, configuration, and errors">
-<meta property="og:description" content="The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.">
+<meta property="og:title" content="Tool and error reference">
+<meta property="og:description" content="The seven memory tools with exact parameters and returns, tool schemas, the prompt resource, the error taxonomy, and the Python API.">
 <meta property="og:url" content="https://msiebert.github.io/wenchang/reference.html">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Reference: wenchang tools, file format, configuration, and errors">
-<meta name="twitter:description" content="The seven memory tools with exact parameters and returns, the file and path format, configuration options, the error taxonomy, and known limitations.">
+<meta name="twitter:title" content="Tool and error reference">
+<meta name="twitter:description" content="The seven memory tools with exact parameters and returns, tool schemas, the prompt resource, the error taxonomy, and the Python API.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="site.js"></script>
+<script>(function(){var t={"concepts":"concepts.html","paths":"concepts.html#paths","scopes":"concepts.html#scopes","areas":"concepts.html#areas","names":"concepts.html#names","system":"concepts.html#system","facts":"concepts.html#facts","metadata":"concepts.html#metadata","concurrency":"concepts.html#concurrency","limits":"concepts.html#limits","file-cap":"storage.html#file-cap","embed":"integrate-existing-server.html#register","bind":"integrate-without-mcp.html#methods","limitations":"status.html#limitations"}[location.hash.slice(1)];if(t)location.replace(t)})()</script>
 </head>
 <body class="page-reference">
 <a class="skip-link" href="#main">Skip to content</a>
@@ -34,13 +35,15 @@
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html">Overview</a></li>
-<li><a href="setup.html">Setup</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
 <li><a href="prompts.html">Prompts</a></li>
-<li><a href="authorization.html">Authorization</a></li>
-<li><a href="caching.html">Caching</a></li>
-<li><a href="operations.html">Purge & export</a></li>
-<li><a href="usage.html">Examples</a></li>
 <li><a href="reference.html" aria-current="page">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
 <li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
 </ul>
 </nav>
@@ -49,21 +52,8 @@
 <div class="page has-toc">
 <main id="main" class="content">
 <p class="md-link"><span class="path">wenchang/reference.md</span> <a href="reference.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
 <nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
-<li><a href="#concepts">Concepts</a>
-<ul>
-<li><a href="#paths">Path shape</a></li>
-<li><a href="#scopes">Scopes</a></li>
-<li><a href="#areas">Areas</a></li>
-<li><a href="#names">Names</a></li>
-<li><a href="#system">The system/ area</a></li>
-<li><a href="#facts">Fact-line format</a></li>
-<li><a href="#metadata">File metadata</a></li>
-<li><a href="#concurrency">Optimistic concurrency</a></li>
-<li><a href="#limits">Limits</a></li>
-<li><a href="#file-cap">Files per entity</a></li>
-</ul>
-</li>
 <li><a href="#tools">Tools</a>
 <ul>
 <li><a href="#get_memory_index">get_memory_index</a></li>
@@ -80,159 +70,25 @@
 <li><a href="#resource">The memory prompt resource</a>
 </li>
 <li><a href="#errors">Errors</a>
+<ul>
+<li><a href="#invalid-argument">InvalidArgumentError</a></li>
+</ul>
 </li>
 <li><a href="#configuration">Configuration</a>
 <ul>
 <li><a href="#identity-types">Identity types</a></li>
 <li><a href="#store-options">Store options</a></li>
 <li><a href="#storage">Storage backends</a></li>
+<li><a href="#operator">Operator methods</a></li>
+<li><a href="#index-cache">Index cache</a></li>
 <li><a href="#transport">Transport</a></li>
-<li><a href="#embed">Add the tools to an existing MCP server</a></li>
 <li><a href="#telemetry">Telemetry</a></li>
-<li><a href="#bind">Using the tools without MCP</a></li>
 <li><a href="#conformance">Conformance suites</a></li>
 </ul>
 </li>
-<li><a href="#limitations">Limitations and status</a>
-</li>
 </ul></details></nav>
-<h1 id="reference">Reference<a class="headerlink" href="#reference" title="Link to this section">#</a></h1>
-<p>Version 0.1.0. Everything here is taken from the source: the tool layer (<code>wenchang.tools</code>, <code>wenchang.mcp</code>), the core store (<code>wenchang.core</code>), and the file format (<code>wenchang.file_format</code>). For how to assemble a server see <a href="setup.html">Setup</a>; for the prompt see <a href="prompts.html">Customizing the prompts</a>; for auth see <a href="authorization.html">Authorization</a>.</p>
-<h2 id="concepts">Concepts<a class="headerlink" href="#concepts" title="Link to this section">#</a></h2>
-<h3 id="paths">Path shape<a class="headerlink" href="#paths" title="Link to this section">#</a></h3>
-<p>Every memory file is stored at</p>
-<div class="highlight"><pre><span></span><code>{scope}/{entity_id}/{area}/{name}.md
-</code></pre></div>
-
-<p>For example <code>project/p-ninth-examination/characters/lin-qiao.md</code>. Agents never write the path. The tools take <code>(scope, area, name)</code> and the tool layer fills in <code>entity_id</code> from the caller's identity grant for that scope, so a caller can only reach its own entities. Results name a file by its <code>scope</code>, <code>area</code>, and <code>name</code>; they never include the storage path.</p>
-<h3 id="scopes">Scopes<a class="headerlink" href="#scopes" title="Link to this section">#</a></h3>
-<p>A scope is an adopter-defined visibility tier. The library defines no scope names; a typical set is <code>user</code> (private), <code>project</code> (shared), and <code>organization</code> (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an <code>InvalidArgumentError</code> listing the available scopes.</p>
-<h3 id="areas">Areas<a class="headerlink" href="#areas" title="Link to this section">#</a></h3>
-<p>An area groups files within a scope. The tool layer requires an area to be a lowercase slug matching <code>^[a-z0-9][a-z0-9_-]*$</code>. Areas are created implicitly by writing a file in them. The prompt's <code>seed_areas</code> slot suggests starting areas; the agent may create more.</p>
-<h3 id="names">Names<a class="headerlink" href="#names" title="Link to this section">#</a></h3>
-<p>A name is the file's stem, passed without <code>.md</code>. It must be a valid path segment: non-empty, not <code>.</code> or <code>..</code>, with no <code>/</code>, backslash, or control character, and the tool layer additionally rejects invisible, separator, and noncharacter code points. Names must be valid UTF-8.</p>
-<h3 id="system">The system/ area<a class="headerlink" href="#system" title="Link to this section">#</a></h3>
-<p>Every scope has an area named exactly <code>system</code>. It holds curated content that people maintain and replace wholesale. The agent can read it (any area may be read) but every mutating tool refuses it with <code>RestrictedScopeError</code> (reason <code>system_read_only</code>). Seeding jobs and admin tooling write it through the core <code>MemoryStore</code>, which applies no restrictions. In the startup index, <code>system/</code> entries come first across all scopes.</p>
-<h3 id="facts">Fact-line format<a class="headerlink" href="#facts" title="Link to this section">#</a></h3>
-<p>A memory file body is made of fact lines, one per line:</p>
-<div class="highlight"><pre><span></span><code>- [stated] Has grey eyes.
-</code></pre></div>
-
-<p>The pattern is <code>- [&lt;label&gt;] &lt;text&gt;</code> with a non-empty text. The label records how the fact is known:</p>
-<div class="table-wrap"><table>
-<thead>
-<tr>
-<th>Label</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>stated</code></td>
-<td>The user told the agent directly.</td>
-</tr>
-<tr>
-<td><code>observed</code></td>
-<td>The agent saw it in a tool result, session data, or behavior.</td>
-</tr>
-<tr>
-<td><code>inferred</code></td>
-<td>The agent concluded it from a pattern across several observations.</td>
-</tr>
-<tr>
-<td><code>system</code></td>
-<td>Curated content. The prompt tells the agent never to write a new <code>[system]</code> line.</td>
-</tr>
-</tbody>
-</table></div>
-<p><code>append_line</code> accepts only a single well-formed fact line. Other lines in a body are tolerated and preserved verbatim. An end date, if the user states one, is written into the fact's text as prose; there are no per-fact timestamps.</p>
-<h3 id="metadata">File metadata<a class="headerlink" href="#metadata" title="Link to this section">#</a></h3>
-<p>Metadata is stored beside the body, as flat string custom metadata on the stored object (in GCS), not inside the markdown.</p>
-<div class="table-wrap"><table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Type</th>
-<th>Behavior</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>description</code></td>
-<td>string, one line</td>
-<td>What the file is about. Part of the agent's search surface. <code>write_file</code> replaces it; <code>append_line</code> and <code>replace_fact</code> replace it only if one is passed.</td>
-</tr>
-<tr>
-<td><code>aliases</code></td>
-<td>list of strings, ordered</td>
-<td>Other names the subject is looked up by. <code>write_file</code> replaces the whole set; <code>append_line</code> and <code>replace_fact</code> add new aliases, keeping existing ones and their order.</td>
-</tr>
-<tr>
-<td><code>sources</code></td>
-<td>set of strings</td>
-<td>Surface names (the <code>source</code> you configure) that have written the file. Only ever grows; returned sorted.</td>
-</tr>
-<tr>
-<td><code>last_updated</code></td>
-<td>UTC timestamp</td>
-<td>Set by the store's clock on every write; rendered as ISO 8601 with a <code>Z</code> suffix.</td>
-</tr>
-</tbody>
-</table></div>
-<p>There is no content search. <code>description</code> and <code>aliases</code> are the entire search surface; the agent reads the index and matches on them.</p>
-<h3 id="concurrency">Optimistic concurrency<a class="headerlink" href="#concurrency" title="Link to this section">#</a></h3>
-<p>Every file has an opaque <code>version</code> (the GCS generation under <code>GcsStorage</code>). Every mutating tool takes <code>expected_version</code>, the version the agent read; the write succeeds only if the file is still at that version. <code>write_file</code> with <code>expected_version=null</code> creates the file and fails if it already exists. A mismatch returns a recoverable <code>VersionConflictError</code> carrying the current content and version.</p>
-<p><code>replace_fact</code> re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but <code>old_string</code> still matches exactly once, it applies against the current content. <code>append_line</code> has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.</p>
-<h3 id="limits">Limits<a class="headerlink" href="#limits" title="Link to this section">#</a></h3>
-<div class="table-wrap"><table>
-<thead>
-<tr>
-<th>Limit</th>
-<th>Default</th>
-<th>Where set</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Per-file content size</td>
-<td>16384 bytes (UTF-8)</td>
-<td><code>MemoryStore(max_file_bytes=...)</code></td>
-</tr>
-<tr>
-<td>Startup index size</td>
-<td>65536 bytes</td>
-<td><code>MemoryStore(index_max_bytes=...)</code></td>
-</tr>
-<tr>
-<td><code>list_prefix</code> page size</td>
-<td>100 entries</td>
-<td><code>MemoryStore(list_page_size=...)</code></td>
-</tr>
-<tr>
-<td>Files per entity</td>
-<td>500 files, <code>system/</code> not counted</td>
-<td><code>MemoryStore(max_files_per_entity=...)</code>; see <a href="#file-cap">Files per entity</a></td>
-</tr>
-<tr>
-<td><code>replace_fact</code> attempts</td>
-<td>3</td>
-<td>fixed</td>
-</tr>
-</tbody>
-</table></div>
-<p>When the index overflows its budget, the remaining files are reported under <code>capped</code> by area, with the count omitted, and the agent pages them with <code>list_prefix</code>. Index order: <code>system/</code> areas of all scopes first; then scopes in <code>scope_priority</code> order (unlisted scopes last, as one tier); within each tier, most recently updated first.</p>
-<h3 id="file-cap">Files per entity<a class="headerlink" href="#file-cap" title="Link to this section">#</a></h3>
-<p>An entity is everything under one <code>{scope}/{entity_id}/</code> prefix: one user's private memory, or one project's shared memory. <code>MemoryStore(max_files_per_entity=...)</code> caps how many files it holds. The default is 500 (<code>wenchang.core.DEFAULT_MAX_FILES_PER_ENTITY</code>); <code>None</code> disables the cap, and any other value must be positive (<code>ValueError</code> otherwise).</p>
-<div class="highlight"><pre><span></span><code><span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">max_files_per_entity</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>  <span class="c1"># or None for no cap</span>
-</code></pre></div>
-
-<p>Only creates are checked: a <code>write_file</code> with <code>expected_version=null</code> outside <code>system/</code>. Replacing a file, <code>append_line</code>, <code>replace_fact</code>, <code>delete_file</code>, and reads never are, so an entity at its cap keeps working on the files it has. Files in <code>system/</code> and keys that are not well-formed memory paths are not counted. Deleting a file frees a slot.</p>
-<p>At the cap, the create fails with a recoverable <code>FileQuotaExceededError</code> whose payload carries <code>limit</code> (plus <code>scope</code>, <code>area</code>, and <code>name</code>). If a file already exists at that path, the create fails with <code>VersionConflictError</code> instead, as it would below the cap. For scope <code>user</code>, area <code>notes</code>, name <code>new</code>, and a limit of 3, the agent sees:</p>
-<div class="highlight"><pre><span></span><code>Cannot create a new file at scope user, area notes, name new: memory in scope user is at its limit of 3 files (system/ files not counted). Add this content to an existing file instead (append_line, replace_fact, or write_file with that file's version), or merge related files into one and delete the merged ones with delete_file, then retry.
-</code></pre></div>
-
-<p>followed by the standard recoverable guidance, so the agent consolidates and retries in the same turn without asking the user.</p>
-<p>The cap is soft. Counting and writing are not atomic, so concurrent creates in one entity can exceed it by at most the number of creates racing at the boundary. Each checked create counts the entity's keys with <code>Storage.list_page</code>, in pages of <code>max(limit - count, list_page_size)</code> keys, stopping once it reaches the limit: at most the limit plus the uncounted keys plus one <code>list_page_size</code> page, and usually one list call.</p>
+<h1 id="tool-and-error-reference">Tool and error reference<a class="headerlink" href="#tool-and-error-reference" title="Link to this section">#</a></h1>
+<p>Version 0.1.0. Everything here is taken from the source: the tool layer (<code>wenchang.tools</code>, <code>wenchang.schemas</code>, <code>wenchang.mcp</code>), the core store (<code>wenchang.core</code>), and storage (<code>wenchang.storage</code>). Paths, scopes, metadata, versions, and limits are explained in <a href="concepts.html">Concepts</a>. How to wire the tools in is under <a href="integrate.html">Integrate</a>, and how to run storage is in <a href="storage.html">Storage and operations</a>.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Link to this section">#</a></h2>
 <p>Seven tools. With <code>tool_prefix</code> set, each is registered as <code>{tool_prefix}_{name}</code>. All results are JSON objects; all failures are rendered as described under <a href="#errors">errors</a>. In every tool, <code>scope</code>, <code>area</code>, and <code>name</code> are strings, and <code>expected_version</code> is a string (the <code>version</code> from a prior result).</p>
 <p>Common file object, returned by <code>read_file</code>, <code>write_file</code>, <code>append_line</code>, and <code>replace_fact</code>:</p>
@@ -456,7 +312,7 @@
 </tr>
 </tbody>
 </table></div>
-<p>Returns the common file object. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code> (<code>file_absent</code>, when replacing a file that does not exist), <code>OversizeWriteError</code>, <code>FileQuotaExceededError</code> (creating a file in an entity at its <a href="#file-cap">file cap</a>), <code>InvalidArgumentError</code>, <code>RestrictedScopeError</code>.</p>
+<p>Returns the common file object. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code> (<code>file_absent</code>, when replacing a file that does not exist), <code>OversizeWriteError</code>, <code>FileQuotaExceededError</code> (creating a file in an entity at its <a href="storage.html#file-cap">file cap</a>), <code>InvalidArgumentError</code>, <code>RestrictedScopeError</code>.</p>
 </section><section class="tool-card"><h3 id="append_line"><span>append_line</span><span class="pill pill-muted">writes</span><a class="headerlink" href="#append_line" title="Link to this section">#</a></h3><p class="sig"><span class="fn">append_line</span>(scope, area, name, line, expected_version, <span class="opt">aliases?</span>, <span class="opt">description?</span>)</p>
 <blockquote>
 <p>Add one fact line to the end of an existing memory file. <code>line</code> is a single fact line with a leading bracketed label (<code>[stated]</code>, <code>[observed]</code>, <code>[inferred]</code>, or <code>[system]</code>), as in <code>- [stated] Prefers tea</code>. Pass the version you read as <code>expected_version</code>. The per-file byte ceiling applies to the result. Optional <code>aliases</code> are added to the file's existing aliases and never removed (<code>write_file</code> replaces the whole set); an optional one-line <code>description</code> replaces the stored one. A version conflict is routine: merge your change into the content it returns and retry with its version.</p>
@@ -623,98 +479,14 @@
 </table></div>
 <p>Returns <code>{"ok": true}</code>. Errors: <code>VersionConflictError</code>, <code>NotFoundError</code>, <code>RestrictedScopeError</code>.</p>
 </section><h2 id="schemas">Tool schemas<a class="headerlink" href="#schemas" title="Link to this section">#</a></h2>
-<p>To register the memory tools with a framework other than MCP, take their definitions from <code>wenchang.schemas</code> (in the <code>wenchang</code> package: <code>pip install wenchang</code>).</p>
-<p><code>tool_schemas(product=None)</code> returns a read-only mapping from tool name to <code>ToolSchema</code>, one per tool, in <code>wenchang.tools.TOOL_NAMES</code> order. <code>error_schema()</code> returns the schema shared by every <code>render_error</code> payload.</p>
-<div class="table-wrap"><table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Type</th>
-<th>Contents</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>name</code></td>
-<td>string</td>
-<td>The bare tool name, such as <code>read_file</code>.</td>
-</tr>
-<tr>
-<td><code>description</code></td>
-<td>string</td>
-<td>The tool's description, the same as <code>tool_descriptions(product)[name]</code>.</td>
-</tr>
-<tr>
-<td><code>input</code></td>
-<td>dict</td>
-<td>JSON Schema of the tool's arguments, with defaults for optional ones.</td>
-</tr>
-<tr>
-<td><code>output</code></td>
-<td>dict</td>
-<td>JSON Schema of the <code>render_result</code> payload on success.</td>
-</tr>
-<tr>
-<td><code>error</code></td>
-<td>dict</td>
-<td>JSON Schema of the <code>render_error</code> payload on failure; the same as <code>error_schema()</code>.</td>
-</tr>
-</tbody>
-</table></div>
-<p>Every schema is JSON Schema draft 2020-12 and closed (<code>additionalProperties: false</code>). Each call builds fresh dicts, so you can change them without affecting later calls.</p>
-<p>Use <code>input</code> as the tool's parameter schema, call the matching <code>MemoryTools</code> method from a session's <code>bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)</code>, and return <code>render_result</code> of its value or <code>render_error</code> of what it raised. Those payloads match <code>output</code> and <code>error</code>. Validate the agent's arguments against <code>input</code> before calling the method, as most frameworks do from the parameter schema: the method is called with <code>**arguments</code>, so a missing or unknown argument raises a <code>TypeError</code> that <code>render_error</code> reports as an opaque <code>internal</code> error. Here <code>ToolDef</code> stands in for your framework's tool definition:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
-
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.schemas</span><span class="w"> </span><span class="kn">import</span> <span class="n">tool_schemas</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryTools</span><span class="p">,</span> <span class="n">bind_tools</span><span class="p">,</span> <span class="n">render_error</span><span class="p">,</span> <span class="n">render_result</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
-
-
-<span class="nd">@dataclass</span>
-<span class="k">class</span><span class="w"> </span><span class="nc">ToolDef</span><span class="p">:</span>  <span class="c1"># stand-in for your framework's tool definition</span>
-    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
-    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
-    <span class="n">parameters</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span>
-    <span class="n">handler</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]</span>
-
-
-<span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">MemoryTools</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]:</span>
-    <span class="n">method</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">tools</span><span class="p">()[</span><span class="n">name</span><span class="p">]</span>
-
-    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="n">arguments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]:</span>
-        <span class="c1"># The framework has already validated `arguments` against `s.input`.</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="k">return</span> <span class="n">render_result</span><span class="p">(</span><span class="n">method</span><span class="p">(</span><span class="o">**</span><span class="n">arguments</span><span class="p">))</span>  <span class="c1"># matches the schema's output</span>
-        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-            <span class="k">return</span> <span class="n">render_error</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>  <span class="c1"># matches the schema's error</span>
-
-    <span class="k">return</span> <span class="n">call</span>
-
-
-<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
-<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
-<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span>
-
-<span class="n">defs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ToolDef</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
-<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">tool_schemas</span><span class="p">(</span><span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
-    <span class="n">call</span> <span class="o">=</span> <span class="n">handler</span><span class="p">(</span><span class="n">tools</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
-    <span class="n">defs</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">ToolDef</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">description</span><span class="p">,</span> <span class="n">parameters</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">input</span><span class="p">,</span> <span class="n">handler</span><span class="o">=</span><span class="n">call</span><span class="p">)</span>
-
-<span class="c1"># A NotFoundError payload, valid against tool_schemas()["read_file"].error.</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">defs</span><span class="p">[</span><span class="s2">"read_file"</span><span class="p">]</span><span class="o">.</span><span class="n">handler</span><span class="p">({</span><span class="s2">"scope"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"area"</span><span class="p">:</span> <span class="s2">"notes"</span><span class="p">,</span> <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"tea"</span><span class="p">}))</span>
-</code></pre></div>
-
-<p>The schemas assume on-contract output and standard tool-use modes:</p>
+<p><code>wenchang.schemas</code> (in the base package) describes each tool for frameworks other than MCP:</p>
 <ul>
-<li><strong>Every field is required.</strong> An on-contract <code>TransportClient</code> always produces every field, so each output field is marked required. <code>render_result</code> drops a field whose value has the wrong type, which an off-contract client can produce; strict validation rejects that payload.</li>
-<li><strong>Errors are wenchang's own.</strong> The error schema covers the error classes wenchang raises. A <code>WenchangError</code> subclass of your own validates only if it reuses these attribute names, types, and <code>reason</code> values.</li>
-<li><strong>Input schemas target standard tool use.</strong> They work as-is with Anthropic tool use and OpenAI function calling. OpenAI's strict mode requires every property in <code>required</code>, so optional arguments must become required and nullable; Gemini function declarations reject <code>anyOf</code>, <code>additionalProperties</code>, and <code>default</code>. A host using either must transform <code>input</code> first.</li>
+<li><code>tool_schemas(product=None) -&gt; Mapping[str, ToolSchema]</code>: one read-only entry per tool, in <code>wenchang.tools.TOOL_NAMES</code> order.</li>
+<li><code>ToolSchema</code>: <code>name</code>, <code>description</code>, <code>input</code>, <code>output</code>, and <code>error</code>, the last three JSON Schema draft 2020-12 dicts.</li>
+<li><code>error_schema() -&gt; dict</code>: the schema shared by every <code>render_error</code> payload.</li>
 </ul>
+<p><code>wenchang.tools.tool_descriptions(product=None) -&gt; Mapping[str, str]</code> returns each tool's description by name, in <code>TOOL_NAMES</code> order, without binding a session. With <code>product</code>, each first line names it. It is the same text as <code>ToolSchema.description</code> and <code>MemoryTools.descriptions()</code>.</p>
+<p><a href="integrate-without-mcp.html#schemas">Tool schemas</a> explains each field and how to register the tools with them.</p>
 <h2 id="resource">The memory prompt resource<a class="headerlink" href="#resource" title="Link to this section">#</a></h2>
 <p>The server exposes the assembled memory prompt as an MCP resource:</p>
 <div class="table-wrap"><table>
@@ -745,7 +517,7 @@
 </table></div>
 <p>Clients that drop server <code>instructions</code> can read the resource instead. The prompt is markdown with <code>##</code> headings and no H1; see <a href="prompts.html#fixed">Customizing the prompts</a> for its sections.</p>
 <h2 id="errors">Errors<a class="headerlink" href="#errors" title="Link to this section">#</a></h2>
-<p>A failed tool call returns an MCP error result (<code>isError</code> true) whose JSON payload has this shape:</p>
+<p>Every failure renders through <code>render_error</code>. Over MCP it is the payload of an error result (<code>isError</code> true); without MCP you call <code>render_error</code> yourself. The payload has this shape:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"VersionConflictError"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>
@@ -815,7 +587,7 @@
 <tr>
 <td><code>FileQuotaExceededError</code></td>
 <td>recoverable</td>
-<td>A <code>write_file</code> create would exceed the entity's <a href="#file-cap">file cap</a>.</td>
+<td>A <code>write_file</code> create would exceed the entity's <a href="storage.html#file-cap">file cap</a>.</td>
 <td><code>limit</code></td>
 </tr>
 <tr>
@@ -856,6 +628,17 @@
 </tr>
 </tbody>
 </table></div>
+<h3 id="invalid-argument">InvalidArgumentError<a class="headerlink" href="#invalid-argument" title="Link to this section">#</a></h3>
+<p><code>wenchang.errors.InvalidArgumentError(argument, detail)</code> names the rejected argument. <code>argument</code> must be a non-empty <code>str</code> (<code>TypeError</code> or <code>ValueError</code> otherwise). The message is <code>Argument {argument} is invalid: {detail}</code>, followed by the recoverable guidance. It renders as <code>error</code>, <code>category</code> (<code>recoverable</code>), <code>message</code>, and <code>argument</code>, with no location fields:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"InvalidArgumentError"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Argument scope is invalid: scope 'project' is not available in this session; available scopes: organization, user. ..."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"argument"</span><span class="p">:</span><span class="w"> </span><span class="s2">"scope"</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The tools raise it with <code>argument</code> set to one of their own parameter names: <code>scope</code>, <code>area</code>, <code>name</code>, <code>content</code>, <code>description</code>, <code>aliases</code>, <code>line</code>, <code>old_string</code>, <code>new_string</code>, <code>expected_version</code>, or <code>cursor</code>. You can raise it from your own dispatch code too, as the <a href="integrate-without-mcp.html#example">direct example</a> does for a missing or unknown argument.</p>
 <p>Notes:</p>
 <ul>
 <li>The tool layer builds each path from the caller's own grants, so over MCP an ungranted scope is reported as <code>InvalidArgumentError</code> (naming the available scopes); <code>not_granted</code> is raised by the core path check.</li>
@@ -865,10 +648,10 @@
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Link to this section">#</a></h2>
 <h3 id="identity-types">Identity types<a class="headerlink" href="#identity-types" title="Link to this section">#</a></h3>
 <p><code>wenchang.identity.Identity(grants)</code> is what a resolver returns: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Scope names and entity IDs must be valid path segments (non-empty, no <code>/</code>, no backslash, no control characters, not <code>.</code> or <code>..</code>). The role must be non-empty. <code>identity.scope_map</code> is scope name to entity ID. <code>identity.entity_id(scope)</code> and <code>identity.role(scope)</code> raise <code>KeyError</code> if the scope is not granted.</p>
-<p><code>IdentityResolver[C]</code> is a protocol with one method, <code>resolve(credentials: C) -&gt; Identity | ResolutionFailure</code>. It must not raise, and the <code>detail</code> of a <code>ResolutionFailure</code> is shown to the agent. <code>SandboxResolver(identity)</code> returns one fixed identity for any credentials, for sandboxes and tests.</p>
+<p><code>IdentityResolver[C]</code> is a protocol with one method, <code>resolve(credentials: C) -&gt; Identity | ResolutionFailure</code>. It must not raise, and the <code>detail</code> of a <code>ResolutionFailure</code> is shown to the agent. <code>resolve</code> must be a plain synchronous method: it is never awaited, so an <code>async def resolve</code> makes every call fail with <code>ResolverFailureError</code> ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with <code>bind_tools</code> alike. It runs on every tool call over MCP, and once per <code>bind_tools</code> call without MCP. <code>SandboxResolver(identity)</code> returns one fixed identity for any credentials, for sandboxes and tests.</p>
 <p><code>wenchang.scope.ScopePolicy(write_roles)</code> maps a scope to the <code>frozenset</code> of roles allowed to write it. A scope absent from the mapping is unrestricted. <code>policy.permitted_roles(scope)</code> returns the set or <code>None</code>.</p>
 <h3 id="store-options">Store options<a class="headerlink" href="#store-options" title="Link to this section">#</a></h3>
-<p><code>wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=(), max_files_per_entity=500)</code>. The three size options must be positive. <code>max_files_per_entity</code> caps the non-<code>system/</code> files per entity and must be positive or <code>None</code> (no cap); see <a href="#file-cap">Files per entity</a>. <code>scope_priority</code> entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and <code>system/</code> areas always come first. <code>clock</code> returns timezone-aware datetimes and stamps <code>last_updated</code>; pass a fixed one in tests. A write over <code>max_file_bytes</code> raises <code>OversizeWriteError</code>.</p>
+<p><code>wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=(), max_files_per_entity=500, index_cache=None)</code>. The three size options must be positive. <code>max_files_per_entity</code> caps the non-<code>system/</code> files per entity and must be positive or <code>None</code> (no cap); see <a href="storage.html#file-cap">Files per entity</a>. <code>index_cache</code> is an optional <code>IndexCache</code>; see <a href="storage.html#index-cache">The index cache</a>. <code>scope_priority</code> entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and <code>system/</code> areas always come first. <code>clock</code> returns timezone-aware datetimes and stamps <code>last_updated</code>; pass a fixed one in tests. A write over <code>max_file_bytes</code> raises <code>OversizeWriteError</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
@@ -923,68 +706,22 @@
 <p>Backends may raise <code>BackendUnavailableError</code> for timeouts and outages. Two ship with the library:</p>
 <ul>
 <li><strong><code>GcsStorage(bucket)</code></strong> in <code>wenchang.storage.gcs</code> takes a <code>google.cloud.storage.Bucket</code>. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.</li>
-<li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a thread-safe fake for tests and trials.</li>
+<li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a fake for tests and trials. It holds a lock, so it is safe to share across threads.</li>
 </ul>
+<p>Object keys, the stored metadata keys, timeouts, and retries are on <a href="storage.html#metadata">Storage and operations</a>.</p>
+<h3 id="operator">Operator methods<a class="headerlink" href="#operator" title="Link to this section">#</a></h3>
+<p>Not agent tools, and not on <code>TransportClient</code> or <code>MemoryTools</code>. See <a href="storage.html#erase">Erasing an entity</a>.</p>
+<ul>
+<li><code>MemoryStore.purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -&gt; int</code>: delete every object under <code>{scope}/{entity_id}/</code>; returns the confirmed delete count. <code>wenchang.core.PURGE_MAX_PASSES</code> is 5. Raises <code>wenchang.core.PurgeIncompleteError</code> if objects remain after the last pass.</li>
+<li><code>MemoryStore.export(scope, entity_id) -&gt; tuple[ExportedObject, ...]</code>: every object under that prefix, raw, in key order. <code>ExportedObject</code> has <code>key</code>, <code>data</code>, <code>metadata</code>, and <code>version</code>.</li>
+<li><code>MemoryStore.invalidate_index(scope, entity_id) -&gt; None</code>: force the next index that includes the entity to list storage again. Does nothing without an index cache.</li>
+</ul>
+<h3 id="index-cache">Index cache<a class="headerlink" href="#index-cache" title="Link to this section">#</a></h3>
+<p><code>wenchang.index_cache.IndexCache(get, set, ttl=None, key_prefix="wenchang:index:")</code>, where <code>get(key) -&gt; str | None</code> and <code>set(key, value, ttl) -&gt; None</code>. <code>InMemoryIndexCache()</code> provides both for one process. See <a href="storage.html#index-cache">The index cache</a>.</p>
 <h3 id="transport">Transport<a class="headerlink" href="#transport" title="Link to this section">#</a></h3>
-<p>The tool layer calls a <code>wenchang.transport.TransportClient</code>, a protocol that mirrors <code>MemoryStore</code>'s seven operations. <code>InProcessClient(store)</code> calls a <code>MemoryStore</code> directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.</p>
-<h3 id="embed">Add the tools to an existing MCP server<a class="headerlink" href="#embed" title="Link to this section">#</a></h3>
-<p><code>build_server</code> creates a new <code>MCPServer</code>. To add memory to a server you already run, with your own auth, middleware, and tools, use <code>register_memory_tools</code>. It adds the seven tools and the <code>wenchang://memory-prompt</code> resource. It raises before registering anything if an argument is invalid or a tool name or the resource URI is already registered. Pass the same text as the server's <code>instructions</code> that you pass as <code>prompt</code>; <code>memory_instructions(slots)</code> returns it. If the server's instructions do not contain the prompt, a warning is logged.</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
-
-<span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span><span class="p">,</span> <span class="n">MCPServer</span>
-
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span><span class="p">,</span> <span class="n">memory_instructions</span><span class="p">,</span> <span class="n">register_memory_tools</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptSlots</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
-
-<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"inkwell.calls"</span><span class="p">)</span>
-
-<span class="n">slots</span> <span class="o">=</span> <span class="n">PromptSlots</span><span class="p">(</span>
-    <span class="n">purpose</span><span class="o">=</span><span class="s2">"You have persistent memory of your work helping an author write a novel."</span><span class="p">,</span>
-    <span class="n">scope_guidance</span><span class="o">=</span><span class="p">(</span>
-        <span class="s2">"There is one scope, user, and it is private to the author you are talking with."</span>
-    <span class="p">),</span>
-    <span class="n">seed_areas</span><span class="o">=</span><span class="s2">"- user: preferences, workflows, research</span><span class="se">\n\n</span><span class="s2">Every scope also has a `system/` area."</span><span class="p">,</span>
-<span class="p">)</span>
-<span class="n">identity</span> <span class="o">=</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
-
-
-<span class="k">def</span><span class="w"> </span><span class="nf">credentials_from_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">Context</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="c1"># Over HTTP, return the raw credential and let your resolver verify it.</span>
-    <span class="c1"># ctx.headers is None on stdio.</span>
-    <span class="k">return</span> <span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">headers</span> <span class="ow">or</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"authorization"</span><span class="p">)</span>
-
-
-<span class="k">def</span><span class="w"> </span><span class="nf">on_call</span><span class="p">(</span><span class="n">record</span><span class="p">:</span> <span class="n">ToolCallRecord</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="c1"># Runs on worker threads after every call; keep it fast and thread-safe.</span>
-    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"</span><span class="si">%s</span><span class="s2"> error=</span><span class="si">%s</span><span class="s2"> </span><span class="si">%.3f</span><span class="s2">s"</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span> <span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">)</span>
-
-
-<span class="n">prompt</span> <span class="o">=</span> <span class="n">memory_instructions</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span>
-
-<span class="c1"># Your existing server, with your own tools and middleware.</span>
-<span class="n">server</span> <span class="o">=</span> <span class="n">MCPServer</span><span class="p">(</span><span class="s2">"hanlin-tools"</span><span class="p">,</span> <span class="n">instructions</span><span class="o">=</span><span class="n">prompt</span><span class="p">)</span>
-
-<span class="n">register_memory_tools</span><span class="p">(</span>
-    <span class="n">server</span><span class="p">,</span>
-    <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>
-    <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">())),</span>
-    <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span>
-    <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({}),</span>
-    <span class="n">credentials_from_context</span><span class="o">=</span><span class="n">credentials_from_context</span><span class="p">,</span>
-    <span class="n">source</span><span class="o">=</span><span class="s2">"hanlin-tools"</span><span class="p">,</span>
-    <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
-    <span class="n">tool_prefix</span><span class="o">=</span><span class="s2">"inkwell"</span><span class="p">,</span>  <span class="c1"># tools are registered as inkwell_read_file, inkwell_write_file, ...</span>
-    <span class="n">on_call</span><span class="o">=</span><span class="n">on_call</span><span class="p">,</span>
-<span class="p">)</span>
-</code></pre></div>
-
+<p>The tool layer calls a <code>wenchang.transport.TransportClient</code>, a protocol that mirrors <code>MemoryStore</code>'s seven operations. <code>InProcessClient(store)</code> calls a <code>MemoryStore</code> directly and is the only client shipped. The MCP adapter calls one client from concurrent worker threads. What is safe to share across threads is under <a href="integrate-without-mcp.html#threads">Threads</a>.</p>
 <h3 id="telemetry">Telemetry<a class="headerlink" href="#telemetry" title="Link to this section">#</a></h3>
-<p>Both entry points take an <code>on_call</code> observer: <code>register_memory_tools(..., on_call=...)</code> and <code>build_server</code> for MCP, and <code>bind_tools(..., on_call=...)</code> (or <code>MemoryTools(..., on_call=...)</code>) for direct calls. It receives a <code>wenchang.observer.ToolCallRecord</code> after every memory tool call. <code>wenchang.mcp</code> re-exports <code>ToolCallRecord</code>.</p>
+<p>An <code>on_call</code> observer receives a <code>wenchang.observer.ToolCallRecord</code> (re-exported by <code>wenchang.mcp</code>) after each memory tool call. How to use it on each path: <a href="integrate-new-server.html#on-call">new server</a>, <a href="integrate-existing-server.html#calls">existing server</a>, <a href="integrate-without-mcp.html#on-call">without MCP</a>.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -1026,80 +763,10 @@
 </tr>
 </tbody>
 </table></div>
-<p><code>arguments</code> and <code>result</code> are read-only deep copies, and <code>duration_s</code> uses a monotonic clock. Calls rejected during argument validation never produce a record.</p>
-<p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed; it never changes the tool's result or exception. For direct calls it runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. Under MCP it runs on worker threads, so it must be thread-safe and fast. Records contain memory content, so treat them as sensitive.</p>
-<p>This observer logs and counts calls without recording arguments or results:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span><span class="p">,</span> <span class="n">defaultdict</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">suppress</span>
-
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NotFoundError</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.observer</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
-
-<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"inkwell.memory"</span><span class="p">)</span>
-
-<span class="c1"># Stand-ins for your metrics client: a call counter and per-tool latencies.</span>
-<span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
-<span class="n">calls</span><span class="p">:</span> <span class="n">Counter</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
-<span class="n">latencies</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
-
-
-<span class="k">def</span><span class="w"> </span><span class="nf">on_call</span><span class="p">(</span><span class="n">record</span><span class="p">:</span> <span class="n">ToolCallRecord</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="c1"># arguments and result carry memory content; log only the call's shape.</span>
-    <span class="n">category</span> <span class="o">=</span> <span class="n">record</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"category"</span><span class="p">)</span> <span class="k">if</span> <span class="n">record</span><span class="o">.</span><span class="n">is_error</span> <span class="k">else</span> <span class="kc">None</span>
-    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-        <span class="s2">"memory tool=</span><span class="si">%s</span><span class="s2"> is_error=</span><span class="si">%s</span><span class="s2"> category=</span><span class="si">%s</span><span class="s2"> duration_s=</span><span class="si">%.3f</span><span class="s2">"</span><span class="p">,</span>
-        <span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span>
-        <span class="n">record</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span>
-        <span class="n">category</span><span class="p">,</span>
-        <span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">,</span>
-    <span class="p">)</span>
-    <span class="k">with</span> <span class="n">lock</span><span class="p">:</span>  <span class="c1"># under MCP, observers run on worker threads</span>
-        <span class="n">calls</span><span class="p">[(</span><span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">category</span> <span class="ow">or</span> <span class="s2">"ok"</span><span class="p">))]</span> <span class="o">+=</span> <span class="mi">1</span>
-        <span class="n">latencies</span><span class="p">[</span><span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">)</span>
-
-
-<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
-<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
-<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">on_call</span><span class="o">=</span><span class="n">on_call</span><span class="p">)</span>
-
-<span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span>  <span class="c1"># on_call has run by the time this returns</span>
-<span class="k">with</span> <span class="n">suppress</span><span class="p">(</span><span class="n">NotFoundError</span><span class="p">):</span>  <span class="c1"># on_call sees it first: is_error=True, category=recoverable</span>
-    <span class="n">tools</span><span class="o">.</span><span class="n">read_file</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"csv"</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">calls</span><span class="p">)</span>
-</code></pre></div>
-
-<h3 id="bind">Using the tools without MCP<a class="headerlink" href="#bind" title="Link to this section">#</a></h3>
-<p><code>wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)</code> resolves the identity and returns a <code>MemoryTools</code> for one session. <code>on_call</code> is a tool-call observer; see <a href="#telemetry">Telemetry</a>. <code>tools.tools()</code> is the seven bound methods by name, and <code>tools.descriptions()</code> is the description for each. Register each tool with its description from <code>descriptions()</code> rather than its docstring. <code>render_result</code> and <code>render_error</code> in <code>wenchang.tools</code> produce the JSON-safe dicts the MCP adapter returns.</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
-
-<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
-<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
-
-<span class="c1"># One MemoryTools per session; resolving the identity happens here.</span>
-<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span>
-
-<span class="n">descriptions</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">descriptions</span><span class="p">()</span>  <span class="c1"># tool name -&gt; description, product named in the first line</span>
-<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">fn</span> <span class="ow">in</span> <span class="n">tools</span><span class="o">.</span><span class="n">tools</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>  <span class="c1"># the seven tools, as bound methods</span>
-    <span class="nb">print</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">fn</span><span class="o">.</span><span class="vm">__name__</span><span class="p">,</span> <span class="s2">"-"</span><span class="p">,</span> <span class="n">descriptions</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">())</span>
-</code></pre></div>
-
+<p><code>arguments</code> and <code>result</code> are read-only mappings (<code>MappingProxyType</code>) built from deep copies, so an observer can't change what the tool or client sees.</p>
+<p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.</p>
 <h3 id="conformance">Conformance suites<a class="headerlink" href="#conformance" title="Link to this section">#</a></h3>
-<p><code>pip install "wenchang[testing]"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
+<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
 <ul>
 <li><strong><code>ResolverConformance[C]</code></strong> checks an <code>IdentityResolver</code>. Supply fixtures <code>resolver</code>, <code>valid_credentials</code>, <code>invalid_credentials</code> (call <code>pytest.skip</code> if your resolver accepts everything), <code>policy</code>, <code>expected_scopes</code>, and <code>known_roles</code>.</li>
 <li><strong><code>TransportConformance</code></strong> checks a <code>TransportClient</code>. Supply fixtures <code>client</code> (fresh and empty per test), <code>source</code>, <code>scope_map</code> (at least two writable scopes), <code>max_file_bytes</code> (at least 64), <code>index_max_bytes</code> (at least 1024), <code>scope_priority</code>, and <code>list_page_size</code>. Within one test the client's writes must stamp strictly increasing <code>last_updated</code> values.</li>
@@ -1208,35 +875,10 @@
         <span class="k">return</span> <span class="mi">2</span>
 </code></pre></div>
 
-<h2 id="limitations">Limitations and status<a class="headerlink" href="#limitations" title="Link to this section">#</a></h2>
-<ul>
-<li><strong>Status.</strong> Version 0.1.0, MIT license, Python 3.12 or newer. Installed from git; no PyPI release is documented.</li>
-<li><strong>A library, not a server.</strong> There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script. The only server in the repository is the dev-only eval server (<code>python -m evals.server</code>), which uses in-memory storage.</li>
-<li><strong>No content search.</strong> Files are found through <code>description</code> and <code>aliases</code>. The quality of that metadata is what makes recall work.</li>
-<li><strong>Not snapshots.</strong> <code>list_prefix</code> and <code>get_memory_index</code> are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear.</li>
-<li><strong>Remote transport is planned.</strong> Today the only client is <code>InProcessClient</code>; the <code>TransportClient</code> protocol is the seam for a remote one.</li>
-<li><strong>Reads are never role-restricted.</strong> A caller can read any area (including <code>system/</code>) of any scope it holds a grant for. <code>ScopePolicy</code> gates writes only.</li>
-<li><strong>Privacy is prompt-level.</strong> The prompt tells the agent to refuse financial account numbers, health diagnoses, and anything indicating the user is a minor, and to be stricter in shared scopes. No tool checks content, so a successful write does not mean the content was safe.</li>
-<li><strong>Behavior depends on the agent.</strong> Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.</li>
-<li><strong>Tool calls run concurrently</strong> on worker threads, so the transport client (and <code>on_call</code>) must be thread-safe.</li>
-</ul>
-<nav class="page-nav" aria-label="Pages"><a rel="prev" href="usage.html"><small>Previous</small>Examples</a></nav>
+<p>Known limitations are on <a href="status.html#limitations">Status and compatibility</a>.</p>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="prompts.html"><small>Previous</small>Prompts</a><a rel="next" href="walkthroughs.html"><small>Next</small>Walkthroughs</a></nav>
 </main>
 <aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
-<li><a href="#concepts">Concepts</a>
-<ul>
-<li><a href="#paths">Path shape</a></li>
-<li><a href="#scopes">Scopes</a></li>
-<li><a href="#areas">Areas</a></li>
-<li><a href="#names">Names</a></li>
-<li><a href="#system">The system/ area</a></li>
-<li><a href="#facts">Fact-line format</a></li>
-<li><a href="#metadata">File metadata</a></li>
-<li><a href="#concurrency">Optimistic concurrency</a></li>
-<li><a href="#limits">Limits</a></li>
-<li><a href="#file-cap">Files per entity</a></li>
-</ul>
-</li>
 <li><a href="#tools">Tools</a>
 <ul>
 <li><a href="#get_memory_index">get_memory_index</a></li>
@@ -1253,20 +895,21 @@
 <li><a href="#resource">The memory prompt resource</a>
 </li>
 <li><a href="#errors">Errors</a>
+<ul>
+<li><a href="#invalid-argument">InvalidArgumentError</a></li>
+</ul>
 </li>
 <li><a href="#configuration">Configuration</a>
 <ul>
 <li><a href="#identity-types">Identity types</a></li>
 <li><a href="#store-options">Store options</a></li>
 <li><a href="#storage">Storage backends</a></li>
+<li><a href="#operator">Operator methods</a></li>
+<li><a href="#index-cache">Index cache</a></li>
 <li><a href="#transport">Transport</a></li>
-<li><a href="#embed">Add the tools to an existing MCP server</a></li>
 <li><a href="#telemetry">Telemetry</a></li>
-<li><a href="#bind">Using the tools without MCP</a></li>
 <li><a href="#conformance">Conformance suites</a></li>
 </ul>
-</li>
-<li><a href="#limitations">Limitations and status</a>
 </li>
 </ul></aside>
 </div>

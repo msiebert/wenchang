@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concepts: paths, scopes, files, versions, limits</title>
+<meta name="description" content="How wenchang addresses memory files: path shape, scopes, areas, names, the system/ area, fact lines, file metadata, optimistic concurrency, and limits.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/concepts.html">
+<link rel="alternate" type="text/markdown" href="concepts.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Concepts: paths, scopes, files, versions, limits">
+<meta property="og:description" content="How wenchang addresses memory files: path shape, scopes, areas, names, the system/ area, fact lines, file metadata, optimistic concurrency, and limits.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/concepts.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Concepts: paths, scopes, files, versions, limits">
+<meta name="twitter:description" content="How wenchang addresses memory files: path shape, scopes, areas, names, the system/ area, fact lines, file metadata, optimistic concurrency, and limits.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-concepts">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html" aria-current="page">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/concepts.md</span> <a href="concepts.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#paths">Path shape</a>
+</li>
+<li><a href="#scopes">Scopes</a>
+</li>
+<li><a href="#areas">Areas</a>
+</li>
+<li><a href="#names">Names</a>
+</li>
+<li><a href="#system">The system/ area</a>
+</li>
+<li><a href="#facts">Fact lines</a>
+</li>
+<li><a href="#metadata">File metadata</a>
+</li>
+<li><a href="#concurrency">Optimistic concurrency</a>
+</li>
+<li><a href="#limits">Limits</a>
+</li>
+</ul></details></nav>
+<h1 id="concepts">Concepts<a class="headerlink" href="#concepts" title="Link to this section">#</a></h1>
+<p>How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the <a href="reference.html">reference</a>; for how files are stored in GCS see <a href="storage.html">Storage and operations</a>.</p>
+<h2 id="paths">Path shape<a class="headerlink" href="#paths" title="Link to this section">#</a></h2>
+<p>Every memory file is stored at</p>
+<div class="highlight"><pre><span></span><code>{scope}/{entity_id}/{area}/{name}.md
+</code></pre></div>
+
+<p>For example <code>project/p-ninth-examination/characters/lin-qiao.md</code>. Agents never write the path. The tools take <code>(scope, area, name)</code> and the tool layer fills in <code>entity_id</code> from the caller's identity grant for that scope, so a caller can only reach its own entities. Results name a file by its <code>scope</code>, <code>area</code>, and <code>name</code>; they never include the storage path.</p>
+<p>An <strong>entity</strong> is everything under one <code>{scope}/{entity_id}/</code> prefix: one user's private memory, or one project's shared memory.</p>
+<h2 id="scopes">Scopes<a class="headerlink" href="#scopes" title="Link to this section">#</a></h2>
+<p>A scope is an adopter-defined visibility tier. The library defines no scope names; a typical set is <code>user</code> (private), <code>project</code> (shared), and <code>organization</code> (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an <code>InvalidArgumentError</code> listing the available scopes. See <a href="identity.html">Identity and multi-tenant auth</a> for how grants are made.</p>
+<h2 id="areas">Areas<a class="headerlink" href="#areas" title="Link to this section">#</a></h2>
+<p>An area groups files within a scope. The tool layer requires an area to be a lowercase slug matching <code>^[a-z0-9][a-z0-9_-]*$</code>. Areas are created implicitly by writing a file in them. The prompt's <code>seed_areas</code> slot suggests starting areas; the agent may create more.</p>
+<h2 id="names">Names<a class="headerlink" href="#names" title="Link to this section">#</a></h2>
+<p>A name is the file's stem, passed without <code>.md</code>. It must be a valid path segment: non-empty, not <code>.</code> or <code>..</code>, with no <code>/</code>, backslash, or control character, and the tool layer additionally rejects invisible, separator, and noncharacter code points. Names must be valid UTF-8.</p>
+<h2 id="system">The system/ area<a class="headerlink" href="#system" title="Link to this section">#</a></h2>
+<p>Every scope has an area named exactly <code>system</code>. It holds curated content that people maintain and replace wholesale. The agent can read it (any area may be read) but every mutating tool refuses it with <code>RestrictedScopeError</code> (reason <code>system_read_only</code>). Seeding jobs and admin tooling write it through the core <code>MemoryStore</code>, which applies no restrictions; see <a href="quickstart.html#seed">Seed curated content</a>. In the startup index, <code>system/</code> entries come first across all scopes.</p>
+<h2 id="facts">Fact lines<a class="headerlink" href="#facts" title="Link to this section">#</a></h2>
+<p>A memory file body is made of fact lines, one per line:</p>
+<div class="highlight"><pre><span></span><code>- [stated] Has grey eyes.
+</code></pre></div>
+
+<p>The pattern is <code>- [&lt;label&gt;] &lt;text&gt;</code> with a non-empty text. The label records how the fact is known:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stated</code></td>
+<td>The user told the agent directly.</td>
+</tr>
+<tr>
+<td><code>observed</code></td>
+<td>The agent saw it in a tool result, session data, or behavior.</td>
+</tr>
+<tr>
+<td><code>inferred</code></td>
+<td>The agent concluded it from a pattern across several observations.</td>
+</tr>
+<tr>
+<td><code>system</code></td>
+<td>Curated content. The prompt tells the agent never to write a new <code>[system]</code> line.</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>append_line</code> accepts only a single well-formed fact line. Other lines in a body are tolerated and preserved verbatim. An end date, if the user states one, is written into the fact's text as prose; there are no per-fact timestamps.</p>
+<h2 id="metadata">File metadata<a class="headerlink" href="#metadata" title="Link to this section">#</a></h2>
+<p>Each file carries four metadata fields, stored beside the body as custom metadata on the stored object, not inside the markdown. Tool results and the index show them under these names; <a href="storage.html#metadata">Storage and operations</a> gives the stored keys and encodings.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>description</code></td>
+<td>string, one line</td>
+<td>What the file is about. Part of the agent's search surface. <code>write_file</code> replaces it; <code>append_line</code> and <code>replace_fact</code> replace it only if one is passed.</td>
+</tr>
+<tr>
+<td><code>aliases</code></td>
+<td>list of strings, ordered</td>
+<td>Other names the subject is looked up by. <code>write_file</code> replaces the whole set; <code>append_line</code> and <code>replace_fact</code> add new aliases, keeping existing ones and their order.</td>
+</tr>
+<tr>
+<td><code>sources</code></td>
+<td>set of strings</td>
+<td>Surface names (the <code>source</code> you configure) that have written the file. Only ever grows; returned sorted.</td>
+</tr>
+<tr>
+<td><code>last_updated</code></td>
+<td>UTC timestamp</td>
+<td>Set by the store's clock on every write; rendered as ISO 8601 with a <code>Z</code> suffix.</td>
+</tr>
+</tbody>
+</table></div>
+<p>There is no content search. <code>description</code> and <code>aliases</code> are the entire search surface; the agent reads the index and matches on them.</p>
+<h2 id="concurrency">Optimistic concurrency<a class="headerlink" href="#concurrency" title="Link to this section">#</a></h2>
+<p>Every file has an opaque <code>version</code> (the GCS generation under <code>GcsStorage</code>). Every mutating tool takes <code>expected_version</code>, the version the agent read; the write succeeds only if the file is still at that version. <code>write_file</code> with <code>expected_version=null</code> creates the file and fails if it already exists. A mismatch returns a recoverable <code>VersionConflictError</code> carrying the current content and version.</p>
+<p><code>replace_fact</code> re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but <code>old_string</code> still matches exactly once, it applies against the current content. <code>append_line</code> has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.</p>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Link to this section">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+<th>Where set</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per-file content size</td>
+<td>16384 bytes (UTF-8)</td>
+<td><code>MemoryStore(max_file_bytes=...)</code></td>
+</tr>
+<tr>
+<td>Startup index size</td>
+<td>65536 bytes; see <a href="storage.html#index-cost">Index cost</a> for how entries are sized</td>
+<td><code>MemoryStore(index_max_bytes=...)</code></td>
+</tr>
+<tr>
+<td><code>list_prefix</code> page size</td>
+<td>100 entries</td>
+<td><code>MemoryStore(list_page_size=...)</code></td>
+</tr>
+<tr>
+<td>Files per entity</td>
+<td>500 files, <code>system/</code> not counted; see <a href="storage.html#file-cap">Files per entity</a></td>
+<td><code>MemoryStore(max_files_per_entity=...)</code></td>
+</tr>
+<tr>
+<td><code>replace_fact</code> attempts</td>
+<td>3</td>
+<td>fixed</td>
+</tr>
+</tbody>
+</table></div>
+<p>When the index overflows its budget, the remaining files are reported under <code>capped</code>, one row per area with the number of files left out in <code>omitted</code>, and the agent pages them with <code>list_prefix</code>. Index order: <code>system/</code> areas of all scopes first; then scopes in <code>scope_priority</code> order (unlisted scopes last, as one tier); within each tier, most recently updated first.</p>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="quickstart.html"><small>Previous</small>Quickstart</a><a rel="next" href="integrate.html"><small>Next</small>Integrate</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#paths">Path shape</a>
+</li>
+<li><a href="#scopes">Scopes</a>
+</li>
+<li><a href="#areas">Areas</a>
+</li>
+<li><a href="#names">Names</a>
+</li>
+<li><a href="#system">The system/ area</a>
+</li>
+<li><a href="#facts">Fact lines</a>
+</li>
+<li><a href="#metadata">File metadata</a>
+</li>
+<li><a href="#concurrency">Optimistic concurrency</a>
+</li>
+<li><a href="#limits">Limits</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="concepts.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

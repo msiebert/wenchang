@@ -51,13 +51,15 @@
 <nav class="site-nav" aria-label="Main">
 <ul>
 <li><a href="index.html" aria-current="page">Overview</a></li>
-<li><a href="setup.html">Setup</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
 <li><a href="prompts.html">Prompts</a></li>
-<li><a href="authorization.html">Authorization</a></li>
-<li><a href="caching.html">Caching</a></li>
-<li><a href="operations.html">Purge & export</a></li>
-<li><a href="usage.html">Examples</a></li>
 <li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
 <li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
 </ul>
 </nav>
@@ -67,6 +69,7 @@
 <main id="main" class="content">
 <p class="md-link"><span class="path">wenchang/index.md</span> <a href="index.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
 
+
 <section class="hero">
 <div class="hero-text">
 
@@ -75,7 +78,7 @@
 <p class="hero-lede">wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.</p>
 
 <pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code></pre>
-<p class="install-note">Not on PyPI yet. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="setup.html">Setup</a> covers that.</p>
+<p class="install-note">Not on PyPI. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="quickstart.html">Quickstart</a> covers that.</p>
 
 </div>
 </section>
@@ -155,11 +158,23 @@ project/p-ninth-examination/characters/lin-qiao.md
 <section class="section">
 <p class="section-label">How you use it</p>
 <h2 id="use">How you use it<a class="headerlink" href="#use" title="Link to this section">#</a></h2>
-<p>wenchang is a library. You write a short Python script that assembles a server, then point your agent's MCP client at it.</p>
+<p>wenchang is a library. You put its tools in front of your agent in one of three ways, all sharing the same store, identity rules, and prompt. <a href="integrate.html">Choose an integration path</a> compares them.</p>
+<div class="card-grid">
+<div class="card">
+<p><strong>A new MCP server.</strong> A short script builds a server with <code>build_server</code> and runs it over stdio or HTTP, for Claude Code or any MCP client. <a href="integrate-new-server.html">New MCP server</a></p>
+</div>
+<div class="card">
+<p><strong>An existing MCP server.</strong> <code>register_memory_tools</code> adds the tools and prompt resource to an mcp 2.x <code>MCPServer</code> you already run. <a href="integrate-existing-server.html">Existing MCP server</a></p>
+</div>
+<div class="card">
+<p><strong>Without MCP.</strong> <code>bind_tools</code> returns the tools as Python methods for your own framework, with JSON Schemas from <code>tool_schemas</code>. <a href="integrate-without-mcp.html">Without MCP</a></p>
+</div>
+</div>
+<p>The quickest start is a stdio server in Claude Code:</p>
 <ol class="steps">
 <li>
 
-<strong>Install it</strong> and create a GCS bucket for memory files. <a href="setup.html#install">Setup</a>
+<strong>Install it</strong> and create a GCS bucket for memory files. <a href="quickstart.html#install">Quickstart</a>
 
 </li>
 <li>
@@ -180,12 +195,12 @@ project/p-ninth-examination/characters/lin-qiao.md
 
 
 
-<a href="setup.html#server">Setup</a>
+<a href="quickstart.html#server">Quickstart</a>
 
 </li>
 <li>
 
-<strong>Register it with your MCP client.</strong> For Claude Code, <code>claude mcp add memory -- python server.py</code>. <a href="setup.html#client">Setup</a>
+<strong>Register it with your MCP client.</strong> For Claude Code, <code>claude mcp add memory -- python server.py</code>. <a href="quickstart.html#client">Quickstart</a>
 
 </li>
 <li>
@@ -195,7 +210,7 @@ project/p-ninth-examination/characters/lin-qiao.md
 </li>
 <li>
 
-<strong>Plug in your own auth</strong> when more than one person uses the server. <a href="authorization.html">Authorization</a>
+<strong>Plug in your own auth</strong> when more than one person uses the server. <a href="identity.html">Identity and multi-tenant auth</a>
 
 </li>
 </ol>
@@ -212,14 +227,14 @@ project/p-ninth-examination/characters/lin-qiao.md
 <li>The memory prompt that teaches the agent how to use them.</li>
 <li>The layer that writes to long-term storage (GCS), with versioned writes and size limits.</li>
 <li>Enforcement of your scope rules: the <code>system/</code> area is read-only, and restricted scopes accept only the roles you name.</li>
-<li>An MCP adapter, so the tools work in any MCP client.</li>
+<li>An MCP adapter, so the tools work in any MCP client, and JSON Schemas for other tool frameworks.</li>
 </ul>
 </div>
 <div class="card">
 <h3 id="you-provide">You provide<a class="headerlink" href="#you-provide" title="Link to this section">#</a></h3>
 <ul>
 <li><strong>Authentication.</strong> Verifying who is calling.</li>
-<li><strong>Authorization.</strong> Mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call and trusts its answer.</li>
+<li><strong>Authorization.</strong> Mapping each caller to the scopes, entity IDs, and roles they get. wenchang calls your resolver on every tool call over MCP, or once per <code>bind_tools</code> call without MCP, and trusts its answer.</li>
 <li>A GCS bucket and credentials.</li>
 <li>The server process: where it runs and how clients reach it.</li>
 <li>Any content filtering beyond what the prompt asks for.</li>
@@ -235,9 +250,9 @@ project/p-ninth-examination/characters/lin-qiao.md
 </ul>
 </div>
 </div>
-<p>Version 0.1.0, MIT license, Python 3.12 or newer. See the <a href="reference.html#limitations">reference</a> for known limits.</p>
+<p>Version 0.1.0, MIT license, Python 3.11 or newer. See <a href="status.html#limitations">Status and compatibility</a> for known limits.</p>
 </section>
-<nav class="page-nav" aria-label="Pages"><a rel="next" href="setup.html"><small>Next</small>Setup</a></nav>
+<nav class="page-nav" aria-label="Pages"><a rel="next" href="quickstart.html"><small>Next</small>Quickstart</a></nav>
 </main>
 
 </div>

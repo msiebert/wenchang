@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integrate without MCP</title>
+<meta name="description" content="Call the memory tools as Python methods from your own tool framework: bind_tools per request, tool_schemas, render_result and render_error, threading, and on_call.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/integrate-without-mcp.html">
+<link rel="alternate" type="text/markdown" href="integrate-without-mcp.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Integrate without MCP">
+<meta property="og:description" content="Call the memory tools as Python methods from your own tool framework: bind_tools per request, tool_schemas, render_result and render_error, threading, and on_call.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/integrate-without-mcp.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Integrate without MCP">
+<meta name="twitter:description" content="Call the memory tools as Python methods from your own tool framework: bind_tools per request, tool_schemas, render_result and render_error, threading, and on_call.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-integrate-without-mcp">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html" aria-current="page">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/integrate-without-mcp.md</span> <a href="integrate-without-mcp.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<nav class="subnav" aria-label="Integration paths"><ul><li><a href="integrate.html">Choose a path</a></li><li><a href="integrate-new-server.html">New MCP server</a></li><li><a href="integrate-existing-server.html">Existing MCP server</a></li><li><a href="integrate-without-mcp.html" aria-current="page">Without MCP</a></li></ul></nav>
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#install">Install</a>
+</li>
+<li><a href="#methods">The tools are methods</a>
+</li>
+<li><a href="#per-request">Bind per request</a>
+</li>
+<li><a href="#schemas">Tool schemas</a>
+</li>
+<li><a href="#results">Results and errors</a>
+</li>
+<li><a href="#example">A complete example</a>
+</li>
+<li><a href="#threads">Threads and async hosts</a>
+<ul>
+<li><a href="#shared">What can be shared</a></li>
+<li><a href="#async">Async hosts</a></li>
+</ul>
+</li>
+<li><a href="#on-call">Observing calls</a>
+</li>
+<li><a href="#provide">What you provide</a>
+</li>
+</ul></details></nav>
+<h1 id="integrate-without-mcp">Integrate without MCP<a class="headerlink" href="#integrate-without-mcp" title="Link to this section">#</a></h1>
+<p>The memory tools are methods on a Python object. If your agent runs on another tool framework, or on your own loop over a model API, call them directly. Nothing is registered anywhere until you register it.</p>
+<h2 id="install">Install<a class="headerlink" href="#install" title="Link to this section">#</a></h2>
+<p>The base package is enough. It needs no <code>mcp</code>:</p>
+<div class="highlight"><pre><span></span><code>pip install "wenchang @ git+https://github.com/msiebert/wenchang"
+</code></pre></div>
+
+<p>With uv: <code>uv add "wenchang @ git+https://github.com/msiebert/wenchang"</code>.</p>
+<h2 id="methods">The tools are methods<a class="headerlink" href="#methods" title="Link to this section">#</a></h2>
+<p><code>wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)</code> resolves the caller's identity and returns a <code>MemoryTools</code> for that identity. On it:</p>
+<ul>
+<li><code>tools.tools()</code> maps each of the seven tool names to its bound method, in <code>wenchang.tools.TOOL_NAMES</code> order.</li>
+<li><code>tools.descriptions()</code> maps each name to the description to show the model, with <code>product</code> named in each first line. Register this text, not the methods' docstrings.</li>
+</ul>
+<p>The methods take the same arguments as the tools in the <a href="reference.html#tools">reference</a> and return result objects. Nothing else is exposed: no prompt, no registration, no transport.</p>
+<p>If you have already resolved the identity yourself, <code>MemoryTools(client, identity, policy, *, source, product=None, on_call=None)</code> builds the same object from an <code>Identity</code>.</p>
+<h2 id="per-request">Bind per request<a class="headerlink" href="#per-request" title="Link to this section">#</a></h2>
+<p><code>bind_tools</code> calls your resolver once and fixes that identity for the object's lifetime. A multi-tenant service binds per request, or per session if a session has one caller, never once per process. Binding runs the resolver and builds a small object.</p>
+<p>The store, the client, the resolver, and the policy are built once per process and shared, except where <a href="#threads">Threads</a> says otherwise.</p>
+<p>If the resolver returns a <code>ResolutionFailure</code> or raises, or <code>resolve</code> is <code>async</code>, <code>bind_tools</code> raises <code>ResolverFailureError</code> (permanent). Render it like any tool error. The model then has no memory for that request.</p>
+<p>The multi-tenant resolver on <a href="identity.html#example">Identity</a> works here unchanged. Build its <code>Credentials</code> from your request and pass them to <code>bind_tools</code>; <a href="identity.html#direct">The same resolver without MCP</a> shows the call.</p>
+<h2 id="schemas">Tool schemas<a class="headerlink" href="#schemas" title="Link to this section">#</a></h2>
+<p><code>wenchang.schemas.tool_schemas(product=None)</code> returns a read-only mapping from tool name to <code>ToolSchema</code>, one per tool, in <code>TOOL_NAMES</code> order. Give these to your framework instead of writing argument models by hand. <code>error_schema()</code> returns the schema shared by every <code>render_error</code> payload.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>The bare tool name, such as <code>read_file</code>.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>The tool's description, the same as <code>wenchang.tools.tool_descriptions(product)[name]</code>.</td>
+</tr>
+<tr>
+<td><code>input</code></td>
+<td>dict</td>
+<td>JSON Schema of the tool's arguments, with defaults for optional ones.</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>dict</td>
+<td>JSON Schema of the <code>render_result</code> payload on success.</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>dict</td>
+<td>JSON Schema of the <code>render_error</code> payload on failure; the same as <code>error_schema()</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Every schema is JSON Schema draft 2020-12 and closed (<code>additionalProperties: false</code>). Each call builds fresh dicts, so you can change them without affecting later calls.</p>
+<p>Validate the model's arguments against <code>input</code> before calling the method, as most frameworks do from the parameter schema. The method is called with <code>**arguments</code>, so a missing or unknown argument raises a <code>TypeError</code> that <code>render_error</code> reports as an opaque <code>internal</code> error. Here <code>ToolDef</code> stands in for your framework's tool definition, for one session's tools:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.schemas</span><span class="w"> </span><span class="kn">import</span> <span class="n">tool_schemas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryTools</span><span class="p">,</span> <span class="n">bind_tools</span><span class="p">,</span> <span class="n">render_error</span><span class="p">,</span> <span class="n">render_result</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ToolDef</span><span class="p">:</span>  <span class="c1"># stand-in for your framework's tool definition</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">parameters</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span>
+    <span class="n">handler</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">tools</span><span class="p">:</span> <span class="n">MemoryTools</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]:</span>
+    <span class="n">method</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">tools</span><span class="p">()[</span><span class="n">name</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="n">arguments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]:</span>
+        <span class="c1"># The framework has already validated `arguments` against `s.input`.</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">render_result</span><span class="p">(</span><span class="n">method</span><span class="p">(</span><span class="o">**</span><span class="n">arguments</span><span class="p">))</span>  <span class="c1"># matches the schema's output</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">render_error</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>  <span class="c1"># matches the schema's error</span>
+
+    <span class="k">return</span> <span class="n">call</span>
+
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
+<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span>
+
+<span class="n">defs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ToolDef</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">tool_schemas</span><span class="p">(</span><span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+    <span class="n">call</span> <span class="o">=</span> <span class="n">handler</span><span class="p">(</span><span class="n">tools</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="n">defs</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">ToolDef</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">description</span><span class="p">,</span> <span class="n">parameters</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">input</span><span class="p">,</span> <span class="n">handler</span><span class="o">=</span><span class="n">call</span><span class="p">)</span>
+
+<span class="c1"># A NotFoundError payload, valid against tool_schemas()["read_file"].error.</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">defs</span><span class="p">[</span><span class="s2">"read_file"</span><span class="p">]</span><span class="o">.</span><span class="n">handler</span><span class="p">({</span><span class="s2">"scope"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"area"</span><span class="p">:</span> <span class="s2">"notes"</span><span class="p">,</span> <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"tea"</span><span class="p">}))</span>
+</code></pre></div>
+
+<p>The schemas assume on-contract output and standard tool-use modes:</p>
+<ul>
+<li><strong>Every field is required.</strong> An on-contract <code>TransportClient</code> always produces every field, so each output field is marked required. <code>render_result</code> drops a field whose value has the wrong type, which an off-contract client can produce; strict validation rejects that payload.</li>
+<li><strong>Errors are wenchang's own.</strong> The error schema covers the error classes wenchang raises. A <code>WenchangError</code> subclass of your own validates only if it reuses these attribute names, types, and <code>reason</code> values.</li>
+<li><strong>Input schemas target standard tool use.</strong> They work as-is with Anthropic tool use and OpenAI function calling. OpenAI's strict mode requires every property in <code>required</code>, so optional arguments must become required and nullable; Gemini function declarations reject <code>anyOf</code>, <code>additionalProperties</code>, and <code>default</code>. A host using either must transform <code>input</code> first.</li>
+</ul>
+<h2 id="results">Results and errors<a class="headerlink" href="#results" title="Link to this section">#</a></h2>
+<p>Tool methods return result objects and raise exceptions. <code>wenchang.tools.render_result(value)</code> turns a return value into the JSON-safe dict to show the model, and <code>render_error(exc)</code> turns any exception into the error payload, with the category and repair details described under <a href="reference.html#errors">errors</a>. These are the same payloads the MCP adapter sends. An unexpected exception renders as an <code>internal</code> error with a generic message, so internals never reach the model.</p>
+<h2 id="example">A complete example<a class="headerlink" href="#example" title="Link to this section">#</a></h2>
+<p>This binds per request with an in-memory store, dispatches each call by name with arguments checked against the schema, and renders a result and an error. The asserts show what comes back.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">InvalidArgumentError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">ResolutionFailure</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.observer</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.schemas</span><span class="w"> </span><span class="kn">import</span> <span class="n">tool_schemas</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span><span class="p">,</span> <span class="n">render_error</span><span class="p">,</span> <span class="n">render_result</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">USERS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"tok-tianlong"</span><span class="p">:</span> <span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"tok-diya"</span><span class="p">:</span> <span class="s2">"u-diya"</span><span class="p">}</span>  <span class="c1"># stand-in for your IdP</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TokenResolver</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Maps a bearer token to the caller's grants. Must not raise."""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">credentials</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Identity</span> <span class="o">|</span> <span class="n">ResolutionFailure</span><span class="p">:</span>
+        <span class="n">user_id</span> <span class="o">=</span> <span class="n">USERS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">credentials</span> <span class="ow">or</span> <span class="s2">""</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">user_id</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">ResolutionFailure</span><span class="p">(</span><span class="s2">"Invalid or expired token."</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="n">user_id</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
+
+
+<span class="c1"># Built once per process and shared by every request. InMemoryStorage is safe to share</span>
+<span class="c1"># across threads; see the Threads section before sharing a GcsStorage.</span>
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
+<span class="n">resolver</span> <span class="o">=</span> <span class="n">TokenResolver</span><span class="p">()</span>
+<span class="n">policy</span> <span class="o">=</span> <span class="n">ScopePolicy</span><span class="p">({})</span>
+<span class="n">schemas</span> <span class="o">=</span> <span class="n">tool_schemas</span><span class="p">(</span><span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">)</span>
+<span class="n">records</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">ToolCallRecord</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="c1"># Register these with your framework once: name, description, and parameter schema.</span>
+<span class="n">definitions</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">"description"</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">description</span><span class="p">,</span> <span class="s2">"input_schema"</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">input</span><span class="p">}</span>
+    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">schemas</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+<span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">check_arguments</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">arguments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># Your framework normally validates against the input schema; this checks names only.</span>
+    <span class="n">schema</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">schemas</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">input</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">arguments</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">schema</span><span class="p">[</span><span class="s2">"properties"</span><span class="p">]:</span>
+            <span class="k">raise</span> <span class="n">InvalidArgumentError</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="s2">"not a parameter of this tool"</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">schema</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"required"</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">arguments</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">InvalidArgumentError</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="s2">"required"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run_tool_calls</span><span class="p">(</span>
+    <span class="n">token</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">calls</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]]</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">"""Run one request's tool calls as the caller the token names."""</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Resolve once per request, never once per process.</span>
+        <span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span>
+            <span class="n">client</span><span class="p">,</span>
+            <span class="n">resolver</span><span class="p">,</span>
+            <span class="n">token</span><span class="p">,</span>
+            <span class="n">policy</span><span class="p">,</span>
+            <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-api"</span><span class="p">,</span>
+            <span class="n">product</span><span class="o">=</span><span class="s2">"Inkwell"</span><span class="p">,</span>
+            <span class="n">on_call</span><span class="o">=</span><span class="n">records</span><span class="o">.</span><span class="n">append</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># ResolverFailureError: no memory for this request</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">render_error</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">calls</span><span class="p">]</span>
+    <span class="n">methods</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">tools</span><span class="p">()</span>
+    <span class="n">payloads</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">arguments</span> <span class="ow">in</span> <span class="n">calls</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">check_arguments</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">arguments</span><span class="p">)</span>
+            <span class="n">payloads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">render_result</span><span class="p">(</span><span class="n">methods</span><span class="p">[</span><span class="n">name</span><span class="p">](</span><span class="o">**</span><span class="n">arguments</span><span class="p">)))</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+            <span class="n">payloads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">render_error</span><span class="p">(</span><span class="n">exc</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">payloads</span>
+
+
+<span class="n">created</span><span class="p">,</span> <span class="n">missing</span> <span class="o">=</span> <span class="n">run_tool_calls</span><span class="p">(</span>
+    <span class="s2">"tok-tianlong"</span><span class="p">,</span>
+    <span class="p">[</span>
+        <span class="p">(</span>
+            <span class="s2">"write_file"</span><span class="p">,</span>
+            <span class="p">{</span>
+                <span class="s2">"scope"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span>
+                <span class="s2">"area"</span><span class="p">:</span> <span class="s2">"preferences"</span><span class="p">,</span>
+                <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"prose-style"</span><span class="p">,</span>
+                <span class="s2">"content"</span><span class="p">:</span> <span class="s2">"- [stated] Writes in close third person, past tense.</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span>
+                <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Prose style preferences"</span><span class="p">,</span>
+                <span class="s2">"aliases"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"narration"</span><span class="p">,</span> <span class="s2">"voice"</span><span class="p">],</span>
+                <span class="s2">"expected_version"</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">),</span>
+        <span class="p">(</span><span class="s2">"read_file"</span><span class="p">,</span> <span class="p">{</span><span class="s2">"scope"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"area"</span><span class="p">:</span> <span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"tea"</span><span class="p">}),</span>
+    <span class="p">],</span>
+<span class="p">)</span>
+<span class="k">assert</span> <span class="n">created</span><span class="p">[</span><span class="s2">"name"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"prose-style"</span> <span class="ow">and</span> <span class="n">created</span><span class="p">[</span><span class="s2">"sources"</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span><span class="s2">"inkwell-api"</span><span class="p">]</span>
+<span class="k">assert</span> <span class="n">missing</span><span class="p">[</span><span class="s2">"error"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"NotFoundError"</span> <span class="ow">and</span> <span class="n">missing</span><span class="p">[</span><span class="s2">"category"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"recoverable"</span>
+
+<span class="p">[</span><span class="n">denied</span><span class="p">]</span> <span class="o">=</span> <span class="n">run_tool_calls</span><span class="p">(</span><span class="s2">"tok-expired"</span><span class="p">,</span> <span class="p">[(</span><span class="s2">"get_memory_index"</span><span class="p">,</span> <span class="p">{})])</span>
+<span class="k">assert</span> <span class="n">denied</span><span class="p">[</span><span class="s2">"error"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"ResolverFailureError"</span> <span class="ow">and</span> <span class="n">denied</span><span class="p">[</span><span class="s2">"category"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"permanent"</span>
+
+<span class="c1"># One record per tool call; request_id is None for direct calls.</span>
+<span class="k">assert</span> <span class="p">[(</span><span class="n">r</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">request_id</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">records</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s2">"write_file"</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">"read_file"</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+<span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">created</span><span class="p">[</span><span class="s2">"version"</span><span class="p">],</span> <span class="n">missing</span><span class="p">[</span><span class="s2">"message"</span><span class="p">])</span>
+</code></pre></div>
+
+<h2 id="threads">Threads and async hosts<a class="headerlink" href="#threads" title="Link to this section">#</a></h2>
+<p>Calls are synchronous. Under <code>GcsStorage</code> each one blocks on one or more GCS round trips; <code>get_memory_index</code> lists every object in the caller's entities unless an <a href="storage.html#index-cache">index cache</a> serves it. This section applies to the MCP paths too: the MCP adapter runs tool calls concurrently on worker threads and calls one <code>client</code> from all of them.</p>
+<h3 id="shared">What can be shared<a class="headerlink" href="#shared" title="Link to this section">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Across threads</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MemoryStore</code></td>
+<td>Safe. It sets its fields once in the constructor and never changes them. All its state lives in its storage and its index cache.</td>
+</tr>
+<tr>
+<td><code>InProcessClient</code></td>
+<td>Safe. It holds only its store.</td>
+</tr>
+<tr>
+<td><code>MemoryTools</code></td>
+<td>Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request.</td>
+</tr>
+<tr>
+<td><code>InMemoryStorage</code>, <code>InMemoryIndexCache</code></td>
+<td>Safe. Each guards its state with a lock.</td>
+</tr>
+<tr>
+<td><code>GcsStorage</code></td>
+<td>Adds no state of its own: it holds the bucket and builds a new <code>Blob</code> for every call. Every call goes through the bucket's <code>storage.Client</code>.</td>
+</tr>
+<tr>
+<td><code>google.cloud.storage.Client</code> and its <code>Bucket</code></td>
+<td>Not guaranteed. See below.</td>
+</tr>
+<tr>
+<td>Your resolver, <code>IndexCache</code> functions, <code>on_call</code>, and <code>clock</code></td>
+<td>Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The index cache's generation tokens already handle readers and writers racing on one entity, across threads and processes; your <code>get</code> and <code>set</code> need only be safe to call concurrently and linearizable per key (<a href="storage.html#cache-limits">Guarantees and limits</a>).</p>
+<p><strong><code>storage.Client</code> is not documented as thread-safe.</strong> google-cloud-storage 3.14.1 sends every request from a client through one <code>google.auth.transport.requests.AuthorizedSession</code>, a <code>requests.Session</code> the client creates on first use without a lock. Neither google-cloud-storage, google-auth, nor requests, as installed, says that one session is safe to share across threads, and wenchang's tests do not cover one client shared across threads. To stay within what is documented, give each thread its own <code>storage.Client</code>:</p>
+<ul>
+<li><strong>Direct calls.</strong> Build the <code>storage.Client</code>, bucket, <code>GcsStorage</code>, <code>MemoryStore</code>, and <code>InProcessClient</code> once per thread, for example in a <code>threading.local</code>. Give every store the same <code>IndexCache</code>, so a write on one thread invalidates the index the others read.</li>
+<li><strong>MCP.</strong> Pass as <code>client</code> a <code>TransportClient</code> whose seven methods forward to a per-thread <code>InProcessClient</code> built the same way. The protocol is only those seven methods, so a small forwarding class satisfies it.</li>
+</ul>
+<h3 id="async">Async hosts<a class="headerlink" href="#async" title="Link to this section">#</a></h3>
+<p>An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example <code>await asyncio.to_thread(method, **arguments)</code>. Call <code>bind_tools</code> in a worker thread too, <code>tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")</code>, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an <code>async def resolve</code> is never awaited, and <code>bind_tools</code> raises <code>ResolverFailureError</code> (<a href="identity.html#contract">Identity</a>).</p>
+<h2 id="on-call">Observing calls<a class="headerlink" href="#on-call" title="Link to this section">#</a></h2>
+<p><code>bind_tools(..., on_call=...)</code> delivers one <code>ToolCallRecord</code> per tool call. On this path:</p>
+<ul>
+<li><code>tool</code> is the bare method name, such as <code>read_file</code>.</li>
+<li><code>arguments</code> holds every parameter by name, with defaults filled.</li>
+<li><code>result</code> is <code>render_result</code> of the return value, or <code>render_error</code> of the raised error; <code>is_error</code> says which.</li>
+<li><code>request_id</code> is <code>None</code>.</li>
+<li><code>duration_s</code> is the wall time of the tool method only.</li>
+</ul>
+<p>The observer runs synchronously on the calling thread, before the call returns or raises, so correlate records with a contextvar or thread-local. <code>bind_tools</code> checks <code>on_call</code> before it runs the resolver. A call Python rejects for its arguments never produces a record. An exception the observer raises is logged at ERROR and swallowed. Records contain memory content, so treat them as sensitive. The <a href="reference.html#telemetry">reference</a> lists every field.</p>
+<p>This observer logs and counts calls without recording arguments or results:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span><span class="p">,</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">suppress</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">NotFoundError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.observer</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallRecord</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"inkwell.memory"</span><span class="p">)</span>
+
+<span class="c1"># Stand-ins for your metrics client: a call counter and per-tool latencies.</span>
+<span class="n">lock</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+<span class="n">calls</span><span class="p">:</span> <span class="n">Counter</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
+<span class="n">latencies</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">on_call</span><span class="p">(</span><span class="n">record</span><span class="p">:</span> <span class="n">ToolCallRecord</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="c1"># arguments and result carry memory content; log only the call's shape.</span>
+    <span class="n">category</span> <span class="o">=</span> <span class="n">record</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"category"</span><span class="p">)</span> <span class="k">if</span> <span class="n">record</span><span class="o">.</span><span class="n">is_error</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+        <span class="s2">"memory tool=</span><span class="si">%s</span><span class="s2"> is_error=</span><span class="si">%s</span><span class="s2"> category=</span><span class="si">%s</span><span class="s2"> duration_s=</span><span class="si">%.3f</span><span class="s2">"</span><span class="p">,</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">is_error</span><span class="p">,</span>
+        <span class="n">category</span><span class="p">,</span>
+        <span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">with</span> <span class="n">lock</span><span class="p">:</span>  <span class="c1"># under MCP, observers run on worker threads</span>
+        <span class="n">calls</span><span class="p">[(</span><span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">category</span> <span class="ow">or</span> <span class="s2">"ok"</span><span class="p">))]</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">latencies</span><span class="p">[</span><span class="n">record</span><span class="o">.</span><span class="n">tool</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="o">.</span><span class="n">duration_s</span><span class="p">)</span>
+
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">()))</span>
+<span class="n">resolver</span> <span class="o">=</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)}))</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span><span class="p">,</span> <span class="n">on_call</span><span class="o">=</span><span class="n">on_call</span><span class="p">)</span>
+
+<span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span>  <span class="c1"># on_call has run by the time this returns</span>
+<span class="k">with</span> <span class="n">suppress</span><span class="p">(</span><span class="n">NotFoundError</span><span class="p">):</span>  <span class="c1"># on_call sees it first: is_error=True, category=recoverable</span>
+    <span class="n">tools</span><span class="o">.</span><span class="n">read_file</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"csv"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">calls</span><span class="p">)</span>
+</code></pre></div>
+
+<h2 id="provide">What you provide<a class="headerlink" href="#provide" title="Link to this section">#</a></h2>
+<ul>
+<li><strong>The prompt.</strong> The model needs the memory prompt alongside the tools. Put <code>build_memory_prompt(slots)</code> from <code>wenchang.prompts</code> in your system prompt; it has <code>##</code> headings and no top-level heading. See <a href="prompts.html">Customizing the prompts</a>.</li>
+<li><strong>Identity.</strong> A resolver and a scope policy. See <a href="identity.html">Identity and multi-tenant auth</a>.</li>
+<li><strong>Storage.</strong> A <code>MemoryStore</code> over <code>GcsStorage</code>, or <code>InMemoryStorage</code> for tests. See <a href="storage.html">Storage and operations</a>.</li>
+</ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="integrate-existing-server.html"><small>Previous</small>Existing MCP server</a><a rel="next" href="identity.html"><small>Next</small>Identity</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#install">Install</a>
+</li>
+<li><a href="#methods">The tools are methods</a>
+</li>
+<li><a href="#per-request">Bind per request</a>
+</li>
+<li><a href="#schemas">Tool schemas</a>
+</li>
+<li><a href="#results">Results and errors</a>
+</li>
+<li><a href="#example">A complete example</a>
+</li>
+<li><a href="#threads">Threads and async hosts</a>
+<ul>
+<li><a href="#shared">What can be shared</a></li>
+<li><a href="#async">Async hosts</a></li>
+</ul>
+</li>
+<li><a href="#on-call">Observing calls</a>
+</li>
+<li><a href="#provide">What you provide</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="integrate-without-mcp.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>
