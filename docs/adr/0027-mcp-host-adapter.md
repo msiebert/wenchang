@@ -150,6 +150,14 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
      (Constitution V, ADR 0003 note).
    - The thread-safety of the `google-cloud-storage` client object used by
      `GcsStorage` is not verified here.
+
+     **Amended (2026-11-02) by AIE-1316.** Verified: one shared
+     `google.cloud.storage.Client`, its `Bucket`, and one `GcsStorage` are
+     safe across threads, with no extra clients and no locking. The
+     basis is a source reading of google-cloud-storage 3.14.1, google-auth,
+     and requests, plus the stress tests in
+     `tests/integration/test_storage_gcs_threads.py`, which re-verify on
+     upgrades.
 8. **Startup checks.** `build_server` checks everything before it builds the
    prompt or a server. `register_memory_tools` checks everything before it
    registers anything.
@@ -259,6 +267,10 @@ fails that test.
 Concurrency is now part of the adopter contract: a `TransportClient` served
 through `wenchang.mcp` must be thread-safe. `InMemoryStorage` is, and
 `GcsStorage` is a follow-up.
+
+**Amended (2026-11-02) by AIE-1316.** `GcsStorage` is also safe to share
+across threads; see decision 7 and
+`tests/integration/test_storage_gcs_threads.py`.
 
 The resolver runs on every tool call, which adds latency for a remote
 resolver. The resolver failure message, which says memory is unavailable

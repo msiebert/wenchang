@@ -54,7 +54,11 @@ def _map_backend_error(exc: Exception) -> BackendUnavailableError | None:
 
 
 class GcsStorage:
-    """Structurally satisfies Storage, backed by a single GCS bucket."""
+    """Structurally satisfies Storage, backed by a single GCS bucket.
+
+    Safe to share across threads, as are the Client and Bucket it wraps: it
+    adds no mutable state and builds a new Blob per call.
+    """
 
     def __init__(self, bucket: Bucket) -> None:
         self._bucket = bucket

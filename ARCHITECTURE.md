@@ -143,6 +143,9 @@ planned piece.
   shared conformance suite. `InMemoryStorage` is the unit-test fake; it is
   thread-safe, with one lock held across each method, because the MCP
   adapter calls the transport from concurrent worker threads.
+  `GcsStorage` is also safe to share across threads, along with the
+  `Client` and `Bucket` it wraps, verified by
+  `tests/integration/test_storage_gcs_threads.py`.
   `GcsStorage` is the only module that imports `google.cloud`; it maps
   client timeouts and server/connection unavailability to
   `BackendUnavailableError`, and pins each `get` to the generation
@@ -1298,7 +1301,8 @@ planned piece.
     (which fail under `python -OO`), and name or URI collisions with what
     the server already has are all checked before anything is registered.
   - **Threading.** Tool calls run concurrently on `mcp`'s worker threads, so
-    the `TransportClient` must be thread-safe. `on_call` runs on those
+    the `TransportClient` must be thread-safe. `InProcessClient` over
+    `GcsStorage` satisfies this. `on_call` runs on those
     threads and must be thread-safe and fast.
   - **Schema validation comes first.** `mcp` validates arguments before the
     wrapper runs. A wrong-type or missing argument returns pydantic's text,
