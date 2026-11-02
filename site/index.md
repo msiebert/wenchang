@@ -7,7 +7,7 @@ wenchang is a Python library that lets an AI agent keep what it learns. During a
 Install (not on PyPI):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Quickstart](quickstart.md) covers that.

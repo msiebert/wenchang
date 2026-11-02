@@ -1,6 +1,6 @@
 """Conformance suite for IdentityResolver implementations.
 
-Requires the `testing` extra: `pip install "wenchang[testing]"`.
+Requires the `testing` extra: install `wenchang[testing]`; see docs/releasing.md.
 
 Subclass ResolverConformance in a test module, with a class name starting
 with "Test", and supply these fixtures:

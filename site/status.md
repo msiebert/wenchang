@@ -11,7 +11,7 @@
 | `mcp` extra | `mcp>=2.2,<3`, for `wenchang.mcp`. Targets `mcp.server.mcpserver.MCPServer` only; FastMCP and mcp 1.x servers do not work. |
 | `testing` extra | `pytest>=8.3`, for the conformance suites in `wenchang.testing`. |
 
-wenchang is installed from git. It is not published on PyPI. The base package works without the `mcp` extra; see [Integrate without MCP](integrate-without-mcp.md).
+wenchang is installed from git by release tag, for example `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`. It is not published on PyPI. The base package works without the `mcp` extra; see [Integrate without MCP](integrate-without-mcp.md).
 
 ## Releases and versioning
 
@@ -21,7 +21,8 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 
 - While the major version is 0, a breaking change bumps the minor version, and any other change bumps the patch version.
 - A change to the shipped prompt wording is at least a minor release, because it can change what agents store.
-- A tag is never moved once released.
+- Versions are plain `X.Y.Z`; there are no pre-release tags.
+- A tag is never moved once its GitHub Release exists; a bad release is fixed by the next patch version.
 
 ## Known limitations
 

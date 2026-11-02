@@ -766,7 +766,7 @@
 <p><code>arguments</code> and <code>result</code> are read-only mappings (<code>MappingProxyType</code>) built from deep copies, so an observer can't change what the tool or client sees.</p>
 <p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.</p>
 <h3 id="conformance">Conformance suites<a class="headerlink" href="#conformance" title="Link to this section">#</a></h3>
-<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
+<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
 <ul>
 <li><strong><code>ResolverConformance[C]</code></strong> checks an <code>IdentityResolver</code>. Supply fixtures <code>resolver</code>, <code>valid_credentials</code>, <code>invalid_credentials</code> (call <code>pytest.skip</code> if your resolver accepts everything), <code>policy</code>, <code>expected_scopes</code>, and <code>known_roles</code>.</li>
 <li><strong><code>TransportConformance</code></strong> checks a <code>TransportClient</code>. Supply fixtures <code>client</code> (fresh and empty per test), <code>source</code>, <code>scope_map</code> (at least two writable scopes), <code>max_file_bytes</code> (at least 64), <code>index_max_bytes</code> (at least 1024), <code>scope_priority</code>, and <code>list_page_size</code>. Within one test the client's writes must stamp strictly increasing <code>last_updated</code> values.</li>

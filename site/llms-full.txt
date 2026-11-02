@@ -14,7 +14,7 @@ wenchang is a Python library that lets an AI agent keep what it learns. During a
 Install (not on PyPI):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Quickstart](quickstart.md) covers that.
@@ -168,15 +168,17 @@ wenchang is a library. It has no command line tool, no ready-made server, and no
 
 ## 1. Install
 
-wenchang is not on PyPI. Install it from git into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
+wenchang is not on PyPI. Each release is a git tag with a GitHub Release. Install a release by its tag into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
-With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
-Without MCP, the base package is enough: `pip install "wenchang @ git+https://github.com/msiebert/wenchang"`. See [Integrate without MCP](integrate-without-mcp.md).
+Without MCP, the base package is enough: `pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`, or `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`. See [Integrate without MCP](integrate-without-mcp.md).
+
+What changed in each release is in the [changelog](https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md).
 
 > **Compatibility: mcp 2.x `MCPServer` only.** The `mcp` extra installs `mcp>=2.2,<3`, and the adapter targets `mcp.server.mcpserver.MCPServer`. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing `wenchang.mcp` raises `ImportError`, and `register_memory_tools` raises `TypeError("server must be an MCPServer, not ...")` for any other server type. For another framework, see [Integrate without MCP](integrate-without-mcp.md).
 
@@ -522,7 +524,7 @@ HTML version: <https://msiebert.github.io/wenchang/integrate.html>
 
 > **Compatibility: mcp 2.x `MCPServer` only.** The `mcp` extra installs `mcp>=2.2,<3`, and the adapter targets `mcp.server.mcpserver.MCPServer`. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing `wenchang.mcp` raises `ImportError`, and `register_memory_tools` raises `TypeError("server must be an MCPServer, not ...")` for any other server type. For another framework, see [Integrate without MCP](integrate-without-mcp.md).
 
-Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
 ## Arguments
 
@@ -581,7 +583,7 @@ HTML version: <https://msiebert.github.io/wenchang/integrate-new-server.html>
 
 > **Compatibility: mcp 2.x `MCPServer` only.** The `mcp` extra installs `mcp>=2.2,<3`, and the adapter targets `mcp.server.mcpserver.MCPServer`. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing `wenchang.mcp` raises `ImportError`, and `register_memory_tools` raises `TypeError("server must be an MCPServer, not ...")` for any other server type, before it registers anything. For another framework, see [Integrate without MCP](integrate-without-mcp.md).
 
-Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
 ## Register the tools
 
@@ -681,10 +683,10 @@ The memory tools are methods on a Python object. If your agent runs on another t
 The base package is enough. It needs no `mcp`:
 
 ```
-pip install "wenchang @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
-With uv: `uv add "wenchang @ git+https://github.com/msiebert/wenchang"`.
+With uv: `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
 ## The tools are methods
 
@@ -1229,7 +1231,7 @@ The example serves streamable HTTP, where each request carries its own credentia
 
 ## Test your resolver
 
-`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"` adds pytest mixins in `wenchang.testing`. Subclass `ResolverConformance` and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an `Identity`, invalid ones give a `ResolutionFailure`, results are consistent, roles are known, and writes follow your policy. Details are in the [reference](reference.md#conformance).
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds pytest mixins in `wenchang.testing`. Subclass `ResolverConformance` and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an `Identity`, invalid ones give a `ResolutionFailure`, results are consistent, roles are known, and writes follow your policy. Details are in the [reference](reference.md#conformance).
 
 ---
 
@@ -2279,7 +2281,7 @@ An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported
 
 ### Conformance suites
 
-`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"` adds `pytest` and two mixins in `wenchang.testing`:
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds `pytest` and two mixins in `wenchang.testing`:
 
 - **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
 - **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values.
@@ -2907,7 +2909,7 @@ HTML version: <https://msiebert.github.io/wenchang/walkthroughs.html>
 | `mcp` extra | `mcp>=2.2,<3`, for `wenchang.mcp`. Targets `mcp.server.mcpserver.MCPServer` only; FastMCP and mcp 1.x servers do not work. |
 | `testing` extra | `pytest>=8.3`, for the conformance suites in `wenchang.testing`. |
 
-wenchang is installed from git. It is not published on PyPI. The base package works without the `mcp` extra; see [Integrate without MCP](integrate-without-mcp.md).
+wenchang is installed from git by release tag, for example `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`. It is not published on PyPI. The base package works without the `mcp` extra; see [Integrate without MCP](integrate-without-mcp.md).
 
 ## Releases and versioning
 
@@ -2917,7 +2919,8 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 
 - While the major version is 0, a breaking change bumps the minor version, and any other change bumps the patch version.
 - A change to the shipped prompt wording is at least a minor release, because it can change what agents store.
-- A tag is never moved once released.
+- Versions are plain `X.Y.Z`; there are no pre-release tags.
+- A tag is never moved once its GitHub Release exists; a bad release is fixed by the next patch version.
 
 ## Known limitations
 

@@ -12,15 +12,17 @@ wenchang is a library. It has no command line tool, no ready-made server, and no
 
 ## 1. Install {#install}
 
-wenchang is not on PyPI. Install it from git into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
+wenchang is not on PyPI. Each release is a git tag with a GitHub Release. Install a release by its tag into the environment the server will run in. The `mcp` extra adds the MCP adapter (`mcp>=2.2,<3`).
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
-With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"`.
+With uv: `uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
 
-Without MCP, the base package is enough: `pip install "wenchang @ git+https://github.com/msiebert/wenchang"`. See [Integrate without MCP](integrate-without-mcp.md).
+Without MCP, the base package is enough: `pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`, or `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.0"`. See [Integrate without MCP](integrate-without-mcp.md).
+
+What changed in each release is in the [changelog](https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md).
 
 <!--html-->
 <div class="callout callout-warn"><strong>Compatibility: mcp 2.x <code>MCPServer</code> only.</strong> The <code>mcp</code> extra installs <code>mcp&gt;=2.2,&lt;3</code>, and the adapter targets <code>mcp.server.mcpserver.MCPServer</code>. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing <code>wenchang.mcp</code> raises <code>ImportError</code>, and <code>register_memory_tools</code> raises <code>TypeError("server must be an MCPServer, not ...")</code> for any other server type. For another framework, see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</div>

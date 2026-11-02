@@ -12,7 +12,7 @@
 
 <p class="hero-lede">wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.</p>
 
-<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"</code></pre>
+<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code></pre>
 <p class="install-note">Not on PyPI. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="quickstart.html">Quickstart</a> covers that.</p>
 
 </div>
@@ -25,7 +25,7 @@ wenchang is a Python library that lets an AI agent keep what it learns. During a
 Install (not on PyPI):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Quickstart](quickstart.md) covers that.

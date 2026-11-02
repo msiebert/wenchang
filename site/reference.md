@@ -295,7 +295,7 @@ An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported
 
 ### Conformance suites
 
-`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang"` adds `pytest` and two mixins in `wenchang.testing`:
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds `pytest` and two mixins in `wenchang.testing`:
 
 - **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
 - **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values.
