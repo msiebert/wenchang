@@ -317,8 +317,8 @@
 <p><code>MemoryStore</code> writes only through <code>put_if_version</code> and <code>delete_if_version</code>, so a retried write is guarded by its generation. <code>put</code> is what a <a href="#export">restore</a> calls.</p>
 <p>How a failure reaches the agent:</p>
 <ul>
-<li><strong>A retried call that keeps failing</strong> raises google-cloud-storage's <code>google.api_core.exceptions.RetryError</code> once the 120-second budget runs out. <code>GcsStorage</code> does not map it, so it propagates out of the store unchanged, and the agent sees an <code>internal</code> error with a generic message.</li>
-<li><strong>A timeout, connection error, or 429, 500, 502, 503, or 504 on a call that is not retried</strong> (an unconditional <code>put</code> under google-cloud-storage 2.x) is mapped to <code>BackendUnavailableError</code>, reason <code>timeout</code> or <code>unavailable</code>, which the agent sees as <code>transient</code>. So is a <code>get</code> that loses the generation race 3 times.</li>
+<li><strong>A retried call that keeps failing</strong> raises google-cloud-storage's <code>google.api_core.exceptions.RetryError</code> once the 120-second budget runs out. <code>GcsStorage</code> maps it to <code>BackendUnavailableError</code>, reason <code>timeout</code>, so the agent sees a <code>transient</code> error and is told to retry later.</li>
+<li><strong>A timeout (including a bare 408), connection error, or 429, 500, 502, 503, or 504 on a call that is not retried</strong> (an unconditional <code>put</code> under google-cloud-storage 2.x) is mapped to <code>BackendUnavailableError</code>, reason <code>timeout</code> or <code>unavailable</code>, which the agent sees as <code>transient</code>. So is a <code>get</code> that loses the generation race 3 times.</li>
 <li><strong>A failed generation precondition</strong> is not an error here: it becomes the store's <code>VersionConflictError</code>, or is skipped by purge.</li>
 <li><strong>Anything else</strong>, such as a 403 from missing permissions, propagates unchanged and is an <code>internal</code> error.</li>
 </ul>
