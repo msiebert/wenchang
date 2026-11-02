@@ -582,8 +582,17 @@ planned piece.
   `Exception` propagates unchanged. Credentials are never inspected,
   stored, or included in an error. `SandboxResolver(identity)` returns the
   adopter-supplied `identity` for any credentials and satisfies
-  `IdentityResolver[C]` for every `C`. See
-  [ADR 0014](docs/adr/0014-identity-resolver.md).
+  `IdentityResolver[C]` for every `C`.
+  `check_resolver(resolver) -> None` raises
+  `TypeError("resolver.resolve must be a plain method, not async")` when
+  `resolve` is detectably async: a coroutine function (including an async
+  static method or a `functools.partial` of one), an async generator
+  function, or an object with an async `__call__`. It never calls `resolve`;
+  if reading `resolve` raises or the attribute is missing it returns, and
+  call-time handling reports it. A sync `resolve` that returns a coroutine is
+  undetectable and still raises `ResolverFailureError` in `resolve_identity`.
+  See [ADR 0014](docs/adr/0014-identity-resolver.md) and
+  [ADR 0044](docs/adr/0044-reject-async-resolver.md).
 - **scope** — write restrictions enforced at the tool layer. It imports
   only `errors`, `identity`, and `paths`, never `core` or `storage`, and
   `core` never imports it: the tool layer calls it before calling `core`,
@@ -989,8 +998,9 @@ planned piece.
   with `check_observer`. All six are read-only properties.
   `bind_tools(client, resolver, credentials, policy, *, source,
   product=None, on_call=None)` is the only function in the layer that takes
-  credentials: it checks `on_call` first, passes the credentials to
-  `resolve_identity`, and returns a `MemoryTools`, retaining nothing; a
+  credentials: it checks `on_call` first, then `check_resolver(resolver)`
+  (a detectably async `resolve` raises `TypeError`), passes the credentials
+  to `resolve_identity`, and returns a `MemoryTools`, retaining nothing; a
   resolution failure is the permanent `ResolverFailureError`, raised before
   `source` or `product` is checked.
   A host serving many sessions binds one `MemoryTools` per session; the
@@ -1275,6 +1285,8 @@ planned piece.
        assertion.
     2. `bind_tools` binds a fresh `MemoryTools` for that call. The MCP
        protocol is stateless, so there is no session to cache on.
+       `check_resolver` runs again here, so a resolver swapped to async
+       after registration renders as an `internal` error with an `ERROR` log.
     3. The call is forwarded to that `MemoryTools`.
     4. A `CallToolResult` comes back with the `render_result` or
        `render_error` payload as `structured_content` and as JSON text, and
@@ -1297,6 +1309,9 @@ planned piece.
     `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
     (which fail under `python -OO`), and name or URI collisions with what
     the server already has are all checked before anything is registered.
+    `resolver` is checked for `IdentityResolver` conformance and then with
+    `check_resolver`, which rejects a detectably async `resolve` with
+    `TypeError`, before the `credentials_from_context` and `on_call` checks.
   - **Threading.** Tool calls run concurrently on `mcp`'s worker threads, so
     the `TransportClient` must be thread-safe. `on_call` runs on those
     threads and must be thread-safe and fast.
@@ -1351,7 +1366,8 @@ with `parse_path`. `tools` builds every path and prefix with `build_path` /
 `index_cache` is dependency-free and omitted; only `core` imports it, and
 the adopter's cache it wraps sits beside storage, never in front of it.
 `identity` sits beside `core` with no arrow: `tools` calls
-`resolve_identity` once per session, in `bind_tools`, and reads the
+`check_resolver` then `resolve_identity` once per session, in
+`bind_tools`, and reads the
 resolved grants to build paths; `transport` never sees an identity.
 `transport` is implemented in-process (`InProcessClient` over
 `MemoryStore`); the remote half of its box is planned. `prompts` imports
@@ -1554,7 +1570,9 @@ server, graders, and report end to end.
   `ResolverFailureError` raised `from None` outside any handler for the
   resolver's exception, so no exception message that might carry a credential is reachable from it,
   whether through a rendered traceback or the exception chain (see
-  [ADR 0014](docs/adr/0014-identity-resolver.md)).
+  [ADR 0014](docs/adr/0014-identity-resolver.md)). A detectably async
+  `resolve` is rejected with `TypeError` by `check_resolver` before any
+  resolver call (see [ADR 0044](docs/adr/0044-reject-async-resolver.md)).
 - **The index cap is a byte budget over `index_entry_bytes`, inclusive,
   applied as a prefix of the documented order.** `get_memory_index`
   includes entries in order while the running total stays within
@@ -1629,7 +1647,10 @@ cause. Defined in `wenchang.errors` (see [ADR
   (`ROLE_REQUIRED`, carrying the permitted `required_roles`), or a path
   outside the caller's granted scope or entity (`NOT_GRANTED`, whose one
   generic message never echoes the caller's own entity ID or role);
-  `ResolverFailureError` for identity resolution failure).
+  `ResolverFailureError` for identity resolution failure; a misconfigured
+  resolver, such as an async `resolve`, is instead a programmer-error
+  `TypeError` at registration or binding, never rendered as a
+  `ResolverFailureError`).
 - **Transient** (`TransientError`) — retry is appropriate
   (`BackendUnavailableError`, distinguishing timeout from unavailability); a
   version-guarded retry safely degrades to a recoverable version conflict if
