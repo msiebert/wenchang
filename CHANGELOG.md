@@ -32,9 +32,28 @@ First tagged release.
   `systems_of_record`).
 - MCP adapter (`wenchang.mcp`, `[mcp]` extra): serves the tools and the
   memory prompt from an MCP server, or adds them to an existing one.
+- Tool-call observer (`wenchang.observer`): `bind_tools(..., on_call=...)`
+  and the MCP adapter deliver a `ToolCallRecord` after every tool call.
+- A per-entity file cap: `MemoryStore(max_files_per_entity=500)` limits
+  creates under `{scope}/{entity_id}/` (excluding `system/`) and raises the
+  recoverable `FileQuotaExceededError` at the cap. `None` disables it.
+- Optional index cache (`wenchang.index_cache`): `IndexCache` caches each
+  entity's listing for `get_memory_index` in an adopter-supplied store such
+  as Redis, with generation-token invalidation on every write;
+  `MemoryStore.invalidate_index` for writers that bypass the store, and
+  `InMemoryIndexCache` for tests.
+- Operator-only `MemoryStore.purge(scope, entity_id)` and
+  `MemoryStore.export(scope, entity_id)` to erase or export everything stored
+  for one entity.
+- Exported tool schemas (`wenchang.schemas`): `tool_schemas()` and
+  `error_schema()` return JSON Schema for every tool's input, output, and
+  error payload, for registering the tools with non-MCP frameworks.
 - Conformance mixins (`wenchang.testing`, `[testing]` extra) for checking an
   adopter's identity resolver and transport client.
 - Supports Python 3.11 and newer.
+- Documentation site at <https://msiebert.github.io/wenchang/>, organized by
+  integration path (new MCP server, existing MCP server, no MCP), with
+  `llms.txt` for agents.
 
 [Unreleased]: https://github.com/msiebert/wenchang/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/msiebert/wenchang/releases/tag/v0.1.0

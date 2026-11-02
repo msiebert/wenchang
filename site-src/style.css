@@ -238,6 +238,12 @@ a:hover {
 
 .site-nav {
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.site-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .site-nav ul {
@@ -254,7 +260,7 @@ a:hover {
 
 .site-nav a {
   display: block;
-  padding: 1.15rem 0.8rem 1rem;
+  padding: 1.15rem 0.65rem 1rem;
   border-bottom: 2px solid transparent;
   color: var(--muted);
   font: 500 0.8rem/1.2 var(--font-mono);
@@ -1595,6 +1601,48 @@ a.card:hover::after {
   margin: 0.9rem 0 0;
   color: var(--muted);
   font: 400 0.75rem/1.5 var(--font-mono);
+}
+
+/* Section sub-nav: a landing page and its children */
+
+.subnav {
+  max-width: 44rem;
+  margin: 0 0 2rem;
+}
+
+.subnav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.subnav li {
+  margin: 0;
+}
+
+.subnav a {
+  display: block;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 500 0.75rem/1.3 var(--font-mono);
+  text-decoration: none;
+}
+
+.subnav a:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.subnav a[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--raised);
+  color: var(--text);
 }
 
 /* Prev / next */

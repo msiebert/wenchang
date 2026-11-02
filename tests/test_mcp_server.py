@@ -23,6 +23,7 @@ from mcp.types import CallToolResult, TextContent
 
 import wenchang.mcp as wmcp
 from evals.reference_adopter import REFERENCE_SLOTS
+from schema_kinds import schema_kind
 from wenchang.core import MemoryStore
 from wenchang.identity import Identity, ResolutionFailure, ScopeGrant
 from wenchang.mcp import (
@@ -253,18 +254,6 @@ def test_input_schemas_mirror_memory_tools_signatures() -> None:
         assert "ctx" not in schema.get("properties", {})
 
 
-def _kind(prop: Mapping[str, Any]) -> str:
-    """Render a JSON-schema property as e.g. "string", "string|null", "array[string]"."""
-    options = cast(list[Mapping[str, Any]], prop.get("anyOf", [prop]))
-    kinds: list[str] = []
-    for option in options:
-        kind = cast(str, option["type"])
-        if kind == "array":
-            kind = f"array[{option['items']['type']}]"
-        kinds.append(kind)
-    return "|".join(kinds)
-
-
 PINNED_KINDS: dict[str, dict[str, str]] = {
     "read_file": {"scope": "string", "area": "string", "name": "string"},
     "list_prefix": {"scope": "string", "area": "string|null", "cursor": "string|null"},
@@ -310,7 +299,7 @@ def test_input_schema_types_are_pinned(tool: str) -> None:
     """The schema types of every tool parameter are pinned (AIE-1060, US3.7)."""
     properties = _tools(_server())[tool].input_schema["properties"]
 
-    assert {name: _kind(prop) for name, prop in properties.items()} == PINNED_KINDS[tool]
+    assert {name: schema_kind(prop) for name, prop in properties.items()} == PINNED_KINDS[tool]
 
 
 @pytest.mark.parametrize(
@@ -870,6 +859,36 @@ def test_missing_file_is_rendered_recoverable() -> None:
     assert ".md" not in payload["message"]
     _assert_no_path_keys(payload)
     _assert_no_path_keys(json.loads(_text(result)))
+
+
+def test_create_at_file_cap_is_rendered_recoverable() -> None:
+    """A write_file create through register_memory_tools on a store at its file
+    cap returns isError with FileQuotaExceededError and the cap as limit
+    (AIE-1292, US5.6).
+    """
+    transport = InProcessClient(MemoryStore(InMemoryStorage(), max_files_per_entity=2))
+    prompt = build_memory_prompt(REFERENCE_SLOTS)
+    server = _adopter_server(prompt)
+    register_memory_tools(server, prompt=prompt, **_kwargs(client=transport))
+
+    async def body(client: Client) -> list[CallToolResult]:
+        return [
+            await _call(client, "write_file", "alice", **_write_args(name))
+            for name in ("one", "two", "three")
+        ]
+
+    first, second, third = _with_client(server, body)
+
+    assert first.is_error is False
+    assert second.is_error is False
+    assert third.is_error is True
+    payload = _payload(third)
+    assert payload["error"] == "FileQuotaExceededError"
+    assert payload["category"] == "recoverable"
+    assert payload["limit"] == 2
+    assert (payload["scope"], payload["area"], payload["name"]) == ("user", "notes", "three")
+    assert json.loads(_text(third)) == payload
+    _assert_no_path_keys(payload)
 
 
 def test_credential_extraction_failure_leaks_nothing(caplog: pytest.LogCaptureFixture) -> None:

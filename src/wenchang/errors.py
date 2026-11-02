@@ -110,6 +110,29 @@ class OversizeWriteError(RecoverableError):
         super().__init__(detail)
 
 
+class FileQuotaExceededError(RecoverableError):
+    """A create would put an entity over its file-count limit."""
+
+    def __init__(self, path: str, limit: int) -> None:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        self.path = path
+        self.limit = limit
+        advice = (
+            f"is at its limit of {limit} files (system/ files not counted). "
+            "Add this content to an existing file instead (append_line, replace_fact, "
+            "or write_file with that file's version), or merge related files into one "
+            "and delete the merged ones with delete_file, then retry."
+        )
+        loc = _location(path)
+        if loc is None:
+            detail = f"Cannot create a new file: memory for this entity {advice}"
+        else:
+            scope = parse_path(path).scope
+            detail = f"Cannot create a new file at {loc}: memory in scope {scope} {advice}"
+        super().__init__(detail)
+
+
 class ReplaceFactMatchError(RecoverableError):
     """A replace_fact anchor matched zero or more than one span."""
 

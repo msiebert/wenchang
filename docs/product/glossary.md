@@ -7,6 +7,13 @@ Terms as used throughout wenchang and its spec.
   else. No per-line author or timestamp.
 - **File** — a markdown document about one subject, carrying the four
   metadata fields and a version token, capped in size (default 16 KB).
+- **File cap (`max_files_per_entity`)** — the most files one entity
+  (`{scope}/{entity_id}/`) may hold, set on `MemoryStore`; default 500,
+  `None` disables it. `system/` files do not count, and only creating a
+  file outside `system/` is checked, so existing files stay editable at
+  the cap. A create past it fails with the recoverable
+  `FileQuotaExceededError`, telling the agent to add to an existing file or
+  merge and delete files. Soft: concurrent creates can exceed it.
 - **Area** — a folder grouping files by subject matter within a scope
   (e.g. `preferences`, `taxonomy`). Adopter-seeded, agent-extensible.
 - **Scope** — a named visibility tier keyed by an entity ID (e.g. user,
@@ -118,6 +125,13 @@ Terms as used throughout wenchang and its spec.
   order; by default it is empty and every scope ranks equally (one flat
   tier), ordered by recency. It orders only the capped startup index and
   never affects `system/` areas, which always load first.
+- **Index cache** — the adopter's optional key-value cache (e.g. Redis) for
+  the memory index, set as `MemoryStore(index_cache=IndexCache(get=..., set=...,
+  ttl=...))`. It holds each entity's listing metadata, never file content, so
+  repeated index calls skip storage listings until a write invalidates that
+  entity. Storage stays the source of truth. Writers that bypass the store
+  call `MemoryStore.invalidate_index`, or their writes may go unseen for up
+  to `ttl`, or indefinitely when `ttl` is unset.
 - **Transport client** — the object the tool layer calls to reach memory,
   implementing `transport.TransportClient`: the core API's operations with
   identical signatures and identical errors, over any transport (in-process

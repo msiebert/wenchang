@@ -1,8 +1,8 @@
 """End-to-end test of the tool layer over a real MemoryStore.
 
 Covers AIE-1044, SC-002: bind_tools with SandboxResolver over a tests-only
-client wrapping MemoryStore(InMemoryStorage()); and AIE-1151, US4.15 through
-InProcessClient.
+client wrapping MemoryStore(InMemoryStorage()); AIE-1151, US4.15 through
+InProcessClient; and AIE-1292, US5.3 through US5.5 (the file cap at the tool layer).
 """
 
 import json
@@ -11,8 +11,16 @@ from datetime import UTC, datetime
 
 import pytest
 
+from evals.reference_adopter import (
+    MEMBER_IDENTITY,
+    REFERENCE_SCOPE_PRIORITY,
+    REFERENCE_SEED_FILES,
+    bind_reference_tools,
+    seed_reference_memory,
+)
 from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex, MemoryStore
 from wenchang.errors import (
+    FileQuotaExceededError,
     InvalidArgumentError,
     NotFoundError,
     NotFoundReason,
@@ -248,3 +256,84 @@ def test_end_to_end_rejections() -> None:
 
     assert client.store.list_prefix("user/").entries == ()
     assert client.store.list_prefix("org/").entries == ()
+
+
+def _counted_seeds(scope: str) -> int:
+    return sum(1 for s in REFERENCE_SEED_FILES if s.scope == scope and s.area != "system")
+
+
+def test_file_quota_error_renders_location_and_limit() -> None:
+    """AIE-1292, US5.3: with cap 1 and one file in the caller's user entity,
+    write_file of a new name raises FileQuotaExceededError, rendered with its
+    category, limit, location, and message, and no path.
+    """
+    store = MemoryStore(InMemoryStorage(), clock=lambda: _NOW, max_files_per_entity=1)
+    tools = bind_tools(
+        InProcessClient(store), SandboxResolver(_identity()), object(), _policy(), source=_SOURCE
+    )
+    tools.write_file("user", "notes", "a", "- [stated] a\n", "d", [], None)
+
+    with pytest.raises(FileQuotaExceededError) as info:
+        tools.write_file("user", "notes", "b", "- [stated] b\n", "d", [], None)
+
+    rendered = render_error(info.value)
+    _json_safe(rendered)
+    assert rendered["error"] == "FileQuotaExceededError"
+    assert rendered["category"] == "recoverable"
+    assert rendered["limit"] == 1
+    assert (rendered["scope"], rendered["area"], rendered["name"]) == ("user", "notes", "b")
+    assert rendered["message"] == str(info.value)
+    assert "path" not in rendered
+
+
+def test_file_quota_over_reference_seeds() -> None:
+    """AIE-1292, US5.4: over the reference seeds, with the cap one above the
+    member's counted user seeds, the first new user file succeeds and the
+    second raises FileQuotaExceededError with that limit.
+    """
+    assert _counted_seeds("user") == 2
+    store = MemoryStore(
+        InMemoryStorage(), scope_priority=REFERENCE_SCOPE_PRIORITY, max_files_per_entity=3
+    )
+    client = InProcessClient(store)
+    seed_reference_memory(client)
+    tools = bind_reference_tools(client, MEMBER_IDENTITY)
+
+    tools.write_file("user", "notes", "first", "- [stated] one\n", "First", [], None)
+    with pytest.raises(FileQuotaExceededError) as info:
+        tools.write_file("user", "notes", "second", "- [stated] two\n", "Second", [], None)
+
+    assert info.value.limit == 3
+    with pytest.raises(NotFoundError):
+        tools.read_file("user", "notes", "second")
+
+
+def test_role_check_precedes_file_quota() -> None:
+    """AIE-1292, US5.5: with the member's organization entity at cap 1 over the
+    reference seeds, a member's organization-scope create raises
+    RestrictedScopeError (ROLE_REQUIRED), not FileQuotaExceededError.
+    """
+    assert _counted_seeds("organization") == 1
+    storage = InMemoryStorage()
+    seed_reference_memory(
+        InProcessClient(MemoryStore(storage, scope_priority=REFERENCE_SCOPE_PRIORITY))
+    )
+    capped = InProcessClient(
+        MemoryStore(storage, scope_priority=REFERENCE_SCOPE_PRIORITY, max_files_per_entity=1)
+    )
+    org_entity = MEMBER_IDENTITY.entity_id("organization")
+    metadata = FileMetadata("d", (), frozenset(), _EPOCH)
+    with pytest.raises(FileQuotaExceededError):
+        capped.write_file(
+            f"organization/{org_entity}/notes/probe.md",
+            "- [stated] x\n",
+            metadata,
+            None,
+            source=_SOURCE,
+        )
+    tools = bind_reference_tools(capped, MEMBER_IDENTITY)
+
+    with pytest.raises(RestrictedScopeError) as info:
+        tools.write_file("organization", "notes", "new", "- [stated] x\n", "New", [], None)
+
+    assert info.value.reason is RestrictionReason.ROLE_REQUIRED

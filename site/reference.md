@@ -1,83 +1,6 @@
-# Reference
+# Tool and error reference
 
-Version 0.1.0. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.mcp`), the core store (`wenchang.core`), and the file format (`wenchang.file_format`). For how to assemble a server see [Setup](setup.md); for the prompt see [Customizing the prompts](prompts.md); for auth see [Authorization](authorization.md).
-
-## Concepts
-
-### Path shape
-
-Every memory file is stored at
-
-```
-{scope}/{entity_id}/{area}/{name}.md
-```
-
-For example `project/p-ninth-examination/characters/lin-qiao.md`. Agents never write the path. The tools take `(scope, area, name)` and the tool layer fills in `entity_id` from the caller's identity grant for that scope, so a caller can only reach its own entities. Results name a file by its `scope`, `area`, and `name`; they never include the storage path.
-
-### Scopes
-
-A scope is an adopter-defined visibility tier. The library defines no scope names; a typical set is `user` (private), `project` (shared), and `organization` (shared, writes need an admin or owner role). A scope must be one of the scopes the session's identity has a grant for; otherwise the call fails with an `InvalidArgumentError` listing the available scopes.
-
-### Areas
-
-An area groups files within a scope. The tool layer requires an area to be a lowercase slug matching `^[a-z0-9][a-z0-9_-]*$`. Areas are created implicitly by writing a file in them. The prompt's `seed_areas` slot suggests starting areas; the agent may create more.
-
-### Names
-
-A name is the file's stem, passed without `.md`. It must be a valid path segment: non-empty, not `.` or `..`, with no `/`, backslash, or control character, and the tool layer additionally rejects invisible, separator, and noncharacter code points. Names must be valid UTF-8.
-
-### The system/ area
-
-Every scope has an area named exactly `system`. It holds curated content that people maintain and replace wholesale. The agent can read it (any area may be read) but every mutating tool refuses it with `RestrictedScopeError` (reason `system_read_only`). Seeding jobs and admin tooling write it through the core `MemoryStore`, which applies no restrictions. In the startup index, `system/` entries come first across all scopes.
-
-### Fact-line format
-
-A memory file body is made of fact lines, one per line:
-
-```
-- [stated] Has grey eyes.
-```
-
-The pattern is `- [<label>] <text>` with a non-empty text. The label records how the fact is known:
-
-| Label | Meaning |
-| --- | --- |
-| `stated` | The user told the agent directly. |
-| `observed` | The agent saw it in a tool result, session data, or behavior. |
-| `inferred` | The agent concluded it from a pattern across several observations. |
-| `system` | Curated content. The prompt tells the agent never to write a new `[system]` line. |
-
-`append_line` accepts only a single well-formed fact line. Other lines in a body are tolerated and preserved verbatim. An end date, if the user states one, is written into the fact's text as prose; there are no per-fact timestamps.
-
-### File metadata
-
-Metadata is stored beside the body, as flat string custom metadata on the stored object (in GCS), not inside the markdown.
-
-| Field | Type | Behavior |
-| --- | --- | --- |
-| `description` | string, one line | What the file is about. Part of the agent's search surface. `write_file` replaces it; `append_line` and `replace_fact` replace it only if one is passed. |
-| `aliases` | list of strings, ordered | Other names the subject is looked up by. `write_file` replaces the whole set; `append_line` and `replace_fact` add new aliases, keeping existing ones and their order. |
-| `sources` | set of strings | Surface names (the `source` you configure) that have written the file. Only ever grows; returned sorted. |
-| `last_updated` | UTC timestamp | Set by the store's clock on every write; rendered as ISO 8601 with a `Z` suffix. |
-
-There is no content search. `description` and `aliases` are the entire search surface; the agent reads the index and matches on them.
-
-### Optimistic concurrency
-
-Every file has an opaque `version` (the GCS generation under `GcsStorage`). Every mutating tool takes `expected_version`, the version the agent read; the write succeeds only if the file is still at that version. `write_file` with `expected_version=null` creates the file and fails if it already exists. A mismatch returns a recoverable `VersionConflictError` carrying the current content and version.
-
-`replace_fact` re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but `old_string` still matches exactly once, it applies against the current content. `append_line` has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.
-
-### Limits
-
-| Limit | Default | Where set |
-| --- | --- | --- |
-| Per-file content size | 16384 bytes (UTF-8) | `MemoryStore(max_file_bytes=...)` |
-| Startup index size | 65536 bytes | `MemoryStore(index_max_bytes=...)` |
-| `list_prefix` page size | 100 entries | `MemoryStore(list_page_size=...)` |
-| `replace_fact` attempts | 3 | fixed |
-
-When the index overflows its budget, the remaining files are reported under `capped` by area, with the count omitted, and the agent pages them with `list_prefix`. Index order: `system/` areas of all scopes first; then scopes in `scope_priority` order (unlisted scopes last, as one tier); within each tier, most recently updated first.
+Version 0.1.0. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.schemas`, `wenchang.mcp`), the core store (`wenchang.core`), and storage (`wenchang.storage`). Paths, scopes, metadata, versions, and limits are explained in [Concepts](concepts.md). How to wire the tools in is under [Integrate](integrate.md), and how to run storage is in [Storage and operations](storage.md).
 
 ## Tools
 
@@ -152,7 +75,7 @@ Returns `{"entries": [...], "next_cursor": string | null}`. Entries are the comm
 | `aliases` | array of strings | yes | Replaces the stored set (use `[]` for none). |
 | `expected_version` | string or null | yes | `null` creates (fails if the file exists); otherwise the version being replaced. |
 
-Returns the common file object. Errors: `VersionConflictError`, `NotFoundError` (`file_absent`, when replacing a file that does not exist), `OversizeWriteError`, `InvalidArgumentError`, `RestrictedScopeError`.
+Returns the common file object. Errors: `VersionConflictError`, `NotFoundError` (`file_absent`, when replacing a file that does not exist), `OversizeWriteError`, `FileQuotaExceededError` (creating a file in an entity at its [file cap](storage.md#file-cap)), `InvalidArgumentError`, `RestrictedScopeError`.
 
 ### append_line
 
@@ -200,6 +123,18 @@ Zero or several matches return `ReplaceFactMatchError` with the current content,
 
 Returns `{"ok": true}`. Errors: `VersionConflictError`, `NotFoundError`, `RestrictedScopeError`.
 
+## Tool schemas
+
+`wenchang.schemas` (in the base package) describes each tool for frameworks other than MCP:
+
+- `tool_schemas(product=None) -> Mapping[str, ToolSchema]`: one read-only entry per tool, in `wenchang.tools.TOOL_NAMES` order.
+- `ToolSchema`: `name`, `description`, `input`, `output`, and `error`, the last three JSON Schema draft 2020-12 dicts.
+- `error_schema() -> dict`: the schema shared by every `render_error` payload.
+
+`wenchang.tools.tool_descriptions(product=None) -> Mapping[str, str]` returns each tool's description by name, in `TOOL_NAMES` order, without binding a session. With `product`, each first line names it. It is the same text as `ToolSchema.description` and `MemoryTools.descriptions()`.
+
+[Tool schemas](integrate-without-mcp.md#schemas) explains each field and how to register the tools with them.
+
 ## The memory prompt resource
 
 The server exposes the assembled memory prompt as an MCP resource:
@@ -215,7 +150,7 @@ Clients that drop server `instructions` can read the resource instead. The promp
 
 ## Errors
 
-A failed tool call returns an MCP error result (`isError` true) whose JSON payload has this shape:
+Every failure renders through `render_error`. Over MCP it is the payload of an error result (`isError` true); without MCP you call `render_error` yourself. The payload has this shape:
 
 ```json
 {
@@ -243,12 +178,28 @@ A failed tool call returns an MCP error result (`isError` true) whose JSON paylo
 | --- | --- | --- | --- |
 | `VersionConflictError` | recoverable | The file changed since it was read. | `content`, `version` (current) |
 | `OversizeWriteError` | recoverable | The resulting content exceeds the per-file limit. | `size`, `limit` |
+| `FileQuotaExceededError` | recoverable | A `write_file` create would exceed the entity's [file cap](storage.md#file-cap). | `limit` |
 | `ReplaceFactMatchError` | recoverable | `old_string` matched zero spans or more than one. | `content`, `version`, `match_count` |
 | `InvalidArgumentError` | recoverable | An argument was rejected: unknown scope, bad area slug, bad name, not a fact line, empty `old_string`, bad cursor, and similar. | `argument` |
 | `NotFoundError` | recoverable | The location is invalid (`invalid_path`) or no file exists there (`file_absent`). | `reason` |
 | `RestrictedScopeError` | permanent | A write to `system/` (`system_read_only`), or to a scope whose policy requires another role (`role_required`), or outside the caller's grant (`not_granted`). | `scope`, `reason`, and `required_roles` for `role_required` |
 | `ResolverFailureError` | permanent | The identity could not be resolved, or `credentials_from_context` raised. Memory is unavailable for the session. | none |
 | `BackendUnavailableError` | transient | The storage backend timed out or is unreachable. | `reason` (`timeout` or `unavailable`) |
+
+### InvalidArgumentError
+
+`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
+
+```json
+{
+  "error": "InvalidArgumentError",
+  "category": "recoverable",
+  "message": "Argument scope is invalid: scope 'project' is not available in this session; available scopes: organization, user. ...",
+  "argument": "scope"
+}
+```
+
+The tools raise it with `argument` set to one of their own parameter names: `scope`, `area`, `name`, `content`, `description`, `aliases`, `line`, `old_string`, `new_string`, `expected_version`, or `cursor`. You can raise it from your own dispatch code too, as the [direct example](integrate-without-mcp.md#example) does for a missing or unknown argument.
 
 Notes:
 
@@ -262,13 +213,13 @@ Notes:
 
 `wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Scope names and entity IDs must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`). The role must be non-empty. `identity.scope_map` is scope name to entity ID. `identity.entity_id(scope)` and `identity.role(scope)` raise `KeyError` if the scope is not granted.
 
-`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
+`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited, so an `async def resolve` makes every call fail with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with `bind_tools` alike. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
 
 `wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. `policy.permitted_roles(scope)` returns the set or `None`.
 
 ### Store options
 
-`wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=())`. The three size options must be positive. `scope_priority` entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and `system/` areas always come first. `clock` returns timezone-aware datetimes and stamps `last_updated`; pass a fixed one in tests. A write over `max_file_bytes` raises `OversizeWriteError`.
+`wenchang.core.MemoryStore(storage, *, max_file_bytes=16384, clock=..., list_page_size=100, index_max_bytes=65536, scope_priority=(), max_files_per_entity=500, index_cache=None)`. The three size options must be positive. `max_files_per_entity` caps the non-`system/` files per entity and must be positive or `None` (no cap); see [Files per entity](storage.md#file-cap). `index_cache` is an optional `IndexCache`; see [The index cache](storage.md#index-cache). `scope_priority` entries must be distinct valid path segments, and the scopes it lists are kept first when the startup index is capped; unlisted scopes rank after them, and `system/` areas always come first. `clock` returns timezone-aware datetimes and stamps `last_updated`; pass a fixed one in tests. A write over `max_file_bytes` raises `OversizeWriteError`.
 
 ```python
 from datetime import UTC, datetime
@@ -282,6 +233,7 @@ store = MemoryStore(
     max_file_bytes=8 * 1024,  # default 16384: larger writes raise OversizeWriteError
     index_max_bytes=32 * 1024,  # default 65536: the startup index is capped at this size
     list_page_size=50,  # default 100: entries per list_prefix page
+    max_files_per_entity=200,  # default 500 (None: no cap): at the cap, creates fail
     scope_priority=("user", "project", "organization"),  # which scopes the capped index keeps first
     clock=lambda: datetime.now(UTC),  # must return timezone-aware datetimes
 )
@@ -304,110 +256,42 @@ print(store.index_max_bytes, store.scope_priority)
 Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
 
 - **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.
-- **`InMemoryStorage()`** in `wenchang.storage.memory` is a thread-safe fake for tests and trials.
+- **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
+
+Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).
+
+### Operator methods
+
+Not agent tools, and not on `TransportClient` or `MemoryTools`. See [Erasing an entity](storage.md#erase).
+
+- `MemoryStore.purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -> int`: delete every object under `{scope}/{entity_id}/`; returns the confirmed delete count. `wenchang.core.PURGE_MAX_PASSES` is 5. Raises `wenchang.core.PurgeIncompleteError` if objects remain after the last pass.
+- `MemoryStore.export(scope, entity_id) -> tuple[ExportedObject, ...]`: every object under that prefix, raw, in key order. `ExportedObject` has `key`, `data`, `metadata`, and `version`.
+- `MemoryStore.invalidate_index(scope, entity_id) -> None`: force the next index that includes the entity to list storage again. Does nothing without an index cache.
+
+### Index cache
+
+`wenchang.index_cache.IndexCache(get, set, ttl=None, key_prefix="wenchang:index:")`, where `get(key) -> str | None` and `set(key, value, ttl) -> None`. `InMemoryIndexCache()` provides both for one process. See [The index cache](storage.md#index-cache).
 
 ### Transport
 
-The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The client you pass to the MCP adapter must be thread-safe, because tool calls run concurrently on worker threads.
-
-### Add the tools to an existing MCP server
-
-`build_server` creates a new `MCPServer`. To add memory to a server you already run, with your own auth, middleware, and tools, use `register_memory_tools`. It adds the seven tools and the `wenchang://memory-prompt` resource. It raises before registering anything if an argument is invalid or a tool name or the resource URI is already registered. Pass the same text as the server's `instructions` that you pass as `prompt`; `memory_instructions(slots)` returns it. If the server's instructions do not contain the prompt, a warning is logged.
-
-```python
-import logging
-
-from mcp.server.mcpserver import Context, MCPServer
-
-from wenchang.core import MemoryStore
-from wenchang.identity import Identity, SandboxResolver, ScopeGrant
-from wenchang.mcp import ToolCallRecord, memory_instructions, register_memory_tools
-from wenchang.prompts import PromptSlots
-from wenchang.scope import ScopePolicy
-from wenchang.storage.memory import InMemoryStorage
-from wenchang.transport import InProcessClient
-
-log = logging.getLogger("inkwell.calls")
-
-slots = PromptSlots(
-    purpose="You have persistent memory of your work helping an author write a novel.",
-    scope_guidance=(
-        "There is one scope, user, and it is private to the author you are talking with."
-    ),
-    seed_areas="- user: preferences, workflows, research\n\nEvery scope also has a `system/` area.",
-)
-identity = Identity(grants={"user": ScopeGrant("u-tianlong", "owner")})
-
-
-def credentials_from_context(ctx: Context) -> str | None:
-    # Over HTTP, return the raw credential and let your resolver verify it.
-    # ctx.headers is None on stdio.
-    return (ctx.headers or {}).get("authorization")
-
-
-def on_call(record: ToolCallRecord) -> None:
-    # Runs on worker threads after every call; keep it fast and thread-safe.
-    log.info("%s error=%s %.3fs", record.tool, record.is_error, record.duration_s)
-
-
-prompt = memory_instructions(slots)
-
-# Your existing server, with your own tools and middleware.
-server = MCPServer("hanlin-tools", instructions=prompt)
-
-register_memory_tools(
-    server,
-    prompt=prompt,
-    client=InProcessClient(MemoryStore(InMemoryStorage())),
-    resolver=SandboxResolver(identity),
-    policy=ScopePolicy({}),
-    credentials_from_context=credentials_from_context,
-    source="hanlin-tools",
-    product="Inkwell",
-    tool_prefix="inkwell",  # tools are registered as inkwell_read_file, inkwell_write_file, ...
-    on_call=on_call,
-)
-```
+The tool layer calls a `wenchang.transport.TransportClient`, a protocol that mirrors `MemoryStore`'s seven operations. `InProcessClient(store)` calls a `MemoryStore` directly and is the only client shipped. The MCP adapter calls one client from concurrent worker threads. What is safe to share across threads is under [Threads](integrate-without-mcp.md#threads).
 
 ### Telemetry
 
-`on_call`, if given, receives a `wenchang.mcp.ToolCallRecord` after every memory tool call:
+An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported by `wenchang.mcp`) after each memory tool call. How to use it on each path: [new server](integrate-new-server.md#on-call), [existing server](integrate-existing-server.md#calls), [without MCP](integrate-without-mcp.md#on-call).
 
-| Field | Meaning |
-| --- | --- |
-| `tool` | Registered tool name, prefix included. |
-| `arguments` | The arguments the wrapper received (read-only mapping). |
-| `result` | A copy of the payload sent to the client (read-only mapping). |
-| `is_error` | Whether the payload is a rendered error. |
-| `request_id` | The MCP request's ID. |
-| `duration_s` | Wall time of the wrapper, on a monotonic clock. |
+| Field | MCP | Direct call |
+| --- | --- | --- |
+| `tool` | Registered tool name, prefix included. | Bare method name, such as `read_file`. |
+| `arguments` | The arguments the wrapper received. | Every parameter by name, defaults filled. |
+| `result` | A copy of the payload sent to the client. | `render_result` of the return value, or `render_error` of the raised error. |
+| `is_error` | Whether `result` is a rendered error. | Same. |
+| `request_id` | The MCP request's ID, for correlating records that arrive in completion order. | `None`. |
+| `duration_s` | Wall time of the wrapper (credentials, binding, the tool, rendering). | Wall time of the tool method only. |
 
-The callback runs on worker threads, so it must be a plain function, fast, and thread-safe. An exception it raises is logged and swallowed. Calls the MCP layer rejects during argument validation never produce a record. Records contain memory content, so treat them as sensitive.
+`arguments` and `result` are read-only mappings (`MappingProxyType`) built from deep copies, so an observer can't change what the tool or client sees.
 
-### Using the tools without MCP
-
-`wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None)` resolves the identity and returns a `MemoryTools` for one session. `tools.tools()` is the seven bound methods by name, and `tools.descriptions()` is the description for each. Register each tool with its description from `descriptions()` rather than its docstring. `render_result` and `render_error` in `wenchang.tools` produce the JSON-safe dicts the MCP adapter returns.
-
-```python
-from wenchang.core import MemoryStore
-from wenchang.identity import Identity, SandboxResolver, ScopeGrant
-from wenchang.scope import ScopePolicy
-from wenchang.storage.memory import InMemoryStorage
-from wenchang.tools import bind_tools
-from wenchang.transport import InProcessClient
-
-client = InProcessClient(MemoryStore(InMemoryStorage()))
-resolver = SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")}))
-
-# One MemoryTools per session; resolving the identity happens here.
-tools = bind_tools(client, resolver, None, ScopePolicy({}), source="inkwell-cli", product="Inkwell")
-
-descriptions = tools.descriptions()  # tool name -> description, product named in the first line
-for name, fn in tools.tools().items():  # the seven tools, as bound methods
-    print(name, fn.__name__, "-", descriptions[name].splitlines()[0])
-
-print(tools.get_memory_index())
-```
+`on_call` must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.
 
 ### Conformance suites
 
@@ -522,17 +406,7 @@ class TestMyClient(TransportConformance):
         return 2
 ```
 
-## Limitations and status
-
-- **Status.** Version 0.1.0, MIT license, Python 3.11 or newer. Releases are git tags with GitHub Releases; not on PyPI.
-- **A library, not a server.** There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script. The only server in the repository is the dev-only eval server (`python -m evals.server`), which uses in-memory storage.
-- **No content search.** Files are found through `description` and `aliases`. The quality of that metadata is what makes recall work.
-- **Not snapshots.** `list_prefix` and `get_memory_index` are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear.
-- **Remote transport is planned.** Today the only client is `InProcessClient`; the `TransportClient` protocol is the seam for a remote one.
-- **Reads are never role-restricted.** A caller can read any area (including `system/`) of any scope it holds a grant for. `ScopePolicy` gates writes only.
-- **Privacy is prompt-level.** The prompt tells the agent to refuse financial account numbers, health diagnoses, and anything indicating the user is a minor, and to be stricter in shared scopes. No tool checks content, so a successful write does not mean the content was safe.
-- **Behavior depends on the agent.** Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.
-- **Tool calls run concurrently** on worker threads, so the transport client (and `on_call`) must be thread-safe.
+Known limitations are on [Status and compatibility](status.md#limitations).
 
 ---
 

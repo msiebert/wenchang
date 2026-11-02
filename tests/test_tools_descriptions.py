@@ -311,6 +311,33 @@ def test_shared_mechanics_stated_once() -> None:
     }
 
 
+def _sentences(text: str) -> list[str]:
+    return re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+
+
+def test_write_file_description_states_file_cap_beside_byte_ceiling() -> None:
+    """The write_file description has one sentence saying creating a file fails
+    at the file limit and what to do instead, next to the byte-ceiling sentence
+    (AIE-1292, US5.7).
+    """
+    sentences = _sentences(tool_descriptions()["write_file"])
+
+    def is_cap(sentence: str) -> bool:
+        lowered = sentence.lower()
+        return (
+            "creat" in lowered
+            and "limit" in lowered
+            and "byte" not in lowered
+            and ("delete" in lowered or "existing file" in lowered)
+        )
+
+    cap = [i for i, sentence in enumerate(sentences) if is_cap(sentence)]
+    byte = [i for i, sentence in enumerate(sentences) if "byte ceiling" in sentence]
+    assert len(cap) == 1, sentences
+    assert len(byte) == 1, sentences
+    assert abs(cap[0] - byte[0]) == 1, sentences
+
+
 def test_get_memory_index_docstring_explains_entity_segment() -> None:
     """The get_memory_index docstring says the entity segment is filled in by
     the tools (AIE-1044, US5.8).

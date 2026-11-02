@@ -2,7 +2,7 @@
 
 import pytest
 
-from storage_conformance import StorageConformance
+from storage_conformance import EntityPurgeExportConformance, StorageConformance
 from wenchang.storage import Storage
 from wenchang.storage.memory import InMemoryStorage
 
@@ -16,6 +16,10 @@ def storage() -> Storage:
 
 class TestInMemoryStorage(StorageConformance):
     """Runs the shared conformance suite against InMemoryStorage."""
+
+
+class TestInMemoryEntityPurgeExport(EntityPurgeExportConformance):
+    """Runs entity purge and export against InMemoryStorage (AIE-1291, US5)."""
 
 
 @pytest.mark.unit

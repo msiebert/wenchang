@@ -25,6 +25,8 @@ dev = [
     "packaging>=24",
     "pyyaml>=6.0.3",
     "types-pyyaml>=6.0.12.20260906",
+    "jsonschema>=4.20",
+    "types-jsonschema>=4.20",
 ]
 
 [build-system]

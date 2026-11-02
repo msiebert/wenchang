@@ -321,10 +321,14 @@ class _Snapshot:
         calls: list[TraceCall] = []
         for r in self.records:
             session, turn = self._tag(r.started_ms)
+            request_id = r.record.request_id
+            # MCP records always carry the request id; only direct calls have None.
+            if request_id is None:
+                raise RuntimeError(f"MCP record for {r.record.tool} has no request_id")
             calls.append(
                 TraceCall(
                     seq=r.seq,
-                    request_id=r.record.request_id,
+                    request_id=request_id,
                     duration_s=r.record.duration_s,
                     started_ms=r.started_ms,
                     completed_ms=r.completed_ms,

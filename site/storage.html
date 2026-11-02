@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storage and operations</title>
+<meta name="description" content="Bucket and IAM setup, object keys and metadata, the per-entity file cap, index cost and the index cache, timeouts and retries, and purging and exporting an entity.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/storage.html">
+<link rel="alternate" type="text/markdown" href="storage.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Storage and operations">
+<meta property="og:description" content="Bucket and IAM setup, object keys and metadata, the per-entity file cap, index cost and the index cache, timeouts and retries, and purging and exporting an entity.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/storage.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Storage and operations">
+<meta name="twitter:description" content="Bucket and IAM setup, object keys and metadata, the per-entity file cap, index cost and the index cache, timeouts and retries, and purging and exporting an entity.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-storage">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html" aria-current="page">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page has-toc">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/storage.md</span> <a href="storage.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+
+<nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
+<li><a href="#bucket">The bucket</a>
+</li>
+<li><a href="#metadata">Objects and metadata</a>
+<ul>
+<li><a href="#out-of-band">Writing objects out of band</a></li>
+</ul>
+</li>
+<li><a href="#file-cap">Files per entity</a>
+</li>
+<li><a href="#index-cost">Index cost</a>
+</li>
+<li><a href="#index-cache">The index cache</a>
+<ul>
+<li><a href="#cache-contract">What you provide</a></li>
+<li><a href="#redis">A Redis example</a></li>
+<li><a href="#in-memory">In-process cache</a></li>
+<li><a href="#invalidate">Writes that bypass the cache</a></li>
+<li><a href="#cache-failures">When the cache fails</a></li>
+<li><a href="#cache-limits">Guarantees and limits</a></li>
+</ul>
+</li>
+<li><a href="#retries">Timeouts and retries</a>
+</li>
+<li><a href="#erase">Erasing an entity</a>
+<ul>
+<li><a href="#shared-scopes">Facts in shared scopes</a></li>
+<li><a href="#purge">How purge works</a></li>
+<li><a href="#deleted-bytes">Deleted bytes in GCS</a></li>
+</ul>
+</li>
+<li><a href="#export">Export and restore</a>
+</li>
+</ul></details></nav>
+<h1 id="storage-and-operations">Storage and operations<a class="headerlink" href="#storage-and-operations" title="Link to this section">#</a></h1>
+<p>How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. Everything on this page goes through <code>MemoryStore</code> over <code>GcsStorage</code> (<code>wenchang.storage.gcs</code>), unless it says otherwise. The <a href="reference.html#storage">reference</a> has the <code>Storage</code> protocol and the store's signature.</p>
+<h2 id="bucket">The bucket<a class="headerlink" href="#bucket" title="Link to this section">#</a></h2>
+<p>Memory files are objects in one bucket. One <code>GcsStorage(bucket)</code> wraps one <code>google.cloud.storage.Bucket</code>. <a href="quickstart.html#bucket">Quickstart</a> creates one with <code>gcloud</code>. google-cloud-storage does not document its <code>Client</code> as thread-safe, so read <a href="integrate-without-mcp.html#threads">Threads</a> before you share one <code>GcsStorage</code> across threads, as the MCP adapter does.</p>
+<p>wenchang finds credentials through Application Default Credentials: locally <code>gcloud auth application-default login</code>, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. <code>roles/storage.objectUser</code> on the bucket grants those. Operator jobs that <a href="#erase">purge</a> need the same permissions.</p>
+<div class="callout"><strong>One bucket, many people.</strong> Every user and project writes into the same bucket under their own path prefix. Access control between users is wenchang's scope rules, not bucket permissions. Anyone who can read the bucket directly can read all of it.</div>
+
+<p>Bucket soft delete and object versioning keep deleted bytes recoverable. Set them to match your retention obligations; see <a href="#deleted-bytes">Deleted bytes in GCS</a>.</p>
+<h2 id="metadata">Objects and metadata<a class="headerlink" href="#metadata" title="Link to this section">#</a></h2>
+<p>Each memory file is one object. Its key is the file's path, <code>{scope}/{entity_id}/{area}/{name}.md</code> (see <a href="concepts.html#paths">Concepts</a>). Its body is the file content as UTF-8, with content type <code>text/markdown; charset=utf-8</code>. Its version is the object's generation.</p>
+<p>The file metadata is GCS custom metadata on the object, under four keys:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Stored key</th>
+<th>Encoding</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>description</code></td>
+<td>Plain string, one line.</td>
+<td><code>Lin Qiao, the protagonist</code></td>
+</tr>
+<tr>
+<td><code>aliases</code></td>
+<td>JSON array of strings, in order.</td>
+<td><code>["Qiao", "Lin"]</code></td>
+</tr>
+<tr>
+<td><code>sources</code></td>
+<td>JSON array of strings, sorted.</td>
+<td><code>["claude-code", "inkwell-web"]</code></td>
+</tr>
+<tr>
+<td><code>last-updated</code></td>
+<td>ISO 8601 in UTC with a <code>Z</code> suffix.</td>
+<td><code>2026-10-30T14:02:11.402913Z</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Tool results and the index show the last one as <code>last_updated</code>, with an underscore, and <code>aliases</code> and <code>sources</code> as arrays. Other keys on an object are ignored.</p>
+<h3 id="out-of-band">Writing objects out of band<a class="headerlink" href="#out-of-band" title="Link to this section">#</a></h3>
+<p>Reads and listings parse all four keys and require every one. An object written another way, such as <code>gcloud storage cp</code> or the GCS console, without them raises <code>MetadataFormatError</code>, which the agent sees as an <code>internal</code> error naming a missing key, such as <code>aliases: missing required key</code>. How far that reaches depends on the tool:</p>
+<ul>
+<li><strong><code>read_file</code></strong> of that file fails. Other files read normally.</li>
+<li><strong><code>list_prefix</code></strong> fails only for a page that includes that object. Earlier pages of the same scope or area succeed.</li>
+<li><strong><code>get_memory_index</code></strong> fails outright for every caller whose grants include that entity, because it lists every object in every granted entity before it builds anything. The caller gets no index at all, not even for its other scopes.</li>
+</ul>
+<p>To fix it, set all four keys on the object or delete it. To avoid it, write through a <code>MemoryStore</code>, as the <a href="quickstart.html#seed">seed script</a> does, or set all four keys yourself. A store with an index cache does not see out-of-band writes; <a href="#invalidate">invalidate</a> the entity afterwards.</p>
+<h2 id="file-cap">Files per entity<a class="headerlink" href="#file-cap" title="Link to this section">#</a></h2>
+<p>An entity is everything under one <code>{scope}/{entity_id}/</code> prefix: one user's private memory, or one project's shared memory. <code>MemoryStore(max_files_per_entity=...)</code> caps how many files it holds. The default is 500 (<code>wenchang.core.DEFAULT_MAX_FILES_PER_ENTITY</code>); <code>None</code> disables the cap, and any other value must be positive (<code>ValueError</code> otherwise).</p>
+<div class="highlight"><pre><span></span><code><span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">max_files_per_entity</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>  <span class="c1"># or None for no cap</span>
+</code></pre></div>
+
+<p>Only creates are checked: a <code>write_file</code> with <code>expected_version=null</code> outside <code>system/</code>. Replacing a file, <code>append_line</code>, <code>replace_fact</code>, <code>delete_file</code>, and reads never are, so an entity at its cap keeps working on the files it has. Files in <code>system/</code> and keys that are not well-formed memory paths are not counted. Deleting a file frees a slot.</p>
+<p>At the cap, the create fails with a recoverable <code>FileQuotaExceededError</code> whose payload carries <code>limit</code> (plus <code>scope</code>, <code>area</code>, and <code>name</code>). If a file already exists at that path, the create fails with <code>VersionConflictError</code> instead, as it would below the cap. For scope <code>user</code>, area <code>notes</code>, name <code>new</code>, and a limit of 3, the agent sees:</p>
+<div class="highlight"><pre><span></span><code>Cannot create a new file at scope user, area notes, name new: memory in scope user is at its limit of 3 files (system/ files not counted). Add this content to an existing file instead (append_line, replace_fact, or write_file with that file's version), or merge related files into one and delete the merged ones with delete_file, then retry.
+</code></pre></div>
+
+<p>followed by the standard recoverable guidance, so the agent consolidates and retries in the same turn without asking the user.</p>
+<p>The cap is soft. Counting and writing are not atomic, so concurrent creates in one entity can exceed it by at most the number of creates racing at the boundary. Each checked create counts the entity's keys with <code>Storage.list_page</code>, in pages of <code>max(limit - count, list_page_size)</code> keys, stopping once it reaches the limit: at most the limit plus the uncounted keys plus one <code>list_page_size</code> page, and usually one list call.</p>
+<h2 id="index-cost">Index cost<a class="headerlink" href="#index-cost" title="Link to this section">#</a></h2>
+<p><code>get_memory_index</code> is what the agent calls at the start of every session. It costs you in two places.</p>
+<ul>
+<li><strong>The model's context.</strong> The index is capped at <code>index_max_bytes</code>, 65536 by default. Each entry is sized as the UTF-8 bytes of its path, its four stored metadata keys and values (in the encodings above), and its version. Entries are added in index order until the next one would pass the cap; the rest are reported under <code>capped</code>. The JSON the agent receives adds field names and punctuation on top of that budget, so the payload is somewhat larger than <code>index_max_bytes</code>.</li>
+<li><strong>Storage calls.</strong> Without a cache, every call lists every object under every granted <code>{scope}/{entity_id}/</code> prefix, in pages of <code>list_page_size</code>, before it caps anything. Listings never read bodies, but the work grows with the number of files in the caller's entities, and the cap does not reduce it. The <a href="#file-cap">file cap</a> bounds it per entity.</li>
+</ul>
+<p>An index cache removes the listing for entities that have not changed.</p>
+<h2 id="index-cache">The index cache<a class="headerlink" href="#index-cache" title="Link to this section">#</a></h2>
+<p>You can give <code>MemoryStore</code> a cache for <code>get_memory_index</code>. The cache is optional, and without one nothing changes. With one, the store caches each entity's listing separately, and every write or delete through the store invalidates that entity's entry. Ordering, the size cap, and <code>capped</code> are still worked out on each call, so a cached index has the same shape as an uncached one.</p>
+<p>wenchang does not ship a cache server. You supply two functions over the cache you already run, such as Redis.</p>
+<div id="contract" class="anchor-alias"></div>
+
+<h3 id="cache-contract">What you provide<a class="headerlink" href="#cache-contract" title="Link to this section">#</a></h3>
+<p><code>wenchang.index_cache.IndexCache(get, set, ttl=None, key_prefix="wenchang:index:")</code> is a frozen configuration object.</p>
+<ul>
+<li><strong><code>get(key) -&gt; str | None</code></strong> returns the value last set for <code>key</code>, or <code>None</code> if it is absent or expired.</li>
+<li><strong><code>set(key, value, ttl) -&gt; None</code></strong> stores <code>value</code> under <code>key</code>, expiring <code>ttl</code> (a <code>timedelta</code>) from now. <code>ttl</code> is <code>None</code> for no expiry.</li>
+<li><strong><code>ttl</code></strong> is passed unchanged to every <code>set</code>. It must be positive if given.</li>
+<li><strong><code>key_prefix</code></strong> starts every key the store writes.</li>
+</ul>
+<p>Both functions are required: <code>set</code> is how the store invalidates, so a read-only cache cannot work. Keys and values are opaque strings. Do not parse them.</p>
+<p>Pass it to the store:</p>
+<div class="highlight"><pre><span></span><code><span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=...</span><span class="p">,</span> <span class="nb">set</span><span class="o">=...</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">)))</span>
+</code></pre></div>
+
+<p><code>store.index_cache</code> returns the configured cache, or <code>None</code>.</p>
+<h3 id="redis">A Redis example<a class="headerlink" href="#redis" title="Link to this section">#</a></h3>
+<p>This adapter uses redis-py. It is an illustration, not something wenchang depends on: install the client yourself.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">timedelta</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">redis</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">google.cloud</span><span class="w"> </span><span class="kn">import</span> <span class="n">storage</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.index_cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexCache</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.gcs</span><span class="w"> </span><span class="kn">import</span> <span class="n">GcsStorage</span>
+
+<span class="c1"># decode_responses=True makes get return str, which the cache must return.</span>
+<span class="n">r</span> <span class="o">=</span> <span class="n">redis</span><span class="o">.</span><span class="n">Redis</span><span class="o">.</span><span class="n">from_url</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"REDIS_URL"</span><span class="p">],</span> <span class="n">decode_responses</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cache_get</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cache_set</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">ttl</span><span class="p">:</span> <span class="n">timedelta</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">ttl</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">r</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">r</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">px</span><span class="o">=</span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">ttl</span> <span class="o">//</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">milliseconds</span><span class="o">=</span><span class="mi">1</span><span class="p">)))</span>
+
+
+<span class="n">index_cache</span> <span class="o">=</span> <span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=</span><span class="n">cache_get</span><span class="p">,</span> <span class="nb">set</span><span class="o">=</span><span class="n">cache_set</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">))</span>
+
+<span class="n">bucket</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">"my-gcp-project"</span><span class="p">)</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"WENCHANG_BUCKET"</span><span class="p">])</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span>
+    <span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">),</span>
+    <span class="n">scope_priority</span><span class="o">=</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"project"</span><span class="p">,</span> <span class="s2">"organization"</span><span class="p">),</span>
+    <span class="n">index_cache</span><span class="o">=</span><span class="n">index_cache</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>Points to notice:</p>
+<ul>
+<li><strong><code>get</code> must return <code>str</code>.</strong> redis-py returns <code>bytes</code> unless the client is created with <code>decode_responses=True</code>. If you share a client that does not decode, decode in <code>get</code> instead: <code>value = r.get(key)</code>, then <code>return None if value is None else value.decode()</code>. A <code>bytes</code> result is not an error, but the store treats it as a miss and logs a warning on every call, so the cache never helps.</li>
+<li><strong><code>set</code> maps <code>ttl</code> to an expiry.</strong> A finite <code>ttl</code> becomes <code>px</code> in milliseconds. <code>None</code> stores the key with no expiry.</li>
+<li><strong>One Redis primary is enough.</strong> The cache needs each key's <code>get</code> and <code>set</code> to be linearizable, which a single primary provides. See <a href="#cache-limits">Guarantees and limits</a> for replicas.</li>
+</ul>
+<h3 id="in-memory">In-process cache<a class="headerlink" href="#in-memory" title="Link to this section">#</a></h3>
+<p><code>wenchang.index_cache.InMemoryIndexCache</code> is a thread-safe cache held in one process, for tests and single-process hosts:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">timedelta</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.index_cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexCache</span><span class="p">,</span> <span class="n">InMemoryIndexCache</span>
+
+<span class="n">cache</span> <span class="o">=</span> <span class="n">InMemoryIndexCache</span><span class="p">()</span>
+<span class="n">index_cache</span> <span class="o">=</span> <span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">get</span><span class="p">,</span> <span class="nb">set</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">set</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">5</span><span class="p">))</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">index_cache</span><span class="p">)</span>
+</code></pre></div>
+
+<p>It drops expired entries only when they are read, so with <code>ttl=None</code> it grows without bound. A host that runs several instances needs a shared cache: each instance's in-process cache misses the other instances' writes.</p>
+<h3 id="invalidate">Writes that bypass the cache<a class="headerlink" href="#invalidate" title="Link to this section">#</a></h3>
+<p><code>write_file</code>, <code>append_line</code>, <code>replace_fact</code>, and <code>delete_file</code> on a store that has the cache invalidate the entity themselves, whether the storage call succeeded or raised. Anything else that changes files in the bucket does not. That includes:</p>
+<ul>
+<li>a seeding job or admin tool,</li>
+<li>another <code>MemoryStore</code> built without the cache (such as the <a href="quickstart.html#seed">seed script</a>),</li>
+<li>a direct write through <code>gcloud</code> or the GCS API, including a <a href="#export">restore</a>.</li>
+</ul>
+<p>The simplest fix is to give those writers the same <code>IndexCache</code>. Otherwise, after they finish, call <code>MemoryStore.invalidate_index(scope, entity_id)</code> on a store that has the cache:</p>
+<div class="highlight"><pre><span></span><code><span class="n">seed_store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">))</span>  <span class="c1"># no cache, so its writes do not invalidate</span>
+<span class="c1"># ... seed_store writes under organization/o-hanlin-press/ ...</span>
+<span class="n">cached_store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">GcsStorage</span><span class="p">(</span><span class="n">bucket</span><span class="p">),</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">index_cache</span><span class="p">)</span>
+<span class="n">cached_store</span><span class="o">.</span><span class="n">invalidate_index</span><span class="p">(</span><span class="s2">"organization"</span><span class="p">,</span> <span class="s2">"o-hanlin-press"</span><span class="p">)</span>
+</code></pre></div>
+
+<p>The next <code>get_memory_index</code> that includes that entity lists storage again. <code>invalidate_index</code> also overwrites the entity's cached listing, so deleted descriptions and aliases do not stay in your cache. A <a href="#erase">purge</a> calls it once all of its deletes finish.</p>
+<p><code>invalidate_index</code> raises <code>TypeError</code> for a non-<code>str</code> argument and <code>ValueError</code> for an invalid scope or entity ID, before touching the cache. It does nothing on a store with no cache. Unlike the store's own invalidation, it does not swallow cache errors: if <code>set</code> raises, so does <code>invalidate_index</code>, because the caller asked for the invalidation and should know it did not happen.</p>
+<p>A writer that does not invalidate leaves the entity stale until its next write through the cached store, or until <code>ttl</code> expires.</p>
+<div id="failures" class="anchor-alias"></div>
+
+<h3 id="cache-failures">When the cache fails<a class="headerlink" href="#cache-failures" title="Link to this section">#</a></h3>
+<p>The cache never makes a memory operation fail.</p>
+<ul>
+<li>If <code>get</code> raises, or returns something that is not a <code>str</code>, the store logs a warning and lists storage as if nothing were cached.</li>
+<li>If <code>set</code> raises, the store logs a warning and skips the store or invalidation. Writes still return their normal result.</li>
+</ul>
+<p>Warnings go to the <code>wenchang.core</code> logger. They name the scope and the exception or result type, never the entity ID or the key. An exception that is not an <code>Exception</code> subclass (such as <code>KeyboardInterrupt</code>) still propagates. Storage errors while listing propagate as they do without a cache, and nothing is cached for that entity.</p>
+<p>A swallowed invalidation failure leaves the entity's old listing in place, and only <code>ttl</code> bounds how long it is served. Watch for these warnings.</p>
+<div id="limits" class="anchor-alias"></div>
+
+<h3 id="cache-limits">Guarantees and limits<a class="headerlink" href="#cache-limits" title="Link to this section">#</a></h3>
+<p>The store keeps a random generation token for each entity. A reader records the token before listing storage and tags its cached listing with it. Every write replaces the token after its storage call, so a listing taken before that write is never served afterwards, even if it is stored late. What this does not cover:</p>
+<ul>
+<li><strong><code>ttl=None</code> means unbounded staleness.</strong> Tokens cannot detect a write that did not invalidate: an out-of-band write, or an invalidation whose <code>set</code> failed. With a finite <code>ttl</code>, such an entity is stale for at most <code>ttl</code>. With <code>ttl=None</code>, it stays stale until something invalidates it or your cache evicts the key. Use a finite <code>ttl</code> in production.</li>
+<li><strong>Timed-out writes.</strong> A write that raised <code>BackendUnavailableError</code> (for example a timeout) may still commit in GCS after the store has replaced the token. A reader in between can cache the listing from before the commit under the new token. That listing is served until the entity's next write or invalidation, or until <code>ttl</code> expires.</li>
+<li><strong>Deleted metadata can linger, unserved.</strong> A reader that listed before a delete can store its pre-delete listing after the delete overwrote it. Its tag is stale, so it is never served, but it stays in your cache until the entity is indexed again or <code>ttl</code> expires. If you have erasure obligations, a finite <code>ttl</code> is required, not just recommended.</li>
+<li><strong>Per-key linearizable <code>get</code> and <code>set</code>.</strong> A cache where a <code>get</code> can miss an earlier <code>set</code> to the same key, such as one reading from asynchronous replicas, bounds freshness only by <code>ttl</code>. Operations do not need to be atomic across keys.</li>
+<li><strong>One <code>key_prefix</code> per storage root.</strong> Keys do not identify the bucket. Stores over different buckets or roots that share one cache need distinct prefixes, and no prefix may be a string prefix of another (<code>"a:"</code> and <code>"a:b:"</code> collide, because scope and entity names may contain <code>:</code>). End each prefix in a delimiter and keep them distinct. This is not checked at runtime.</li>
+<li><strong>Large entities make large values.</strong> A cached listing holds one entry per file in the entity.</li>
+</ul>
+<div class="callout callout-warn"><strong>The cache holds memory metadata.</strong> Cached values contain each file's description, aliases, and sources. Keys contain scope names and entity IDs, which are often user IDs. Your cache inherits the same data-handling obligations as the bucket. File content is never cached.</div>
+
+<h2 id="retries">Timeouts and retries<a class="headerlink" href="#retries" title="Link to this section">#</a></h2>
+<p>wenchang has no timeout or retry setting of its own. <code>GcsStorage</code> calls google-cloud-storage with that library's defaults, plus one loop:</p>
+<ul>
+<li><strong><code>get</code> retries a generation race.</strong> It reads the object's metadata, then downloads the body only if the generation is unchanged. If the object was replaced or deleted in between, it starts over, up to 3 attempts, then raises <code>BackendUnavailableError</code>.</li>
+<li><strong>Timeout.</strong> Each GCS request uses google-cloud-storage's default timeout, 60 seconds.</li>
+<li><strong>Retries.</strong> google-cloud-storage retries 408, 429, 500, 502, 503, and 504 responses and connection errors, backing off from 1 second, doubling up to 60 seconds between tries, for at most 120 seconds. Which calls it retries depends on its major version. wenchang requires <code>google-cloud-storage&gt;=2.18</code>, and its lockfile installs 3.14.1.</li>
+</ul>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Storage call</th>
+<th>GCS request</th>
+<th>google-cloud-storage 3.x</th>
+<th>2.x</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get</code>, <code>list_page</code></td>
+<td>get metadata, download, list</td>
+<td>retried</td>
+<td>retried</td>
+</tr>
+<tr>
+<td><code>put_if_version</code></td>
+<td>upload with <code>if_generation_match</code></td>
+<td>retried</td>
+<td>retried</td>
+</tr>
+<tr>
+<td><code>delete_if_version</code></td>
+<td>delete with <code>if_generation_match</code></td>
+<td>retried</td>
+<td>retried</td>
+</tr>
+<tr>
+<td><code>put</code></td>
+<td>upload with no precondition</td>
+<td>retried</td>
+<td>not retried</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>MemoryStore</code> writes only through <code>put_if_version</code> and <code>delete_if_version</code>, so a retried write is guarded by its generation. <code>put</code> is what a <a href="#export">restore</a> calls.</p>
+<p>How a failure reaches the agent:</p>
+<ul>
+<li><strong>A retried call that keeps failing</strong> raises google-cloud-storage's <code>google.api_core.exceptions.RetryError</code> once the 120-second budget runs out. <code>GcsStorage</code> does not map it, so it propagates out of the store unchanged, and the agent sees an <code>internal</code> error with a generic message.</li>
+<li><strong>A timeout, connection error, or 429, 500, 502, 503, or 504 on a call that is not retried</strong> (an unconditional <code>put</code> under google-cloud-storage 2.x) is mapped to <code>BackendUnavailableError</code>, reason <code>timeout</code> or <code>unavailable</code>, which the agent sees as <code>transient</code>. So is a <code>get</code> that loses the generation race 3 times.</li>
+<li><strong>A failed generation precondition</strong> is not an error here: it becomes the store's <code>VersionConflictError</code>, or is skipped by purge.</li>
+<li><strong>Anything else</strong>, such as a 403 from missing permissions, propagates unchanged and is an <code>internal</code> error.</li>
+</ul>
+<h2 id="erase">Erasing an entity<a class="headerlink" href="#erase" title="Link to this section">#</a></h2>
+<p>Erasure requests and project or org deletion need everything stored for one entity removed or handed over. <code>MemoryStore</code> has two methods for that:</p>
+<ul>
+<li><strong><code>purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -&gt; int</code></strong> deletes every object under <code>{scope}/{entity_id}/</code>.</li>
+<li><strong><code>export(scope, entity_id) -&gt; tuple[ExportedObject, ...]</code></strong> returns every object under that prefix, raw.</li>
+</ul>
+<p>Both are operator-only. They are not agent tools and not on the transport: <code>TransportClient</code>, <code>MemoryTools</code>, and the MCP adapter do not have them. Call them on a <code>MemoryStore</code> directly; <code>InProcessClient.store</code> returns the store a client wraps. Both work on <code>GcsStorage</code> and <code>InMemoryStorage</code>.</p>
+<p>To erase one user, for example under a GDPR erasure request:</p>
+<ol>
+<li><strong>Stop writers.</strong> Change your resolver so it no longer grants that user's scope, and let in-flight sessions end.</li>
+<li><strong>Export</strong>, if you need to hand the data over or keep a copy.</li>
+<li><strong>Purge</strong> the prefix, on a store configured like your server's, including its <code>index_cache</code>, so the purge invalidates the cached index. The cache needs a finite <code>ttl</code> for erasure; see <a href="#cache-limits">Guarantees and limits</a>.</li>
+<li><strong>Clear retained bytes.</strong> Purge removes live objects only. See <a href="#deleted-bytes">Deleted bytes in GCS</a>.</li>
+<li><strong>Check shared scopes.</strong> Purge does not touch facts about the user in <code>project</code> or <code>organization</code>. See <a href="#shared-scopes">Facts in shared scopes</a>.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">timedelta</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportedObject</span><span class="p">,</span> <span class="n">MemoryStore</span><span class="p">,</span> <span class="n">PurgeIncompleteError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.index_cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexCache</span><span class="p">,</span> <span class="n">InMemoryIndexCache</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+<span class="n">log</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">"erasure"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">revoke_grant</span><span class="p">(</span><span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Your auth layer: stop resolving any caller to this user's grant."""</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">erase_user</span><span class="p">(</span><span class="n">store</span><span class="p">:</span> <span class="n">MemoryStore</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="n">ExportedObject</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="n">revoke_grant</span><span class="p">(</span><span class="n">user_id</span><span class="p">)</span>  <span class="c1"># 1. stop writers, and let in-flight sessions end</span>
+    <span class="n">backup</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">)</span>  <span class="c1"># 2. optional: hand over or archive</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">deleted</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">purge</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">)</span>  <span class="c1"># 3. everything under user/{user_id}/</span>
+    <span class="k">except</span> <span class="n">PurgeIncompleteError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="c1"># Objects kept reappearing: a writer is still active. Stop it and re-run.</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"erasure incomplete in scope </span><span class="si">%r</span><span class="s2"> after </span><span class="si">%d</span><span class="s2"> passes"</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">scope</span><span class="p">,</span> <span class="n">exc</span><span class="o">.</span><span class="n">passes</span><span class="p">)</span>
+        <span class="k">raise</span>
+    <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"purged </span><span class="si">%d</span><span class="s2"> objects"</span><span class="p">,</span> <span class="n">deleted</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">backup</span><span class="p">,</span> <span class="n">deleted</span>
+
+
+<span class="c1"># The server's store configuration, cache included, so the purge invalidates</span>
+<span class="c1"># the user's cached index.</span>
+<span class="n">storage</span> <span class="o">=</span> <span class="n">InMemoryStorage</span><span class="p">()</span>
+<span class="n">cache</span> <span class="o">=</span> <span class="n">InMemoryIndexCache</span><span class="p">()</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span>
+    <span class="n">storage</span><span class="p">,</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">get</span><span class="p">,</span> <span class="nb">set</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">set</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">))</span>
+<span class="p">)</span>
+
+<span class="n">identity</span> <span class="o">=</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span>
+    <span class="n">InProcessClient</span><span class="p">(</span><span class="n">store</span><span class="p">),</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span>
+<span class="p">)</span>
+<span class="k">for</span> <span class="n">area</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"prose-style"</span><span class="p">,</span> <span class="s2">"- [stated] Close third person.</span><span class="se">\n</span><span class="s2">"</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">"workflows"</span><span class="p">,</span> <span class="s2">"drafting"</span><span class="p">,</span> <span class="s2">"- [stated] Drafts in the morning.</span><span class="se">\n</span><span class="s2">"</span><span class="p">),</span>
+<span class="p">]:</span>
+    <span class="n">tools</span><span class="o">.</span><span class="n">write_file</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">area</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="p">[],</span> <span class="kc">None</span><span class="p">)</span>
+<span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span><span class="o">.</span><span class="n">entries</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>  <span class="c1"># this listing is now cached</span>
+
+<span class="n">backup</span><span class="p">,</span> <span class="n">deleted</span> <span class="o">=</span> <span class="n">erase_user</span><span class="p">(</span><span class="n">store</span><span class="p">,</span> <span class="s2">"u-tianlong"</span><span class="p">)</span>
+
+<span class="k">assert</span> <span class="p">[</span><span class="n">o</span><span class="o">.</span><span class="n">key</span> <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">backup</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span>
+    <span class="s2">"user/u-tianlong/preferences/prose-style.md"</span><span class="p">,</span>
+    <span class="s2">"user/u-tianlong/workflows/drafting.md"</span><span class="p">,</span>
+<span class="p">]</span>
+<span class="k">assert</span> <span class="n">backup</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">data</span> <span class="o">==</span> <span class="sa">b</span><span class="s2">"- [stated] Close third person.</span><span class="se">\n</span><span class="s2">"</span>
+<span class="k">assert</span> <span class="n">deleted</span> <span class="o">==</span> <span class="mi">2</span>
+<span class="k">assert</span> <span class="ow">not</span> <span class="n">storage</span><span class="o">.</span><span class="n">list_page</span><span class="p">(</span><span class="s2">"user/u-tianlong/"</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># nothing left under the prefix</span>
+<span class="k">assert</span> <span class="ow">not</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span><span class="o">.</span><span class="n">entries</span>  <span class="c1"># the cached listing was invalidated</span>
+</code></pre></div>
+
+<h3 id="shared-scopes">Facts in shared scopes<a class="headerlink" href="#shared-scopes" title="Link to this section">#</a></h3>
+<p><code>purge</code> removes one entity's prefix and nothing else: for a user, everything under <code>user/{user_id}/</code>. Facts about that user that the agent filed in a <code>project</code> or <code>organization</code> scope are under that project's or organization's prefix, so they survive. Nothing in a shared file attributes a fact to the user it is about or the user who wrote it: <code>sources</code> records surfaces, not people. wenchang cannot find those facts for you.</p>
+<ul>
+<li><strong>Review the shared entities.</strong> <code>export</code> each project and organization the user belonged to, review the files, then rewrite the affected files through a <code>MemoryStore</code> or purge the entity.</li>
+<li><strong>Keep personal data out of shared scopes.</strong> Say in the prompt's <a href="prompts.html#scope-guidance"><code>scope_guidance</code></a> that personal details about a person go in <code>user</code>, never in <code>project</code> or <code>organization</code>. The prompt is the only control: no tool checks content.</li>
+</ul>
+<h3 id="purge">How purge works<a class="headerlink" href="#purge" title="Link to this section">#</a></h3>
+<p>A pass lists the prefix from the start and deletes each object it sees, guarded on the listed version. An object that changed or vanished in the meantime is left for the next pass. Passes repeat until one lists nothing.</p>
+<ul>
+<li><strong>Everything goes.</strong> Purge deletes every object under <code>{scope}/{entity_id}/</code>, including <code>system/</code> files, keys that are not valid memory paths, and objects with corrupt metadata. It never reads bodies or parses metadata.</li>
+<li><strong>The guarantee.</strong> When <code>purge</code> returns, the prefix was observed empty after its last delete. A write that lands after that survives. Durable erasure requires stopped writers.</li>
+<li><strong><code>max_passes</code> bounds restarts, not a pass.</strong> At most <code>max_passes + 1</code> listings start from the beginning of the prefix. A writer that adds keys faster than purge deletes them keeps a single pass running. <code>PURGE_MAX_PASSES</code> is 5.</li>
+<li><strong><code>PurgeIncompleteError</code></strong> is raised if objects remain after the last pass. It is a plain <code>Exception</code>, not a <code>WenchangError</code>, with <code>scope</code>, <code>entity_id</code>, and <code>passes</code> attributes. Its message names the scope and pass count, never the entity ID.</li>
+<li><strong>Re-running is safe.</strong> On an empty prefix purge returns 0 without deleting anything. The return value counts deletes storage confirmed: a delete that landed but whose response was lost is not counted, so treat it as a lower bound.</li>
+<li><strong>Other storage errors propagate.</strong> Deletes already made stand. Re-run once the backend recovers.</li>
+<li><strong>Arguments are checked first.</strong> A non-<code>str</code> <code>scope</code> or <code>entity_id</code>, or a non-<code>int</code> <code>max_passes</code>, raises <code>TypeError</code>. An invalid segment or <code>max_passes</code> below 1 raises <code>ValueError</code>. Neither touches storage or the cache.</li>
+<li><strong>Cost.</strong> N objects take N sequential deletes, roughly N round trips on GCS.</li>
+</ul>
+<div id="cache" class="anchor-alias"></div>
+
+<p>Purge calls <a href="#invalidate"><code>invalidate_index</code></a> once, after its last storage call, whether it succeeded or failed. On success a cache error propagates and the delete count is lost; re-running returns 0 and invalidates again. On failure a cache error is logged to <code>wenchang.core</code> and the purge's own exception is raised. A reader that listed before the purge can still store its pre-purge listing in your cache. It is never served, but it stays until the entity is indexed again or <code>ttl</code> expires.</p>
+<div id="limitations" class="anchor-alias"></div>
+
+<p>An invalid <code>entity_id</code> is echoed in the <code>ValueError</code> message (<code>invalid entity_id: '...'</code>), the same message <code>invalidate_index</code> and <code>get_memory_index</code> raise. If entity IDs identify people, do not log that message as is.</p>
+<div id="gcs" class="anchor-alias"></div>
+
+<h3 id="deleted-bytes">Deleted bytes in GCS<a class="headerlink" href="#deleted-bytes" title="Link to this section">#</a></h3>
+<p>Purge removes live objects only. A bucket's soft-delete policy (7 days by default on new GCS buckets) and object versioning keep deleted bytes recoverable for their retention window. Set both to match your retention obligation: <code>gcloud storage buckets update gs://BUCKET --clear-soft-delete</code> disables soft delete.</p>
+<h2 id="export">Export and restore<a class="headerlink" href="#export" title="Link to this section">#</a></h2>
+<p><code>export</code> lists the prefix and <code>get</code>s each object, returning them in ascending key order. Each <code>ExportedObject</code> has:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key</code></td>
+<td>The full storage key.</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td>The raw body, as <code>bytes</code>.</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>The stored metadata map, read-only, with the <a href="#metadata">stored keys</a>.</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>The storage version token.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Nothing is parsed, so malformed keys, corrupt metadata, and non-UTF-8 bodies are exported as they are. To restore, <code>put</code> each object back through the same storage the store uses, then invalidate the entity's cached index. This round trip writes two files, exports and purges them, and restores them. The asserts show that keys, bytes, and metadata come back unchanged, that each object gets a new version, and that the files read back through the store:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Iterable</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">timedelta</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportedObject</span><span class="p">,</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.identity</span><span class="w"> </span><span class="kn">import</span> <span class="n">Identity</span><span class="p">,</span> <span class="n">SandboxResolver</span><span class="p">,</span> <span class="n">ScopeGrant</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.index_cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexCache</span><span class="p">,</span> <span class="n">InMemoryIndexCache</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.scope</span><span class="w"> </span><span class="kn">import</span> <span class="n">ScopePolicy</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage</span><span class="w"> </span><span class="kn">import</span> <span class="n">Storage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">InMemoryStorage</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">bind_tools</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.transport</span><span class="w"> </span><span class="kn">import</span> <span class="n">InProcessClient</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">restore</span><span class="p">(</span>
+    <span class="n">storage</span><span class="p">:</span> <span class="n">Storage</span><span class="p">,</span> <span class="n">store</span><span class="p">:</span> <span class="n">MemoryStore</span><span class="p">,</span> <span class="n">objects</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">ExportedObject</span><span class="p">],</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">objects</span><span class="p">:</span>
+        <span class="n">storage</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">o</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">o</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">o</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>
+    <span class="c1"># Direct puts bypass the index cache.</span>
+    <span class="n">store</span><span class="o">.</span><span class="n">invalidate_index</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">)</span>
+
+
+<span class="c1"># The server's store configuration; the storage is the one the store wraps.</span>
+<span class="n">storage</span> <span class="o">=</span> <span class="n">InMemoryStorage</span><span class="p">()</span>
+<span class="n">cache</span> <span class="o">=</span> <span class="n">InMemoryIndexCache</span><span class="p">()</span>
+<span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span>
+    <span class="n">storage</span><span class="p">,</span> <span class="n">index_cache</span><span class="o">=</span><span class="n">IndexCache</span><span class="p">(</span><span class="n">get</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">get</span><span class="p">,</span> <span class="nb">set</span><span class="o">=</span><span class="n">cache</span><span class="o">.</span><span class="n">set</span><span class="p">,</span> <span class="n">ttl</span><span class="o">=</span><span class="n">timedelta</span><span class="p">(</span><span class="n">minutes</span><span class="o">=</span><span class="mi">10</span><span class="p">))</span>
+<span class="p">)</span>
+
+<span class="n">identity</span> <span class="o">=</span> <span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})</span>
+<span class="n">tools</span> <span class="o">=</span> <span class="n">bind_tools</span><span class="p">(</span>
+    <span class="n">InProcessClient</span><span class="p">(</span><span class="n">store</span><span class="p">),</span> <span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="n">ScopePolicy</span><span class="p">({}),</span> <span class="n">source</span><span class="o">=</span><span class="s2">"inkwell-cli"</span>
+<span class="p">)</span>
+<span class="k">for</span> <span class="n">area</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">aliases</span> <span class="ow">in</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"prose-style"</span><span class="p">,</span> <span class="s2">"- [stated] Close third person.</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span> <span class="p">[</span><span class="s2">"voice"</span><span class="p">]),</span>
+    <span class="p">(</span><span class="s2">"workflows"</span><span class="p">,</span> <span class="s2">"drafting"</span><span class="p">,</span> <span class="s2">"- [stated] Drafts in the morning.</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span> <span class="p">[]),</span>
+<span class="p">]:</span>
+    <span class="n">tools</span><span class="o">.</span><span class="n">write_file</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="n">area</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">line</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">aliases</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+<span class="n">backup</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"u-tianlong"</span><span class="p">)</span>
+<span class="n">store</span><span class="o">.</span><span class="n">purge</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"u-tianlong"</span><span class="p">)</span>
+<span class="k">assert</span> <span class="ow">not</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span><span class="o">.</span><span class="n">entries</span>  <span class="c1"># gone, and the empty listing is cached</span>
+
+<span class="n">restore</span><span class="p">(</span><span class="n">storage</span><span class="p">,</span> <span class="n">store</span><span class="p">,</span> <span class="n">backup</span><span class="p">,</span> <span class="s2">"u-tianlong"</span><span class="p">)</span>
+
+<span class="n">restored</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"u-tianlong"</span><span class="p">)</span>
+<span class="k">assert</span> <span class="p">[(</span><span class="n">o</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">o</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="nb">dict</span><span class="p">(</span><span class="n">o</span><span class="o">.</span><span class="n">metadata</span><span class="p">))</span> <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">restored</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span>
+    <span class="p">(</span><span class="n">o</span><span class="o">.</span><span class="n">key</span><span class="p">,</span> <span class="n">o</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="nb">dict</span><span class="p">(</span><span class="n">o</span><span class="o">.</span><span class="n">metadata</span><span class="p">))</span> <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">backup</span>
+<span class="p">]</span>
+<span class="k">assert</span> <span class="nb">all</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">version</span> <span class="o">!=</span> <span class="n">b</span><span class="o">.</span><span class="n">version</span> <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">restored</span><span class="p">,</span> <span class="n">backup</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>  <span class="c1"># new versions</span>
+
+<span class="n">prose</span> <span class="o">=</span> <span class="n">tools</span><span class="o">.</span><span class="n">read_file</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"prose-style"</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">prose</span><span class="o">.</span><span class="n">content</span> <span class="o">==</span> <span class="s2">"- [stated] Close third person.</span><span class="se">\n</span><span class="s2">"</span>
+<span class="k">assert</span> <span class="n">prose</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">aliases</span> <span class="o">==</span> <span class="p">(</span><span class="s2">"voice"</span><span class="p">,)</span> <span class="ow">and</span> <span class="n">prose</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">sources</span> <span class="o">==</span> <span class="p">{</span><span class="s2">"inkwell-cli"</span><span class="p">}</span>
+<span class="k">assert</span> <span class="p">[</span><span class="n">e</span><span class="o">.</span><span class="n">path</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">tools</span><span class="o">.</span><span class="n">get_memory_index</span><span class="p">()</span><span class="o">.</span><span class="n">entries</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span>
+    <span class="s2">"user/u-tianlong/workflows/drafting.md"</span><span class="p">,</span>
+    <span class="s2">"user/u-tianlong/preferences/prose-style.md"</span><span class="p">,</span>
+<span class="p">]</span>  <span class="c1"># the cached empty listing was invalidated</span>
+</code></pre></div>
+
+<ul>
+<li><strong>A backup, not a snapshot.</strong> Each object is internally consistent, but an object deleted between listing and <code>get</code> is omitted, and one written after its page was listed may be missing. Stop writers for a consistent export. Export never touches the index cache.</li>
+<li><strong>Memory.</strong> Every object's bytes are held at once. The library does not bound this.</li>
+<li><strong>Cost.</strong> N objects take N sequential <code>get</code> calls, roughly N round trips on GCS.</li>
+</ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="identity.html"><small>Previous</small>Identity</a><a rel="next" href="prompts.html"><small>Next</small>Prompts</a></nav>
+</main>
+<aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
+<li><a href="#bucket">The bucket</a>
+</li>
+<li><a href="#metadata">Objects and metadata</a>
+<ul>
+<li><a href="#out-of-band">Writing objects out of band</a></li>
+</ul>
+</li>
+<li><a href="#file-cap">Files per entity</a>
+</li>
+<li><a href="#index-cost">Index cost</a>
+</li>
+<li><a href="#index-cache">The index cache</a>
+<ul>
+<li><a href="#cache-contract">What you provide</a></li>
+<li><a href="#redis">A Redis example</a></li>
+<li><a href="#in-memory">In-process cache</a></li>
+<li><a href="#invalidate">Writes that bypass the cache</a></li>
+<li><a href="#cache-failures">When the cache fails</a></li>
+<li><a href="#cache-limits">Guarantees and limits</a></li>
+</ul>
+</li>
+<li><a href="#retries">Timeouts and retries</a>
+</li>
+<li><a href="#erase">Erasing an entity</a>
+<ul>
+<li><a href="#shared-scopes">Facts in shared scopes</a></li>
+<li><a href="#purge">How purge works</a></li>
+<li><a href="#deleted-bytes">Deleted bytes in GCS</a></li>
+</ul>
+</li>
+<li><a href="#export">Export and restore</a>
+</li>
+</ul></aside>
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="storage.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

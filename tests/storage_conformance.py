@@ -14,6 +14,15 @@ makes the bare import resolve from both `tests/test_storage_memory.py` and
 
 import pytest
 
+from purge_export_support import (
+    NEIGHBOURS,
+    SEED_SUFFIXES,
+    seed_entity,
+    seed_many,
+    seed_neighbours,
+    snapshot,
+)
+from wenchang.core import MemoryStore
 from wenchang.storage import ListedObject, PreconditionFailedError, Storage
 from wenchang.version_token import VersionToken
 
@@ -471,3 +480,63 @@ class StorageConformance:
         result = storage.get("v/k")
         assert result is not None
         assert result.version == latest_token
+
+
+class EntityPurgeExportConformance:
+    """MemoryStore.purge and export over a real `Storage` implementation
+    (AIE-1291, US5). Concurrency cases stay in the unit tests.
+    """
+
+    def test_purge_deletes_entity_and_spares_neighbours(self, storage: Storage) -> None:
+        """Purge returns 6, empties user/u1/, and leaves neighbours unchanged
+        (AIE-1291, US5.1).
+        """
+        seed_entity(storage)
+        seed_neighbours(storage)
+        before = snapshot(storage, NEIGHBOURS)
+
+        assert MemoryStore(storage, list_page_size=2).purge("user", "u1") == 6
+
+        assert list(storage.list_page("user/u1/", None, 100)) == []
+        assert snapshot(storage, NEIGHBOURS) == before
+
+    def test_export_purge_restore_round_trip(self, storage: Storage) -> None:
+        """Export, purge, restore with put, and export again match on key,
+        data, and metadata; the first export has the 6 seed keys and no
+        neighbour (AIE-1291, US5.2).
+        """
+        seed_entity(storage)
+        seed_neighbours(storage)
+        store = MemoryStore(storage, list_page_size=2)
+
+        first = store.export("user", "u1")
+        store.purge("user", "u1")
+        for o in first:
+            storage.put(o.key, o.data, o.metadata)
+        second = store.export("user", "u1")
+
+        assert [o.key for o in first] == ["user/u1/" + s for s in SEED_SUFFIXES]
+        assert [(o.key, o.data, dict(o.metadata)) for o in first] == [
+            (o.key, o.data, dict(o.metadata)) for o in second
+        ]
+
+    def test_purge_and_export_paginate(self, storage: Storage) -> None:
+        """Seven objects with page size 2 are all purged, and once re-seeded
+        all exported in order (AIE-1291, US5.3).
+        """
+        store = MemoryStore(storage, list_page_size=2)
+        seed_many(storage, 7)
+
+        assert store.purge("user", "u1") == 7
+        assert list(storage.list_page("user/u1/", None, 100)) == []
+
+        keys = seed_many(storage, 7)
+        assert [o.key for o in store.export("user", "u1")] == keys
+
+    def test_empty_entity(self, storage: Storage) -> None:
+        """An empty entity purges to 0 and exports as () (AIE-1291, US5.4)."""
+        seed_neighbours(storage)
+        store = MemoryStore(storage, list_page_size=2)
+
+        assert store.purge("user", "u1") == 0
+        assert store.export("user", "u1") == ()

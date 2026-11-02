@@ -1,4 +1,4 @@
-# Examples
+# Walkthroughs
 
 Six walkthroughs of what an agent does with memory. Each shows what the user says, the tool calls the agent makes, and the memory file before and after.
 
@@ -482,6 +482,6 @@ This protection is the prompt, not a filter. wenchang's tools do not inspect con
 
 ## Try it yourself {#try}
 
-- Run these against your own server: [setup](setup.md).
+- Run these against your own server: [quickstart](quickstart.md).
 - Change the scopes, areas, and rules the agent is told about: [prompts](prompts.md).
 - Every tool, argument, and error in full: [reference](reference.md).

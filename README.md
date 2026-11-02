@@ -101,6 +101,22 @@ fact line to the end of an existing Mixpanel memory file."; without a
 product, each description is the tool's docstring. See
 [ADR 0026](docs/adr/0026-product-identity.md).
 
+For a host that takes JSON Schema tool definitions, `tool_schemas()` gives
+each tool's name, description, and draft 2020-12 schemas for its arguments,
+its `render_result` payload, and its `render_error` payload:
+
+```python
+from wenchang.schemas import tool_schemas
+
+# ToolDef stands for the host's tool definition; its handler returns
+# render_result(...) on success and render_error(exc) on failure.
+for s in tool_schemas(product="Mixpanel").values():
+    host.register(ToolDef(name=s.name, description=s.description, parameters=s.input))
+```
+
+See [Tool schemas](https://msiebert.github.io/wenchang/reference.html#schemas)
+for a full example and the caveats.
+
 ## Serving over MCP
 
 `wenchang.mcp` serves the tools and the memory prompt from an MCP server. It
@@ -167,7 +183,8 @@ Things to know:
   on every call, so cache inside it if resolution is expensive.
 - **Calls run concurrently on worker threads.** The `TransportClient`, and
   the optional `on_call` observer, must be thread-safe. `on_call` receives a
-  `ToolCallRecord` after every call.
+  `ToolCallRecord` after every call. `bind_tools(..., on_call=...)` delivers
+  the same `ToolCallRecord`, with `request_id=None`.
 - **MCP validates arguments first.** A wrong-type or missing argument
   returns MCP's own error text, not a rendered wenchang error.
 - **MCP pre-parses JSON-like strings.** The string `"null"` arrives as

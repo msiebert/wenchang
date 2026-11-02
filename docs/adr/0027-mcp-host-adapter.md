@@ -207,6 +207,11 @@ Add `src/wenchang/mcp.py`, installed with the `mcp` extra. It exports
     trace.
     - **Rejected: MCP middleware.** It sees raw requests, not the rendered
       payload.
+
+    **Amended (2026-10-30) by [ADR 0043](0043-shared-tool-call-observer.md).**
+    `ToolCallRecord` moved to `wenchang.observer` (re-exported here), its
+    `request_id` widened to `str | None`, and `bind_tools` accepts the same
+    `on_call`.
 11. **Deviations at the MCP surface.** `MCPServer` validates arguments
     against the generated schema before the wrapper runs.
     - **Schema errors bypass the tool layer.** A wrong-type or missing

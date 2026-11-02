@@ -10,6 +10,7 @@ import pytest
 from wenchang.errors import (
     BackendUnavailableError,
     ErrorCategory,
+    FileQuotaExceededError,
     NotFoundError,
     NotFoundReason,
     OversizeWriteError,
@@ -834,3 +835,81 @@ def test_restricted_scope_message_unparseable_path_falls_back_to_scope() -> None
     err = RestrictedScopeError("not-a-path", "user", RestrictionReason.NOT_GRANTED)
     assert "The file at scope user cannot be written:" in err.message
     assert "not-a-path" not in err.message
+
+
+_QUOTA_PATH = "user/u1/notes/new.md"
+
+_QUOTA_MESSAGE = (
+    "Cannot create a new file at scope user, area notes, name new: memory in scope user is at "
+    "its limit of 3 files (system/ files not counted). Add this content to an existing file "
+    "instead (append_line, replace_fact, or write_file with that file's version), or merge "
+    "related files into one and delete the merged ones with delete_file, then retry. This is "
+    "normal coordination, not an error the user needs to know about. Use the details above to "
+    "correct the call and retry in the same turn, without asking the user."
+)
+
+_QUOTA_FALLBACK_MESSAGE = (
+    "Cannot create a new file: memory for this entity is at its limit of 3 files (system/ files "
+    "not counted). Add this content to an existing file instead (append_line, replace_fact, or "
+    "write_file with that file's version), or merge related files into one and delete the "
+    "merged ones with delete_file, then retry. This is normal coordination, not an error the "
+    "user needs to know about. Use the details above to correct the call and retry in the same "
+    "turn, without asking the user."
+)
+
+
+@pytest.mark.unit
+def test_file_quota_exceeded_error_exposes_path_and_limit() -> None:
+    """FileQuotaExceededError exposes path and limit unchanged (AIE-1292, FR-004)."""
+    err = FileQuotaExceededError(_QUOTA_PATH, 3)
+    assert err.path == _QUOTA_PATH
+    assert err.limit == 3
+
+
+@pytest.mark.unit
+def test_file_quota_exceeded_error_message_is_exact_literal() -> None:
+    """str() of FileQuotaExceededError for a parseable path is exactly the plan's
+    literal and never names the entity ID (AIE-1292, US5.1).
+    """
+    err = FileQuotaExceededError(_QUOTA_PATH, 3)
+    assert str(err) == _QUOTA_MESSAGE
+    assert err.message == _QUOTA_MESSAGE
+    assert "u1" not in str(err)
+    assert err.message.endswith(RecoverableError.guidance)
+
+
+@pytest.mark.unit
+def test_file_quota_exceeded_error_unparseable_path_uses_fallback_literal() -> None:
+    """str() of FileQuotaExceededError for an unparseable path is exactly the
+    plan's fallback literal (AIE-1292, US5.1).
+    """
+    err = FileQuotaExceededError("not-a-path", 3)
+    assert str(err) == _QUOTA_FALLBACK_MESSAGE
+    assert err.path == "not-a-path"
+    assert "not-a-path" not in str(err)
+
+
+@pytest.mark.unit
+def test_file_quota_exceeded_error_is_recoverable() -> None:
+    """FileQuotaExceededError is a RecoverableError with category RECOVERABLE,
+    and neither permanent nor transient (AIE-1292, US5.2).
+    """
+    assert issubclass(FileQuotaExceededError, RecoverableError)
+    assert FileQuotaExceededError.category == ErrorCategory.RECOVERABLE
+    err = FileQuotaExceededError(_QUOTA_PATH, 3)
+    assert isinstance(err, WenchangError)
+    assert isinstance(err, RecoverableError)
+    assert err.category == ErrorCategory.RECOVERABLE
+    assert not isinstance(err, PermanentError)
+    assert not isinstance(err, TransientError)
+    assert "fail" not in err.message.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("limit", [0, -1])
+def test_file_quota_exceeded_error_rejects_non_positive_limit(limit: int) -> None:
+    """FileQuotaExceededError raises ValueError("limit must be positive") for
+    limit 0 or -1 (AIE-1292, US6.3).
+    """
+    with pytest.raises(ValueError, match=r"^limit must be positive$"):
+        FileQuotaExceededError(_QUOTA_PATH, limit)

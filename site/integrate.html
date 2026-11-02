@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choose an integration path</title>
+<meta name="description" content="Three ways to give an agent wenchang memory: a new MCP server, an existing mcp 2.x server, or your own tool framework without MCP.">
+<link rel="canonical" href="https://msiebert.github.io/wenchang/integrate.html">
+<link rel="alternate" type="text/markdown" href="integrate.md" title="Markdown version of this page">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="wenchang">
+<meta property="og:title" content="Choose an integration path">
+<meta property="og:description" content="Three ways to give an agent wenchang memory: a new MCP server, an existing mcp 2.x server, or your own tool framework without MCP.">
+<meta property="og:url" content="https://msiebert.github.io/wenchang/integrate.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Choose an integration path">
+<meta name="twitter:description" content="Three ways to give an agent wenchang memory: a new MCP server, an existing mcp 2.x server, or your own tool framework without MCP.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e5e9e1">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151c1d">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700&text=%E6%96%87%E6%98%8C&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="site.js"></script>
+</head>
+<body class="page-integrate">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="inner">
+<a class="brand" href="index.html"><span>wenchang</span></a>
+<nav class="site-nav" aria-label="Main">
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="quickstart.html">Quickstart</a></li>
+<li><a href="concepts.html">Concepts</a></li>
+<li><a href="integrate.html" aria-current="page">Integrate</a></li>
+<li><a href="identity.html">Identity</a></li>
+<li><a href="storage.html">Storage</a></li>
+<li><a href="prompts.html">Prompts</a></li>
+<li><a href="reference.html">Reference</a></li>
+<li><a href="walkthroughs.html">Walkthroughs</a></li>
+<li><a href="status.html">Status</a></li>
+<li><a href="https://github.com/msiebert/wenchang">GitHub</a></li>
+</ul>
+</nav>
+</div>
+</header>
+<div class="page">
+<main id="main" class="content">
+<p class="md-link"><span class="path">wenchang/integrate.md</span> <a href="integrate.md" type="text/markdown">View as Markdown</a> (for AI agents; also <a href="llms.txt">llms.txt</a>)</p>
+<nav class="subnav" aria-label="Integration paths"><ul><li><a href="integrate.html" aria-current="page">Choose a path</a></li><li><a href="integrate-new-server.html">New MCP server</a></li><li><a href="integrate-existing-server.html">Existing MCP server</a></li><li><a href="integrate-without-mcp.html">Without MCP</a></li></ul></nav>
+
+<h1 id="choose-an-integration-path">Choose an integration path<a class="headerlink" href="#choose-an-integration-path" title="Link to this section">#</a></h1>
+<p>The memory tools are plain Python methods. There are three ways to put them in front of an agent. All three share the same store, identity resolver, scope policy, and prompt; they differ only in who registers the tools and how a call reaches them.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Use it when</th>
+<th>Entry point</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="integrate-new-server.html">A new MCP server</a></td>
+<td>You want a standalone memory server for an MCP client such as Claude Code, over stdio or HTTP.</td>
+<td><code>wenchang.mcp.build_server</code></td>
+</tr>
+<tr>
+<td><a href="integrate-existing-server.html">An existing MCP server</a></td>
+<td>You already run an mcp 2.x <code>MCPServer</code> with your own tools, auth, and middleware, and want memory on it.</td>
+<td><code>wenchang.mcp.register_memory_tools</code></td>
+</tr>
+<tr>
+<td><a href="integrate-without-mcp.html">Without MCP</a></td>
+<td>Your agent uses another tool framework, or calls a model API directly with its own tool loop.</td>
+<td><code>wenchang.tools.bind_tools</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>The MCP paths need the <code>mcp</code> extra and work only with mcp 2.x <code>MCPServer</code>. The path without MCP needs only the base package.</p>
+<p>Whichever path you take:</p>
+<ul>
+<li><a href="concepts.html">Concepts</a> explains paths, scopes, files, versions, and limits.</li>
+<li><a href="identity.html">Identity and multi-tenant auth</a> explains how a caller becomes a set of scopes.</li>
+<li><a href="prompts.html">Customizing the prompts</a> explains the prompt the agent needs alongside the tools.</li>
+<li><a href="storage.html">Storage and operations</a> covers the bucket, costs, caching, and erasure.</li>
+</ul>
+<nav class="page-nav" aria-label="Pages"><a rel="prev" href="concepts.html"><small>Previous</small>Concepts</a><a rel="next" href="integrate-new-server.html"><small>Next</small>New MCP server</a></nav>
+</main>
+
+</div>
+<footer class="site-footer">
+<div class="inner">
+<p>MIT licensed. Version 0.1.0.</p>
+<ul>
+<li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
+<li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
+<li><a href="llms.txt">For agents: llms.txt</a></li>
+<li><a href="integrate.md" type="text/markdown">This page as Markdown</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>
