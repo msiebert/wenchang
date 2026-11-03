@@ -2174,7 +2174,7 @@ Every failure renders through `render_error`. Over MCP it is the payload of an e
 
 ### InvalidArgumentError
 
-`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
+`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}` (`Argument {argument} is invalid` when `detail` is blank), ended with a period unless it already ends in `.`, `!`, or `?`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
 
 ```json
 {

@@ -57,7 +57,14 @@ planned piece.
   for a rejected agent-supplied argument. `argument` names it (a non-`str`
   raises `TypeError`, an empty one `ValueError`; a `str` subclass is stored
   as an exact `str`), and `detail` is the composed sentence `Argument
-  {argument} is invalid: {detail}`.
+  {argument} is invalid: {detail}`, or `Argument {argument} is invalid` when
+  the detail is blank.
+  `message` (and `str(err)`) is the detail ended as a sentence, a space, then
+  the category guidance. Ending a sentence strips trailing `str.rstrip()`
+  whitespace and appends `.` unless the last character is `.`, `!`, or `?`;
+  an empty detail gives the guidance alone. The optional caller detail of
+  `ResolverFailureError` and `BackendUnavailableError` is ended the same way
+  before their fixed text. `.detail` stays unterminated.
   `RestrictedScopeError(path, scope, reason, required_roles: frozenset[str]
   | None = None)` exposes all four as attributes. `required_roles` is the
   set of roles permitted to write the scope. It is checked in this order: a
