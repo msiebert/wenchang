@@ -11,6 +11,7 @@ import datetime
 import re
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -63,22 +64,24 @@ def _cleanup(bucket: Bucket) -> None:
 @pytest.fixture
 def bucket(storage_emulator_host: str) -> Iterator[Bucket]:
     client = _client(storage_emulator_host)
-    created = client.create_bucket(f"wenchang-test-{uuid.uuid4().hex}")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     try:
-        yield created  # pyright: ignore[reportUnknownVariableType]
+        created = client.create_bucket(f"wenchang-test-{uuid.uuid4().hex}")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        try:
+            yield created  # pyright: ignore[reportUnknownVariableType]
+        finally:
+            _cleanup(created)  # pyright: ignore[reportUnknownArgumentType]
     finally:
-        _cleanup(created)  # pyright: ignore[reportUnknownArgumentType]
+        client.close()
 
 
-def _run(
-    count: int, worker: Callable[[int], object], barrier_parties: int | None = None
-) -> list[Any]:
-    """Run worker(i) on count threads released together by a barrier.
+def _run(count: int, worker: Callable[[int], object]) -> list[Any]:
+    """Run worker(i) on count daemon threads released together by a barrier.
 
-    Returns the results in thread order; asserts no thread hangs and that no
-    worker raised.
+    Returns the results in thread order; asserts no thread hangs past one
+    shared deadline and re-raises the first worker exception, keeping its
+    traceback.
     """
-    barrier = threading.Barrier(barrier_parties or count, timeout=30)
+    barrier = threading.Barrier(count, timeout=30)
     results: list[Any] = [None] * count
     errors: list[BaseException] = []
 
@@ -89,13 +92,17 @@ def _run(
         except BaseException as exc:
             errors.append(exc)
 
-    threads = [threading.Thread(target=run, args=(i,)) for i in range(count)]
+    threads = [threading.Thread(target=run, args=(i,), daemon=True) for i in range(count)]
     for t in threads:
         t.start()
+    deadline = time.monotonic() + 60
     for t in threads:
-        t.join(timeout=60)
+        t.join(max(0.0, deadline - time.monotonic()))
     assert not any(t.is_alive() for t in threads)
-    assert errors == []
+    if len(errors) == 1:
+        raise errors[0]
+    if errors:
+        raise BaseExceptionGroup("worker threads raised", errors)
     return results
 
 
@@ -168,7 +175,10 @@ def test_mixed_operations_on_shared_storage_stay_isolated(bucket: Bucket) -> Non
 def test_concurrent_create_has_exactly_one_winner(bucket: Bucket) -> None:
     """16 threads put_if_version(expected=None) on one new key: exactly one gets
     a token, the rest raise PreconditionFailedError, and the stored object is
-    the winner's, over 5 rounds (AIE-1316, AC2).
+    the winner's, over 5 rounds (AIE-1316, AC2). The one-winner property is
+    enforced by the server (fake-gcs-server's conditional upload); the test
+    checks that the shared client delivers each conditional request intact and
+    maps the 412 correctly under concurrency.
     """
     storage = GcsStorage(bucket)
     run_id = uuid.uuid4().hex
@@ -227,20 +237,26 @@ def test_first_use_of_fresh_client_from_many_threads_succeeds(
     try:
         for trial in range(FRESH_CLIENTS):
             fresh = _client(storage_emulator_host)
-            storage = GcsStorage(fresh.bucket(bucket_name))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            try:
+                storage = GcsStorage(fresh.bucket(bucket_name))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
-            def worker(i: int, trial: int = trial, storage: GcsStorage = storage) -> None:
-                key = f"user/trial-{trial}/t{i}.md"
-                data = f"t{trial}-{i}".encode()
-                token = storage.put(key, data, {})
-                got = storage.get(key)
-                assert got is not None
-                assert got.data == data
-                assert got.version == token
+                def worker(i: int, trial: int = trial, storage: GcsStorage = storage) -> None:
+                    key = f"user/trial-{trial}/t{i}.md"
+                    data = f"t{trial}-{i}".encode()
+                    token = storage.put(key, data, {})
+                    got = storage.get(key)
+                    assert got is not None
+                    assert got.data == data
+                    assert got.version == token
 
-            _run(THREADS, worker)
+                _run(THREADS, worker)
+            finally:
+                fresh.close()
     finally:
-        _cleanup(setup_bucket)  # pyright: ignore[reportUnknownArgumentType]
+        try:
+            _cleanup(setup_bucket)  # pyright: ignore[reportUnknownArgumentType]
+        finally:
+            setup_client.close()
 
 
 @pytest.mark.usefixtures("tiny_switch_interval")
@@ -275,21 +291,31 @@ def test_concurrent_writes_through_memory_store_all_appear_in_index(bucket: Buck
 
 class _AlwaysRefreshingCredentials(Credentials):
     """Credentials inside google-auth's refresh window on every request, so
-    every request refreshes; records each applied Authorization header.
+    every request refreshes; records each applied Authorization header and the
+    maximum number of refreshes in flight at once.
     """
 
     def __init__(self) -> None:
         super().__init__()  # pyright: ignore[reportUnknownMemberType]
         self._lock = threading.Lock()
         self.refreshes = 0
+        self.inflight = 0
+        self.max_inflight = 0
         self.headers: list[str | None] = []
 
     def refresh(self, request: Any) -> None:
         with self._lock:
             self.refreshes += 1
             n = self.refreshes
-        self.token = f"tok-{n}"
-        self.expiry = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+            self.inflight += 1
+            self.max_inflight = max(self.max_inflight, self.inflight)
+        try:
+            time.sleep(0.01)
+            self.token = f"tok-{n}"
+            self.expiry = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+        finally:
+            with self._lock:
+                self.inflight -= 1
 
     def apply(self, headers: Any, token: str | None = None) -> None:
         super().apply(headers, token)  # pyright: ignore[reportUnknownMemberType]
@@ -301,15 +327,14 @@ class _AlwaysRefreshingCredentials(Credentials):
 def test_concurrent_credential_refresh_serves_valid_headers(storage_emulator_host: str) -> None:
     """With credentials that refresh on every request, 16 threads doing put
     then get through one shared GcsStorage raise nothing, read back their own
-    writes, trigger several refreshes, and every request carries a valid Bearer
-    header (AIE-1316, AC6).
+    writes, trigger several refreshes that overlap in time (more than one in flight at
+    once), and every request carries a valid Bearer header (AIE-1316, AC6).
     """
     setup_client = _client(storage_emulator_host)
+    shared: Client | None = None
     bucket_name = f"wenchang-test-{uuid.uuid4().hex}"
     setup_bucket = setup_client.create_bucket(bucket_name)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     creds = _AlwaysRefreshingCredentials()
-    shared = _client(storage_emulator_host, creds)
-    storage = GcsStorage(shared.bucket(bucket_name))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     run_id = uuid.uuid4().hex
 
     def worker(i: int) -> None:
@@ -323,10 +348,18 @@ def test_concurrent_credential_refresh_serves_valid_headers(storage_emulator_hos
             assert got.version == token
 
     try:
+        shared = _client(storage_emulator_host, creds)
+        storage = GcsStorage(shared.bucket(bucket_name))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         _run(THREADS, worker)
     finally:
-        _cleanup(setup_bucket)  # pyright: ignore[reportUnknownArgumentType]
+        try:
+            _cleanup(setup_bucket)  # pyright: ignore[reportUnknownArgumentType]
+        finally:
+            setup_client.close()
+            if shared is not None:
+                shared.close()
 
     assert creds.refreshes > 1
+    assert creds.max_inflight > 1
     assert creds.headers
     assert all(h is not None and re.fullmatch(r"Bearer tok-\d+", h) for h in creds.headers)

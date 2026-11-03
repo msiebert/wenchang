@@ -40,20 +40,23 @@ installed in `.venv`):
    The metadata cache's `get_or_queue_fetch` and `check_and_evict` spawn
    daemon threads that call `client.get_bucket` and `bucket.exists` on the
    shared client. That is more concurrent use of the same client, consistent
-   with the verdict. It is gated on `HAS_OPENTELEMETRY` (True in `.venv`,
-   because opentelemetry is installed), `enable_otel_traces` (False by
-   default; env var `ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES`), and bucket
-   metadata not being disabled. The emulator tests therefore take the non-OTel
-   path; production with OTel tracing enabled may take this path.
+   with the verdict. It is not gated on OTel: every blob and list call goes
+   through `create_trace_span_helper` (`_helpers.py:153`), which has no OTel
+   gate, and the first call per bucket starts the daemon thread. It runs by
+   default and the integration tests exercise it.
+   `DISABLE_GCS_PYTHON_CLIENT_OTEL_BUCKET_METADATA=true` turns it off.
 3. `google.auth.transport.requests.AuthorizedSession.request` passes the
    refresh-attempt counter as a kwarg "to maintain thread-safety" and copies
    headers per request. Credential refresh (`Credentials._blocking_refresh`)
    is unlocked: concurrent threads with an expired token may each refresh,
    which is redundant but benign (each gets a valid token). This is both read
    from source and tested (AC6).
-4. `Client._http` creates the `AuthorizedSession` lazily without a lock:
-   concurrent first use may build two sessions and keep one; the other serves
-   one request and is dropped. Benign and silent (AC4 is a smoke test).
+4. `Client._http` creates the `AuthorizedSession` lazily without a lock and
+   re-reads `self._http_internal`, so a losing thread usually gets the winning
+   session, which may then be configured twice. That matters only under mTLS,
+   where the session is published before the channel is configured.
+   `GcsStorage.__init__` now builds the session up front, which avoids it
+   (AC9). AC4 stays a smoke test.
 5. Connection pooling is urllib3's thread-safe pool. requests does not
    formally document `Session` as thread-safe; this is the residual
    undocumented piece, covered by the stress tests below.
@@ -95,14 +98,17 @@ thread-safety note), and CAS/storage semantics are unchanged.
 - `GcsStorage` class docstring states it is safe to share across threads, as
   is the `Client`/`Bucket` it wraps, because it adds no mutable state. No
   behavior change, no AIE ID in the docstring. (Parallel issue AIE-1317 edits
-  error mapping in the same file; keep this change to the class docstring.)
+  error mapping in the same file; keep this change to the class docstring and the eager session build in `__init__`.)
 - Docs replace the "one client per thread" stopgap with the verdict and its
-  basis, pin the verified version (google-cloud-storage 3.14.1), say the
+  basis, name the verified version (google-cloud-storage 3.14.1, the lockfile's;
+  the declared range `>=2.18` is not verified), say the
   integration tests re-verify on dependency upgrades, and state the residual
   caveats.
 - Storage semantics (CAS, versions, errors) do not change.
+- `GcsStorage.__init__` builds the bucket client's HTTP session at
+  construction (see Review findings and fixes).
 
-Out of scope: `src/` behavior, the Storage protocol, the transport, tools, and
+Out of scope: `src/` behavior beyond the eager session build, the Storage protocol, the transport, tools, and
 the in-memory fake.
 
 ## Acceptance criteria
@@ -130,9 +136,10 @@ timing. Tests carry the `integration` marker and cite `AIE-1316`.
 | 3 | An existing key at version `v` | 16 threads concurrently `put_if_version(key, ..., expected=v)`; 5 rounds | Exactly one wins, the others raise `PreconditionFailedError`, and the stored object is the winner's |
 | 4 | A freshly constructed `Client` that has made no request yet | 16 threads make their first calls through it concurrently; repeated over 10 fresh clients | All succeed and each reads back its own write. This is a smoke test: the lazy-session race is benign and silent, so a dropped session must not fail the test (the test-writer confirms `pyproject` `filterwarnings` has no `error` filter) |
 | 5 | One `InProcessClient(MemoryStore(GcsStorage(shared bucket)))`, no index cache (the default) | 16 threads concurrently write distinct files through the public `MemoryStore`/`InProcessClient` API (distinct or shared entities), then read the memory index | No call raises and the index lists every file written |
-| 6 | A `Client` built with a custom `google.auth.credentials.Credentials` subclass whose `refresh()` is lock-counted, sets `token=f"tok-{n}"` and sets `expiry` to `utcnow()` (naive UTC), already inside google-auth's refresh window so every request refreshes; `apply()` is overridden to append `headers["authorization"]` after `super().apply()` to record headers. The Client points at the emulator (fake-gcs-server ignores auth) | 16 threads run put then get on their own keys through one shared `GcsStorage` for 5 rounds | No call raises; every read returns its own write; `refresh()` was called more than once (concurrent refreshes happened); every recorded request carried an `Authorization` header of the form `Bearer tok-N` |
+| 6 | A `Client` built with a custom `google.auth.credentials.Credentials` subclass whose `refresh()` is lock-counted, sets `token=f"tok-{n}"` and sets `expiry` to `utcnow()` (naive UTC), already inside google-auth's refresh window so every request refreshes; `apply()` is overridden to append `headers["authorization"]` after `super().apply()` to record headers. The Client points at the emulator (fake-gcs-server ignores auth) | 16 threads run put then get on their own keys through one shared `GcsStorage` for 5 rounds | No call raises; every read returns its own write; the maximum number of in-flight `refresh()` calls exceeds 1 (refreshes overlapped); every recorded request carried an `Authorization` header of the form `Bearer tok-N` |
 | 7 | The change | `make check` and `make test-integration` | Both pass; `GcsStorage` behavior is unchanged |
 | 8 | The docs | Read `site-src/integrate-without-mcp.md` (including line 30, "except where Threads says otherwise"), `storage.md`, `status.md`, `ARCHITECTURE.md`, ADRs 0027 and 0003 | None still say the client must not be shared or that thread-safety is unverified; `site/` is regenerated; grep of `site/` and `site-src/` finds no "per thread", "not documented as thread-safe", or "Not guaranteed" strings left over |
+| 9 | A `Client` that has made no request | `GcsStorage(client.bucket(name))` is constructed | The client's HTTP session exists before any storage call (unit test `tests/test_storage_gcs_session.py`); given `Bucket(client=None)`, construction does not raise |
 
 Notes:
 
@@ -149,4 +156,19 @@ Notes:
 - No new dependencies. Tests finish in seconds.
 - Docs state the residual caveats honestly: the guarantee rests on an internal
   google-cloud-storage precedent plus these stress tests, not on a documented
-  upstream contract; the verified version is google-cloud-storage 3.14.1.
+  upstream contract; the verified version is google-cloud-storage 3.14.1 (the lockfile's; older
+  versions in the declared range are not verified).
+
+## Review findings and fixes
+
+- **Eager session build.** `GcsStorage.__init__` builds the client's HTTP
+  session on the constructing thread, so no request runs before mTLS setup
+  finishes (research point 4; AC9).
+- **OTel correction.** The background bucket-metadata thread is not gated on
+  OTel; it runs by default (research point 2).
+- **AC6 proves overlap.** The test asserts the maximum number of in-flight
+  refreshes exceeds 1, not just that `refresh()` was called more than once.
+- **Test hygiene.** Worker threads are daemon threads with one shared join
+  deadline, so a hang fails fast; clients are closed on cleanup.
+- **Docs.** Version claim reworded (lockfile 3.14.1, declared `>=2.18`),
+  connection-pool and mTLS caveats added.

@@ -4,7 +4,7 @@ How wenchang uses a GCS bucket, what that costs, and how to erase or export one 
 
 ## The bucket {#bucket}
 
-Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. One `GcsStorage` and its client are safe to share across threads, as the MCP adapter does; see [Threads](integrate-without-mcp.md#threads).
+Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. One `GcsStorage` and its client are safe to share across threads, as the MCP adapter does; see [Threads](integrate-without-mcp.md#threads) for caveats.
 
 wenchang finds credentials through Application Default Credentials: locally `gcloud auth application-default login`, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. `roles/storage.objectUser` on the bucket grants those. Operator jobs that [purge](#erase) need the same permissions.
 

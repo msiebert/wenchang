@@ -74,7 +74,8 @@ New `tests/integration/test_storage_gcs_threads.py`, marker `integration`.
 
 ## Source (T2)
 
-`src/wenchang/storage/gcs.py`: extend the `GcsStorage` class docstring only: it
+`src/wenchang/storage/gcs.py`: extend the `GcsStorage` class docstring and build
+the bucket client's HTTP session in `__init__` (tolerating `Bucket(client=None)`); it
 is safe to share across threads, as is the `Client`/`Bucket` it wraps, because
 it holds no mutable state (new `Blob` per call). No AIE ID in the docstring.
 Do not touch error mapping (AIE-1317 edits it).
@@ -86,13 +87,16 @@ Do not touch error mapping (AIE-1317 edits it).
   Replace the "storage.Client is not documented as thread-safe" paragraph and
   the per-thread bullets with a short verdict and its basis: an internal
   precedent in google-cloud-storage (not an API contract) plus wenchang's
-  integration tests, which re-verify on dependency upgrades; pin the verified
-  version (google-cloud-storage 3.14.1). Residual caveats: requests does not
+  integration tests, which re-verify on dependency upgrades; name the verified
+  version (google-cloud-storage 3.14.1, the lockfile's; the declared `>=2.18`
+  range is unverified). Residual caveats: requests does not
   formally document `Session` thread-safety; concurrent credential refresh may
-  duplicate refresh requests; with OpenTelemetry tracing enabled
-  (`ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES`), the client's bucket metadata cache
-  also issues `get_bucket`/`exists` calls from background daemon threads on the
-  same shared client, which is more concurrent use of the same client.
+  duplicate refresh requests; the client's
+  bucket metadata cache starts a daemon thread on the first call per bucket
+  that calls `get_bucket` on the shared client, by default and not gated on
+  OTel (`DISABLE_GCS_PYTHON_CLIENT_OTEL_BUCKET_METADATA=true` disables it);
+  mTLS residual on a 401 with a rotated certificate; the default 10-connection
+  pool. `GcsStorage.__init__` builds the client's HTTP session up front.
   Also fix line 30 ("except where Threads says otherwise") if it no longer
   fits.
 - `site-src/storage.md` (line 7 sentence), `site-src/status.md` ("Concurrency

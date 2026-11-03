@@ -331,11 +331,11 @@
 </tr>
 <tr>
 <td><code>GcsStorage</code></td>
-<td>Safe. It adds no state of its own: it holds the bucket and builds a new <code>Blob</code> for every call.</td>
+<td>Safe. It adds no state of its own: it holds the bucket and builds a new <code>Blob</code> for every call. Its constructor builds the client's HTTP session on the constructing thread.</td>
 </tr>
 <tr>
 <td><code>google.cloud.storage.Client</code> and its <code>Bucket</code></td>
-<td>Safe, with the caveats below. One client per process is enough.</td>
+<td>Safe, with the caveats below. One client per process works; heavy concurrency can outgrow its connection pool.</td>
 </tr>
 <tr>
 <td>Your resolver, <code>IndexCache</code> functions, <code>on_call</code>, and <code>clock</code></td>
@@ -344,12 +344,13 @@
 </tbody>
 </table></div>
 <p>The index cache's generation tokens already handle readers and writers racing on one entity, across threads and processes; your <code>get</code> and <code>set</code> need only be safe to call concurrently and linearizable per key (<a href="storage.html#cache-limits">Guarantees and limits</a>).</p>
-<p><strong>One shared <code>storage.Client</code> is safe.</strong> Build one per process and share it, its <code>Bucket</code>, and one <code>GcsStorage</code> across threads; it needs no extra clients and no locking. The basis is a reading of google-cloud-storage 3.14.1, google-auth, and requests, plus wenchang's integration tests, which stress one shared client against an emulator and re-verify this on upgrades. In the source, the batch stack is thread-local, the bucket metadata cache is lock-guarded, and each request keeps its state in its own arguments and copied headers. The library's own <code>transfer_manager</code> shares one client across threads, which is an internal precedent rather than an API contract. The caveats:</p>
+<p><strong>One shared <code>storage.Client</code> is safe.</strong> Build one per process and share it, its <code>Bucket</code>, and one <code>GcsStorage</code> across threads; it needs no extra clients and no locking. The basis is a reading of google-cloud-storage 3.14.1, google-auth, and requests, plus wenchang's integration tests, which stress one shared client against an emulator and re-verify this on upgrades. It is verified against google-cloud-storage 3.14.1, the version wenchang's lockfile resolves; older versions in the declared range (<code>&gt;=2.18</code>) are not verified. In the source, the batch stack is thread-local, the bucket metadata cache is lock-guarded, and each request keeps its state in its own arguments and copied headers. The library's own <code>transfer_manager</code> shares one client across threads, which is an internal precedent rather than an API contract. <code>GcsStorage(bucket)</code> builds the client's HTTP session when it is constructed, so no request runs before the session is fully set up. The caveats:</p>
 <ul>
 <li>requests does not formally document <code>Session</code> as thread-safe.</li>
-<li>Concurrent credential refreshes are unlocked, so threads can send duplicate token requests. They do no harm.</li>
-<li>With OpenTelemetry tracing enabled (<code>ENABLE_GCS_PYTHON_CLIENT_OTEL_TRACES</code>), the client makes bucket metadata calls from background threads on the same client. The emulator tests do not cover that path.</li>
-<li>The verification is pinned to google-cloud-storage 3.14.1.</li>
+<li>Concurrent credential refreshes are unlocked, so threads can send duplicate token requests. They are redundant; every request still carries a valid token, which the tests check.</li>
+<li>On the first call per bucket, the client starts a background daemon thread that calls <code>get_bucket</code> on the same shared client. This happens by default; the integration tests exercise it. Set <code>DISABLE_GCS_PYTHON_CLIENT_OTEL_BUCKET_METADATA=true</code> to turn it off.</li>
+<li>A client used only through <code>GcsStorage</code> is safe under mutual TLS (<code>GOOGLE_API_USE_CLIENT_CERTIFICATE</code>, or an auto-detected workload certificate), because the session is built up front. One residual: on a 401 with a rotated client certificate, google-auth reconfigures the mTLS channel on the shared session while other threads may be mid-request, and google-auth documents that call as not thread-safe.</li>
+<li>requests keeps 10 connections per host by default, and neither google-auth nor google-cloud-storage enlarges that. Above 10 concurrent calls, urllib3 discards the extra connections and logs "Connection pool is full, discarding connection". That costs latency, not correctness.</li>
 </ul>
 <h3 id="async">Async hosts<a class="headerlink" href="#async" title="Link to this section">#</a></h3>
 <p>An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example <code>await asyncio.to_thread(method, **arguments)</code>. Call <code>bind_tools</code> in a worker thread too, <code>tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")</code>, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an <code>async def resolve</code> is never awaited, and <code>bind_tools</code> raises <code>ResolverFailureError</code> (<a href="identity.html#contract">Identity</a>).</p>

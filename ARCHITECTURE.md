@@ -145,7 +145,9 @@ planned piece.
   adapter calls the transport from concurrent worker threads.
   `GcsStorage` is also safe to share across threads, along with the
   `Client` and `Bucket` it wraps, verified by
-  `tests/integration/test_storage_gcs_threads.py`.
+  `tests/integration/test_storage_gcs_threads.py`. The constructor
+  builds the client's HTTP session up front. Caveats:
+  `site-src/integrate-without-mcp.md#threads` and ADR 0027 decision 7.
   `GcsStorage` is the only module that imports `google.cloud`; it maps
   client timeouts and server/connection unavailability to
   `BackendUnavailableError`, and pins each `get` to the generation

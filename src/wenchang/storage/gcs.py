@@ -57,11 +57,17 @@ class GcsStorage:
     """Structurally satisfies Storage, backed by a single GCS bucket.
 
     Safe to share across threads, as are the Client and Bucket it wraps: it
-    adds no mutable state and builds a new Blob per call.
+    adds no mutable state and builds a new Blob per call. The constructor
+    builds the client's HTTP session so no thread triggers its lazy setup.
     """
 
     def __init__(self, bucket: Bucket) -> None:
         self._bucket = bucket
+        # The client builds its session lazily and configures mTLS after
+        # publishing it, so build it here, before threads share it.
+        client = bucket.client  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if client is not None:
+            _ = client._http  # pyright: ignore[reportUnknownMemberType, reportPrivateUsage, reportUnknownVariableType]
 
     def get(self, key: str) -> StoredObject | None:
         for _ in range(_GET_RETRY_ATTEMPTS):
