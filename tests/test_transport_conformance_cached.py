@@ -1,8 +1,9 @@
 """Transport conformance run against InProcessClient over a MemoryStore with an
 index cache.
 
-Covers AIE-1293, US8.4. An autouse fixture turns any pytest.skip call inside an
-inherited case into a failure.
+Covers AIE-1293, US8.4, and AIE-1322, US4.1 (the capped store runs the file-cap
+case). An autouse fixture turns any pytest.skip call inside an inherited case
+into a failure.
 """
 
 from collections.abc import Mapping
@@ -23,6 +24,7 @@ MAX_FILE_BYTES = 256
 INDEX_MAX_BYTES = 4096
 SCOPE_PRIORITY = ("user", "org")
 LIST_PAGE_SIZE = 2
+MAX_FILES_PER_ENTITY = 32
 
 
 class _Ticking:
@@ -61,6 +63,7 @@ class TestCachedInProcessClient(TransportConformance):
                 index_max_bytes=INDEX_MAX_BYTES,
                 scope_priority=SCOPE_PRIORITY,
                 list_page_size=LIST_PAGE_SIZE,
+                max_files_per_entity=MAX_FILES_PER_ENTITY,
                 index_cache=IndexCache(get=cache.get, set=cache.set, ttl=timedelta(minutes=5)),
             )
         )
@@ -88,3 +91,7 @@ class TestCachedInProcessClient(TransportConformance):
     @pytest.fixture
     def list_page_size(self) -> int:
         return LIST_PAGE_SIZE
+
+    @pytest.fixture
+    def max_files_per_entity(self) -> int:
+        return MAX_FILES_PER_ENTITY

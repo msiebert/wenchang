@@ -50,6 +50,7 @@ Q = "org/o-9/notes/conformance-probe-2.md"
 R = "user/u-1/notes/conformance-probe-3.md"
 PROBES = frozenset({P, Q, R})
 WHEN = datetime(2024, 1, 1, tzinfo=UTC)
+MAX_FILES_PER_ENTITY = 32
 
 UNICODE_ROUND_TRIP = "test_round_trip_unicode_content_and_metadata"
 FAILED_REPLACE = "test_failed_replace_leaves_content_and_metadata_together"
@@ -91,6 +92,7 @@ def _reference() -> InProcessClient:
             index_max_bytes=4096,
             scope_priority=("user", "org"),
             list_page_size=2,
+            max_files_per_entity=MAX_FILES_PER_ENTITY,
         )
     )
 
@@ -193,6 +195,7 @@ def _fixtures(client: object) -> dict[str, object]:
         "index_max_bytes": 4096,
         "scope_priority": ("user", "org"),
         "list_page_size": 2,
+        "max_files_per_entity": MAX_FILES_PER_ENTITY,
     }
 
 
@@ -734,14 +737,15 @@ ERROR_PARITY_CASES = (
     "test_empty_source_is_value_error",
     "test_error_messages_carry_category_guidance",
     "test_get_memory_index_argument_errors_match_core",
+    "test_create_at_file_cap_is_quota_exceeded",
 )
 
 
 @pytest.mark.parametrize("case", ERROR_PARITY_CASES)
 def test_reference_client_passes_error_parity_case(case: str) -> None:
-    """The reference client and forwarding wrapper pass each US10 case.
+    """The reference client and forwarding wrapper pass each US10 case, unskipped.
 
-    AIE-1045, US10.1-US10.5, US11.1, US11.2.
+    AIE-1045, US10.1-US10.5, US11.1, US11.2; AIE-1322, US1.1, US4.1.
     """
     _reference_passes(case)
 
