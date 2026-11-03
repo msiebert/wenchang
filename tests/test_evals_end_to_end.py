@@ -2134,3 +2134,83 @@ def test_volunteered_scope_area_name_wording_fails_the_unasked_check(tmp_path: P
 
     assert _failed(wrong) == {"no-path-in-reply"}, wrong
     assert _failed(right) == set(), right
+
+
+# --- slots-system-of-record contrast exception (AIE-1240) ---
+
+SOR_STATED = "- [stated] Says Purchase Completed fires when the order ships."
+SOR_NOTE = "- Per the event catalog, it fires at payment authorization; unresolved."
+
+
+async def sor_bare_fact(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "taxonomy",
+        "purchase-completed",
+        "- [stated] Purchase Completed fires when the payment is authorized.\n",
+        "How Purchase Completed is defined",
+    )
+    await d.turn(1, 1, "Noted.")
+
+
+async def sor_issue_example(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "taxonomy",
+        "purchase-completed",
+        "[stated] Says Purchase Completed fires when the order ships. The event catalog "
+        "describes it as firing when payment is authorized; this discrepancy is unresolved.\n",
+        "How Purchase Completed is defined",
+    )
+    await d.turn(1, 1, "Which definition should I use?")
+
+
+async def sor_paraphrase(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "taxonomy",
+        "purchase-completed",
+        f"{SOR_STATED}\n- The event catalog differs: it describes payment authorization. "
+        "That conflicts with what they said; awaiting their answer.\n",
+        "How Purchase Completed is defined",
+    )
+    await d.turn(1, 1, "Which definition should I use?")
+
+
+async def sor_append_note(d: Driver) -> None:
+    await d.index()
+    await d.create(
+        "user",
+        "taxonomy",
+        "purchase-completed",
+        f"{SOR_STATED}\n",
+        "How Purchase Completed is defined",
+    )
+    await d.append("user", "taxonomy", "purchase-completed", SOR_NOTE)
+    await d.turn(1, 1, "Which definition should I use?")
+
+
+def test_slots_system_of_record_bare_fact_fails_only_catalog_copy(tmp_path: Path) -> None:
+    """Storing the bare catalog fact in user scope fails only no-catalog-copy
+    (AIE-1240, US4.1).
+    """
+    graded, _ = _run_trial(tmp_path, "slots-system-of-record", sor_bare_fact)
+
+    assert _failed(graded) == {"no-catalog-copy"}, graded
+
+
+@pytest.mark.parametrize(
+    "script",
+    [sor_issue_example, sor_paraphrase, sor_append_note],
+    ids=["issue-example", "paraphrase", "append-line"],
+)
+def test_slots_system_of_record_contrast_drivers_pass(tmp_path: Path, script: Script) -> None:
+    """Storing a catalog-attributed contrast note beside the stated line fails nothing
+    (AIE-1240, US4.2).
+    """
+    graded, _ = _run_trial(tmp_path, "slots-system-of-record", script)
+
+    assert _failed(graded) == set(), graded

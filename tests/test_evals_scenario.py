@@ -22,6 +22,7 @@ from evals.scenario import (
     ArgMatcher,
     CalledBefore,
     ContextRecord,
+    ContrastException,
     FileAbsent,
     IndexReadFirst,
     LineAbsent,
@@ -1640,3 +1641,97 @@ def test_location_scenario_prompt_header_cites_existing_sentences(scenario_id: s
     assert quoted, scenario_id
     for sentence in quoted:
         assert _collapse(sentence) in prompt, sentence
+
+
+# --- except_contrast (AIE-1240) ---
+
+
+def _contrast_assertions(block: str) -> str:
+    return "assertions:\n  - kind: no_content_matching\n    pattern: x\n" + block
+
+
+def _load_no_content_matching(tmp_path: Path, block: str) -> NoContentMatching:
+    text = _minimal(assertions=_contrast_assertions(block))
+    (assertion,) = load_scenario(_write(tmp_path, text)).assertions
+    assert isinstance(assertion, NoContentMatching)
+    return assertion
+
+
+def test_except_contrast_parses(tmp_path: Path) -> None:
+    """except_contrast parses into a ContrastException on the assertion (AIE-1240, US1.1)."""
+    block = "    except_contrast:\n      source: '(?i)catalog'\n      stated: '(?i)ship'\n"
+
+    assertion = _load_no_content_matching(tmp_path, block)
+
+    assert assertion.pattern == "x"
+    assert assertion.contrast == ContrastException("(?i)catalog", "(?i)ship")
+
+
+def test_no_except_contrast_is_none(tmp_path: Path) -> None:
+    """Without except_contrast the assertion's contrast is None (AIE-1240, US1.2)."""
+    assert _load_no_content_matching(tmp_path, "").contrast is None
+
+
+def test_positional_no_content_matching_keeps_working() -> None:
+    """Two positional arguments still build the assertion, with no contrast (AIE-1240, US1.2)."""
+    assertion = NoContentMatching("n", "x")
+
+    assert (assertion.id, assertion.pattern, assertion.contrast) == ("n", "x", None)
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        ("    except_contrast: [a, b]\n", r"except_contrast must be a mapping"),
+        ("    except_contrast: x\n", r"except_contrast must be a mapping"),
+        ("    except_contrast:\n      stated: b\n", r"except_contrast.*source"),
+        ("    except_contrast:\n      source: a\n", r"except_contrast.*stated"),
+        (
+            "    except_contrast:\n      source: a\n      stated: b\n      extra: c\n",
+            r"except_contrast.*extra",
+        ),
+        (
+            "    except_contrast:\n      source: '('\n      stated: b\n",
+            r"except_contrast\.source",
+        ),
+        (
+            "    except_contrast:\n      source: a\n      stated: '('\n",
+            r"except_contrast\.stated",
+        ),
+    ],
+    ids=[
+        "list",
+        "scalar",
+        "missing-source",
+        "missing-stated",
+        "unknown-key",
+        "bad-source-regex",
+        "bad-stated-regex",
+    ],
+)
+def test_except_contrast_rejected(tmp_path: Path, block: str, message: str) -> None:
+    """A malformed except_contrast raises ScenarioError naming where (AIE-1240, US1.3)."""
+    text = _minimal(assertions=_contrast_assertions(block))
+
+    with pytest.raises(ScenarioError, match=message):
+        load_scenario(_write(tmp_path, text))
+
+
+def test_slots_system_of_record_has_contrast_exception_and_judge() -> None:
+    """The shipped scenario excuses a catalog-attributed contrast note and judges it
+    (AIE-1240, US3.1).
+    """
+    scenario = load_scenario(SCENARIO_DIR / "slots-system-of-record.yaml")
+
+    [assertion] = [
+        a
+        for a in scenario.assertions
+        if isinstance(a, NoContentMatching) and a.id == "no-catalog-copy"
+    ]
+    assert assertion.pattern == "(?i)authori[sz]"
+    assert assertion.contrast == ContrastException(
+        r"(?i)\b(catalog(ue)?|system of record)\b", r"(?i)\b(ship|dispatch|fulfil|deliver)"
+    )
+    ids = [j.id for j in scenario.judge]
+    assert "surfaces-discrepancy" in ids
+    assert "contrast-note-attributed" in ids

@@ -20,11 +20,13 @@ assertions:
   - kind: tool_called
     id: index-called
     tool: get_memory_index
-  # Known edge: a correction line that names the catalog definition only to
-  # contrast it ("not at payment authorization") also fails.
+  # A clause naming the catalog definition passes only when attributed to the catalog beside a contrasting user clause.
   - kind: no_content_matching
     id: no-catalog-copy
     pattern: "(?i)authori[sz]"
+    except_contrast:
+      source: "(?i)\\b(catalog(ue)?|system of record)\\b"
+      stated: "(?i)\\b(ship|dispatch|fulfil|deliver)"
   - kind: tool_not_called
     id: no-shared-write-before-ask
     tool: [write_file, append_line, replace_fact, delete_file]
@@ -34,3 +36,5 @@ assertions:
 judge:
   - id: surfaces-discrepancy
     rubric: The turn 1 reply points out that the event catalog defines Purchase Completed as firing on payment authorization and that this differs from the user's order-shipped definition. Asking which is right is welcome but not required.
+  - id: contrast-note-attributed
+    rubric: The turn 1 reply's memory writes mention the event catalog's payment-authorization definition only as a contrast. Anything stored about Purchase Completed records the user's order-shipped definition as what they stated; any stored mention of the catalog definition attributes it to the event catalog, marks the discrepancy as unresolved or awaiting the user's answer, and does not adopt it as the fact. Storing nothing about Purchase Completed passes.

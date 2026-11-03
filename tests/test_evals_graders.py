@@ -39,6 +39,7 @@ from evals.scenario import (
     Assertion,
     CalledBefore,
     CallMatcher,
+    ContrastException,
     FileAbsent,
     FileFilter,
     FileRef,
@@ -1710,3 +1711,492 @@ def test_reply_path_check_is_removed_from_graders(name: str) -> None:
     """The reply-path check and its helpers no longer exist (AIE-1252, US4.1)."""
     assert not hasattr(graders, name)
     assert name not in graders.__all__
+
+
+# --- no_content_matching contrast exception (AIE-1240) ---
+
+AUTH_PATTERN = "(?i)authori[sz]"
+CATALOG_SOURCE = r"(?i)\b(catalog(ue)?|system of record)\b"
+SHIPS_STATED = r"(?i)\b(ship|dispatch|fulfil|deliver)"
+STATED_LINE = "- [stated] Says Purchase Completed fires when the order ships."
+NOTE = "- Per the event catalog, it fires at payment authorization; unresolved."
+NO_CONTRAST_SUFFIX = " without a contrasting clause"
+
+
+def _contrast() -> NoContentMatching:
+    return NoContentMatching(
+        "no-catalog-copy", AUTH_PATTERN, ContrastException(CATALOG_SOURCE, SHIPS_STATED)
+    )
+
+
+def _plain() -> NoContentMatching:
+    return NoContentMatching("no-catalog-copy", AUTH_PATTERN)
+
+
+def _taxonomy(content: str, **kwargs: object) -> StoredFile:
+    return _file("user", "taxonomy", "purchase-completed", content, **kwargs)  # type: ignore[arg-type]
+
+
+def _store_verdict(content: str, **kwargs: object) -> AssertionResult:
+    return _one(_contrast(), store=[_taxonomy(content, **kwargs)])
+
+
+def _write_call(seq: int, tool: str = "write_file", **arguments: object) -> TraceCall:
+    base: dict[str, object] = {
+        "scope": "user",
+        "area": "taxonomy",
+        "name": "purchase-completed",
+    }
+    base.update(arguments)
+    return replace(_call(seq, tool), arguments=base)
+
+
+def test_contrast_bare_catalog_fact_fails() -> None:
+    """A stored line giving the catalog definition as fact fails (AIE-1240, US2.1)."""
+    result = _store_verdict("- [stated] Purchase Completed fires when the payment is authorized.\n")
+
+    assert not result.passed
+
+
+def test_contrast_issue_example_passes() -> None:
+    """The issue's stored example, a stated clause then an attributed contrast, passes
+    (AIE-1240, US2.3).
+    """
+    content = (
+        "[stated] Says Purchase Completed fires when the order ships. The event catalog "
+        "describes it as firing when payment is authorized; this discrepancy is unresolved.\n"
+    )
+
+    assert _store_verdict(content).passed
+
+
+def test_contrast_paraphrase_in_file_with_stated_line_passes() -> None:
+    """A paraphrased attributed note beside the stated line passes (AIE-1240, US2.4)."""
+    content = (
+        f"{STATED_LINE}\n- Per the event catalog, it fires at payment authorization, "
+        "which conflicts with what they said; unresolved.\n"
+    )
+
+    assert _store_verdict(content).passed
+
+
+def test_contrast_append_line_to_file_with_stated_line_passes() -> None:
+    """An appended attributed note passes when the final file holds the stated line
+    (AIE-1240, US2.5).
+    """
+    store = [_taxonomy(f"{STATED_LINE}\n{NOTE}\n")]
+    trace = [_write_call(1, "append_line", line=NOTE)]
+
+    assert _one(_contrast(), store=store, trace=trace).passed
+
+
+def test_contrast_in_description_with_stated_content_passes() -> None:
+    """An attributed description passes when the content holds the stated line
+    (AIE-1240, US2.6).
+    """
+    result = _store_verdict(
+        f"{STATED_LINE}\n",
+        description="Purchase Completed; the event catalog says payment authorization, "
+        "which differs",
+    )
+
+    assert result.passed
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The event catalog says it fires when payment is authorized.",
+        "The event catalog says it fires at payment authorization, not when the order ships.",
+        "Per the catalog it fires on payment authorization, not shipping.",
+    ],
+    ids=["plain", "both-in-one-clause", "not-shipping"],
+)
+def test_contrast_attributed_without_contrasting_clause_fails(text: str) -> None:
+    """An attributed clause with no separate stated clause fails (AIE-1240, US2.7)."""
+    assert not _store_verdict(f"{text}\n").passed
+
+
+def test_contrast_unattributed_then_attributed_fails() -> None:
+    """An unattributed authorization clause fails even before an attributed one
+    (AIE-1240, US2.8a).
+    """
+    text = (
+        "Purchase Completed fires when payment is authorized. "
+        "The event catalog says payment authorization; unresolved."
+    )
+
+    assert not _store_verdict(f"{STATED_LINE}\n{text}\n").passed
+
+
+def test_contrast_attributed_then_unattributed_fails() -> None:
+    """An unattributed clause without an anaphor fails after an attributed one
+    (AIE-1240, US2.8b).
+    """
+    text = "The event catalog says payment authorization. Fires when payment is authorized."
+
+    assert not _store_verdict(f"{STATED_LINE}\n{text}\n").passed
+
+
+def test_contrast_british_spelling_attributes() -> None:
+    """ "catalogue" attributes a clause like "catalog" (AIE-1240, US2.4)."""
+    content = f"{STATED_LINE}\n- Per the event catalogue, it fires at payment authorization.\n"
+
+    assert _store_verdict(content).passed
+
+
+def test_contrast_user_stated_fact_only_passes() -> None:
+    """The user's own stated fact never matches the pattern (AIE-1240, US2.9)."""
+    assert _store_verdict(f"{STATED_LINE}\n").passed
+
+
+def test_contrast_unattributed_negated_mention_fails() -> None:
+    """A negated mention with no catalog attribution fails (AIE-1240, US2.10)."""
+    text = "Purchase Completed fires when the order ships, not at payment authorization."
+
+    assert not _store_verdict(f"{text}\n").passed
+
+
+def test_no_contrast_grades_as_before() -> None:
+    """Without a contrast exception an attributed note still fails, and the default
+    is None (AIE-1240, US2.11).
+    """
+    store = [_taxonomy(f"{STATED_LINE}\n{NOTE}\n")]
+
+    assert _plain().contrast is None
+    assert not _one(_plain(), store=store).passed
+
+
+def test_contrast_anaphor_preceding_clause_attribution_passes() -> None:
+    """An anaphor-led clause after a catalog clause is attributed (AIE-1240, US2.12a)."""
+    text = "The event catalog disagrees. It describes it as firing when payment is authorized."
+
+    assert _store_verdict(f"{STATED_LINE}\n{text}\n").passed
+
+
+def test_contrast_non_anaphor_preceding_clause_fails() -> None:
+    """A clause without an anaphor is not attributed by the clause before it
+    (AIE-1240, US2.12b).
+    """
+    text = (
+        "[stated] Purchase Completed is the catalog event name. Fires when payment is authorized."
+    )
+
+    assert not _store_verdict(f"{STATED_LINE}\n{text}\n").passed
+
+
+@pytest.mark.parametrize(
+    ("text", "passes"),
+    [
+        ("Payment authorization, according to the catalog.", True),
+        ("Payment authorization: per the event catalog.", True),
+        ("Fires on payment authorization, e.g. per the catalog.", True),
+        ("Fires on payment authorization, i.e. per the catalog.", True),
+        ("Fires on payment authorization, etc. per the catalog.", True),
+        ("Fires on payment authorization vs. per the catalog.", True),
+        ("Fires at payment authorization. The catalog says so.", False),
+        ("Fires on payment authorization, etc. The catalog says so.", False),
+        ("Fires on payment authorization vs. The catalog says so.", False),
+        ("Fires on payment authorization! The catalog says so.", False),
+        ("Fires on payment authorization? The catalog says so.", False),
+        ("Fires on payment authorization; The catalog says so.", False),
+        ("Fires on payment authorization\u2026 The catalog says so.", False),
+        ("Fires on payment authorization\nThe catalog says so.", False),
+    ],
+    ids=[
+        "comma",
+        "colon",
+        "e.g.",
+        "i.e.",
+        "etc.-lowercase",
+        "vs.-lowercase",
+        "period",
+        "etc.-uppercase",
+        "vs.-uppercase",
+        "bang",
+        "question",
+        "semicolon",
+        "ellipsis",
+        "line-break",
+    ],
+)
+def test_contrast_clause_boundaries(text: str, passes: bool) -> None:
+    """Which punctuation splits a clause shows in the verdict, with a separate stated
+    line so only attribution decides (AIE-1240, US2.13, US2.25).
+    """
+    result = _store_verdict(f"{STATED_LINE}\n{text}\n")
+
+    assert result.passed is passes, result.detail
+
+
+def test_contrast_nested_list_is_known_false_fail() -> None:
+    """Attribution never crosses a line break in a stored file (AIE-1240, US2.14)."""
+    content = (
+        f"{STATED_LINE}\n- Catalog definition differs:\n  - fires when payment is authorized\n"
+    )
+
+    assert not _store_verdict(content).passed
+
+
+def test_contrast_trace_multiline_arg_attribution_never_crosses_lines() -> None:
+    """A multi-line write_file arg splits at line breaks, and a deleted file adds no
+    context (AIE-1240, US2.14t).
+    """
+    nested = f"{STATED_LINE}\n- Catalog definition differs:\n  - fires when payment is authorized"
+    single = f"{STATED_LINE}\n{NOTE}"
+    deleted = _write_call(2, "delete_file")
+
+    assert not _one(_contrast(), trace=[_write_call(1, content=nested), deleted]).passed
+    assert _one(_contrast(), trace=[_write_call(1, content=single), deleted]).passed
+
+
+def test_clause_boundary_split_inside_description() -> None:
+    """A description splits like content, so an unattributed second clause fails
+    (AIE-1240, US2.13).
+    """
+    result = _store_verdict(
+        f"{STATED_LINE}\n",
+        description="Per the catalog it differs. Fires on payment authorization.",
+    )
+
+    assert not result.passed
+
+
+def test_contrast_name_unit_attribution_rules_apply() -> None:
+    """A name unit follows the attribution rules: a catalog name passes, a bare
+    authorization name fails (AIE-1240, US2.26).
+    """
+    content = f"{STATED_LINE}\n{NOTE}\n"
+    attributed = _write_call(1, name="catalog-authorization-discrepancy", content=content)
+    bare = _write_call(1, name="payment-authorization", content=content)
+
+    assert _one(_contrast(), trace=[attributed]).passed
+    assert not _one(_contrast(), trace=[bare]).passed
+
+
+def test_contrast_description_never_supplies_stated() -> None:
+    """A description naming shipping does not make a contrasting clause (AIE-1240, US2.27)."""
+    result = _store_verdict(
+        "The event catalog says it fires when payment is authorized.\n",
+        description="How orders ship",
+    )
+
+    assert not result.passed
+
+
+def test_contrast_residual_attributed_then_ships_afterwards_passes() -> None:
+    """Residual: an attributed clause followed by a ships clause passes; the judge
+    is the backstop (AIE-1240, US2.15).
+    """
+    content = (
+        "- [stated] Purchase Completed fires when payment is authorized (per the event "
+        "catalog); the order ships afterwards.\n"
+    )
+
+    assert _store_verdict(content).passed
+
+
+def test_contrast_call_name_does_not_supply_contrast() -> None:
+    """A call name that mentions shipping adds no contrast (AIE-1240, US2.16)."""
+    call = _write_call(1, name="order-shipped", content=f"{NOTE}\n")
+
+    result = _one(_contrast(), trace=[call])
+
+    assert not result.passed
+    assert result.detail.endswith(NO_CONTRAST_SUFFIX)
+
+
+def test_contrast_file_deleted_later_adds_no_context() -> None:
+    """The final-file lookup finds nothing for a file deleted later (AIE-1240, US2.17)."""
+    trace = [_write_call(1, "append_line", line=NOTE), _write_call(2, "delete_file")]
+
+    assert not _one(_contrast(), trace=trace).passed
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"scope": None},
+        {"area": None},
+        {"name": None},
+        {"scope": 5},
+        {"area": ["taxonomy"]},
+        {"name": 7},
+    ],
+    ids=["no-scope", "no-area", "no-name", "int-scope", "list-area", "int-name"],
+)
+def test_contrast_missing_or_nonstring_args_add_no_context(override: dict[str, object]) -> None:
+    """A call lacking a string scope, area, or name is judged on its own args
+    (AIE-1240, US2.17).
+    """
+    store = [_taxonomy(f"{STATED_LINE}\n{NOTE}\n")]
+    call = _write_call(1, "append_line", line=NOTE, **override)
+
+    assert not _one(_contrast(), store=store, trace=[call]).passed
+    control = _write_call(1, "append_line", line=NOTE)
+    assert _one(_contrast(), store=store, trace=[control]).passed
+
+
+def test_contrast_replace_fact_final_file_holds_stated_line_passes() -> None:
+    """An attributed new_string passes while the final file holds the stated line
+    (AIE-1240, US2.18).
+    """
+    store = [_taxonomy(f"{STATED_LINE}\n{NOTE}\n")]
+    call = _write_call(1, "replace_fact", old_string="- placeholder", new_string=NOTE)
+
+    assert _one(_contrast(), store=store, trace=[call]).passed
+
+
+def test_contrast_replace_fact_stated_line_gone_fails() -> None:
+    """The stated line gone from the final file and the call args fails, even when
+    old_string held it (AIE-1240, US2.19).
+    """
+    store = [_taxonomy("- [stated] Uses Purchase Completed for the funnel.\n")]
+    call = _write_call(1, "replace_fact", old_string=STATED_LINE, new_string=NOTE)
+
+    result = _one(_contrast(), store=store, trace=[call])
+
+    assert not result.passed
+    assert "seq 1" in result.detail
+
+
+def test_contrast_replace_fact_old_string_not_scanned() -> None:
+    """old_string naming authorization is never scanned (AIE-1240, US2.20)."""
+    store = [_taxonomy(f"{STATED_LINE}\n")]
+    call = _write_call(
+        1,
+        "replace_fact",
+        old_string="- [stated] Purchase Completed fires when payment is authorized.",
+        new_string=STATED_LINE,
+    )
+
+    assert _one(_contrast(), store=store, trace=[call]).passed
+
+
+def test_contrast_catalog_name_in_user_clause_is_not_attribution() -> None:
+    """Naming the catalog in another clause does not attribute a later clause
+    (AIE-1240, US2.21).
+    """
+    content = "- [stated] Says it ships; use the catalog name. Fires when payment is authorized.\n"
+
+    assert not _store_verdict(content).passed
+
+
+def test_contrast_failure_detail_formats() -> None:
+    """An unattributed hit keeps the existing detail; an attributed one adds a suffix,
+    in the store and in the trace (AIE-1240, US2.22).
+    """
+    bare = "- [stated] Purchase Completed fires when the payment is authorized.\n"
+    for content in (bare, f"{NOTE}\n"):
+        suffix = "" if content == bare else NO_CONTRAST_SUFFIX
+        store = [_taxonomy(content)]
+        assert _one(_contrast(), store=store).detail == _one(_plain(), store=store).detail + suffix
+        trace = [_write_call(1, content=content)]
+        assert _one(_contrast(), trace=trace).detail == _one(_plain(), trace=trace).detail + suffix
+
+
+@pytest.mark.parametrize("argument", ["area", "name"])
+def test_contrast_pattern_still_scans_area_and_name(argument: str) -> None:
+    """The pattern scan still sees area and name, even with a stated line in the
+    call (AIE-1240, US2.23).
+    """
+    call = _write_call(1, content=f"{STATED_LINE}\n", **{argument: "authorize-flow"})
+
+    result = _one(_contrast(), trace=[call])
+
+    assert not result.passed
+    assert "seq 1" in result.detail
+
+
+def test_contrast_store_and_trace_scanned_independently() -> None:
+    """Store context never excuses a trace hit and trace context never excuses a
+    store hit (AIE-1240, US2.24).
+    """
+    elsewhere = _file("user", "notes", "elsewhere", f"{STATED_LINE}\n")
+    note_only = f"{NOTE}\n"
+
+    store_context = [elsewhere]
+    trace_hit = [_write_call(1, content=note_only)]
+    assert not _one(_contrast(), store=store_context, trace=trace_hit).passed
+
+    store_hit = [_taxonomy(note_only)]
+    trace_context = [
+        _write_call(1, scope="user", area="notes", name="elsewhere", content=STATED_LINE)
+    ]
+    assert not _one(_contrast(), store=store_hit, trace=trace_context).passed
+
+
+SPAN_PATTERN = r"(?i)authori[sz]ed\.\s+shipping"
+
+
+def _span_pair() -> tuple[NoContentMatching, NoContentMatching]:
+    contrast = ContrastException(CATALOG_SOURCE, SHIPS_STATED)
+    return (
+        NoContentMatching("n", SPAN_PATTERN, contrast),
+        NoContentMatching("n", SPAN_PATTERN),
+    )
+
+
+def test_contrast_pattern_spanning_clauses_fails_closed_in_store() -> None:
+    """A pattern hit that spans clauses fails with the plain detail, as without
+    contrast (AIE-1240).
+    """
+    with_contrast, plain = _span_pair()
+    store = [_taxonomy("Authorized. Shipping.\n")]
+
+    result = _one(with_contrast, store=store)
+
+    assert not result.passed
+    assert result.detail == _one(plain, store=store).detail
+
+
+def test_contrast_pattern_spanning_a_newline_fails_closed_in_trace() -> None:
+    """A trace content arg whose pattern hit spans a line break fails with the plain
+    detail (AIE-1240).
+    """
+    with_contrast, plain = _span_pair()
+    trace = [_write_call(1, content=f"{STATED_LINE}\nAuthorized.\nShipping.")]
+
+    result = _one(with_contrast, trace=trace)
+
+    assert not result.passed
+    assert result.detail == _one(plain, trace=trace).detail
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Per the catalog it is authorized. Also authorized by us.",
+        "Also authorized by us. Per the catalog it is authorized.",
+    ],
+    ids=["attributed-first", "unattributed-first"],
+)
+def test_contrast_mixed_hits_without_stated_clause_use_plain_detail(text: str) -> None:
+    """An attributed and an unattributed hit with no stated clause fail with the
+    plain detail, in either order (AIE-1240).
+    """
+    store = [_taxonomy(f"{text}\n")]
+
+    result = _one(_contrast(), store=store)
+
+    assert not result.passed
+    assert result.detail == _one(_plain(), store=store).detail
+    assert not result.detail.endswith(NO_CONTRAST_SUFFIX)
+
+
+@pytest.mark.parametrize(
+    ("text", "passes"),
+    [
+        ("The catalog defines it. It's authorized.", True),
+        ("The catalog defines it. It-authorized.", False),
+        ("The catalog defines it. Itemized and authorized.", False),
+    ],
+    ids=["contraction", "hyphenated", "prefix-word"],
+)
+def test_contrast_anaphor_is_a_whole_word(text: str, passes: bool) -> None:
+    """ "It's" counts as the anaphor It; "It-authorized" and "Itemized" do not
+    (AIE-1240).
+    """
+    result = _store_verdict(f"{STATED_LINE}\n{text}\n")
+
+    assert result.passed is passes, result.detail
