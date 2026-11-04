@@ -96,7 +96,9 @@ slow and nondeterministic.
      `line`, `new_string`, `description`, `aliases`, `area`, and `name`,
      and only on `write_file`, `append_line`, and `replace_fact`. Version
      tokens are small integers, `old_string` quotes text being removed,
-     and a delete persists nothing.
+     and a delete persists nothing. Amended (2026-11-02) by ADR 0046: an
+     optional `except_contrast` excuses a clause that names a definition
+     only to contrast it.
    - **Trial dir.** `eval_reset` accepts a `trial_dir` only under the
      server's runs root, which defaults to `evals/runs/` and is gitignored.
 

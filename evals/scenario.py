@@ -40,6 +40,7 @@ __all__ = [
     "CallMatcher",
     "CalledBefore",
     "ContextRecord",
+    "ContrastException",
     "FileAbsent",
     "FileFilter",
     "FileRef",
@@ -183,9 +184,16 @@ class LineAbsent:
 
 
 @dataclass(frozen=True)
+class ContrastException:
+    source: str  # regex: the clause is attributed to the catalog
+    stated: str  # regex: matches the user's version in a contrasting clause
+
+
+@dataclass(frozen=True)
 class NoContentMatching:
     id: str
     pattern: str
+    contrast: ContrastException | None = None
 
 
 @dataclass(frozen=True)
@@ -323,7 +331,7 @@ _KIND_KEYS: Final[Mapping[str, tuple[frozenset[str], frozenset[str]]]] = Mapping
         "file_absent": (_FILE_KEYS, _FILE_KEYS),
         "line_present": (_FILE_KEYS | {"pattern"}, frozenset({"pattern"})),
         "line_absent": (_FILE_KEYS | {"pattern"}, frozenset({"pattern"})),
-        "no_content_matching": (frozenset({"pattern"}), frozenset({"pattern"})),
+        "no_content_matching": (frozenset({"pattern", "except_contrast"}), frozenset({"pattern"})),
         "no_duplicate_fact": (_FILE_KEYS | {"pattern"}, frozenset({"pattern"})),
         "seed_lines_preserved": (_FILE_KEYS | {"except"}, _FILE_KEYS),
         "tool_called": (_CALL_KEYS | {"min", "max"}, frozenset({"tool"})),
@@ -422,6 +430,18 @@ class _Loader:
         except re.error as exc:
             raise self.fail(f"{where} is not a valid regex ({exc}): {text!r}") from None
         return text
+
+    def contrast(self, data: Mapping[str, Any], where: str) -> ContrastException | None:
+        if "except_contrast" not in data:
+            return None
+        where = f"{where}.except_contrast"
+        raw = self.mapping(data["except_contrast"], where)
+        keys = frozenset({"source", "stated"})
+        self.keys(raw, keys, keys, where)
+        return ContrastException(
+            self.pattern(raw["source"], f"{where}.source"),
+            self.pattern(raw["stated"], f"{where}.stated"),
+        )
 
     def scope(self, value: object, where: str) -> str:
         text = self.text(value, where)
@@ -541,7 +561,8 @@ class _Loader:
                 pattern = self.pattern(data["pattern"], f"{where}.pattern")
                 return LineAbsent(ident, pattern, self.file_filter(data, where))
             case "no_content_matching":
-                return NoContentMatching(ident, self.pattern(data["pattern"], f"{where}.pattern"))
+                pattern = self.pattern(data["pattern"], f"{where}.pattern")
+                return NoContentMatching(ident, pattern, self.contrast(data, where))
             case "no_duplicate_fact":
                 pattern = self.pattern(data["pattern"], f"{where}.pattern")
                 return NoDuplicateFact(ident, pattern, self.file_filter(data, where))

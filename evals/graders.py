@@ -10,6 +10,7 @@ import re
 import unicodedata
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final, Protocol, TypeVar, cast
@@ -20,6 +21,7 @@ from evals.scenario import (
     Assertion,
     CalledBefore,
     CallMatcher,
+    ContrastException,
     FileAbsent,
     FileFilter,
     IndexReadFirst,
@@ -412,23 +414,132 @@ def _scanned_values(call: TraceCall) -> Iterator[tuple[str, str]]:
                     yield key, item
 
 
+_CLAUSE_END: Final = re.compile(r"[.;!?\u2026]+(?=\s|$)")
+_NEVER_SPLIT: Final = re.compile(r"(?i)\b(e\.g|i\.e)$")
+_SPLIT_BEFORE_UPPER: Final = re.compile(r"(?i)\b(etc|vs)$")
+_NEXT_CHAR: Final = re.compile(r"\s*(\S?)")
+_ANAPHOR: Final = re.compile(
+    r"(?i)^(?:[-*]\s+)?(?:\[[^\]]*\]\s*)?(?:it|its|this|that|they|which)(?![\w-])"
+)
+_CONTEXT_ARGUMENTS: Final = ("content", "line", "new_string")
+# Longest abbreviation ("e.g") plus one boundary character.
+_ABBREVIATION_WINDOW: Final = 4
+
+
+def _clauses(text: str) -> list[list[str]]:
+    """Clauses of each line of text; a clause never spans a line break."""
+    result: list[list[str]] = []
+    for line in text.splitlines():
+        clauses: list[str] = []
+        start = 0
+        for m in _CLAUSE_END.finditer(line):
+            if m.group() == ".":
+                before = line[max(0, m.start() - _ABBREVIATION_WINDOW) : m.start()]
+                if _NEVER_SPLIT.search(before):
+                    continue
+                if _SPLIT_BEFORE_UPPER.search(before):
+                    following = _NEXT_CHAR.match(line, m.end())
+                    if following is not None and following.group(1).islower():
+                        continue
+            clauses.append(line[start : m.end()])
+            start = m.end()
+        clauses.append(line[start:])
+        result.append([c.strip() for c in clauses if c.strip()])
+    return result
+
+
+def _hits(unit: str, contrast: ContrastException, pattern: str) -> list[bool]:
+    """For each clause of unit matching pattern, whether it is attributed to the source."""
+    hits: list[bool] = []
+    for clauses in _clauses(unit):
+        for i, clause in enumerate(clauses):
+            if not re.search(pattern, clause):
+                continue
+            hits.append(
+                re.search(contrast.source, clause) is not None
+                or (
+                    i > 0
+                    and _ANAPHOR.search(clause) is not None
+                    and re.search(contrast.source, clauses[i - 1]) is not None
+                )
+            )
+    return hits
+
+
+def _has_stated(texts: Sequence[str], a: NoContentMatching, contrast: ContrastException) -> bool:
+    """Whether some clause of texts matches stated but neither pattern nor source."""
+    return any(
+        re.search(contrast.stated, clause)
+        and not re.search(a.pattern, clause)
+        and not re.search(contrast.source, clause)
+        for text in texts
+        for clauses in _clauses(text)
+        for clause in clauses
+    )
+
+
+def _call_context(call: TraceCall, store: StoreDump) -> list[str]:
+    """Content a call writes plus the final content of the file it targets."""
+    texts = [v for k in _CONTEXT_ARGUMENTS if isinstance(v := call.arguments.get(k), str)]
+    target = [call.arguments.get(k) for k in ("scope", "area", "name")]
+    if all(isinstance(t, str) for t in target):
+        found = store.get(*cast(list[str], target))
+        if found is not None:
+            texts.append(found.content)
+    return texts
+
+
+def _contrast_failure(
+    a: NoContentMatching,
+    contrast: ContrastException,
+    unit: str,
+    has_stated: Callable[[], bool],
+) -> str | None:
+    """'' for an unattributed hit, ' without a contrasting clause' when every hit is
+    attributed but no contrasting clause exists, None when excused.
+
+    A unit whose match spans clauses has no clause hit and fails as unattributed.
+    """
+    hits = _hits(unit, contrast, a.pattern)
+    if not hits or not all(hits):
+        return ""
+    return None if has_stated() else " without a contrasting clause"
+
+
+def _lazy_stated(
+    a: NoContentMatching, contrast: ContrastException | None, texts: Sequence[str]
+) -> Callable[[], bool]:
+    """A memoized _has_stated over texts, evaluated only when first needed."""
+    return cache(lambda: contrast is not None and _has_stated(texts, a, contrast))
+
+
 def _no_content_matching(
     a: NoContentMatching, store: StoreDump, trace: Sequence[TraceCall]
 ) -> str | None:
+    contrast = a.contrast
     for f in store.files:
+        content_lines = f.content.splitlines()
+        stated = _lazy_stated(a, contrast, content_lines)
         for label, text in (
-            *(("content", line) for line in f.content.splitlines()),
+            *(("content", line) for line in content_lines),
             ("description", f.description),
             *(("alias", alias) for alias in f.aliases),
         ):
-            if re.search(a.pattern, text):
-                return f"{f.path} {label} matches {a.pattern!r}"
+            if not re.search(a.pattern, text):
+                continue
+            suffix = "" if contrast is None else _contrast_failure(a, contrast, text, stated)
+            if suffix is not None:
+                return f"{f.path} {label} matches {a.pattern!r}{suffix}"
     for call in trace:
         if call.tool not in SCANNED_TOOLS:
             continue
+        stated = _lazy_stated(a, contrast, _call_context(call, store) if contrast else [])
         for key, text in _scanned_values(call):
-            if re.search(a.pattern, text):
-                return f"{_describe(call)} argument {key!r} matches {a.pattern!r}"
+            if not re.search(a.pattern, text):
+                continue
+            suffix = "" if contrast is None else _contrast_failure(a, contrast, text, stated)
+            if suffix is not None:
+                return f"{_describe(call)} argument {key!r} matches {a.pattern!r}{suffix}"
     return None
 
 
