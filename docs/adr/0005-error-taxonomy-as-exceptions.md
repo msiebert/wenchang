@@ -44,6 +44,26 @@ from a literal reading of the spec text.
   `NewType` over `str`, rather than inside `wenchang.errors`, because every
   later core API function needs it and importing it shouldn't require
   importing the error hierarchy.
+- **A detail is ended as a sentence before the guidance (AIE-1320).** A
+  private helper in `wenchang.errors` strips trailing whitespace and appends
+  `.` unless the last character is `.`, `!`, or `?`; an empty result gives
+  the guidance alone. `WenchangError.message` applies it to the detail, and
+  `ResolverFailureError` and `BackendUnavailableError` apply it to their
+  optional caller detail before their fixed text. A blank
+  `InvalidArgumentError` detail composes `Argument {argument} is invalid`
+  with no colon. `.detail` stays unterminated.
+  - **Rejected: always joining with `". "`**, which doubles the period on
+    the many details that already end with one.
+  - **Rejected: per-call-site fixes**, like the unknown-scope period, which
+    miss adopter-supplied (`ResolutionFailure`) and exception-derived text.
+  - **Rejected: storing the terminated text in `.detail`**, which changes an
+    observable attribute.
+  - The helper normalizes with `str.__str__` and calls `str` methods
+    unbound, so a `str`-subclass override cannot alter the message. A
+    non-`str` detail now raises `TypeError`.
+  - The tool layer's unknown-scope detail keeps its trailing period; the
+    helper makes it redundant for the message, but removing it would change
+    `InvalidArgumentError.detail`.
 - **Error serialization across a transport** (Section 10.2's error parity
   requirement) is deferred to the transport issues (AIE-1045/1048); this
   issue defines only the in-process Python exception vocabulary.

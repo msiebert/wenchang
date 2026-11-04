@@ -188,7 +188,7 @@ Every failure renders through `render_error`. Over MCP it is the payload of an e
 
 ### InvalidArgumentError {#invalid-argument}
 
-`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
+`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}` (`Argument {argument} is invalid` when `detail` is blank), ended with a period unless it already ends in `.`, `!`, or `?`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
 
 ```json
 {
@@ -213,7 +213,7 @@ Notes:
 
 `wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Scope names and entity IDs must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`). The role must be non-empty. `identity.scope_map` is scope name to entity ID. `identity.entity_id(scope)` and `identity.role(scope)` raise `KeyError` if the scope is not granted.
 
-`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited, so an `async def resolve` makes every call fail with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with `bind_tools` alike. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
+`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited. If it is detectably async (an `async def`, an async generator function, an async `staticmethod`, a `functools.partial` of an async function, or a callable object with `async def __call__`), `register_memory_tools`, `build_server`, and `bind_tools` raise `TypeError("resolver.resolve must be a plain method, not async")`. The first two raise at registration, before anything is registered; `bind_tools` raises before the resolver runs. A sync `def` that returns a coroutine is not detected, and every call fails with `ResolverFailureError`. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
 
 `wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. `policy.permitted_roles(scope)` returns the set or `None`.
 
@@ -237,7 +237,7 @@ Notes:
 
 Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
 
-- **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.
+- **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. The constructor builds the bucket client's HTTP session (including any mTLS channel setup), so mTLS configuration errors raise from `GcsStorage(bucket)` rather than from the first call. It makes no network call.
 - **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
 
 Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).

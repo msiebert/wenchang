@@ -93,7 +93,7 @@
 <tr>
 <td><code>resolver</code></td>
 <td>yes</td>
-<td>Your <code>IdentityResolver</code>. On this path it runs on every tool call. Its <code>resolve</code> must be a plain synchronous method. See <a href="identity.html">Identity</a>.</td>
+<td>Your <code>IdentityResolver</code>. On this path it runs on every tool call. Its <code>resolve</code> must be a plain synchronous method; an <code>async</code> one raises <code>TypeError</code> at registration. See <a href="identity.html">Identity</a>.</td>
 </tr>
 <tr>
 <td><code>policy</code></td>

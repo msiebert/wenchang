@@ -11,12 +11,13 @@ import functools
 import gc
 import inspect
 import tomllib
+import warnings
 import weakref
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Concatenate, ParamSpec, TypeAlias, TypeVar, cast
+from typing import Any, Concatenate, ParamSpec, TypeAlias, TypeVar, cast
 
 import pytest
 
@@ -546,6 +547,188 @@ def test_bind_tools_does_not_retain_credentials() -> None:
 
     assert ref() is None
     assert tools.identity == IDENTITY
+
+
+# --- AIE-1318: async resolve is rejected at bind_tools ---------------------------------
+
+ASYNC_RESOLVE_MESSAGE = "resolver.resolve must be a plain method, not async"
+
+
+async def _async_resolve_fn(credentials: object) -> Identity | ResolutionFailure:
+    return ResolutionFailure("async")
+
+
+class _AsyncCallable:
+    async def __call__(self, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _AsyncMethodResolver:
+    async def resolve(self, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _AsyncStaticResolver:
+    @staticmethod
+    async def resolve(credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _PartialAttrResolver:
+    def __init__(self) -> None:
+        self.resolve: object = functools.partial(_async_resolve_fn)
+
+
+class _AsyncGenResolver:
+    async def resolve(self, credentials: object) -> AsyncIterator[Identity]:
+        yield IDENTITY
+
+
+class _CallableAttrResolver:
+    def __init__(self) -> None:
+        self.resolve: object = _AsyncCallable()
+
+
+class _RaisingReadResolver:
+    @property
+    def resolve(self) -> object:
+        raise RuntimeError("secret")
+
+
+class _CoroutineReturningResolver:
+    """A sync resolve that returns a coroutine, which the check cannot see."""
+
+    def __init__(self) -> None:
+        self.coroutines: list[Awaitable[object]] = []
+
+    def resolve(self, credentials: object) -> Identity | ResolutionFailure:
+        coroutine = _async_resolve_fn(credentials)
+        self.coroutines.append(coroutine)
+        return cast(Identity, coroutine)
+
+
+async def _async_observer(record: object) -> None:
+    return None
+
+
+class _AsyncClassmethodResolver:
+    @classmethod
+    async def resolve(cls, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _PartialOfAsyncCallableResolver:
+    def __init__(self) -> None:
+        self.resolve: object = functools.partial(_AsyncCallable())
+
+
+ASYNC_VARIANTS: list[Callable[[], object]] = [
+    _AsyncMethodResolver,
+    _AsyncStaticResolver,
+    _PartialAttrResolver,
+    _AsyncGenResolver,
+    _CallableAttrResolver,
+    _AsyncClassmethodResolver,
+    _PartialOfAsyncCallableResolver,
+]
+ASYNC_VARIANT_IDS = [
+    "async-method",
+    "async-static",
+    "partial",
+    "async-gen",
+    "async-call-object",
+    "async-classmethod",
+    "partial-of-async-call-object",
+]
+
+
+@pytest.mark.parametrize("make", ASYNC_VARIANTS, ids=ASYNC_VARIANT_IDS)
+def test_bind_tools_rejects_async_resolve(make: Callable[[], object]) -> None:
+    """bind_tools raises the exact TypeError for each async resolve variant,
+    not ResolverFailureError, without a never-awaited RuntimeWarning, and
+    never reaches the client (AIE-1318, US1.3, US1.4).
+    """
+    log: list[_Call] = []
+    resolver = make()
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        with pytest.raises(TypeError) as excinfo:
+            bind_tools(
+                _FakeClient(log),
+                cast(SandboxResolver, resolver),
+                object(),
+                POLICY,
+                source=SOURCE,
+            )
+        gc.collect()
+
+    assert not isinstance(excinfo.value, ResolverFailureError)
+    assert str(excinfo.value) == ASYNC_RESOLVE_MESSAGE
+    assert log == []
+    assert not [
+        w
+        for w in recorded
+        if issubclass(w.category, RuntimeWarning) and "never awaited" in str(w.message)
+    ]
+
+
+def test_bind_tools_accepts_sync_resolver_after_resolver_check() -> None:
+    """A sync resolver is still accepted by bind_tools (AIE-1318, US2.1)."""
+    tools = bind_tools(_FakeClient([]), SandboxResolver(IDENTITY), object(), POLICY, source=SOURCE)
+
+    assert tools.identity == IDENTITY
+
+
+def test_bind_tools_raising_resolve_read_stays_resolver_failure() -> None:
+    """A resolve attribute that raises is still a ResolverFailureError from
+    bind_tools, not a TypeError (AIE-1318, US2.2).
+    """
+    with pytest.raises(ResolverFailureError):
+        bind_tools(
+            _FakeClient([]),
+            cast(SandboxResolver, _RaisingReadResolver()),
+            object(),
+            POLICY,
+            source=SOURCE,
+        )
+
+
+def test_bind_tools_sync_resolve_returning_coroutine_stays_resolver_failure() -> None:
+    """A sync resolve that returns a coroutine is still a ResolverFailureError
+    (AIE-1318, US2.3).
+    """
+    resolver = _CoroutineReturningResolver()
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        bind_tools(
+            _FakeClient([]),
+            cast(SandboxResolver, resolver),
+            object(),
+            POLICY,
+            source=SOURCE,
+        )
+
+    assert not isinstance(excinfo.value, TypeError)
+    for coroutine in resolver.coroutines:
+        cast(Any, coroutine).close()
+
+
+def test_bind_tools_async_on_call_error_precedes_resolver_check() -> None:
+    """With an async on_call and an async resolve, the on_call TypeError is
+    raised first (AIE-1318, US3.3).
+    """
+    with pytest.raises(TypeError) as excinfo:
+        bind_tools(
+            _FakeClient([]),
+            cast(SandboxResolver, _AsyncMethodResolver()),
+            object(),
+            POLICY,
+            source=SOURCE,
+            on_call=cast(Any, _async_observer),
+        )
+
+    assert str(excinfo.value) == "on_call must be a plain function, not async"
 
 
 # --- product ----------------------------------------------------------------------
@@ -1644,6 +1827,15 @@ def test_empty_old_string_is_rejected_before_client_call(harness: _Harness) -> N
     err = _invalid(harness, "replace_fact", "old_string", old_string="")
 
     assert err.category is ErrorCategory.RECOVERABLE
+
+
+def test_empty_old_string_message_separates_detail_from_guidance(harness: _Harness) -> None:
+    """The rendered empty old_string rejection ends the detail as a sentence before the
+    coordination guidance (AIE-1320, US2.3).
+    """
+    err = _invalid(harness, "replace_fact", "old_string", old_string="")
+
+    assert "old_string must not be empty. This is normal coordination" in err.message
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS)

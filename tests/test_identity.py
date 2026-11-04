@@ -7,9 +7,10 @@ and AIE-1137 (resolver failure errors carry no exception context).
 
 import copy
 import dataclasses
+import functools
 import pickle
 import traceback
-from collections.abc import Callable, ItemsView, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, ItemsView, Iterator, Mapping
 
 import pytest
 
@@ -27,6 +28,7 @@ from wenchang.identity import (
     ResolutionFailure,
     SandboxResolver,
     ScopeGrant,
+    check_resolver,
     resolve_identity,
 )
 
@@ -408,6 +410,21 @@ def test_resolution_failure_becomes_permanent_resolver_failure_error() -> None:
     assert err.category is ErrorCategory.PERMANENT
     assert isinstance(err, PermanentError)
     assert SECRET_CREDENTIALS not in str(err)
+
+
+def test_resolution_failure_message_separates_detail_from_following_text() -> None:
+    """A ResolutionFailure detail is ended as a sentence before the fixed explanation
+    in the full message (AIE-1320, US3.2).
+    """
+    resolver = _FixedResolver(ResolutionFailure("token expired"))
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        resolve_identity(resolver, SECRET_CREDENTIALS)
+
+    assert excinfo.value.message == (
+        "token expired. Identity could not be resolved; memory is unavailable for this "
+        "session; continue working without memory. Do not retry: retrying will not succeed."
+    )
 
 
 def test_raising_resolver_becomes_resolver_failure_error_without_secret() -> None:
@@ -934,3 +951,155 @@ def test_resolver_failure_traceback_omits_original_exception_message(path: str) 
 
     formatted = "".join(traceback.format_exception(excinfo.value))
     assert TRACEBACK_MARKER not in formatted
+
+
+# --- AIE-1318: check_resolver ---------------------------------------------------------
+
+ASYNC_RESOLVE_MESSAGE = "resolver.resolve must be a plain method, not async"
+
+
+async def _async_resolve_fn(credentials: object) -> Identity | ResolutionFailure:
+    return ResolutionFailure("async")
+
+
+class _AsyncCallable:
+    async def __call__(self, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _AsyncMethodResolver:
+    async def resolve(self, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _AsyncStaticResolver:
+    @staticmethod
+    async def resolve(credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _PartialAttrResolver:
+    def __init__(self) -> None:
+        self.resolve: object = functools.partial(_async_resolve_fn)
+
+
+class _AsyncGenResolver:
+    async def resolve(self, credentials: object) -> AsyncIterator[Identity]:
+        yield _identity()
+
+
+class _CallableAttrResolver:
+    def __init__(self) -> None:
+        self.resolve: object = _AsyncCallable()
+
+
+class _RaisingReadResolver:
+    @property
+    def resolve(self) -> object:
+        raise RuntimeError("boom")
+
+
+class _CountingSyncResolver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def resolve(self, credentials: object) -> Identity | ResolutionFailure:
+        self.calls += 1
+        return ResolutionFailure("sync")
+
+
+class _CountingAsyncResolver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def resolve(self, credentials: object) -> Identity | ResolutionFailure:
+        self.calls += 1
+        return ResolutionFailure("async")
+
+
+class _AsyncClassmethodResolver:
+    @classmethod
+    async def resolve(cls, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _PartialOfAsyncCallableResolver:
+    def __init__(self) -> None:
+        self.resolve: object = functools.partial(_AsyncCallable())
+
+
+ASYNC_VARIANTS: list[Callable[[], object]] = [
+    _AsyncMethodResolver,
+    _AsyncStaticResolver,
+    _PartialAttrResolver,
+    _AsyncGenResolver,
+    _CallableAttrResolver,
+    _AsyncClassmethodResolver,
+    _PartialOfAsyncCallableResolver,
+]
+ASYNC_VARIANT_IDS = [
+    "async-method",
+    "async-static",
+    "partial",
+    "async-gen",
+    "async-call-object",
+    "async-classmethod",
+    "partial-of-async-call-object",
+]
+
+
+@pytest.mark.parametrize("make", ASYNC_VARIANTS, ids=ASYNC_VARIANT_IDS)
+def test_async_variants_satisfy_identity_resolver_protocol(make: Callable[[], object]) -> None:
+    """Every async variant is still an IdentityResolver, so rejection comes
+    from check_resolver alone (AIE-1318, US3.1).
+    """
+    assert isinstance(make(), IdentityResolver)
+
+
+def test_check_resolver_accepts_sync_resolver() -> None:
+    """check_resolver returns None for sync resolvers and never calls resolve
+    (AIE-1318, US3.1).
+    """
+    counting = _CountingSyncResolver()
+
+    assert check_resolver(counting) is None
+    assert check_resolver(SandboxResolver(_identity())) is None
+    assert counting.calls == 0
+
+
+@pytest.mark.parametrize("make", ASYNC_VARIANTS, ids=ASYNC_VARIANT_IDS)
+def test_check_resolver_rejects_each_async_variant(make: Callable[[], object]) -> None:
+    """check_resolver raises the exact TypeError for every detectable async
+    resolve variant (AIE-1318, US3.1).
+    """
+    with pytest.raises(TypeError) as excinfo:
+        check_resolver(make())
+
+    assert str(excinfo.value) == ASYNC_RESOLVE_MESSAGE
+
+
+def test_check_resolver_never_calls_resolve() -> None:
+    """A counting async resolve is rejected without being invoked
+    (AIE-1318, US3.1).
+    """
+    counting = _CountingAsyncResolver()
+
+    with pytest.raises(TypeError):
+        check_resolver(counting)
+
+    assert counting.calls == 0
+
+
+def test_check_resolver_returns_none_without_resolve_attribute() -> None:
+    """An object with no resolve attribute is left to other checks
+    (AIE-1318, US3.2).
+    """
+    assert check_resolver(_NoResolveMethod()) is None
+    assert check_resolver(object()) is None
+
+
+def test_check_resolver_returns_none_when_resolve_read_raises() -> None:
+    """A resolve read that raises Exception is left to call-time handling
+    (AIE-1318, US3.2).
+    """
+    assert check_resolver(_RaisingReadResolver()) is None
