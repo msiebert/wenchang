@@ -68,7 +68,7 @@
 <p><code>wenchang.mcp.build_server(...)</code> returns a new mcp 2.x <code>MCPServer</code> that carries the memory prompt as its <code>instructions</code>, the seven memory tools, and the prompt resource <code>wenchang://memory-prompt</code>. You run it with <code>server.run(...)</code>. <a href="quickstart.html">Quickstart</a> builds one end to end for Claude Code; this page covers every argument and both transports.</p>
 <div class="callout callout-warn"><strong>Compatibility: mcp 2.x <code>MCPServer</code> only.</strong> The <code>mcp</code> extra installs <code>mcp&gt;=2.2,&lt;3</code>, and the adapter targets <code>mcp.server.mcpserver.MCPServer</code>. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing <code>wenchang.mcp</code> raises <code>ImportError</code>, and <code>register_memory_tools</code> raises <code>TypeError("server must be an MCPServer, not ...")</code> for any other server type. For another framework, see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</div>
 
-<p>Install with the extra: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code>.</p>
+<p>Install with the extra: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>.</p>
 <h2 id="arguments">Arguments<a class="headerlink" href="#arguments" title="Link to this section">#</a></h2>
 <p>Every argument is keyword-only. <code>build_server</code> checks them all before it creates the server, and raises <code>TypeError</code> or <code>ValueError</code> for a bad one.</p>
 <div class="table-wrap"><table>
@@ -171,7 +171,7 @@
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.0.</p>
+<p>MIT licensed. Version 0.1.1.</p>
 <ul>
 <li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
 <li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>

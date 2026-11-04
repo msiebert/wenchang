@@ -551,7 +551,7 @@ JSONLD = {
     "codeRepository": REPO,
     "programmingLanguage": "Python",
     "license": "https://spdx.org/licenses/MIT.html",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "url": BASE,
     "author": {"@type": "Person", "name": "Mark Siebert"},
 }
@@ -673,7 +673,7 @@ def page_html(page: dict, body: str, tokens: list[dict]) -> str:
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.0.</p>
+<p>MIT licensed. Version 0.1.1.</p>
 <ul>
 <li><a href="{REPO}">GitHub repository</a></li>
 <li><a href="{REPO}/blob/main/LICENSE">License</a></li>
@@ -745,7 +745,7 @@ def page_404() -> str:
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.0.</p>
+<p>MIT licensed. Version 0.1.1.</p>
 <ul>
 <li><a href="{REPO}">GitHub repository</a></li>
 <li><a href="/wenchang/llms.txt">For agents: llms.txt</a></li>

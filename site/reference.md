@@ -1,6 +1,6 @@
 # Tool and error reference
 
-Version 0.1.0. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.schemas`, `wenchang.mcp`), the core store (`wenchang.core`), and storage (`wenchang.storage`). Paths, scopes, metadata, versions, and limits are explained in [Concepts](concepts.md). How to wire the tools in is under [Integrate](integrate.md), and how to run storage is in [Storage and operations](storage.md).
+Version 0.1.1. Everything here is taken from the source: the tool layer (`wenchang.tools`, `wenchang.schemas`, `wenchang.mcp`), the core store (`wenchang.core`), and storage (`wenchang.storage`). Paths, scopes, metadata, versions, and limits are explained in [Concepts](concepts.md). How to wire the tools in is under [Integrate](integrate.md), and how to run storage is in [Storage and operations](storage.md).
 
 ## Tools
 
@@ -295,7 +295,7 @@ An `on_call` observer receives a `wenchang.observer.ToolCallRecord` (re-exported
 
 ### Conformance suites
 
-`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"` adds `pytest` and two mixins in `wenchang.testing`:
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.1"` adds `pytest` and two mixins in `wenchang.testing`:
 
 - **`ResolverConformance[C]`** checks an `IdentityResolver`. Supply fixtures `resolver`, `valid_credentials`, `invalid_credentials` (call `pytest.skip` if your resolver accepts everything), `policy`, `expected_scopes`, and `known_roles`.
 - **`TransportConformance`** checks a `TransportClient`. Supply fixtures `client` (fresh and empty per test), `source`, `scope_map` (at least two writable scopes), `max_file_bytes` (at least 64), `index_max_bytes` (at least 1024), `scope_priority`, and `list_page_size`. Within one test the client's writes must stamp strictly increasing `last_updated` values. An optional `max_files_per_entity` fixture (default `None`) returns the client's store `max_files_per_entity` (at least 32 and at least `list_page_size + 2`) to run the file-cap case, which checks that a create at the cap raises `FileQuotaExceededError`; with `None` that case is skipped.

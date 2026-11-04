@@ -9,7 +9,7 @@
 > **Compatibility: mcp 2.x `MCPServer` only.** The `mcp` extra installs `mcp>=2.2,<3`, and the adapter targets `mcp.server.mcpserver.MCPServer`. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing `wenchang.mcp` raises `ImportError`, and `register_memory_tools` raises `TypeError("server must be an MCPServer, not ...")` for any other server type, before it registers anything. For another framework, see [Integrate without MCP](integrate-without-mcp.md).
 <!--/md-->
 
-Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"`.
+Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"`.
 
 ## Register the tools {#register}
 
