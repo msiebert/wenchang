@@ -741,7 +741,7 @@ planned piece.
   `wenchang.testing.transport_conformance`) is the same shape for a
   `TransportClient`: a non-generic pytest mixin, not `Test`-prefixed,
   subclassed as `class TestMyClient(TransportConformance)` with seven
-  required fixtures: `client` (a fresh `TransportClient` over an empty
+  required fixtures and one optional: `client` (a fresh `TransportClient` over an empty
   store, per test; checked by reading each of the seven method names, each
   of which must exist, be readable, and be callable, with a failure naming
   the method, and then by `isinstance(client, TransportClient)` run inside
@@ -755,17 +755,27 @@ planned piece.
   at least `MIN_INDEX_BYTES = 1024`), `list_page_size` (an exact positive
   `int`; `bool` rejected for all three), and `scope_priority` (an exact `tuple` of distinct
   exact-`str` valid segments, even though `MemoryStore` accepts any
-  `Sequence`). Fixtures are validated in that fixed order, so the first bad
-  one is reported, with key phrase `fixture <name>`;
-  `test_client_satisfies_protocol` takes all seven and validates them all,
-  so every fixture is required from the first run even though only later
-  cases use the last three. The fixture contract also requires that every
+  `Sequence`). The optional eighth, `max_files_per_entity`, defaults to
+  `None` through an underscore-named base method registered with
+  `@pytest.fixture(name="max_files_per_entity")`, so a subclass override
+  replaces it; set to the store's cap, it enables the file-cap case. A
+  non-`None` value must be an exact `int` (`bool` rejected) of at least
+  `MIN_FILES_PER_ENTITY = 32`, and of at least `list_page_size + 2` (the
+  pagination cases put `list_page_size + 1` files plus the sentinel under
+  one entity), so the floor is `max(32, list_page_size + 2)`. Fixtures are
+  validated in that fixed order, `max_files_per_entity` last, so the first
+  bad one is reported, with key phrase `fixture <name>`;
+  `test_client_satisfies_protocol` takes all eight and validates them all,
+  so every required fixture is checked from the first run even though only
+  later cases use the last three; the optional fixture is the one departure
+  from that rule, because requiring it would break existing subclasses
+  ([ADR 0045](docs/adr/0045-conformance-file-cap-case.md)). The fixture contract also requires that every
   mapped scope be writable through `client` under the credentials it was
   constructed with, and that a client's writes stamp strictly increasing
   `last_updated` within one test (the repo's reference run uses a ticking
   clock). Cases call the client sequentially; concurrency is modeled as
   sequential interleavings on one client, so no thread safety is required.
-  Five baseline methods ship: `test_client_satisfies_protocol` (all seven
+  Five baseline methods ship: `test_client_satisfies_protocol` (all eight
   fixtures, including the client's method and protocol checks),
   `test_write_then_read_round_trips` (content and all four metadata fields;
   `source` must be unioned into `sources`),
@@ -773,7 +783,7 @@ planned piece.
   by `write_file`, and one from a write by `append_line`),
   `test_read_absent_is_not_found`, and `test_oversize_write_is_rejected`
   (`OversizeWriteError` with `size` and `limit`, then the path still reads
-  as absent). On top of these, 43 case methods cover all nine §10.2
+  as absent). On top of these, 44 case methods cover all nine §10.2
   groups, one method per assertion, each self-contained (own writes, own
   probe paths): round-trip fidelity (unicode, fact-like markdown, no
   trailing newline, empty content, empty aliases with many sources, a
@@ -797,7 +807,13 @@ planned piece.
   prefix, malformed and foreign cursors), and error parity (invalid path
   and absent file for every operation, empty `source` per method, full
   `str(exc)` equal to a locally built core error and ending with the
-  category guidance, `get_memory_index` argument errors). Six more cases
+  category guidance, `get_memory_index` argument errors, and
+  `test_create_at_file_cap_is_quota_exceeded`: it fills the second sorted
+  scope's entity to `max_files_per_entity` and asserts the next create
+  raises `FileQuotaExceededError` with core's exact type, category,
+  message, `path`, and `limit` and stores nothing; it skips, before any
+  store call, when the fixture is `None`, and a quota error during the
+  fill fails with a hint to check the fixture). Six more cases
   cover `append_line`/`replace_fact`'s optional `aliases` and
   `description`: the alias union and description replacement, in both the
   returned file and a read-back, for each method; omitted and explicit-`None`

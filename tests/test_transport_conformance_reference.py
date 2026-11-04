@@ -22,6 +22,7 @@ MAX_FILE_BYTES = 256
 INDEX_MAX_BYTES = 4096
 SCOPE_PRIORITY = ("user", "org")
 LIST_PAGE_SIZE = 2
+MAX_FILES_PER_ENTITY = 32
 
 BASELINE_CASES = frozenset(
     {
@@ -93,6 +94,7 @@ ERROR_PARITY_CASES = frozenset(
         "test_empty_source_is_value_error",
         "test_error_messages_carry_category_guidance",
         "test_get_memory_index_argument_errors_match_core",
+        "test_create_at_file_cap_is_quota_exceeded",
     }
 )
 
@@ -122,7 +124,7 @@ class _Ticking:
 class TestInProcessClient(TransportConformance):
     """InProcessClient over a fresh MemoryStore passes every suite case, none skipped.
 
-    AIE-1047, US1.1, US3.1-US3.5; AIE-1045, US1-US10, US11.1.
+    AIE-1047, US1.1, US3.1-US3.5; AIE-1045, US1-US10, US11.1; AIE-1322, US4.1.
     """
 
     @pytest.fixture
@@ -135,6 +137,7 @@ class TestInProcessClient(TransportConformance):
                 index_max_bytes=INDEX_MAX_BYTES,
                 scope_priority=SCOPE_PRIORITY,
                 list_page_size=LIST_PAGE_SIZE,
+                max_files_per_entity=MAX_FILES_PER_ENTITY,
             )
         )
 
@@ -162,6 +165,10 @@ class TestInProcessClient(TransportConformance):
     def list_page_size(self) -> int:
         return LIST_PAGE_SIZE
 
+    @pytest.fixture
+    def max_files_per_entity(self) -> int:
+        return MAX_FILES_PER_ENTITY
+
 
 def test_ticking_clock_strictly_increases() -> None:
     """The reference clock stamps strictly increasing aware datetimes (AIE-1047, US1.1)."""
@@ -178,7 +185,7 @@ def test_suite_public_methods_are_exactly_the_listed_cases() -> None:
     AIE-1047, US5.3; AIE-1045, US11.1 (adds the round-trip, atomicity, token,
     conflict, replace-fact, append, enforcement, index, listing, and US10
     error-parity cases); AIE-1151, US6.7 (adds the aliases and description
-    cases).
+    cases); AIE-1322, US4.2 (adds the file-cap case).
     """
     public = {
         name

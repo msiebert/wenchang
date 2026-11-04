@@ -180,6 +180,8 @@ existing module changes.
    `__class__` raises fails `fixture client` rather than erroring. So
    every fixture is required and checked from the first run, even though only AIE-1045's cases use `index_max_bytes`,
    `scope_priority`, and `list_page_size`.
+   *Amended by [ADR 0045](0045-conformance-file-cap-case.md): an optional
+   eighth fixture, `max_files_per_entity`, is not required.*
    - **Rejected: validating lazily in the cases that use each fixture**,
      which would let an adopter omit fixtures until the exhaustive cases
      land and then break.
