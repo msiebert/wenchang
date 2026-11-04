@@ -28,7 +28,7 @@ from typing import Concatenate, Final, NoReturn, ParamSpec, TypeVar, cast
 from wenchang.core import CappedPrefix, FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import ErrorCategory, InvalidArgumentError, WenchangError
 from wenchang.file_format import FileMetadata, MetadataFormatError, parse_fact
-from wenchang.identity import Identity, IdentityResolver, resolve_identity
+from wenchang.identity import Identity, IdentityResolver, check_resolver, resolve_identity
 from wenchang.observer import ToolCallObserver, check_observer, notify_observer
 from wenchang.paths import build_path, build_prefix, is_valid_segment, parse_path
 from wenchang.scope import ScopePolicy, check_write
@@ -628,9 +628,10 @@ def bind_tools(
 ) -> MemoryTools:
     """Resolve the caller's identity and return the session's tools.
 
-    on_call is checked before the resolver runs.
+    on_call and the resolver are checked before the resolver runs.
     """
     check_observer(on_call)
+    check_resolver(resolver)
     return MemoryTools(
         client,
         resolve_identity(resolver, credentials),

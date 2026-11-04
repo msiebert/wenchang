@@ -29,7 +29,7 @@ If you have already resolved the identity yourself, `MemoryTools(client, identit
 
 The store, the client, the resolver, and the policy are built once per process and shared; [Threads](#threads) lists what is safe to share.
 
-If the resolver returns a `ResolutionFailure` or raises, or `resolve` is `async`, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
+If the resolver returns a `ResolutionFailure` or raises, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request. If `resolve` is `async`, `bind_tools` raises `TypeError` before it runs the resolver.
 
 The multi-tenant resolver on [Identity](identity.md#example) works here unchanged. Build its `Credentials` from your request and pass them to `bind_tools`; [The same resolver without MCP](identity.md#direct) shows the call.
 
@@ -95,7 +95,7 @@ The index cache's generation tokens already handle readers and writers racing on
 
 ### Async hosts {#async}
 
-An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`. Call `bind_tools` in a worker thread too, `tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")`, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an `async def resolve` is never awaited, and `bind_tools` raises `ResolverFailureError` ([Identity](identity.md#contract)).
+An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`. Call `bind_tools` in a worker thread too, `tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")`, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; `bind_tools` raises `TypeError` for an `async def resolve` ([Identity](identity.md#contract)).
 
 ## Observing calls {#on-call}
 

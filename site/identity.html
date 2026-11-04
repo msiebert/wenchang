@@ -134,7 +134,7 @@ ScopePolicy                            may this role write this scope?
 <p>Three pieces plug in.</p>
 <ol>
 <li><strong><code>credentials_from_context(ctx)</code></strong> reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, <code>ctx.headers</code> holds the request headers. On stdio it is <code>None</code>, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to <code>bind_tools</code> yourself.</li>
-<li><strong>A resolver</strong> with one method, <code>resolve(credentials) -&gt; Identity | ResolutionFailure</code>. It verifies the credentials and returns an <code>Identity</code>: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Roles are your own words (<code>owner</code>, <code>member</code>, <code>admin</code>). <code>resolve</code> must be a plain synchronous method. wenchang never awaits it, so an <code>async def resolve</code> returns a coroutine, and every call fails with <code>ResolverFailureError</code> ("Resolver ... returned coroutine, not Identity or ResolutionFailure.") on every integration path.</li>
+<li><strong>A resolver</strong> with one method, <code>resolve(credentials) -&gt; Identity | ResolutionFailure</code>. It verifies the credentials and returns an <code>Identity</code>: a mapping from scope name to <code>ScopeGrant(entity_id, role)</code>. Roles are your own words (<code>owner</code>, <code>member</code>, <code>admin</code>). <code>resolve</code> must be a plain synchronous method. wenchang never awaits it, so a detectably async <code>resolve</code> (such as <code>async def</code>) is rejected with <code>TypeError("resolver.resolve must be a plain method, not async")</code> when you call <code>register_memory_tools</code>, <code>build_server</code>, or <code>bind_tools</code>. A sync <code>def</code> that returns a coroutine is not detected, and every call fails with <code>ResolverFailureError</code>.</li>
 <li><strong>A <code>ScopePolicy</code></strong> mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The <code>system/</code> area is read-only in every scope regardless.</li>
 </ol>
 <p>Under MCP, every tool call runs all three. Without MCP, the resolver runs once per <code>bind_tools</code> call, which is why you <a href="integrate-without-mcp.html#per-request">bind per request</a>. The agent never sees credentials and never passes an entity ID. It passes <code>scope</code>, <code>area</code>, and <code>name</code>, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.</p>
@@ -312,8 +312,12 @@ ScopePolicy                            may this role write this scope?
 <td>Permanent error carrying your detail. No memory for that call.</td>
 </tr>
 <tr>
-<td>Resolver raises, or <code>resolve</code> is <code>async</code></td>
+<td>Resolver raises, or a sync <code>resolve</code> returns a coroutine</td>
 <td><code>ResolverFailureError</code> naming the exception type, or saying it returned a coroutine.</td>
+</tr>
+<tr>
+<td><code>resolve</code> is <code>async</code></td>
+<td><code>TypeError</code> at <code>register_memory_tools</code>, <code>build_server</code>, or <code>bind_tools</code>, before any call.</td>
 </tr>
 <tr>
 <td><code>credentials_from_context</code> raises</td>

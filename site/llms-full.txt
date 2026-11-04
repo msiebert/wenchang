@@ -534,7 +534,7 @@ Every argument is keyword-only. `build_server` checks them all before it creates
 | --- | --- | --- |
 | `slots` | yes | A `PromptSlots`. The server's `instructions` are `build_memory_prompt(slots)`. See [Customizing the prompts](prompts.md). |
 | `client` | yes | A `TransportClient`, normally `InProcessClient(MemoryStore(...))`. Tool calls run concurrently on worker threads and share it. See [Threads](integrate-without-mcp.md#threads) for what is safe to share. |
-| `resolver` | yes | Your `IdentityResolver`. On this path it runs on every tool call. Its `resolve` must be a plain synchronous method. See [Identity](identity.md). |
+| `resolver` | yes | Your `IdentityResolver`. On this path it runs on every tool call. Its `resolve` must be a plain synchronous method; an `async` one raises `TypeError` at registration. See [Identity](identity.md). |
 | `policy` | yes | A `ScopePolicy`: the roles that may write each scope. |
 | `credentials_from_context` | yes | A plain (non-async) function that takes the MCP request `Context` and returns the raw credentials your resolver verifies. See [Credentials](#credentials). |
 | `source` | yes | The surface name added to each written file's `sources` metadata. Non-empty. |
@@ -705,7 +705,7 @@ If you have already resolved the identity yourself, `MemoryTools(client, identit
 
 The store, the client, the resolver, and the policy are built once per process and shared; [Threads](#threads) lists what is safe to share.
 
-If the resolver returns a `ResolutionFailure` or raises, or `resolve` is `async`, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
+If the resolver returns a `ResolutionFailure` or raises, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request. If `resolve` is `async`, `bind_tools` raises `TypeError` before it runs the resolver.
 
 The multi-tenant resolver on [Identity](identity.md#example) works here unchanged. Build its `Credentials` from your request and pass them to `bind_tools`; [The same resolver without MCP](identity.md#direct) shows the call.
 
@@ -924,7 +924,7 @@ The index cache's generation tokens already handle readers and writers racing on
 
 ### Async hosts
 
-An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`. Call `bind_tools` in a worker thread too, `tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")`, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; an `async def resolve` is never awaited, and `bind_tools` raises `ResolverFailureError` ([Identity](identity.md#contract)).
+An async host must not call wenchang on its event loop. Run each tool call in a worker thread, for example `await asyncio.to_thread(method, **arguments)`. Call `bind_tools` in a worker thread too, `tools = await asyncio.to_thread(bind_tools, client, resolver, credentials, policy, source="inkwell-api")`, because it runs your resolver, which blocks on whatever verification it does. The resolver itself must be a plain synchronous method; `bind_tools` raises `TypeError` for an `async def resolve` ([Identity](identity.md#contract)).
 
 ## Observing calls
 
@@ -1042,7 +1042,7 @@ The agent passes only `scope`, `area`, and `name`. The entity ID always comes fr
 Three pieces plug in.
 
 1. **`credentials_from_context(ctx)`** reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, `ctx.headers` holds the request headers. On stdio it is `None`, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to `bind_tools` yourself.
-2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`). `resolve` must be a plain synchronous method. wenchang never awaits it, so an `async def resolve` returns a coroutine, and every call fails with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure.") on every integration path.
+2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`). `resolve` must be a plain synchronous method. wenchang never awaits it, so a detectably async `resolve` (such as `async def`) is rejected with `TypeError("resolver.resolve must be a plain method, not async")` when you call `register_memory_tools`, `build_server`, or `bind_tools`. A sync `def` that returns a coroutine is not detected, and every call fails with `ResolverFailureError`.
 3. **A `ScopePolicy`** mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The `system/` area is read-only in every scope regardless.
 
 Under MCP, every tool call runs all three. Without MCP, the resolver runs once per `bind_tools` call, which is why you [bind per request](integrate-without-mcp.md#per-request). The agent never sees credentials and never passes an entity ID. It passes `scope`, `area`, and `name`, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.
@@ -1218,7 +1218,8 @@ tools = bind_tools(
 | Situation | Result |
 | --- | --- |
 | Resolver returns `ResolutionFailure` | Permanent error carrying your detail. No memory for that call. |
-| Resolver raises, or `resolve` is `async` | `ResolverFailureError` naming the exception type, or saying it returned a coroutine. |
+| Resolver raises, or a sync `resolve` returns a coroutine | `ResolverFailureError` naming the exception type, or saying it returned a coroutine. |
+| `resolve` is `async` | `TypeError` at `register_memory_tools`, `build_server`, or `bind_tools`, before any call. |
 | `credentials_from_context` raises | `ResolverFailureError`: "Credentials could not be read from the request." |
 | Agent names a scope the caller has no grant for | `InvalidArgumentError` listing the scopes that are available. |
 | Tianlong (a `member`) writes `organization` | `RestrictedScopeError`, reason `role_required`, with the permitted roles. |
@@ -2202,7 +2203,7 @@ Notes:
 
 `wenchang.identity.Identity(grants)` is what a resolver returns: a mapping from scope name to `ScopeGrant(entity_id, role)`. Scope names and entity IDs must be valid path segments (non-empty, no `/`, no backslash, no control characters, not `.` or `..`). The role must be non-empty. `identity.scope_map` is scope name to entity ID. `identity.entity_id(scope)` and `identity.role(scope)` raise `KeyError` if the scope is not granted.
 
-`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited, so an `async def resolve` makes every call fail with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure."), over MCP and with `bind_tools` alike. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
+`IdentityResolver[C]` is a protocol with one method, `resolve(credentials: C) -> Identity | ResolutionFailure`. It must not raise, and the `detail` of a `ResolutionFailure` is shown to the agent. `resolve` must be a plain synchronous method: it is never awaited. If it is detectably async (an `async def`, an async generator function, an async `staticmethod`, a `functools.partial` of an async function, or a callable object with `async def __call__`), `register_memory_tools`, `build_server`, and `bind_tools` raise `TypeError("resolver.resolve must be a plain method, not async")`. The first two raise at registration, before anything is registered; `bind_tools` raises before the resolver runs. A sync `def` that returns a coroutine is not detected, and every call fails with `ResolverFailureError`. It runs on every tool call over MCP, and once per `bind_tools` call without MCP. `SandboxResolver(identity)` returns one fixed identity for any credentials, for sandboxes and tests.
 
 `wenchang.scope.ScopePolicy(write_roles)` maps a scope to the `frozenset` of roles allowed to write it. A scope absent from the mapping is unrestricted. `policy.permitted_roles(scope)` returns the set or `None`.
 

@@ -4,6 +4,8 @@ Scope names and entity IDs follow the path segment rule, so an Identity can
 never produce a traversal or malformed memory path.
 """
 
+import functools
+import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -108,17 +110,40 @@ _C_contra = TypeVar("_C_contra", contravariant=True)
 class IdentityResolver(Protocol[_C_contra]):
     """Turns caller credentials into an Identity. Injected by the adopter.
 
-    isinstance checks only that a resolve attribute exists.
+    isinstance checks only that a resolve attribute exists. resolve is a plain,
+    non-async method; check_resolver rejects async ones.
     """
 
     def resolve(self, credentials: _C_contra) -> Identity | ResolutionFailure:
         """Resolve `credentials`.
 
-        Must not raise: report bad or unverifiable credentials as a
-        ResolutionFailure. Identical credentials must give an equal result
-        within a session.
+        A plain method, not async. Must not raise: report bad or
+        unverifiable credentials as a ResolutionFailure. Identical
+        credentials must give an equal result within a session.
         """
         ...
+
+
+def _is_async(fn: object) -> bool:
+    while isinstance(fn, functools.partial):
+        fn = fn.func  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    if inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn):
+        return True
+    if not callable(fn) or inspect.isfunction(fn) or inspect.ismethod(fn):
+        return False
+    call = getattr(type(fn), "__call__", None)  # noqa: B004
+    return inspect.iscoroutinefunction(call) or inspect.isasyncgenfunction(call)
+
+
+def check_resolver(resolver: object) -> None:
+    """Raise TypeError if resolver.resolve is async. Never calls resolve."""
+    try:
+        resolve = getattr(resolver, "resolve")  # noqa: B009
+        is_async = _is_async(resolve)
+    except Exception:
+        return
+    if is_async:
+        raise TypeError("resolver.resolve must be a plain method, not async")
 
 
 def _type_name(t: type) -> str:

@@ -36,7 +36,7 @@ except ImportError as exc:
 import wenchang
 from wenchang.core import ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import ResolverFailureError
-from wenchang.identity import Identity, IdentityResolver
+from wenchang.identity import Identity, IdentityResolver, check_resolver
 from wenchang.observer import ToolCallObserver, ToolCallRecord, check_observer, notify_observer
 from wenchang.prompts import PromptSlots, build_memory_prompt
 from wenchang.scope import ScopePolicy
@@ -106,6 +106,7 @@ def _validate(
     MemoryTools(client, Identity({}), policy, source=source, product=product)
     if not isinstance(cast(object, resolver), IdentityResolver):
         raise TypeError("resolver must satisfy IdentityResolver")
+    check_resolver(resolver)
     if not callable(cast(object, credentials_from_context)):
         raise TypeError("credentials_from_context must be callable")
     # Tools run on worker threads and call these synchronously.
@@ -154,7 +155,8 @@ def register_memory_tools(
     MemoryTools. Tool calls run concurrently on worker threads, so client
     must be thread-safe, and on_call, if given, runs on those threads after
     each call and must be thread-safe and fast. Raises before registering
-    anything if an argument is invalid or a name is already registered.
+    anything if an argument is invalid (including an async resolver.resolve)
+    or a name is already registered.
     """
     if not issubclass(type(cast(object, server)), MCPServer):
         raise TypeError(f"server must be an MCPServer, not {_type_name(type(server))}")
@@ -415,7 +417,8 @@ def build_server(
 ) -> MCPServer:
     """Return an MCPServer with the memory prompt as instructions and the memory tools.
 
-    See register_memory_tools for the arguments and the threading contract;
+    See register_memory_tools for the arguments, validation (including the
+    async-resolve rejection), and the threading contract;
     serve it over stdio with server.run("stdio").
     """
     _validate(
