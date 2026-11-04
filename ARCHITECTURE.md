@@ -57,7 +57,14 @@ planned piece.
   for a rejected agent-supplied argument. `argument` names it (a non-`str`
   raises `TypeError`, an empty one `ValueError`; a `str` subclass is stored
   as an exact `str`), and `detail` is the composed sentence `Argument
-  {argument} is invalid: {detail}`.
+  {argument} is invalid: {detail}`, or `Argument {argument} is invalid` when
+  the detail is blank.
+  `message` (and `str(err)`) is the detail ended as a sentence, a space, then
+  the category guidance. Ending a sentence strips trailing `str.rstrip()`
+  whitespace and appends `.` unless the last character is `.`, `!`, or `?`;
+  an empty detail gives the guidance alone. The optional caller detail of
+  `ResolverFailureError` and `BackendUnavailableError` is ended the same way
+  before their fixed text. `.detail` stays unterminated.
   `RestrictedScopeError(path, scope, reason, required_roles: frozenset[str]
   | None = None)` exposes all four as attributes. `required_roles` is the
   set of roles permitted to write the scope. It is checked in this order: a
@@ -1025,7 +1032,10 @@ planned piece.
   product, only the first line changes: it comes from a fixed per-tool
   template that is the docstring's first line with the product inserted
   (plus "memory" for `list_prefix`), e.g. "Add one fact line to the end of
-  an existing Mixpanel memory file."; the remaining lines are the
+  an existing Mixpanel memory file."; four templates (`list_prefix`,
+  `write_file`, `replace_fact`, `delete_file`) also change the docstring's
+  "a" before the product to "one" so no article precedes the product, e.g.
+  "Delete one Mixpanel memory file."; the remaining lines are the
   docstring's. No tool method takes `product`, and the docstrings are
   static (see [ADR 0026](docs/adr/0026-product-identity.md)).
   Tools are scope-relative: `read_file(scope, area, name)`,
