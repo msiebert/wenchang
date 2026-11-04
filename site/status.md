@@ -36,7 +36,7 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 - **Behavior depends on the agent.** Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.
 - **Concurrency is the caller's concern.** MCP tool calls run concurrently on worker threads and share one client. One `GcsStorage` and its `storage.Client` are safe to share across threads; see [Threads](integrate-without-mcp.md#threads) for caveats. Direct calls are synchronous and block on storage.
 - **The file cap is soft.** Concurrent creates in one entity can pass `max_files_per_entity`; see [Files per entity](storage.md#file-cap).
-- **No timeout or retry settings.** `GcsStorage` uses google-cloud-storage's defaults. A GCS outage that outlasts its retries raises an unmapped `RetryError`, which the agent sees as an `internal` error, not a `transient` one; see [Timeouts and retries](storage.md#retries).
+- **No timeout or retry settings.** `GcsStorage` uses google-cloud-storage's defaults. See [Timeouts and retries](storage.md#retries).
 
 ---
 

@@ -629,7 +629,7 @@
 </tbody>
 </table></div>
 <h3 id="invalid-argument">InvalidArgumentError<a class="headerlink" href="#invalid-argument" title="Link to this section">#</a></h3>
-<p><code>wenchang.errors.InvalidArgumentError(argument, detail)</code> names the rejected argument. <code>argument</code> must be a non-empty <code>str</code> (<code>TypeError</code> or <code>ValueError</code> otherwise). The message is <code>Argument {argument} is invalid: {detail}</code>, followed by the recoverable guidance. It renders as <code>error</code>, <code>category</code> (<code>recoverable</code>), <code>message</code>, and <code>argument</code>, with no location fields:</p>
+<p><code>wenchang.errors.InvalidArgumentError(argument, detail)</code> names the rejected argument. <code>argument</code> must be a non-empty <code>str</code> (<code>TypeError</code> or <code>ValueError</code> otherwise). The message is <code>Argument {argument} is invalid: {detail}</code> (<code>Argument {argument} is invalid</code> when <code>detail</code> is blank), ended with a period unless it already ends in <code>.</code>, <code>!</code>, or <code>?</code>, followed by the recoverable guidance. It renders as <code>error</code>, <code>category</code> (<code>recoverable</code>), <code>message</code>, and <code>argument</code>, with no location fields:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"InvalidArgumentError"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"recoverable"</span><span class="p">,</span>

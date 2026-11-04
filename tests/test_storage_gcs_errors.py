@@ -15,12 +15,17 @@ from google.api_core.exceptions import (
     DeadlineExceeded,
     Forbidden,
     GatewayTimeout,
+    GoogleAPICallError,
     InternalServerError,
+    MethodNotImplemented,
     NotFound,
     PreconditionFailed,
+    RetryError,
     ServiceUnavailable,
     TooManyRequests,
+    from_http_status,  # pyright: ignore[reportUnknownVariableType]
 )
+from google.api_core.retry import Retry, if_exception_type
 from google.cloud.storage import Bucket  # pyright: ignore[reportMissingTypeStubs]
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ReadTimeout
@@ -36,7 +41,21 @@ TIMEOUT_EXCEPTIONS: list[Exception] = [
     DeadlineExceeded("timed out"),
     GatewayTimeout("gateway timeout"),
     ReadTimeout("read timeout"),
+    RetryError("Timeout of 120.0s exceeded", ServiceUnavailable("x")),
+    RetryError("Unknown error", None),
+    from_http_status(408, "request timeout"),
 ]
+
+
+def _exc_id(exc: Exception) -> str:
+    """Parametrize id that stays unique across the two RetryError entries."""
+    if isinstance(exc, RetryError):
+        cause = cast(object, exc.cause)
+        return f"RetryError-{type(cause).__name__}"
+    if isinstance(exc, GoogleAPICallError) and exc.code is not None:
+        return f"{type(exc).__name__}-{exc.code}"
+    return type(exc).__name__
+
 
 UNAVAILABLE_EXCEPTIONS: list[Exception] = [
     ServiceUnavailable("unavailable"),
@@ -115,7 +134,7 @@ def _make_storage(bucket: "_StubBucket | _StubBucketForList") -> Storage:
     return GcsStorage(cast(Bucket, bucket))
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_get_blob_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -127,6 +146,7 @@ def test_get_blob_timeout_exceptions_map_to_backend_unavailable_timeout(
     with pytest.raises(BackendUnavailableError) as excinfo:
         storage.get("k")
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -143,7 +163,7 @@ def test_get_blob_unavailable_exceptions_map_to_backend_unavailable_unavailable(
     assert excinfo.value.reason is TransientReason.UNAVAILABLE
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_download_as_bytes_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -156,6 +176,7 @@ def test_download_as_bytes_timeout_exceptions_map_to_backend_unavailable_timeout
     with pytest.raises(BackendUnavailableError) as excinfo:
         storage.get("k")
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -184,7 +205,7 @@ class _RaisingOnUploadBlob(_StubBlob):
         raise self._upload_raises
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_upload_from_string_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -197,6 +218,7 @@ def test_upload_from_string_timeout_exceptions_map_to_backend_unavailable_timeou
     with pytest.raises(BackendUnavailableError) as excinfo:
         storage.put("k", b"data", {})
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -412,7 +434,7 @@ def test_put_if_version_upload_precondition_failed_raises_precondition_failed_er
     assert excinfo.value.key == "k"
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_put_if_version_upload_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -428,6 +450,7 @@ def test_put_if_version_upload_timeout_exceptions_map_to_backend_unavailable_tim
         storage.put_if_version("k", b"payload", {}, None)
 
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -557,7 +580,7 @@ def test_delete_if_version_not_found_raises_precondition_failed_error() -> None:
     assert excinfo.value.key == "k"
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_delete_if_version_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -573,6 +596,7 @@ def test_delete_if_version_timeout_exceptions_map_to_backend_unavailable_timeout
         storage.delete_if_version("k", VersionToken("1"))
 
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -668,7 +692,7 @@ class _StubBucketForList:
         return _iterator()
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_list_blobs_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -680,6 +704,7 @@ def test_list_blobs_timeout_exceptions_map_to_backend_unavailable_timeout(
     with pytest.raises(BackendUnavailableError) as excinfo:
         storage.list_page("prefix/", None, 10)
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -706,7 +731,7 @@ def test_list_blobs_unmapped_exception_propagates_unchanged() -> None:
         storage.list_page("prefix/", None, 10)
 
 
-@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=lambda e: type(e).__name__)
+@pytest.mark.parametrize("exc", TIMEOUT_EXCEPTIONS, ids=_exc_id)
 def test_list_blobs_mid_iteration_timeout_exceptions_map_to_backend_unavailable_timeout(
     exc: Exception,
 ) -> None:
@@ -719,6 +744,7 @@ def test_list_blobs_mid_iteration_timeout_exceptions_map_to_backend_unavailable_
     with pytest.raises(BackendUnavailableError) as excinfo:
         storage.list_page("prefix/", None, 10)
     assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert excinfo.value.__cause__ is exc
 
 
 @pytest.mark.parametrize("exc", UNAVAILABLE_EXCEPTIONS, ids=lambda e: type(e).__name__)
@@ -834,3 +860,110 @@ def test_no_module_outside_storage_gcs_imports_google_cloud() -> None:
                     offenders.append(f"{path}: from {node.module} import ...")
 
     assert offenders == []
+
+
+def _always_raise_503() -> None:
+    raise ServiceUnavailable("unavailable")
+
+
+def _exhaust_retry() -> None:
+    """Run a real api_core Retry against an always-503 function until it gives up."""
+    retry = Retry(
+        predicate=if_exception_type(ServiceUnavailable),
+        initial=0.001,
+        maximum=0.002,
+        timeout=0.05,
+    )
+    retry(_always_raise_503)()
+
+
+class _RetryExhaustingBucket(_StubBucket):
+    def get_blob(self, key: str) -> _StubBlob | None:
+        _exhaust_retry()
+        return None
+
+
+class _RetryExhaustingUploadBlob(_StubBlobForPutIfVersion):
+    def upload_from_string(
+        self, data: bytes, *, content_type: str, if_generation_match: int | None = None
+    ) -> None:
+        _exhaust_retry()
+
+
+def test_get_retry_exhaustion_maps_to_backend_unavailable_timeout() -> None:
+    """A real api_core Retry exhausting inside get_blob() surfaces as
+    BackendUnavailableError(TIMEOUT) chained from the RetryError (AIE-1317, AC3).
+    """
+    storage = _make_storage(_RetryExhaustingBucket())
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.get("k")
+    assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert isinstance(excinfo.value.__cause__, RetryError)
+
+
+def test_put_if_version_retry_exhaustion_maps_to_backend_unavailable_timeout() -> None:
+    """A real api_core Retry exhausting inside upload_from_string() during
+    put_if_version() surfaces as BackendUnavailableError(TIMEOUT) chained from
+    the RetryError (AIE-1317, AC3).
+    """
+    blob = _RetryExhaustingUploadBlob(generation=1)
+    bucket = _StubBucket(blob_for_put=blob)
+    storage = _make_storage(bucket)
+    with pytest.raises(BackendUnavailableError) as excinfo:
+        storage.put_if_version("k", b"payload", {}, None)
+    assert excinfo.value.reason is TransientReason.TIMEOUT
+    assert isinstance(excinfo.value.__cause__, RetryError)
+
+
+def _bare_api_call_error(code: int | None) -> GoogleAPICallError:
+    exc = GoogleAPICallError("bare error")
+    exc.code = code
+    return exc
+
+
+def test_method_not_implemented_from_get_blob_propagates_unchanged() -> None:
+    """MethodNotImplemented (501) raised from get_blob() propagates unchanged
+    (AIE-1317, AC4).
+    """
+    exc = MethodNotImplemented("not implemented")
+    storage = _make_storage(_StubBucket(get_blob_raises=exc))
+    with pytest.raises(MethodNotImplemented) as excinfo:
+        storage.get("k")
+    assert excinfo.value is exc
+
+
+def test_method_not_implemented_from_upload_propagates_unchanged() -> None:
+    """MethodNotImplemented (501) raised from upload_from_string() during
+    put_if_version() propagates unchanged (AIE-1317, AC4).
+    """
+    exc = MethodNotImplemented("not implemented")
+    blob = _StubBlobForPutIfVersion(generation=1, upload_raises=exc)
+    storage = _make_storage(_StubBucket(blob_for_put=blob))
+    with pytest.raises(MethodNotImplemented) as excinfo:
+        storage.put_if_version("k", b"payload", {}, None)
+    assert excinfo.value is exc
+
+
+@pytest.mark.parametrize("code", [404, None], ids=["code-404", "code-none"])
+def test_bare_api_call_error_from_get_blob_propagates_unchanged(code: int | None) -> None:
+    """A bare GoogleAPICallError with code 404 or None raised from get_blob()
+    propagates unchanged; the mapping is not broadened (AIE-1317, AC4).
+    """
+    exc = _bare_api_call_error(code)
+    storage = _make_storage(_StubBucket(get_blob_raises=exc))
+    with pytest.raises(GoogleAPICallError) as excinfo:
+        storage.get("k")
+    assert excinfo.value is exc
+
+
+@pytest.mark.parametrize("code", [404, None], ids=["code-404", "code-none"])
+def test_bare_api_call_error_from_upload_propagates_unchanged(code: int | None) -> None:
+    """A bare GoogleAPICallError with code 404 or None raised from
+    upload_from_string() during put() propagates unchanged (AIE-1317, AC4).
+    """
+    exc = _bare_api_call_error(code)
+    blob = _RaisingOnUploadBlob(generation=1, upload_raises=exc)
+    storage = _make_storage(_StubBucket(blob_for_put=blob))
+    with pytest.raises(GoogleAPICallError) as excinfo:
+        storage.put("k", b"data", {})
+    assert excinfo.value is exc

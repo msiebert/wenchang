@@ -149,7 +149,8 @@ def resolve_identity(resolver: IdentityResolver[_C_contra], credentials: _C_cont
         return cast(Identity, result)
     if issubclass(result_type, ResolutionFailure):
         try:
-            error = ResolverFailureError(cast(ResolutionFailure, result).detail)
+            # Formatting here surfaces a detail whose __format__ raises.
+            error = ResolverFailureError(f"{cast(ResolutionFailure, result).detail}")
         except Exception:
             error = ResolverFailureError(f"Resolver {name} returned an invalid ResolutionFailure.")
         raise error from None

@@ -6,6 +6,12 @@ the policy in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Error messages end the detail as a sentence before the guidance, so an
+  unpunctuated detail (such as an adopter's `ResolutionFailure` detail or a
+  rejected argument's detail) no longer runs into the next sentence.
+
 ## [0.1.0] - 2026-10-30
 
 First tagged release.

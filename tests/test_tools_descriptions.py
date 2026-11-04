@@ -361,14 +361,25 @@ PINNED_FIRST_LINES = {
     ),
     "read_file": "Read one Mixpanel memory file: its content, metadata, and version.",
     "list_prefix": (
-        "List the files in a Mixpanel memory scope or area, one page at a time, without content."
+        "List the files in one Mixpanel memory scope or area, one page at a time, without content."
     ),
-    "write_file": "Create a Mixpanel memory file or replace one whole.",
+    "write_file": "Create one Mixpanel memory file or replace one whole.",
     "append_line": "Add one fact line to the end of an existing Mixpanel memory file.",
-    "replace_fact": "Change one fact in a Mixpanel memory file by quoting the text to replace.",
-    "delete_file": "Delete a Mixpanel memory file.",
+    "replace_fact": "Change one fact in one Mixpanel memory file by quoting the text to replace.",
+    "delete_file": "Delete one Mixpanel memory file.",
 }
-FIDELITY_PRODUCTS = ("Mixpanel", "Acme Analytics")
+FIDELITY_PRODUCTS = ("Mixpanel", "Acme Analytics", "Inkwell")
+ARTICLE_PRODUCTS = ("Inkwell", "Uber", "Hour", "MCP", "Mixpanel", "Acme Analytics", "C++")
+INKWELL_FIRST_LINES = {
+    "list_prefix": (
+        "List the files in one Inkwell memory scope or area, one page at a time, without content."
+    ),
+    "write_file": "Create one Inkwell memory file or replace one whole.",
+    "replace_fact": "Change one fact in one Inkwell memory file by quoting the text to replace.",
+    "delete_file": "Delete one Inkwell memory file.",
+}
+ARTICLE_BEFORE_INKWELL = re.compile(r"\ban? Inkwell\b")
+ARTICLE_BOUNDARY = re.compile(r"(?<![^ ])a $")
 
 
 def _product_tools(product: str | None) -> MemoryTools:
@@ -423,16 +434,51 @@ def test_descriptions_with_product_pin_first_line_only(tool: str) -> None:
 def test_descriptions_first_line_is_single_insertion(tool: str, product: str) -> None:
     """Each rendered first line is the docstring's first line with exactly one
     insertion at a word boundary: "P " for six tools, "P memory " for
-    list_prefix (AIE-1164, US5.4).
+    list_prefix (AIE-1164, US5.4). Where the text before the boundary ends in
+    the standalone article "a ", the only candidate swaps that "a " for "one "
+    around the insertion (AIE-1321, AC5).
     """
     first = _cleandoc(tool).split("\n", 1)[0]
     boundaries = {0} | {j + 1 for j, c in enumerate(first) if c == " "}
     insertion = f"{product} memory " if tool == "list_prefix" else f"{product} "
-    candidates = {first[:i] + insertion + first[i:] for i in boundaries}
+    candidates: set[str] = set()
+    for i in boundaries:
+        if ARTICLE_BOUNDARY.search(first[:i]):
+            candidates.add(first[: i - 2] + "one " + insertion + first[i:])
+        else:
+            candidates.add(first[:i] + insertion + first[i:])
 
     rendered = _product_tools(product).descriptions()[tool].split("\n", 1)[0]
 
     assert rendered in candidates
+
+
+@pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)
+def test_inkwell_first_lines_are_exact_and_free_of_a_inkwell(tool: str) -> None:
+    """With product "Inkwell", the four changed first lines are exact and no
+    description, from either entry point, reads "a Inkwell" or "an Inkwell"
+    (AIE-1321, AC1).
+    """
+    via_tools = _product_tools("Inkwell").descriptions()[tool]
+    via_module = tool_descriptions("Inkwell")[tool]
+
+    assert via_tools == via_module
+    if tool in INKWELL_FIRST_LINES:
+        assert via_tools.split("\n", 1)[0] == INKWELL_FIRST_LINES[tool]
+    assert ARTICLE_BEFORE_INKWELL.search(via_tools) is None
+
+
+@pytest.mark.parametrize("product", ARTICLE_PRODUCTS)
+@pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)
+def test_first_line_has_no_article_directly_before_product(tool: str, product: str) -> None:
+    """No occurrence of the product in each first line is directly preceded by
+    "a" or "an", whatever the product's sound or characters (AIE-1321, AC2).
+    """
+    first = tool_descriptions(product)[tool].split("\n", 1)[0]
+
+    assert f" {product} " in f" {first} ", first
+    article = rf"(?:^| )an? {re.escape(product)}(?= |$)"
+    assert re.search(article, first, re.IGNORECASE) is None, first
 
 
 @pytest.mark.parametrize("tool", EXPECTED_TOOL_NAMES)

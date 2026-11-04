@@ -118,7 +118,7 @@
 <li><strong>Behavior depends on the agent.</strong> Where facts get filed, and how well, is up to the model following the prompt. The repository's behavioral evals run scripted scenarios against a real agent and grade what it stored; they are signal for prompt iteration, not release gates.</li>
 <li><strong>Concurrency is the caller's concern.</strong> MCP tool calls run concurrently on worker threads and share one client. One <code>GcsStorage</code> and its <code>storage.Client</code> are safe to share across threads; see <a href="integrate-without-mcp.html#threads">Threads</a> for caveats. Direct calls are synchronous and block on storage.</li>
 <li><strong>The file cap is soft.</strong> Concurrent creates in one entity can pass <code>max_files_per_entity</code>; see <a href="storage.html#file-cap">Files per entity</a>.</li>
-<li><strong>No timeout or retry settings.</strong> <code>GcsStorage</code> uses google-cloud-storage's defaults. A GCS outage that outlasts its retries raises an unmapped <code>RetryError</code>, which the agent sees as an <code>internal</code> error, not a <code>transient</code> one; see <a href="storage.html#retries">Timeouts and retries</a>.</li>
+<li><strong>No timeout or retry settings.</strong> <code>GcsStorage</code> uses google-cloud-storage's defaults. See <a href="storage.html#retries">Timeouts and retries</a>.</li>
 </ul>
 <nav class="page-nav" aria-label="Pages"><a rel="prev" href="walkthroughs.html"><small>Previous</small>Walkthroughs</a></nav>
 </main>
