@@ -151,7 +151,8 @@ planned piece.
   thread-safe, with one lock held across each method, because the MCP
   adapter calls the transport from concurrent worker threads.
   `GcsStorage` is the only module that imports `google.cloud`; it maps
-  client timeouts and server/connection unavailability to
+  client timeouts (including exhausted client retries and HTTP 408) and
+  server/connection unavailability to
   `BackendUnavailableError`, and pins each `get` to the generation
   `get_blob` fetched so content and metadata always come from the same
   write, retrying on a generation race. `put` is unconditional in both
