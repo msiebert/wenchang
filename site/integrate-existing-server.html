@@ -68,7 +68,7 @@
 <p><code>build_server</code> creates a new server. To add memory to an <code>MCPServer</code> you already run, with your own tools, auth, and middleware, call <code>wenchang.mcp.register_memory_tools(server, ...)</code>. It adds the seven memory tools and the <code>wenchang://memory-prompt</code> resource to that server.</p>
 <div class="callout callout-warn"><strong>Compatibility: mcp 2.x <code>MCPServer</code> only.</strong> The <code>mcp</code> extra installs <code>mcp&gt;=2.2,&lt;3</code>, and the adapter targets <code>mcp.server.mcpserver.MCPServer</code>. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing <code>wenchang.mcp</code> raises <code>ImportError</code>, and <code>register_memory_tools</code> raises <code>TypeError("server must be an MCPServer, not ...")</code> for any other server type, before it registers anything. For another framework, see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</div>
 
-<p>Install with the extra: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code>.</p>
+<p>Install with the extra: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>.</p>
 <h2 id="register">Register the tools<a class="headerlink" href="#register" title="Link to this section">#</a></h2>
 <p><code>register_memory_tools</code> takes the server, then keyword arguments: <code>prompt</code>, <code>client</code>, <code>resolver</code>, <code>policy</code>, <code>credentials_from_context</code>, <code>source</code>, and optionally <code>product</code>, <code>tool_prefix</code>, and <code>on_call</code>. They mean the same as for <a href="integrate-new-server.html#arguments"><code>build_server</code></a>, except that you pass the prompt text instead of the slots.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
@@ -156,7 +156,7 @@
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.0.</p>
+<p>MIT licensed. Version 0.1.1.</p>
 <ul>
 <li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
 <li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>

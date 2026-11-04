@@ -88,7 +88,7 @@
 </li>
 </ul></details></nav>
 <h1 id="tool-and-error-reference">Tool and error reference<a class="headerlink" href="#tool-and-error-reference" title="Link to this section">#</a></h1>
-<p>Version 0.1.0. Everything here is taken from the source: the tool layer (<code>wenchang.tools</code>, <code>wenchang.schemas</code>, <code>wenchang.mcp</code>), the core store (<code>wenchang.core</code>), and storage (<code>wenchang.storage</code>). Paths, scopes, metadata, versions, and limits are explained in <a href="concepts.html">Concepts</a>. How to wire the tools in is under <a href="integrate.html">Integrate</a>, and how to run storage is in <a href="storage.html">Storage and operations</a>.</p>
+<p>Version 0.1.1. Everything here is taken from the source: the tool layer (<code>wenchang.tools</code>, <code>wenchang.schemas</code>, <code>wenchang.mcp</code>), the core store (<code>wenchang.core</code>), and storage (<code>wenchang.storage</code>). Paths, scopes, metadata, versions, and limits are explained in <a href="concepts.html">Concepts</a>. How to wire the tools in is under <a href="integrate.html">Integrate</a>, and how to run storage is in <a href="storage.html">Storage and operations</a>.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Link to this section">#</a></h2>
 <p>Seven tools. With <code>tool_prefix</code> set, each is registered as <code>{tool_prefix}_{name}</code>. All results are JSON objects; all failures are rendered as described under <a href="#errors">errors</a>. In every tool, <code>scope</code>, <code>area</code>, and <code>name</code> are strings, and <code>expected_version</code> is a string (the <code>version</code> from a prior result).</p>
 <p>Common file object, returned by <code>read_file</code>, <code>write_file</code>, <code>append_line</code>, and <code>replace_fact</code>:</p>
@@ -766,7 +766,7 @@
 <p><code>arguments</code> and <code>result</code> are read-only mappings (<code>MappingProxyType</code>) built from deep copies, so an observer can't change what the tool or client sees.</p>
 <p><code>on_call</code> must be a plain (non-async) function. An exception it raises is logged at ERROR and swallowed.</p>
 <h3 id="conformance">Conformance suites<a class="headerlink" href="#conformance" title="Link to this section">#</a></h3>
-<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.0"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
+<p><code>pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.1"</code> adds <code>pytest</code> and two mixins in <code>wenchang.testing</code>:</p>
 <ul>
 <li><strong><code>ResolverConformance[C]</code></strong> checks an <code>IdentityResolver</code>. Supply fixtures <code>resolver</code>, <code>valid_credentials</code>, <code>invalid_credentials</code> (call <code>pytest.skip</code> if your resolver accepts everything), <code>policy</code>, <code>expected_scopes</code>, and <code>known_roles</code>.</li>
 <li><strong><code>TransportConformance</code></strong> checks a <code>TransportClient</code>. Supply fixtures <code>client</code> (fresh and empty per test), <code>source</code>, <code>scope_map</code> (at least two writable scopes), <code>max_file_bytes</code> (at least 64), <code>index_max_bytes</code> (at least 1024), <code>scope_priority</code>, and <code>list_page_size</code>. Within one test the client's writes must stamp strictly increasing <code>last_updated</code> values. An optional <code>max_files_per_entity</code> fixture (default <code>None</code>) returns the client's store <code>max_files_per_entity</code> (at least 32 and at least <code>list_page_size + 2</code>) to run the file-cap case, which checks that a create at the cap raises <code>FileQuotaExceededError</code>; with <code>None</code> that case is skipped.</li>
@@ -915,7 +915,7 @@
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.0.</p>
+<p>MIT licensed. Version 0.1.1.</p>
 <ul>
 <li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
 <li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>

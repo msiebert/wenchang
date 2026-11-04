@@ -6,11 +6,37 @@ the policy in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-04
+
+### Added
+
+- `TransportConformance` takes an optional `max_files_per_entity` fixture
+  (default `None`). Set to the store's cap, it runs a case checking that a
+  create at the cap raises `FileQuotaExceededError` and stores nothing; with
+  `None` the case is skipped.
+
+### Changed
+
+- `register_memory_tools`, `build_server`, and `bind_tools` raise
+  `TypeError` when `resolver.resolve` is detectably async, instead of failing
+  every call with `ResolverFailureError`. A sync `resolve` that returns a
+  coroutine still fails at call time with `ResolverFailureError`.
+- Tool descriptions with a product name no longer put "a" before the
+  product: four first lines say "one" instead, so names such as "Inkwell"
+  read correctly.
+- One `storage.Client`, its `Bucket`, and one `GcsStorage` are documented as
+  safe to share across threads. `GcsStorage(bucket)` builds the client's HTTP
+  session when it is constructed, so mTLS setup errors raise there rather than
+  on the first call.
+
 ### Fixed
 
 - Error messages end the detail as a sentence before the guidance, so an
   unpunctuated detail (such as an adopter's `ResolutionFailure` detail or a
   rejected argument's detail) no longer runs into the next sentence.
+- `GcsStorage` maps google-cloud-storage's `RetryError` and a bare HTTP 408
+  to `BackendUnavailableError` (reason `timeout`), so the agent sees a
+  `transient` error instead of an `internal` one.
 
 ## [0.1.0] - 2026-10-30
 
@@ -61,5 +87,6 @@ First tagged release.
   integration path (new MCP server, existing MCP server, no MCP), with
   `llms.txt` for agents.
 
-[Unreleased]: https://github.com/msiebert/wenchang/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/msiebert/wenchang/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/msiebert/wenchang/releases/tag/v0.1.1
 [0.1.0]: https://github.com/msiebert/wenchang/releases/tag/v0.1.0
