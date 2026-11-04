@@ -32,7 +32,7 @@
 
 - `evals/scenario.py`, `evals/graders.py`, `evals/scenarios/slots-system-of-record.yaml`
 - `tests/test_evals_scenario.py`, `tests/test_evals_graders.py`, `tests/test_evals_end_to_end.py`
-- `docs/adr/0044-no-content-matching-contrast-exception.md` (new), `docs/adr/0028-behavioral-eval-harness.md` (note)
+- `docs/adr/0046-no-content-matching-contrast-exception.md` (new), `docs/adr/0028-behavioral-eval-harness.md` (note)
 - ARCHITECTURE.md unaffected: `evals/` is not the public API.
 
 ## Open questions / assumptions

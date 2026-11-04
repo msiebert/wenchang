@@ -117,8 +117,8 @@ Every row uses the real `pattern` and the shipped `source` and `stated` regexes 
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 5.1 | `docs/adr/0044-no-content-matching-contrast-exception.md` | read | it records the decision, the rejected alternatives, the residuals (including punctuation-dependent excusal), the nested-list false-fail, and that the judge item `contrast-note-attributed` is the backstop for the residuals |
-| 5.2 | ADR 0028 | read | a short note beside the "Scanned writes" bullet points to ADR 0044 |
+| 5.1 | `docs/adr/0046-no-content-matching-contrast-exception.md` | read | it records the decision, the rejected alternatives, the residuals (including punctuation-dependent excusal), the nested-list false-fail, and that the judge item `contrast-note-attributed` is the backstop for the residuals |
+| 5.2 | ADR 0028 | read | a short note beside the "Scanned writes" bullet points to ADR 0046 |
 
 ## Judge item
 

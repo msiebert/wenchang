@@ -26,7 +26,7 @@ Graders tests are in `tests/test_evals_graders.py`, all prefixed `test_contrast_
 
 ## Architecture / ADR changes
 
-- New `docs/adr/0044-no-content-matching-contrast-exception.md`; short amendment note beside the "Scanned writes" bullet in `docs/adr/0028-behavioral-eval-harness.md`.
+- New `docs/adr/0046-no-content-matching-contrast-exception.md`; short amendment note beside the "Scanned writes" bullet in `docs/adr/0028-behavioral-eval-harness.md`.
 - ARCHITECTURE.md unchanged: `evals/` is not the public API.
 
 ## Deviations from spec

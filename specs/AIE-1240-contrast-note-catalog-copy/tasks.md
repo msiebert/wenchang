@@ -51,8 +51,8 @@ Each group is test-first: test-writer writes failing tests (`tests/**` only), th
 
 ## T4 - Docs (doc-updater; 5.1 and 5.2 are non-test)
 
-- [ ] T4a New `docs/adr/0044-no-content-matching-contrast-exception.md`, including the residuals (punctuation-dependent excusal among them) and that the judge item is the backstop.
-- [ ] T4b `docs/adr/0028-behavioral-eval-harness.md`: note near the "Scanned writes" bullet pointing to ADR 0044.
+- [ ] T4a New `docs/adr/0046-no-content-matching-contrast-exception.md`, including the residuals (punctuation-dependent excusal among them) and that the judge item is the backstop.
+- [ ] T4b `docs/adr/0028-behavioral-eval-harness.md`: note near the "Scanned writes" bullet pointing to ADR 0046.
 - [ ] T4c `review-pr.md` at PR time.
 
 ## T5 - Final gate

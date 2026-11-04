@@ -15,7 +15,7 @@ Python 3.13, pytest, pyright strict, ruff. No new dependencies. Gate: `make chec
 - Tests first, none weakened: new tests only; existing `no_content_matching` tests stay green (spec US2.11).
 - Strict typing: the new dataclass and helpers are fully typed.
 - Storage only through the interface: untouched; the grader reads the store dump.
-- Architecture documented: `evals/` internals only, so ARCHITECTURE.md is unaffected. ADR 0044 records the grader decision; ADR 0028 gets a pointer note.
+- Architecture documented: `evals/` internals only, so ARCHITECTURE.md is unaffected. ADR 0046 records the grader decision; ADR 0028 gets a pointer note.
 - Traceability: tests cite `AIE-1240, USx.y`.
 
 Result: pass.
@@ -112,8 +112,8 @@ Function names per row are in tasks.md. Each docstring names `AIE-1240, USx.y`.
 
 ## Docs (doc-updater)
 
-- New `docs/adr/0044-no-content-matching-contrast-exception.md` from the MADR template: decision, rejected alternatives (regex-only YAML, deterministic "unresolved" marker, prompt change), consequences. Consequences state the residuals (including punctuation-dependent excusal), the nested-list false-fail, and that the judge item `contrast-note-attributed` is the backstop for the residuals.
-- `docs/adr/0028-behavioral-eval-harness.md`: short note near the "Scanned writes" bullet (~line 95) pointing to ADR 0044.
+- New `docs/adr/0046-no-content-matching-contrast-exception.md` from the MADR template: decision, rejected alternatives (regex-only YAML, deterministic "unresolved" marker, prompt change), consequences. Consequences state the residuals (including punctuation-dependent excusal), the nested-list false-fail, and that the judge item `contrast-note-attributed` is the backstop for the residuals.
+- `docs/adr/0028-behavioral-eval-harness.md`: short note near the "Scanned writes" bullet (~line 95) pointing to ADR 0046.
 - ARCHITECTURE.md and glossary: unaffected (`evals/` is not the public API; no product term).
 - `review-pr.md` at PR time.
 
@@ -129,7 +129,7 @@ specs/AIE-1240-contrast-note-catalog-copy/
   spec.md plan.md tasks.md review-spec.md
 evals/{scenario.py,graders.py,scenarios/slots-system-of-record.yaml}
 tests/{test_evals_scenario.py,test_evals_graders.py,test_evals_end_to_end.py}
-docs/adr/{0044-*.md,0028-behavioral-eval-harness.md}
+docs/adr/{0046-*.md,0028-behavioral-eval-harness.md}
 ```
 
 **Structure Decision**: No new modules; private helpers in `graders.py`.
