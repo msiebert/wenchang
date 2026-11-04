@@ -103,11 +103,33 @@ live in a docstring.
    - `replace_fact`: "Change one fact in a Mixpanel memory file by quoting
      the text to replace."
    - `delete_file`: "Delete a Mixpanel memory file."
+   - **Note (AIE-1321, 2026-11-02).** The four templates that put "a" before
+     the product (`list_prefix`, `write_file`, `replace_fact`, `delete_file`)
+     now say "one" instead, so no article ever directly precedes the
+     product and the text is correct for any name ("a Inkwell" no longer
+     occurs). The "one phrase inserted" rule above now reads: the first line
+     is the docstring's first line with one phrase inserted, and a
+     standalone "a" immediately before the insertion point becomes "one".
+     The "a Mixpanel scope or area" rationale for adding "memory" to
+     `list_prefix` stands, now as "one Mixpanel scope or area". With product
+     `Mixpanel` the changed first lines are:
+     - `list_prefix`: "List the files in one Mixpanel memory scope or area,
+       one page at a time, without content."
+     - `write_file`: "Create one Mixpanel memory file or replace one whole."
+     - `replace_fact`: "Change one fact in one Mixpanel memory file by
+       quoting the text to replace."
+     - `delete_file`: "Delete one Mixpanel memory file."
+
+     The other three lines in the list above are unchanged, and the
+     docstrings are unchanged.
    - **Rejected: the product in every paragraph.** It breaks the AIE-1165
      budget and adds noise; the first line is what a host shows for tool
      selection.
    - **Rejected: an a/an article heuristic.** Choosing the article depends
-     on pronunciation, not spelling; the templates use a fixed "a".
+     on pronunciation, not spelling; the templates use a fixed "a" (superseded; see the AIE-1321 Note below).
+     - **Note (AIE-1321, 2026-11-02).** The rejection stands. The fixed "a"
+       is gone: the four affected templates say "one", which avoids the
+       article instead of choosing it.
 5. **Hosts register descriptions from `descriptions()`.** A host registers
    each tool from `tools()` with `descriptions()[name]` as its
    description, rather than the method's `__doc__`. `tools()` is
@@ -145,6 +167,10 @@ first line must be mirrored in its template.
 
 The fixed article "a" reads oddly before a product name that takes "an",
 such as "Amplitude" ("a Amplitude memory file") in four of the templates.
+
+**Note (AIE-1321, 2026-11-02).** That remark no longer applies: the four
+templates say "one" before the product, so no article precedes it. The agent
+sees "one Amplitude memory file" for any name.
 
 A blank `overview.BODY` no longer omits section 1, which ADR 0025's
 omit-empty rule did before.
