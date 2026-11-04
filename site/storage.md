@@ -4,7 +4,7 @@ How wenchang uses a GCS bucket, what that costs, and how to erase or export one 
 
 ## The bucket
 
-Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. google-cloud-storage does not document its `Client` as thread-safe, so read [Threads](integrate-without-mcp.md#threads) before you share one `GcsStorage` across threads, as the MCP adapter does.
+Memory files are objects in one bucket. One `GcsStorage(bucket)` wraps one `google.cloud.storage.Bucket`. [Quickstart](quickstart.md#bucket) creates one with `gcloud`. One `GcsStorage` and its client are safe to share across threads, as the MCP adapter does; see [Threads](integrate-without-mcp.md#threads) for caveats.
 
 wenchang finds credentials through Application Default Credentials: locally `gcloud auth application-default login`, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. `roles/storage.objectUser` on the bucket grants those. Operator jobs that [purge](#erase) need the same permissions.
 
@@ -219,8 +219,8 @@ wenchang has no timeout or retry setting of its own. `GcsStorage` calls google-c
 
 How a failure reaches the agent:
 
-- **A retried call that keeps failing** raises google-cloud-storage's `google.api_core.exceptions.RetryError` once the 120-second budget runs out. `GcsStorage` does not map it, so it propagates out of the store unchanged, and the agent sees an `internal` error with a generic message.
-- **A timeout, connection error, or 429, 500, 502, 503, or 504 on a call that is not retried** (an unconditional `put` under google-cloud-storage 2.x) is mapped to `BackendUnavailableError`, reason `timeout` or `unavailable`, which the agent sees as `transient`. So is a `get` that loses the generation race 3 times.
+- **A retried call that keeps failing** raises google-cloud-storage's `google.api_core.exceptions.RetryError` once the 120-second budget runs out. `GcsStorage` maps it to `BackendUnavailableError`, reason `timeout`, so the agent sees a `transient` error and is told to retry later.
+- **A timeout (including a bare 408), connection error, or 429, 500, 502, 503, or 504 on a call that is not retried** (an unconditional `put` under google-cloud-storage 2.x) is mapped to `BackendUnavailableError`, reason `timeout` or `unavailable`, which the agent sees as `transient`. So is a `get` that loses the generation race 3 times.
 - **A failed generation precondition** is not an error here: it becomes the store's `VersionConflictError`, or is skipped by purge.
 - **Anything else**, such as a 403 from missing permissions, propagates unchanged and is an `internal` error.
 

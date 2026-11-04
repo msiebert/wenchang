@@ -1829,6 +1829,15 @@ def test_empty_old_string_is_rejected_before_client_call(harness: _Harness) -> N
     assert err.category is ErrorCategory.RECOVERABLE
 
 
+def test_empty_old_string_message_separates_detail_from_guidance(harness: _Harness) -> None:
+    """The rendered empty old_string rejection ends the detail as a sentence before the
+    coordination guidance (AIE-1320, US2.3).
+    """
+    err = _invalid(harness, "replace_fact", "old_string", old_string="")
+
+    assert "old_string must not be empty. This is normal coordination" in err.message
+
+
 @pytest.mark.parametrize("tool", ALL_TOOLS)
 @pytest.mark.parametrize(
     "make_error",

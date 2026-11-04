@@ -412,6 +412,21 @@ def test_resolution_failure_becomes_permanent_resolver_failure_error() -> None:
     assert SECRET_CREDENTIALS not in str(err)
 
 
+def test_resolution_failure_message_separates_detail_from_following_text() -> None:
+    """A ResolutionFailure detail is ended as a sentence before the fixed explanation
+    in the full message (AIE-1320, US3.2).
+    """
+    resolver = _FixedResolver(ResolutionFailure("token expired"))
+
+    with pytest.raises(ResolverFailureError) as excinfo:
+        resolve_identity(resolver, SECRET_CREDENTIALS)
+
+    assert excinfo.value.message == (
+        "token expired. Identity could not be resolved; memory is unavailable for this "
+        "session; continue working without memory. Do not retry: retrying will not succeed."
+    )
+
+
 def test_raising_resolver_becomes_resolver_failure_error_without_secret() -> None:
     """A resolver raising an Exception yields a ResolverFailureError naming the
     resolver class and exception type, without the exception message or

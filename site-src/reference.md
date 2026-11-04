@@ -188,7 +188,7 @@ Every failure renders through `render_error`. Over MCP it is the payload of an e
 
 ### InvalidArgumentError {#invalid-argument}
 
-`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
+`wenchang.errors.InvalidArgumentError(argument, detail)` names the rejected argument. `argument` must be a non-empty `str` (`TypeError` or `ValueError` otherwise). The message is `Argument {argument} is invalid: {detail}` (`Argument {argument} is invalid` when `detail` is blank), ended with a period unless it already ends in `.`, `!`, or `?`, followed by the recoverable guidance. It renders as `error`, `category` (`recoverable`), `message`, and `argument`, with no location fields:
 
 ```json
 {
@@ -237,7 +237,7 @@ Notes:
 
 Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
 
-- **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.
+- **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. The constructor builds the bucket client's HTTP session (including any mTLS channel setup), so mTLS configuration errors raise from `GcsStorage(bucket)` rather than from the first call. It makes no network call.
 - **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
 
 Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).
