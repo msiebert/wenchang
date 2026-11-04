@@ -15,7 +15,8 @@ opacity, conflict semantics, replace-fact matching, append guarding,
 enforcement, index behavior, and error parity.
 
 AIE-1047 built the harness ([ADR 0021](0021-transport-conformance-harness.md)):
-the `TransportConformance` mixin with seven fixtures, five baseline cases,
+the `TransportConformance` mixin with seven fixtures (amended by
+[ADR 0045](0045-conformance-file-cap-case.md): one optional eighth), five baseline cases,
 `require_fresh` and the conformance sentinel, `probe_path`,
 `expect_error`, the deep exact-type canonical readers, `without_sentinel`,
 `sentinel_entry_bytes`, the `name: label: phrase` message form, the clock

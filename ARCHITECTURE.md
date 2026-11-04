@@ -57,7 +57,14 @@ planned piece.
   for a rejected agent-supplied argument. `argument` names it (a non-`str`
   raises `TypeError`, an empty one `ValueError`; a `str` subclass is stored
   as an exact `str`), and `detail` is the composed sentence `Argument
-  {argument} is invalid: {detail}`.
+  {argument} is invalid: {detail}`, or `Argument {argument} is invalid` when
+  the detail is blank.
+  `message` (and `str(err)`) is the detail ended as a sentence, a space, then
+  the category guidance. Ending a sentence strips trailing `str.rstrip()`
+  whitespace and appends `.` unless the last character is `.`, `!`, or `?`;
+  an empty detail gives the guidance alone. The optional caller detail of
+  `ResolverFailureError` and `BackendUnavailableError` is ended the same way
+  before their fixed text. `.detail` stays unterminated.
   `RestrictedScopeError(path, scope, reason, required_roles: frozenset[str]
   | None = None)` exposes all four as attributes. `required_roles` is the
   set of roles permitted to write the scope. It is checked in this order: a
@@ -143,8 +150,14 @@ planned piece.
   shared conformance suite. `InMemoryStorage` is the unit-test fake; it is
   thread-safe, with one lock held across each method, because the MCP
   adapter calls the transport from concurrent worker threads.
+  `GcsStorage` is also safe to share across threads, along with the
+  `Client` and `Bucket` it wraps, verified by
+  `tests/integration/test_storage_gcs_threads.py`. The constructor
+  builds the client's HTTP session up front. Caveats:
+  `site-src/integrate-without-mcp.md#threads` and ADR 0027 decision 7.
   `GcsStorage` is the only module that imports `google.cloud`; it maps
-  client timeouts and server/connection unavailability to
+  client timeouts (including exhausted client retries and HTTP 408) and
+  server/connection unavailability to
   `BackendUnavailableError`, and pins each `get` to the generation
   `get_blob` fetched so content and metadata always come from the same
   write, retrying on a generation race. `put` is unconditional in both
@@ -582,8 +595,17 @@ planned piece.
   `Exception` propagates unchanged. Credentials are never inspected,
   stored, or included in an error. `SandboxResolver(identity)` returns the
   adopter-supplied `identity` for any credentials and satisfies
-  `IdentityResolver[C]` for every `C`. See
-  [ADR 0014](docs/adr/0014-identity-resolver.md).
+  `IdentityResolver[C]` for every `C`.
+  `check_resolver(resolver) -> None` raises
+  `TypeError("resolver.resolve must be a plain method, not async")` when
+  `resolve` is detectably async: a coroutine function (including an async
+  static method or a `functools.partial` of one), an async generator
+  function, or an object with an async `__call__`. It never calls `resolve`;
+  if reading `resolve` raises or the attribute is missing it returns, and
+  call-time handling reports it. A sync `resolve` that returns a coroutine is
+  undetectable and still raises `ResolverFailureError` in `resolve_identity`.
+  See [ADR 0014](docs/adr/0014-identity-resolver.md) and
+  [ADR 0044](docs/adr/0044-reject-async-resolver.md).
 - **scope** — write restrictions enforced at the tool layer. It imports
   only `errors`, `identity`, and `paths`, never `core` or `storage`, and
   `core` never imports it: the tool layer calls it before calling `core`,
@@ -719,7 +741,7 @@ planned piece.
   `wenchang.testing.transport_conformance`) is the same shape for a
   `TransportClient`: a non-generic pytest mixin, not `Test`-prefixed,
   subclassed as `class TestMyClient(TransportConformance)` with seven
-  required fixtures: `client` (a fresh `TransportClient` over an empty
+  required fixtures and one optional: `client` (a fresh `TransportClient` over an empty
   store, per test; checked by reading each of the seven method names, each
   of which must exist, be readable, and be callable, with a failure naming
   the method, and then by `isinstance(client, TransportClient)` run inside
@@ -733,17 +755,27 @@ planned piece.
   at least `MIN_INDEX_BYTES = 1024`), `list_page_size` (an exact positive
   `int`; `bool` rejected for all three), and `scope_priority` (an exact `tuple` of distinct
   exact-`str` valid segments, even though `MemoryStore` accepts any
-  `Sequence`). Fixtures are validated in that fixed order, so the first bad
-  one is reported, with key phrase `fixture <name>`;
-  `test_client_satisfies_protocol` takes all seven and validates them all,
-  so every fixture is required from the first run even though only later
-  cases use the last three. The fixture contract also requires that every
+  `Sequence`). The optional eighth, `max_files_per_entity`, defaults to
+  `None` through an underscore-named base method registered with
+  `@pytest.fixture(name="max_files_per_entity")`, so a subclass override
+  replaces it; set to the store's cap, it enables the file-cap case. A
+  non-`None` value must be an exact `int` (`bool` rejected) of at least
+  `MIN_FILES_PER_ENTITY = 32`, and of at least `list_page_size + 2` (the
+  pagination cases put `list_page_size + 1` files plus the sentinel under
+  one entity), so the floor is `max(32, list_page_size + 2)`. Fixtures are
+  validated in that fixed order, `max_files_per_entity` last, so the first
+  bad one is reported, with key phrase `fixture <name>`;
+  `test_client_satisfies_protocol` takes all eight and validates them all,
+  so every required fixture is checked from the first run even though only
+  later cases use the last three; the optional fixture is the one departure
+  from that rule, because requiring it would break existing subclasses
+  ([ADR 0045](docs/adr/0045-conformance-file-cap-case.md)). The fixture contract also requires that every
   mapped scope be writable through `client` under the credentials it was
   constructed with, and that a client's writes stamp strictly increasing
   `last_updated` within one test (the repo's reference run uses a ticking
   clock). Cases call the client sequentially; concurrency is modeled as
   sequential interleavings on one client, so no thread safety is required.
-  Five baseline methods ship: `test_client_satisfies_protocol` (all seven
+  Five baseline methods ship: `test_client_satisfies_protocol` (all eight
   fixtures, including the client's method and protocol checks),
   `test_write_then_read_round_trips` (content and all four metadata fields;
   `source` must be unioned into `sources`),
@@ -751,7 +783,7 @@ planned piece.
   by `write_file`, and one from a write by `append_line`),
   `test_read_absent_is_not_found`, and `test_oversize_write_is_rejected`
   (`OversizeWriteError` with `size` and `limit`, then the path still reads
-  as absent). On top of these, 43 case methods cover all nine §10.2
+  as absent). On top of these, 44 case methods cover all nine §10.2
   groups, one method per assertion, each self-contained (own writes, own
   probe paths): round-trip fidelity (unicode, fact-like markdown, no
   trailing newline, empty content, empty aliases with many sources, a
@@ -775,7 +807,13 @@ planned piece.
   prefix, malformed and foreign cursors), and error parity (invalid path
   and absent file for every operation, empty `source` per method, full
   `str(exc)` equal to a locally built core error and ending with the
-  category guidance, `get_memory_index` argument errors). Six more cases
+  category guidance, `get_memory_index` argument errors, and
+  `test_create_at_file_cap_is_quota_exceeded`: it fills the second sorted
+  scope's entity to `max_files_per_entity` and asserts the next create
+  raises `FileQuotaExceededError` with core's exact type, category,
+  message, `path`, and `limit` and stores nothing; it skips, before any
+  store call, when the fixture is `None`, and a quota error during the
+  fill fails with a hint to check the fixture). Six more cases
   cover `append_line`/`replace_fact`'s optional `aliases` and
   `description`: the alias union and description replacement, in both the
   returned file and a read-back, for each method; omitted and explicit-`None`
@@ -989,8 +1027,9 @@ planned piece.
   with `check_observer`. All six are read-only properties.
   `bind_tools(client, resolver, credentials, policy, *, source,
   product=None, on_call=None)` is the only function in the layer that takes
-  credentials: it checks `on_call` first, passes the credentials to
-  `resolve_identity`, and returns a `MemoryTools`, retaining nothing; a
+  credentials: it checks `on_call` first, then `check_resolver(resolver)`
+  (a detectably async `resolve` raises `TypeError`), passes the credentials
+  to `resolve_identity`, and returns a `MemoryTools`, retaining nothing; a
   resolution failure is the permanent `ResolverFailureError`, raised before
   `source` or `product` is checked.
   A host serving many sessions binds one `MemoryTools` per session; the
@@ -1024,7 +1063,10 @@ planned piece.
   product, only the first line changes: it comes from a fixed per-tool
   template that is the docstring's first line with the product inserted
   (plus "memory" for `list_prefix`), e.g. "Add one fact line to the end of
-  an existing Mixpanel memory file."; the remaining lines are the
+  an existing Mixpanel memory file."; four templates (`list_prefix`,
+  `write_file`, `replace_fact`, `delete_file`) also change the docstring's
+  "a" before the product to "one" so no article precedes the product, e.g.
+  "Delete one Mixpanel memory file."; the remaining lines are the
   docstring's. No tool method takes `product`, and the docstrings are
   static (see [ADR 0026](docs/adr/0026-product-identity.md)).
   Tools are scope-relative: `read_file(scope, area, name)`,
@@ -1275,6 +1317,8 @@ planned piece.
        assertion.
     2. `bind_tools` binds a fresh `MemoryTools` for that call. The MCP
        protocol is stateless, so there is no session to cache on.
+       `check_resolver` runs again here, so a resolver swapped to async
+       after registration renders as an `internal` error with an `ERROR` log.
     3. The call is forwarded to that `MemoryTools`.
     4. A `CallToolResult` comes back with the `render_result` or
        `render_error` payload as `structured_content` and as JSON text, and
@@ -1297,8 +1341,12 @@ planned piece.
     `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
     (which fail under `python -OO`), and name or URI collisions with what
     the server already has are all checked before anything is registered.
+    `resolver` is checked for `IdentityResolver` conformance and then with
+    `check_resolver`, which rejects a detectably async `resolve` with
+    `TypeError`, before the `credentials_from_context` and `on_call` checks.
   - **Threading.** Tool calls run concurrently on `mcp`'s worker threads, so
-    the `TransportClient` must be thread-safe. `on_call` runs on those
+    the `TransportClient` must be thread-safe. `InProcessClient` over
+    `GcsStorage` satisfies this. `on_call` runs on those
     threads and must be thread-safe and fast.
   - **Schema validation comes first.** `mcp` validates arguments before the
     wrapper runs. A wrong-type or missing argument returns pydantic's text,
@@ -1351,7 +1399,8 @@ with `parse_path`. `tools` builds every path and prefix with `build_path` /
 `index_cache` is dependency-free and omitted; only `core` imports it, and
 the adopter's cache it wraps sits beside storage, never in front of it.
 `identity` sits beside `core` with no arrow: `tools` calls
-`resolve_identity` once per session, in `bind_tools`, and reads the
+`check_resolver` then `resolve_identity` once per session, in
+`bind_tools`, and reads the
 resolved grants to build paths; `transport` never sees an identity.
 `transport` is implemented in-process (`InProcessClient` over
 `MemoryStore`); the remote half of its box is planned. `prompts` imports
@@ -1554,7 +1603,9 @@ server, graders, and report end to end.
   `ResolverFailureError` raised `from None` outside any handler for the
   resolver's exception, so no exception message that might carry a credential is reachable from it,
   whether through a rendered traceback or the exception chain (see
-  [ADR 0014](docs/adr/0014-identity-resolver.md)).
+  [ADR 0014](docs/adr/0014-identity-resolver.md)). A detectably async
+  `resolve` is rejected with `TypeError` by `check_resolver` before any
+  resolver call (see [ADR 0044](docs/adr/0044-reject-async-resolver.md)).
 - **The index cap is a byte budget over `index_entry_bytes`, inclusive,
   applied as a prefix of the documented order.** `get_memory_index`
   includes entries in order while the running total stays within
@@ -1629,7 +1680,10 @@ cause. Defined in `wenchang.errors` (see [ADR
   (`ROLE_REQUIRED`, carrying the permitted `required_roles`), or a path
   outside the caller's granted scope or entity (`NOT_GRANTED`, whose one
   generic message never echoes the caller's own entity ID or role);
-  `ResolverFailureError` for identity resolution failure).
+  `ResolverFailureError` for identity resolution failure; a misconfigured
+  resolver, such as an async `resolve`, is instead a programmer-error
+  `TypeError` at registration or binding, never rendered as a
+  `ResolverFailureError`).
 - **Transient** (`TransientError`) — retry is appropriate
   (`BackendUnavailableError`, distinguishing timeout from unavailability); a
   version-guarded retry safely degrades to a recoverable version conflict if

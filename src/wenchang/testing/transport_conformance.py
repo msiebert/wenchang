@@ -16,6 +16,12 @@ with "Test", and supply these fixtures:
     scope_priority   the store's scope_priority, as an exact tuple of str
     list_page_size   the store's list_page_size (a positive int)
 
+Optional fixture:
+
+    max_files_per_entity  the store's max_files_per_entity (None, the default,
+                     or an int of at least max(32, list_page_size + 2)); None
+                     skips the file-cap case
+
 Isolation: each case that touches the store first writes a sentinel file
 under the first sorted scope's entity, in area "conformance-sentinel", and
 fails if it already exists, so a `client` fixture shared across tests is
@@ -58,6 +64,7 @@ from wenchang.core import (
 )
 from wenchang.errors import (
     ErrorCategory,
+    FileQuotaExceededError,
     NotFoundError,
     NotFoundReason,
     OversizeWriteError,
@@ -80,6 +87,7 @@ SENTINEL_AREA: Final = "conformance-sentinel"
 SENTINEL_STEM: Final = "sentinel"
 MIN_FILE_BYTES: Final = 64
 MIN_INDEX_BYTES: Final = 1024
+MIN_FILES_PER_ENTITY: Final = 32
 _SENTINEL_SOURCE: Final = "conformance-harness"
 _SENTINEL_CONTENT: Final = "- [system] conformance sentinel\n"
 _REPR_LIMIT: Final = 80
@@ -226,6 +234,13 @@ def check_positive_int(name: str, fixture: str, value: object, minimum: int = 1)
     if value < minimum:
         pytest.fail(f"{name}: fixture {fixture} must be at least {minimum}, got {value}")
     return value
+
+
+def check_files_per_entity(name: str, value: object) -> int | None:
+    """Return None, or value if it is an exact int (not bool) of at least MIN_FILES_PER_ENTITY."""
+    if value is None:
+        return None
+    return check_positive_int(name, "max_files_per_entity", value, MIN_FILES_PER_ENTITY)
 
 
 def check_scope_priority(name: str, value: object) -> tuple[str, ...]:
@@ -447,7 +462,11 @@ def expect_error(
         result = call()
     except Exception as exc:
         return _check_raised(name, label, exc, expected, category, message, payload)
-    hint = "; check the max_file_bytes fixture" if expected is OversizeWriteError else ""
+    hint = ""
+    if expected is OversizeWriteError:
+        hint = "; check the max_file_bytes fixture"
+    elif expected is FileQuotaExceededError:
+        hint = "; check the max_files_per_entity fixture"
     _fail(
         name,
         label,
@@ -934,6 +953,11 @@ def _first_page(
 class TransportConformance:
     """Tests every TransportClient must pass. Subclass with a Test* name and supply fixtures."""
 
+    @pytest.fixture(name="max_files_per_entity")
+    def _max_files_per_entity(self) -> int | None:
+        """The store's max_files_per_entity, or None (default) to skip the file-cap case."""
+        return None
+
     def test_client_satisfies_protocol(
         self,
         client: TransportClient,
@@ -943,6 +967,7 @@ class TransportConformance:
         index_max_bytes: int,
         scope_priority: tuple[str, ...],
         list_page_size: int,
+        max_files_per_entity: int | None,
     ) -> None:
         """Every fixture is valid and the client exposes the seven TransportClient methods."""
         name = _name(type(client))
@@ -952,7 +977,14 @@ class TransportConformance:
         check_positive_int(name, "max_file_bytes", max_file_bytes, MIN_FILE_BYTES)
         check_positive_int(name, "index_max_bytes", index_max_bytes, MIN_INDEX_BYTES)
         check_scope_priority(name, scope_priority)
-        check_positive_int(name, "list_page_size", list_page_size)
+        page_size = check_positive_int(name, "list_page_size", list_page_size)
+        cap = check_files_per_entity(name, max_files_per_entity)
+        # Pagination cases create page_size + 1 files plus the sentinel under one entity.
+        if cap is not None and cap < page_size + 2:
+            pytest.fail(
+                f"{name}: fixture max_files_per_entity must be at least "
+                f"list_page_size + 2 ({page_size + 2}), got {cap}"
+            )
 
     def test_write_then_read_round_trips(
         self, client: TransportClient, source: str, scope_map: Mapping[str, str]
@@ -2464,6 +2496,55 @@ class TransportConformance:
             text = _call(name, label, lambda exc=exc: str(exc))
             if not text.endswith(guidance):
                 _fail(name, label, f"missing guidance: {_short(text)}")
+
+    def test_create_at_file_cap_is_quota_exceeded(
+        self,
+        client: TransportClient,
+        source: str,
+        scope_map: Mapping[str, str],
+        max_files_per_entity: int | None,
+    ) -> None:
+        """At max_files_per_entity, a create raises FileQuotaExceededError and stores nothing."""
+        name = _name(type(client))
+        check_client(name, client)
+        src = check_source(name, source)
+        scopes = check_scope_map(name, scope_map)
+        limit = check_files_per_entity(name, max_files_per_entity)
+        if limit is None:
+            pytest.skip(
+                "max_files_per_entity fixture is None; override it with the store's "
+                "max_files_per_entity to run this case"
+            )
+        require_fresh(name, client, scopes)
+        second = sorted(scopes)[1]
+        metadata = _meta(sources=frozenset({_seed(src)}))
+        for i in range(limit):
+            path = probe_path(name, _PROBE_LABEL, scopes, second, PROBE_AREA, f"{PROBE_STEM}-{i}")
+            label = f"write_file({path})"
+            try:
+                client.write_file(path, "- [stated] a\n", metadata, None, source=src)
+            except Exception as exc:
+                # Raised inside the handler so pytest shows the original exception as context.
+                if type(exc) is FileQuotaExceededError:
+                    _fail(
+                        name,
+                        label,
+                        "unexpected error: FileQuotaExceededError; "
+                        "check the max_files_per_entity fixture",
+                    )
+                _fail(name, label, f"unexpected error: {_name(type(exc))}")
+        p = probe_path(name, _PROBE_LABEL, scopes, second, PROBE_AREA, f"{PROBE_STEM}-{limit}")
+        expect_error(
+            name,
+            f"write_file({p})",
+            lambda: client.write_file(p, "- [stated] a\n", metadata, None, source=src),
+            FileQuotaExceededError,
+            _RECOVERABLE,
+            message=str(FileQuotaExceededError(p, limit)),
+            path=p,
+            limit=limit,
+        )
+        _expect_absent(name, client, p)
 
     def test_get_memory_index_argument_errors_match_core(
         self, client: TransportClient, scope_map: Mapping[str, str]

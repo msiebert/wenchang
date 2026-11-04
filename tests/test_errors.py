@@ -109,10 +109,12 @@ def test_error_classes_are_siblings_not_related(cls: type[WenchangError]) -> Non
 @pytest.mark.unit
 @pytest.mark.parametrize("cls", CATEGORY_CLASSES)
 def test_error_message_format(cls: type[WenchangError]) -> None:
-    """str(err) == err.message == f'{detail} {guidance}' for a sample detail (AIE-1030)."""
+    """str(err) == err.message == f'{detail}. {guidance}' for a sample detail
+    (AIE-1030, AIE-1320, US1.1).
+    """
     detail = "something went wrong"
     err = cls(detail)
-    expected = f"{detail} {cls.guidance}"
+    expected = f"{detail}. {cls.guidance}"
     assert str(err) == expected
     assert err.message == expected
 
@@ -913,3 +915,231 @@ def test_file_quota_exceeded_error_rejects_non_positive_limit(limit: int) -> Non
     """
     with pytest.raises(ValueError, match=r"^limit must be positive$"):
         FileQuotaExceededError(_QUOTA_PATH, limit)
+
+
+_RESOLVER_TAIL = (
+    "Identity could not be resolved; memory is unavailable for this session; "
+    "continue working without memory."
+)
+
+
+class _HostileStr(str):
+    """A str whose rstrip, endswith, and __add__ raise."""
+
+    def rstrip(self, chars: str | None = None) -> str:
+        raise AssertionError("rstrip called")
+
+    def endswith(self, *args: object, **kwargs: object) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise AssertionError("endswith called")
+
+    def __add__(self, other: object) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
+        raise AssertionError("__add__ called")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("cls", CATEGORY_CLASSES)
+def test_message_terminates_detail_for_each_category(cls: type[WenchangError]) -> None:
+    """Each category renders an unpunctuated detail as 'detail. guidance' via str() and
+    .message (AIE-1320, US1.1).
+    """
+    err = cls("something went wrong")
+    expected = f"something went wrong. {cls.guidance}"
+    assert str(err) == expected
+    assert err.message == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("detail", ["Done.", "Stop!", "Why?"])
+@pytest.mark.parametrize("cls", CATEGORY_CLASSES)
+def test_message_keeps_terminal_punctuation(cls: type[WenchangError], detail: str) -> None:
+    """A detail ending in '.', '!' or '?' is unchanged before one space and the guidance
+    (AIE-1320, US1.2).
+    """
+    assert cls(detail).message == f"{detail} {cls.guidance}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("detail", "expected_detail"),
+    [("something went wrong  ", "something went wrong."), ("Done. ", "Done.")],
+)
+def test_message_strips_trailing_whitespace(detail: str, expected_detail: str) -> None:
+    """Trailing whitespace is removed, the detail terminated, and exactly one space
+    precedes the guidance (AIE-1320, US1.3).
+    """
+    err = RecoverableError(detail)
+    assert err.message == f"{expected_detail} {RecoverableError.guidance}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("detail", ["", "   ", "\n\t "], ids=["empty", "spaces", "mixed"])
+def test_message_blank_detail_is_guidance_alone(detail: str) -> None:
+    """An empty or whitespace-only detail renders exactly the guidance (AIE-1320, US1.4)."""
+    err = PermanentError(detail)
+    assert err.message == PermanentError.guidance
+    assert str(err) == PermanentError.guidance
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("cls", CATEGORY_CLASSES)
+def test_detail_attribute_is_not_terminated(cls: type[WenchangError]) -> None:
+    """The detail attribute keeps the passed, unterminated value (AIE-1320, US1.5)."""
+    assert cls("something went wrong").detail == "something went wrong"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "detail",
+    ["first;", "first,", "see (x)", "use '-' or '_'"],
+    ids=["semicolon", "comma", "paren", "quote"],
+)
+def test_message_terminates_other_punctuation(detail: str) -> None:
+    """A detail ending in other punctuation gets a period appended (AIE-1320, US1.6)."""
+    assert TransientError(detail).message == f"{detail}. {TransientError.guidance}"
+
+
+@pytest.mark.unit
+def test_message_ellipsis_counts_as_terminated() -> None:
+    """A detail ending in '...' gets no extra period (AIE-1320, US1.7)."""
+    assert RecoverableError("wait...").message == f"wait... {RecoverableError.guidance}"
+
+
+@pytest.mark.unit
+def test_message_uses_raw_last_character() -> None:
+    """A period followed by a closing bracket still gets a period (AIE-1320, US1.8)."""
+    err = RecoverableError("bad input (see x.)")
+    assert err.message == f"bad input (see x.). {RecoverableError.guidance}"
+
+
+@pytest.mark.unit
+def test_message_strips_trailing_newline_keeps_interior() -> None:
+    """A trailing newline is stripped and interior newlines kept (AIE-1320, US1.9)."""
+    err = RecoverableError("line one\nline two\n")
+    assert err.message == f"line one\nline two. {RecoverableError.guidance}"
+
+
+@pytest.mark.unit
+def test_message_ignores_str_subclass_method_overrides() -> None:
+    """A str subclass overriding rstrip, endswith, and __add__ renders the same as the
+    equal plain str and nothing raises (AIE-1320, US1.10).
+    """
+    plain = RecoverableError("something went wrong ")
+    hostile = RecoverableError(_HostileStr("something went wrong "))
+    assert hostile.message == plain.message
+    assert str(hostile) == plain.message
+
+
+@pytest.mark.unit
+def test_resolver_failure_error_terminates_caller_detail() -> None:
+    """ResolverFailureError ends the caller detail as a sentence before the fixed text
+    (AIE-1320, US3.1).
+    """
+    err = ResolverFailureError("token expired")
+    assert err.message == f"token expired. {_RESOLVER_TAIL} {PermanentError.guidance}"
+    assert err.message == (
+        "token expired. Identity could not be resolved; memory is unavailable for this "
+        "session; continue working without memory. Do not retry: retrying will not succeed."
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "detail", ["", "Credentials could not be read from the request."], ids=["default", "terminated"]
+)
+def test_resolver_failure_error_unchanged_cases(detail: str) -> None:
+    """No detail, or an already-terminated detail, renders as before (AIE-1320, US3.3)."""
+    err = ResolverFailureError(detail)
+    prefix = f"{detail} " if detail else ""
+    assert err.detail == f"{prefix}{_RESOLVER_TAIL}"
+    assert err.message == f"{prefix}{_RESOLVER_TAIL} {PermanentError.guidance}"
+
+
+@pytest.mark.unit
+def test_resolver_failure_error_blank_detail_matches_no_detail() -> None:
+    """A whitespace-only detail renders like no detail (AIE-1320, US3.4)."""
+    blank = ResolverFailureError("   ")
+    assert blank.message == ResolverFailureError().message
+    assert blank.detail == ResolverFailureError().detail
+
+
+@pytest.mark.unit
+def test_resolver_failure_error_ignores_str_subclass_method_overrides() -> None:
+    """A hostile str-subclass detail renders the same as the equal plain str
+    (AIE-1320, US3.5).
+    """
+    plain = ResolverFailureError("token expired ")
+    hostile = ResolverFailureError(_HostileStr("token expired "))
+    assert hostile.message == plain.message
+
+
+@pytest.mark.unit
+def test_resolver_failure_error_detail_attribute_includes_terminated_prefix() -> None:
+    """The detail attribute starts with the terminated caller detail (AIE-1320, US3.6)."""
+    err = ResolverFailureError("token expired")
+    assert err.detail.startswith("token expired. Identity could not be resolved")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("reason", "phrase"),
+    [
+        (TransientReason.TIMEOUT, "The storage backend timed out."),
+        (TransientReason.UNAVAILABLE, "The storage backend is unavailable."),
+    ],
+    ids=["timeout", "unavailable"],
+)
+def test_backend_unavailable_error_terminates_caller_detail(
+    reason: TransientReason, phrase: str
+) -> None:
+    """BackendUnavailableError ends the caller detail as a sentence before the fixed
+    text for each reason (AIE-1320, US4.1, US4.2).
+    """
+    err = BackendUnavailableError(reason, "deadline exceeded")
+    assert err.message == f"deadline exceeded. {phrase} {TransientError.guidance}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("detail", [None, "", "  "], ids=["default", "empty", "whitespace"])
+def test_backend_unavailable_error_blank_detail_has_no_prefix(detail: str | None) -> None:
+    """An empty or whitespace-only detail omits the prefix and its space (AIE-1320, US4.3)."""
+    err = (
+        BackendUnavailableError(TransientReason.TIMEOUT)
+        if detail is None
+        else BackendUnavailableError(TransientReason.TIMEOUT, detail)
+    )
+    assert err.message == f"The storage backend timed out. {TransientError.guidance}"
+
+
+@pytest.mark.unit
+def test_backend_unavailable_error_terminated_detail_not_doubled() -> None:
+    """A caller detail already ending in a period gets no second period (AIE-1320, US4.4)."""
+    err = BackendUnavailableError(TransientReason.UNAVAILABLE, "Connection reset.")
+    assert err.message == (
+        f"Connection reset. The storage backend is unavailable. {TransientError.guidance}"
+    )
+
+
+@pytest.mark.unit
+def test_backend_unavailable_error_multiline_detail() -> None:
+    """A multi-line detail keeps interior newlines and drops the trailing one
+    (AIE-1320, US4.5).
+    """
+    err = BackendUnavailableError(TransientReason.TIMEOUT, "HTTP 503\nService Unavailable\n")
+    assert err.message == (
+        f"HTTP 503\nService Unavailable. The storage backend timed out. {TransientError.guidance}"
+    )
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: PermanentError(None),  # pyright: ignore[reportArgumentType]
+        lambda: ResolverFailureError(None),  # pyright: ignore[reportArgumentType]
+        lambda: BackendUnavailableError(TransientReason.TIMEOUT, b"x"),  # pyright: ignore[reportArgumentType]
+    ],
+    ids=["permanent-none", "resolver-none", "backend-bytes"],
+)
+def test_non_str_detail_raises_type_error(build: Callable[[], WenchangError]) -> None:
+    """A non-str detail raises TypeError at construction (AIE-1320)."""
+    with pytest.raises(TypeError):
+        build()

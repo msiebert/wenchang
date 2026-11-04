@@ -6,12 +6,13 @@ Covers US3 (registration and startup checks), US4 (prompt delivery), US5
 to the server over mcp's in-memory transport.
 """
 
+import functools
 import inspect
 import json
 import logging
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import FrozenInstanceError, fields, is_dataclass
 from typing import Any, TypeVar, cast
 
@@ -1307,3 +1308,139 @@ def test_no_observer_by_default() -> None:
         return await _call(client, "write_file", "alice", **_write_args())
 
     assert _with_client(_server(), body).is_error is False
+
+
+# --- AIE-1318: async resolve is rejected at registration -------------------------------
+
+ASYNC_RESOLVE_MESSAGE = "resolver.resolve must be a plain method, not async"
+
+
+async def _async_resolve_fn(credentials: object) -> Identity | ResolutionFailure:
+    return ResolutionFailure("async")
+
+
+class _AsyncCallable:
+    async def __call__(self, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _AsyncMethodResolver:
+    async def resolve(self, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _AsyncStaticResolver:
+    @staticmethod
+    async def resolve(credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _PartialAttrResolver:
+    def __init__(self) -> None:
+        self.resolve: object = functools.partial(_async_resolve_fn)
+
+
+class _AsyncGenResolver:
+    async def resolve(self, credentials: object) -> AsyncIterator[Identity]:
+        yield IDENTITIES["alice"]
+
+
+class _CallableAttrResolver:
+    def __init__(self) -> None:
+        self.resolve: object = _AsyncCallable()
+
+
+class _AsyncClassmethodResolver:
+    @classmethod
+    async def resolve(cls, credentials: object) -> Identity | ResolutionFailure:
+        return ResolutionFailure("async")
+
+
+class _PartialOfAsyncCallableResolver:
+    def __init__(self) -> None:
+        self.resolve: object = functools.partial(_AsyncCallable())
+
+
+ASYNC_VARIANTS: list[Callable[[], object]] = [
+    _AsyncMethodResolver,
+    _AsyncStaticResolver,
+    _PartialAttrResolver,
+    _AsyncGenResolver,
+    _CallableAttrResolver,
+    _AsyncClassmethodResolver,
+    _PartialOfAsyncCallableResolver,
+]
+ASYNC_VARIANT_IDS = [
+    "async-method",
+    "async-static",
+    "partial",
+    "async-gen",
+    "async-call-object",
+    "async-classmethod",
+    "partial-of-async-call-object",
+]
+
+
+@pytest.mark.parametrize("make", ASYNC_VARIANTS, ids=ASYNC_VARIANT_IDS)
+def test_register_rejects_async_resolve(make: Callable[[], object]) -> None:
+    """register_memory_tools raises the exact TypeError for each async resolve
+    variant and registers no tools and no prompt resource (AIE-1318, US1.1, US1.4).
+    """
+    server = _adopter_server()
+    before = _snapshot(server)
+
+    with pytest.raises(TypeError) as caught:
+        register_memory_tools(server, prompt="p", **_kwargs(resolver=make()))
+
+    assert str(caught.value) == ASYNC_RESOLVE_MESSAGE
+    assert _snapshot(server) == before
+
+
+@pytest.mark.parametrize("make", ASYNC_VARIANTS, ids=ASYNC_VARIANT_IDS)
+def test_build_server_rejects_async_resolve(make: Callable[[], object]) -> None:
+    """build_server raises the exact TypeError for each async resolve variant
+    (AIE-1318, US1.2, US1.4).
+    """
+    with pytest.raises(TypeError) as caught:
+        _server(resolver=make())
+
+    assert str(caught.value) == ASYNC_RESOLVE_MESSAGE
+
+
+def test_sync_resolver_is_accepted_by_both_entry_points() -> None:
+    """A sync resolver still registers and builds (AIE-1318, US2.1)."""
+    server = _adopter_server()
+
+    register_memory_tools(server, prompt="p", **_kwargs())
+    tools, _ = _snapshot(server)
+
+    assert set(TOOL_NAMES) <= tools
+    assert _snapshot(_server())[0] >= set(TOOL_NAMES)
+
+
+def test_non_resolver_error_precedes_async_resolve_check() -> None:
+    """An object that is not an IdentityResolver raises the isinstance
+    TypeError, not the async one (AIE-1318, US3.4).
+    """
+    with pytest.raises(TypeError) as register_caught:
+        register_memory_tools(_adopter_server(), prompt="p", **_kwargs(resolver=object()))
+    with pytest.raises(TypeError) as build_caught:
+        _server(resolver=object())
+
+    assert str(register_caught.value) == "resolver must satisfy IdentityResolver"
+    assert str(build_caught.value) == "resolver must satisfy IdentityResolver"
+
+
+def test_async_resolve_error_precedes_async_credentials_error() -> None:
+    """An async resolver with an async credentials_from_context raises the
+    resolver TypeError first (AIE-1318, US3.5).
+    """
+    overrides = {"resolver": _AsyncMethodResolver(), "credentials_from_context": _async_credentials}
+
+    with pytest.raises(TypeError) as register_caught:
+        register_memory_tools(_adopter_server(), prompt="p", **_kwargs(**overrides))
+    with pytest.raises(TypeError) as build_caught:
+        _server(**overrides)
+
+    assert str(register_caught.value) == ASYNC_RESOLVE_MESSAGE
+    assert str(build_caught.value) == ASYNC_RESOLVE_MESSAGE

@@ -16,6 +16,16 @@ def _location(path: str) -> str | None:
     return f"scope {parts.scope}, area {parts.area}, name {parts.name}"
 
 
+def _sentence(text: str) -> str:
+    """End `text` as a sentence; empty if blank. Uses only unbound str operations."""
+    text = str.rstrip(str.__str__(text))
+    if not text:
+        return ""
+    if text[-1] in ".!?":
+        return text
+    return text + "."
+
+
 class ErrorCategory(StrEnum):
     """The three ways a wenchang operation can fail."""
 
@@ -28,7 +38,8 @@ class WenchangError(Exception):
     """Base of every library error.
 
     Subclasses set `category` and `guidance`; `message` combines the
-    instance-specific `detail` with the class's fixed guidance text.
+    instance-specific `detail`, ended as a sentence, with the class's fixed
+    guidance text.
     """
 
     category: ClassVar[ErrorCategory]
@@ -40,7 +51,9 @@ class WenchangError(Exception):
 
     @property
     def message(self) -> str:
-        return f"{self.detail} {type(self).guidance}"
+        sentence = _sentence(self.detail)
+        guidance = type(self).guidance
+        return f"{sentence} {guidance}" if sentence else guidance
 
     def __str__(self) -> str:
         return self.message
@@ -166,10 +179,14 @@ class InvalidArgumentError(RecoverableError):
             raise TypeError("argument must be a str")
         # Exact str, so an overridden __str__/__format__ cannot alter the message.
         argument = str.__str__(argument)
+        detail = str.__str__(detail)
         if not argument:
             raise ValueError("argument must be non-empty")
         self.argument = argument
-        super().__init__(f"Argument {argument} is invalid: {detail}")
+        if _sentence(detail):
+            super().__init__(f"Argument {argument} is invalid: {detail}")
+        else:
+            super().__init__(f"Argument {argument} is invalid")
 
 
 class NotFoundReason(StrEnum):
@@ -263,7 +280,8 @@ class BackendUnavailableError(TransientError):
 
     def __init__(self, reason: TransientReason, detail: str = "") -> None:
         self.reason = reason
-        prefix = f"{detail} " if detail else ""
+        sentence = _sentence(detail)
+        prefix = f"{sentence} " if sentence else ""
         if reason is TransientReason.TIMEOUT:
             message = f"{prefix}The storage backend timed out."
         else:
@@ -275,7 +293,8 @@ class ResolverFailureError(PermanentError):
     """Identity resolution failed, so memory is unavailable for this session."""
 
     def __init__(self, detail: str = "") -> None:
-        prefix = f"{detail} " if detail else ""
+        sentence = _sentence(detail)
+        prefix = f"{sentence} " if sentence else ""
         message = (
             f"{prefix}Identity could not be resolved; memory is unavailable for "
             "this session; continue working without memory."

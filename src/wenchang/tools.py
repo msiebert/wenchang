@@ -28,7 +28,7 @@ from typing import Concatenate, Final, NoReturn, ParamSpec, TypeVar, cast
 from wenchang.core import CappedPrefix, FileEntry, ListCursor, ListPage, MemoryFile, MemoryIndex
 from wenchang.errors import ErrorCategory, InvalidArgumentError, WenchangError
 from wenchang.file_format import FileMetadata, MetadataFormatError, parse_fact
-from wenchang.identity import Identity, IdentityResolver, resolve_identity
+from wenchang.identity import Identity, IdentityResolver, check_resolver, resolve_identity
 from wenchang.observer import ToolCallObserver, check_observer, notify_observer
 from wenchang.paths import build_path, build_prefix, is_valid_segment, parse_path
 from wenchang.scope import ScopePolicy, check_write
@@ -86,6 +86,7 @@ _LINE_BOUNDARIES: Final[tuple[str, ...]] = (
 )
 
 # Each tool's description first line with the product named; "{product}" is replaced verbatim.
+# No article directly precedes "{product}", so the line reads right for any name.
 _FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "get_memory_index": (
@@ -93,15 +94,15 @@ _FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType(
         ),
         "read_file": "Read one {product} memory file: its content, metadata, and version.",
         "list_prefix": (
-            "List the files in a {product} memory scope or area, one page at a time, "
+            "List the files in one {product} memory scope or area, one page at a time, "
             "without content."
         ),
-        "write_file": "Create a {product} memory file or replace one whole.",
+        "write_file": "Create one {product} memory file or replace one whole.",
         "append_line": "Add one fact line to the end of an existing {product} memory file.",
         "replace_fact": (
-            "Change one fact in a {product} memory file by quoting the text to replace."
+            "Change one fact in one {product} memory file by quoting the text to replace."
         ),
-        "delete_file": "Delete a {product} memory file.",
+        "delete_file": "Delete one {product} memory file.",
     }
 )
 if tuple(_FIRST_LINE_TEMPLATES) != TOOL_NAMES:
@@ -627,9 +628,10 @@ def bind_tools(
 ) -> MemoryTools:
     """Resolve the caller's identity and return the session's tools.
 
-    on_call is checked before the resolver runs.
+    on_call and the resolver are checked before the resolver runs.
     """
     check_observer(on_call)
+    check_resolver(resolver)
     return MemoryTools(
         client,
         resolve_identity(resolver, credentials),

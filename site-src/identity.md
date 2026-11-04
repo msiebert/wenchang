@@ -39,7 +39,7 @@ The agent passes only `scope`, `area`, and `name`. The entity ID always comes fr
 Three pieces plug in.
 
 1. **`credentials_from_context(ctx)`** reads the caller's raw credentials from the MCP request. It must be a plain function, not async. Over HTTP, `ctx.headers` holds the request headers. On stdio it is `None`, so a stdio server reads credentials from its own environment instead. Return the raw value and do not trust it here. Without MCP there is no such function: you pass the credentials to `bind_tools` yourself.
-2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`). `resolve` must be a plain synchronous method. wenchang never awaits it, so an `async def resolve` returns a coroutine, and every call fails with `ResolverFailureError` ("Resolver ... returned coroutine, not Identity or ResolutionFailure.") on every integration path.
+2. **A resolver** with one method, `resolve(credentials) -> Identity | ResolutionFailure`. It verifies the credentials and returns an `Identity`: a mapping from scope name to `ScopeGrant(entity_id, role)`. Roles are your own words (`owner`, `member`, `admin`). `resolve` must be a plain synchronous method. wenchang never awaits it, so a detectably async `resolve` (such as `async def`) is rejected with `TypeError("resolver.resolve must be a plain method, not async")` when you call `register_memory_tools`, `build_server`, or `bind_tools`. A sync `def` that returns a coroutine is not detected, and every call fails with `ResolverFailureError`.
 3. **A `ScopePolicy`** mapping a scope to the set of roles allowed to write it. A scope not listed is open to every role that holds a grant. The `system/` area is read-only in every scope regardless.
 
 Under MCP, every tool call runs all three. Without MCP, the resolver runs once per `bind_tools` call, which is why you [bind per request](integrate-without-mcp.md#per-request). The agent never sees credentials and never passes an entity ID. It passes `scope`, `area`, and `name`, and the tool layer fills in the entity ID from the caller's grant for that scope. A caller cannot name another user's path.
@@ -85,7 +85,8 @@ tools = bind_tools(
 | Situation | Result |
 | --- | --- |
 | Resolver returns `ResolutionFailure` | Permanent error carrying your detail. No memory for that call. |
-| Resolver raises, or `resolve` is `async` | `ResolverFailureError` naming the exception type, or saying it returned a coroutine. |
+| Resolver raises, or a sync `resolve` returns a coroutine | `ResolverFailureError` naming the exception type, or saying it returned a coroutine. |
+| `resolve` is `async` | `TypeError` at `register_memory_tools`, `build_server`, or `bind_tools`, before any call. |
 | `credentials_from_context` raises | `ResolverFailureError`: "Credentials could not be read from the request." |
 | Agent names a scope the caller has no grant for | `InvalidArgumentError` listing the scopes that are available. |
 | Tianlong (a `member`) writes `organization` | `RestrictedScopeError`, reason `role_required`, with the permitted roles. |

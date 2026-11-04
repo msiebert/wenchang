@@ -13,9 +13,11 @@ from google.api_core.exceptions import (
     BadGateway,
     DeadlineExceeded,
     GatewayTimeout,
+    GoogleAPICallError,
     InternalServerError,
     NotFound,
     PreconditionFailed,
+    RetryError,
     ServiceUnavailable,
     TooManyRequests,
 )
@@ -26,6 +28,7 @@ from wenchang.storage import ListedObject, PreconditionFailedError, StoredObject
 from wenchang.version_token import VersionToken
 
 _GET_RETRY_ATTEMPTS = 3
+_HTTP_REQUEST_TIMEOUT = 408  # api_core has no dedicated class
 _CONTENT_TYPE = "text/markdown; charset=utf-8"
 _GENERATION_TOKEN_RE = re.compile(r"[1-9][0-9]*")
 
@@ -37,7 +40,9 @@ def _map_backend_error(exc: Exception) -> BackendUnavailableError | None:
     `requests.exceptions.ConnectTimeout` subclasses both `Timeout` and
     `ConnectionError`.
     """
-    if isinstance(exc, (DeadlineExceeded, GatewayTimeout, requests.exceptions.Timeout)):
+    if isinstance(
+        exc, (DeadlineExceeded, GatewayTimeout, RetryError, requests.exceptions.Timeout)
+    ) or (isinstance(exc, GoogleAPICallError) and exc.code == _HTTP_REQUEST_TIMEOUT):
         return BackendUnavailableError(TransientReason.TIMEOUT, str(exc))
     if isinstance(
         exc,
@@ -54,10 +59,20 @@ def _map_backend_error(exc: Exception) -> BackendUnavailableError | None:
 
 
 class GcsStorage:
-    """Structurally satisfies Storage, backed by a single GCS bucket."""
+    """Structurally satisfies Storage, backed by a single GCS bucket.
+
+    Safe to share across threads, as are the Client and Bucket it wraps: it
+    adds no mutable state and builds a new Blob per call. The constructor
+    builds the client's HTTP session so no thread triggers its lazy setup.
+    """
 
     def __init__(self, bucket: Bucket) -> None:
         self._bucket = bucket
+        # The client builds its session lazily and configures mTLS after
+        # publishing it, so build it here, before threads share it.
+        client = bucket.client  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        if client is not None:
+            _ = client._http  # pyright: ignore[reportUnknownMemberType, reportPrivateUsage, reportUnknownVariableType]
 
     def get(self, key: str) -> StoredObject | None:
         for _ in range(_GET_RETRY_ATTEMPTS):

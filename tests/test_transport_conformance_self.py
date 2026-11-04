@@ -28,6 +28,7 @@ from wenchang.core import (
 )
 from wenchang.errors import (
     ErrorCategory,
+    FileQuotaExceededError,
     NotFoundError,
     NotFoundReason,
     OversizeWriteError,
@@ -38,6 +39,7 @@ from wenchang.storage.memory import InMemoryStorage
 from wenchang.testing import transport_conformance
 from wenchang.testing.transport_conformance import (
     MIN_FILE_BYTES,
+    MIN_FILES_PER_ENTITY,
     MIN_INDEX_BYTES,
     PROBE_AREA,
     PROBE_STEM,
@@ -50,6 +52,7 @@ from wenchang.testing.transport_conformance import (
     canonical_index,
     canonical_page,
     check_client,
+    check_files_per_entity,
     check_scope_map,
     expect_error,
     probe_path,
@@ -79,6 +82,7 @@ WHEN = datetime(2024, 1, 1, tzinfo=UTC)
 TOKEN = VersionToken("v-1")
 RECOVERABLE = ErrorCategory.RECOVERABLE
 FILE_ABSENT = NotFoundReason.FILE_ABSENT
+MAX_FILES_PER_ENTITY = 32
 
 
 class _Ticking:
@@ -101,6 +105,7 @@ def _reference() -> InProcessClient:
             index_max_bytes=4096,
             scope_priority=("user", "org"),
             list_page_size=2,
+            max_files_per_entity=MAX_FILES_PER_ENTITY,
         )
     )
 
@@ -1173,6 +1178,7 @@ OVERSIZE = "test_oversize_write_is_rejected"
 PROTOCOL = "test_client_satisfies_protocol"
 STATEFUL_CASES = (ROUND_TRIP, TOKEN_CASE, ABSENT, OVERSIZE)
 ALL_CASES = (PROTOCOL, *STATEFUL_CASES)
+FILE_CAP = "test_create_at_file_cap_is_quota_exceeded"
 FIXTURE_ORDER = (
     "client",
     "source",
@@ -1181,6 +1187,7 @@ FIXTURE_ORDER = (
     "index_max_bytes",
     "scope_priority",
     "list_page_size",
+    "max_files_per_entity",
 )
 
 
@@ -1194,6 +1201,7 @@ def _fixtures(client: object, **overrides: object) -> dict[str, object]:
         "index_max_bytes": 4096,
         "scope_priority": ("user", "org"),
         "list_page_size": 2,
+        "max_files_per_entity": MAX_FILES_PER_ENTITY,
     }
     return base | overrides
 
@@ -1656,6 +1664,11 @@ BAD_FIXTURES: list[tuple[str, str, object, str]] = [
     ("list-page-size-true", "list_page_size", True, "bool"),
     ("list-page-size-false", "list_page_size", False, "bool"),
     ("list-page-size-float", "list_page_size", 2.0, "float"),
+    ("max-files-per-entity-true", "max_files_per_entity", True, "bool"),
+    ("max-files-per-entity-str", "max_files_per_entity", "32", "str"),
+    ("max-files-per-entity-float", "max_files_per_entity", 32.0, "float"),
+    ("max-files-per-entity-zero", "max_files_per_entity", 0, str(MIN_FILES_PER_ENTITY)),
+    ("max-files-per-entity-small", "max_files_per_entity", 31, str(MIN_FILES_PER_ENTITY)),
 ]
 
 
@@ -1706,6 +1719,7 @@ BAD_FIXTURE_VALUES: dict[str, object] = {
     "index_max_bytes": 0,
     "scope_priority": ["user", "org"],
     "list_page_size": False,
+    "max_files_per_entity": True,
 }
 
 FIXTURE_PAIRS = [
@@ -1754,14 +1768,18 @@ def test_stateful_case_rejects_bad_fixture_it_uses(case: str, fixture: str, valu
     _fixture_fails(case, _reference(), fixture, **{fixture: value})
 
 
-def test_every_case_takes_only_the_seven_fixtures() -> None:
-    """Each case's parameters are client plus a subset of the fixtures (AIE-1047, US1.3)."""
+def test_every_case_takes_only_the_eight_fixtures() -> None:
+    """Each case's parameters are client plus a subset of the fixtures (AIE-1047, US1.3).
+
+    AIE-1322, US3.4: the protocol case takes the optional eighth fixture last.
+    """
     assert _case_params(PROTOCOL) == list(FIXTURE_ORDER)
     for case in STATEFUL_CASES:
         params = _case_params(case)
         assert params[0] == "client"
         assert set(params) <= set(FIXTURE_ORDER)
     assert "max_file_bytes" in _case_params(OVERSIZE)
+    assert _case_params(FILE_CAP) == ["client", "source", "scope_map", "max_files_per_entity"]
 
 
 # --- US2.0, FR-003: adversarial values fail, never raise raw -----------------
@@ -2295,3 +2313,515 @@ def test_subclass_missing_fixture_reports_fixture_error(pytester: pytest.Pyteste
     assert takes_source > 0
     result.assert_outcomes(passed=len(cases) - takes_source, errors=takes_source)
     result.stdout.fnmatch_lines(["*fixture 'source' not found*"])
+
+
+# --- File cap case -----------------------------------------------------------
+
+CAP = MAX_FILES_PER_ENTITY
+CAP_AREA_PREFIX = "user/u-1/notes/conformance-probe-"
+CAP_PATH = f"{CAP_AREA_PREFIX}{CAP}.md"
+QUOTA_HINT = "check the max_files_per_entity fixture"
+REJECTED_LABEL = f"write_file({CAP_PATH})"
+
+
+def _cap_path(index: int) -> str:
+    return f"{CAP_AREA_PREFIX}{index}.md"
+
+
+def _capped_client(cap: int | None) -> _Forwarding:
+    """A forwarding client over a store whose per-entity file cap is `cap`."""
+    store = MemoryStore(
+        InMemoryStorage(),
+        clock=_Ticking(),
+        max_file_bytes=256,
+        index_max_bytes=4096,
+        scope_priority=("user", "org"),
+        list_page_size=2,
+        max_files_per_entity=cap,
+    )
+    return _Forwarding(InProcessClient(store))
+
+
+class _RaisesAt(_Forwarding):
+    """write_file of `target` raises make(target); every other write is forwarded."""
+
+    def __init__(self, target: str, make: Callable[[str], BaseException]) -> None:
+        super().__init__()
+        self.target = target
+        self.make = make
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        if path == self.target:
+            raise self.make(path)
+        return super().write_file(path, content, metadata, expected_version, source=source)
+
+
+class _StoresThenRejectsQuota(_Forwarding):
+    """Over an uncapped store, the write of CAP_PATH lands and then raises the real quota error."""
+
+    def __init__(self) -> None:
+        super().__init__(_capped_client(None).inner)
+
+    def write_file(
+        self,
+        path: str,
+        content: str,
+        metadata: FileMetadata,
+        expected_version: VersionToken | None,
+        *,
+        source: str,
+    ) -> MemoryFile:
+        result = super().write_file(path, content, metadata, expected_version, source=source)
+        if path == CAP_PATH:
+            raise FileQuotaExceededError(path, CAP)
+        return result
+
+
+class _QuotaSub(FileQuotaExceededError):
+    """A FileQuotaExceededError subclass, which the fill's exact-type check must not hint on."""
+
+
+def _quota_with(**attrs: object) -> FileQuotaExceededError:
+    """The core quota error for CAP_PATH with attributes overwritten after construction."""
+    exc = FileQuotaExceededError(CAP_PATH, CAP)
+    vars(exc).update(attrs)
+    return exc
+
+
+def test_min_files_per_entity_is_32() -> None:
+    """MIN_FILES_PER_ENTITY has the spec's value (AIE-1322, US3.2)."""
+    assert MIN_FILES_PER_ENTITY == 32
+
+
+# --- US1.1, US1.2: conforming clients pass -----------------------------------
+
+
+def test_file_cap_case_passes_for_conforming_clients() -> None:
+    """A conforming client over a capped store passes, unskipped (AIE-1322, US1.1, US1.2)."""
+    _run(FILE_CAP, _reference())
+    _run(FILE_CAP, _Forwarding())
+
+
+def test_file_cap_case_passes_for_other_cap() -> None:
+    """The case fills to whatever cap the fixture reports (AIE-1322, US1.1)."""
+    _run(FILE_CAP, _capped_client(40), max_files_per_entity=40)
+
+
+def test_file_cap_case_fills_second_scope_notes_then_overflows() -> None:
+    """The case writes N stems under the second scope's notes, then the N+1th (AIE-1322, US1.1)."""
+    client = _RecordsWrites()
+
+    _run(FILE_CAP, client)
+
+    paths = [path for path, *_ in client.writes]
+    assert paths[0] == SENTINEL
+    assert paths[1:] == [_cap_path(i) for i in range(CAP + 1)]
+    for _, content, _, expected_version, source in client.writes[1:]:
+        assert content == "- [stated] a\n"
+        assert expected_version is None
+        assert source == SOURCE
+
+
+# --- US1.3-US1.6: wrong errors at the cap ------------------------------------
+
+
+WRONG_TYPES: list[tuple[str, Callable[[str], BaseException], str]] = [
+    ("oversize", lambda p: OversizeWriteError(p, 1, 1), "OversizeWriteError"),
+    ("conflict", lambda p: VersionConflictError(p, "c", TOKEN), "VersionConflictError"),
+    ("runtime-error", lambda _: RuntimeError("boom"), "RuntimeError"),
+    ("subclass", lambda p: _QuotaSub(p, CAP), "_QuotaSub"),
+]
+
+
+@pytest.mark.parametrize(
+    ("make", "got_name"),
+    [(m, g) for _, m, g in WRONG_TYPES],
+    ids=[i for i, _, _ in WRONG_TYPES],
+)
+def test_file_cap_wrong_error_type_fails(
+    make: Callable[[str], BaseException], got_name: str
+) -> None:
+    """A different error type at the cap fails "wrong error type" (AIE-1322, US1.3)."""
+    message = _case_fails(FILE_CAP, _RaisesAt(CAP_PATH, make), REJECTED_LABEL, "wrong error type")
+
+    assert got_name in message
+    assert "FileQuotaExceededError" in message
+
+
+WRONG_PAYLOADS: list[tuple[str, Callable[[str], BaseException], str]] = [
+    ("limit", lambda _: _quota_with(limit=CAP + 1), "limit"),
+    ("path", lambda _: _quota_with(path=_cap_path(0)), "path"),
+]
+
+
+@pytest.mark.parametrize(
+    ("make", "detail"),
+    [(m, d) for _, m, d in WRONG_PAYLOADS],
+    ids=[i for i, _, _ in WRONG_PAYLOADS],
+)
+def test_file_cap_wrong_payload_fails(make: Callable[[str], BaseException], detail: str) -> None:
+    """A quota error with a wrong limit or path fails "wrong payload" (AIE-1322, US1.4)."""
+    message = _case_fails(FILE_CAP, _RaisesAt(CAP_PATH, make), REJECTED_LABEL, "wrong payload")
+
+    assert detail in message
+
+
+@pytest.mark.parametrize(
+    "detail",
+    ["Quota reached.", "Cannot create a new file: memory is full."],
+    ids=["reworded", "guidance-stripped"],
+)
+def test_file_cap_wrong_message_fails(detail: str) -> None:
+    """A quota error whose str() differs from core's fails "wrong message" (AIE-1322, US1.5)."""
+    client = _RaisesAt(CAP_PATH, lambda p: _quota_with(detail=detail))
+
+    _case_fails(FILE_CAP, client, REJECTED_LABEL, "wrong message")
+
+
+def test_file_cap_wrong_category_fails() -> None:
+    """A quota error with the wrong category fails "wrong category" (AIE-1322, US1.6)."""
+    client = _RaisesAt(CAP_PATH, lambda p: _quota_with(category=ErrorCategory.TRANSIENT))
+
+    message = _case_fails(FILE_CAP, client, REJECTED_LABEL, "wrong category")
+
+    assert "transient" in message
+
+
+# --- US1.7: cap never enforced -----------------------------------------------
+
+
+def test_file_cap_not_enforced_fails_did_not_raise_with_hint() -> None:
+    """A store that never enforces the cap fails "did not raise" with the fixture hint.
+
+    AIE-1322, US1.7.
+    """
+    message = _case_fails(
+        FILE_CAP, _capped_client(None), REJECTED_LABEL, "FileQuotaExceededError did not raise"
+    )
+
+    assert QUOTA_HINT in message
+
+
+# --- US1.8: fill failures ----------------------------------------------------
+
+
+def test_file_cap_fixture_above_real_cap_fails_with_hint() -> None:
+    """A FileQuotaExceededError before N files exist fails at that fill write with the hint.
+
+    AIE-1322, US1.8.
+    """
+    client = _capped_client(10)
+
+    _case_fails(
+        FILE_CAP,
+        client,
+        f"write_file({_cap_path(10)})",
+        f"unexpected error: FileQuotaExceededError; {QUOTA_HINT}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("make", "got_name"),
+    [(m, g) for i, m, g in WRONG_TYPES if i in ("subclass", "runtime-error")],
+    ids=["runtime-error", "subclass"],
+)
+def test_file_cap_other_fill_error_has_no_hint(
+    make: Callable[[str], BaseException], got_name: str
+) -> None:
+    """A fill error that is not exactly FileQuotaExceededError gets no fixture hint.
+
+    AIE-1322, US1.8.
+    """
+    message = _case_fails(
+        FILE_CAP,
+        _RaisesAt(_cap_path(3), make),
+        f"write_file({_cap_path(3)})",
+        f"unexpected error: {got_name}",
+    )
+
+    assert QUOTA_HINT not in message
+    assert "max_files_per_entity" not in message
+
+
+def test_file_cap_fill_base_exception_propagates() -> None:
+    """A BaseException during the fill is not caught (AIE-1322, US1.8)."""
+    with pytest.raises(_Abort):
+        _run(FILE_CAP, _RaisesAt(_cap_path(3), lambda _: _Abort()))
+
+
+# --- US1.9: stores then rejects ----------------------------------------------
+
+
+def test_file_cap_write_that_stores_fails_on_follow_up_read() -> None:
+    """A correct quota error after storing the file fails the follow-up read.
+
+    AIE-1322, US1.9.
+    """
+    _case_fails(FILE_CAP, _StoresThenRejectsQuota(), f"read_file({CAP_PATH})", "did not raise")
+
+
+# --- expect_error hint -------------------------------------------------------
+
+
+def test_expect_error_quota_did_not_raise_hints_fixture() -> None:
+    """A quota error that did not raise hints at max_files_per_entity (AIE-1322, US1.7)."""
+    message = _fails(
+        lambda: expect_error(NAME, LABEL, lambda: None, FileQuotaExceededError, RECOVERABLE),
+        "did not raise",
+    )
+
+    assert "FileQuotaExceededError" in message
+    assert "NoneType" in message
+    assert QUOTA_HINT in message
+
+
+@pytest.mark.parametrize("expected", [OversizeWriteError, NotFoundError])
+def test_expect_error_other_types_get_no_quota_hint(expected: type[Exception]) -> None:
+    """Other types that did not raise carry no max_files_per_entity hint (AIE-1322, US1.7)."""
+    message = _fails(
+        lambda: expect_error(NAME, LABEL, lambda: None, expected, RECOVERABLE),
+        "did not raise",
+    )
+
+    assert "max_files_per_entity" not in message
+
+
+# --- US2: optional fixture ---------------------------------------------------
+
+
+def test_file_cap_case_skips_without_fixture_and_writes_nothing() -> None:
+    """With the fixture None the case skips, naming the fixture, before any write.
+
+    AIE-1322, US2.1.
+    """
+    client = _RecordsWrites()
+
+    with pytest.raises(pytest.skip.Exception, match="max_files_per_entity"):
+        _run(FILE_CAP, client, max_files_per_entity=None)
+
+    assert client.writes == []
+
+
+def test_protocol_case_passes_with_no_file_cap_fixture() -> None:
+    """The None default is a valid fixture value for the protocol case (AIE-1322, US2.2)."""
+    _run(PROTOCOL, _reference(), max_files_per_entity=None)
+
+
+def test_default_fixture_is_not_a_public_suite_method() -> None:
+    """The default fixture is underscore-named, so it is not a public suite method.
+
+    AIE-1322, US2.3.
+    """
+    public = {
+        name
+        for name, value in vars(TransportConformance).items()
+        if callable(value) and not name.startswith("_")
+    }
+
+    assert "max_files_per_entity" not in public
+    assert FILE_CAP in public
+    assert "_max_files_per_entity" in vars(TransportConformance)
+
+
+FILE_CAP_SUBCLASS_MODULE = """
+from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from wenchang.core import MemoryStore
+from wenchang.storage.memory import InMemoryStorage
+from wenchang.testing import TransportConformance
+from wenchang.transport import InProcessClient, TransportClient
+
+
+class _Ticking:
+    def __init__(self) -> None:
+        self._n = 0
+
+    def __call__(self) -> datetime:
+        self._n += 1
+        return datetime(2024, 1, 1, tzinfo=UTC) + timedelta(microseconds=self._n)
+
+
+class _Adopter(TransportConformance):
+    @pytest.fixture
+    def client(self) -> TransportClient:
+        return InProcessClient(
+            MemoryStore(
+                InMemoryStorage(),
+                clock=_Ticking(),
+                max_file_bytes=256,
+                index_max_bytes=4096,
+                scope_priority=("user", "org"),
+                list_page_size=2,
+                max_files_per_entity=32,
+            )
+        )
+
+    @pytest.fixture
+    def source(self) -> str:
+        return "conformance"
+
+    @pytest.fixture
+    def scope_map(self) -> Mapping[str, str]:
+        return {"user": "u-1", "org": "o-9"}
+
+    @pytest.fixture
+    def max_file_bytes(self) -> int:
+        return 256
+
+    @pytest.fixture
+    def index_max_bytes(self) -> int:
+        return 4096
+
+    @pytest.fixture
+    def scope_priority(self) -> tuple[str, ...]:
+        return ("user", "org")
+
+    @pytest.fixture
+    def list_page_size(self) -> int:
+        return 2
+
+
+class TestWithoutFixture(_Adopter):
+    def test_default_fixture_is_none(self, max_files_per_entity: int | None) -> None:
+        assert max_files_per_entity is None
+
+
+class TestWithFixture(_Adopter):
+    @pytest.fixture
+    def max_files_per_entity(self) -> int:
+        return 32
+"""
+
+
+def _suite_cases() -> list[str]:
+    return [
+        name
+        for name, value in vars(TransportConformance).items()
+        if name.startswith("test_") and callable(value)
+    ]
+
+
+def test_subclass_without_fixture_collects_and_skips_only_file_cap(
+    pytester: pytest.Pytester,
+) -> None:
+    """A subclass lacking the fixture passes every case but the file-cap one, which skips.
+
+    AIE-1322, US2.1, US2.2.
+    """
+    pytester.makepyfile(test_adopter=FILE_CAP_SUBCLASS_MODULE)
+
+    result = pytester.runpytest("-p", "no:cacheprovider", "-rs", "-k", "TestWithoutFixture")
+
+    file_cap_cases = 1
+    own_cases = 1  # test_default_fixture_is_none, defined on TestWithoutFixture
+    result.assert_outcomes(
+        passed=len(_suite_cases()) - file_cap_cases + own_cases, skipped=file_cap_cases
+    )
+    result.stdout.fnmatch_lines(["*SKIPPED*max_files_per_entity*"])
+
+
+def test_subclass_fixture_overrides_default_and_runs_the_case(pytester: pytest.Pytester) -> None:
+    """A subclass fixture named max_files_per_entity overrides the None default.
+
+    AIE-1322, US2.3, US4.1.
+    """
+    pytester.makepyfile(test_adopter=FILE_CAP_SUBCLASS_MODULE)
+
+    result = pytester.runpytest("-p", "no:cacheprovider", "-k", "TestWithFixture and file_cap")
+
+    result.assert_outcomes(passed=1)
+
+
+# --- US3: fixture validation -------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [None, 32, 33, 500])
+def test_check_files_per_entity_accepts(value: int | None) -> None:
+    """None and ints of at least the minimum are returned unchanged (AIE-1322, US3.1, US3.2)."""
+    assert check_files_per_entity(NAME, value) == value
+
+
+@pytest.mark.parametrize(
+    ("value", "detail"),
+    [
+        (True, "must be an int, got bool"),
+        (False, "must be an int, got bool"),
+        ("32", "must be an int, got str"),
+        (32.0, "must be an int, got float"),
+        (0, "must be at least 32, got 0"),
+        (31, "must be at least 32, got 31"),
+        (-1, "must be at least 32, got -1"),
+    ],
+)
+def test_check_files_per_entity_rejects(value: object, detail: str) -> None:
+    """A bool, non-int, or int below the minimum fails with the fixture's name (AIE-1322, US3.3)."""
+    with pytest.raises(pytest.fail.Exception) as exc_info:
+        check_files_per_entity(NAME, value)
+
+    assert str(exc_info.value) == f"{NAME}: fixture max_files_per_entity {detail}"
+
+
+FILE_CAP_BAD_FIXTURES = [
+    (bad_id, fixture, value)
+    for bad_id, fixture, value, _ in BAD_FIXTURES
+    if fixture in _case_params(FILE_CAP)
+]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "value"),
+    [(f, v) for _, f, v in FILE_CAP_BAD_FIXTURES],
+    ids=[i for i, _, _ in FILE_CAP_BAD_FIXTURES],
+)
+def test_file_cap_case_rejects_bad_fixture_it_uses(fixture: str, value: object) -> None:
+    """The file-cap case fails, never skips, for a bad fixture it takes (AIE-1322, US3.3)."""
+    client = _RecordsWrites()
+
+    _fixture_fails(FILE_CAP, client, fixture, **{fixture: value})
+
+    assert client.writes == []
+
+
+def test_file_cap_case_rejects_bad_client() -> None:
+    """The file-cap case fails "fixture client" for a non-client (AIE-1322, US3.3)."""
+    _fixture_fails(FILE_CAP, _NotAClient(), "client")
+
+
+def test_file_cap_fixture_validated_after_list_page_size() -> None:
+    """With both fixtures bad, the protocol case reports list_page_size first (AIE-1322, US3.4)."""
+    message = _fixture_fails(
+        PROTOCOL, _reference(), "list_page_size", list_page_size=0, max_files_per_entity=True
+    )
+
+    assert "fixture max_files_per_entity" not in message
+
+
+def test_protocol_case_rejects_cap_below_page_floor() -> None:
+    """A cap below list_page_size + 2 fails with the stated floor message (AIE-1322, US3.5)."""
+    client = _reference()
+
+    expected = (
+        f"{type(client).__name__}: fixture max_files_per_entity must be at least "
+        "list_page_size + 2 (42), got 40"
+    )
+    with pytest.raises(pytest.fail.Exception) as exc_info:
+        _run(PROTOCOL, client, list_page_size=40, max_files_per_entity=40)
+
+    assert str(exc_info.value) == expected
+
+
+def test_protocol_case_accepts_cap_at_page_floor() -> None:
+    """A cap equal to list_page_size + 2 passes, as does the minimum cap (AIE-1322, US3.5)."""
+    _run(PROTOCOL, _reference(), list_page_size=30, max_files_per_entity=32)
+    _run(PROTOCOL, _reference(), list_page_size=40, max_files_per_entity=42)
