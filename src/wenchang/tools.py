@@ -86,6 +86,7 @@ _LINE_BOUNDARIES: Final[tuple[str, ...]] = (
 )
 
 # Each tool's description first line with the product named; "{product}" is replaced verbatim.
+# No article directly precedes "{product}", so the line reads right for any name.
 _FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "get_memory_index": (
@@ -93,15 +94,15 @@ _FIRST_LINE_TEMPLATES: Final[Mapping[str, str]] = MappingProxyType(
         ),
         "read_file": "Read one {product} memory file: its content, metadata, and version.",
         "list_prefix": (
-            "List the files in a {product} memory scope or area, one page at a time, "
+            "List the files in one {product} memory scope or area, one page at a time, "
             "without content."
         ),
-        "write_file": "Create a {product} memory file or replace one whole.",
+        "write_file": "Create one {product} memory file or replace one whole.",
         "append_line": "Add one fact line to the end of an existing {product} memory file.",
         "replace_fact": (
-            "Change one fact in a {product} memory file by quoting the text to replace."
+            "Change one fact in one {product} memory file by quoting the text to replace."
         ),
-        "delete_file": "Delete a {product} memory file.",
+        "delete_file": "Delete one {product} memory file.",
     }
 )
 if tuple(_FIRST_LINE_TEMPLATES) != TOOL_NAMES:

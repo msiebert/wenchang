@@ -1024,7 +1024,10 @@ planned piece.
   product, only the first line changes: it comes from a fixed per-tool
   template that is the docstring's first line with the product inserted
   (plus "memory" for `list_prefix`), e.g. "Add one fact line to the end of
-  an existing Mixpanel memory file."; the remaining lines are the
+  an existing Mixpanel memory file."; four templates (`list_prefix`,
+  `write_file`, `replace_fact`, `delete_file`) also change the docstring's
+  "a" before the product to "one" so no article precedes the product, e.g.
+  "Delete one Mixpanel memory file."; the remaining lines are the
   docstring's. No tool method takes `product`, and the docstrings are
   static (see [ADR 0026](docs/adr/0026-product-identity.md)).
   Tools are scope-relative: `read_file(scope, area, name)`,
