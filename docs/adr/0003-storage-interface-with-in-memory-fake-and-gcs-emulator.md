@@ -42,6 +42,12 @@ never mint a duplicate token, as GCS does. The MCP host adapter calls the
 transport from concurrent worker threads. See
 [ADR 0027](0027-mcp-host-adapter.md) decision 7.
 
+**Note (2026-11-02, AIE-1316).** `GcsStorage` is also safe to share across
+threads, along with its `Client` and `Bucket`. Evidence:
+`tests/integration/test_storage_gcs_threads.py`, verified against
+google-cloud-storage 3.14.1. `GcsStorage` builds the client's HTTP session at
+construction. See [ADR 0027](0027-mcp-host-adapter.md) decision 7 for caveats.
+
 ## Consequences
 
 Unit tests run fast, with no network dependency, while still exercising

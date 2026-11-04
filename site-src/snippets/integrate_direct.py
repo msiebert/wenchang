@@ -22,7 +22,7 @@ class TokenResolver:
 
 
 # Built once per process and shared by every request. InMemoryStorage is safe to share
-# across threads; see the Threads section before sharing a GcsStorage.
+# across threads, as is a GcsStorage; see the Threads section.
 client = InProcessClient(MemoryStore(InMemoryStorage()))
 resolver = TokenResolver()
 policy = ScopePolicy({})

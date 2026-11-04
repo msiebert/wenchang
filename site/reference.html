@@ -705,7 +705,7 @@
 </table></div>
 <p>Backends may raise <code>BackendUnavailableError</code> for timeouts and outages. Two ship with the library:</p>
 <ul>
-<li><strong><code>GcsStorage(bucket)</code></strong> in <code>wenchang.storage.gcs</code> takes a <code>google.cloud.storage.Bucket</code>. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions.</li>
+<li><strong><code>GcsStorage(bucket)</code></strong> in <code>wenchang.storage.gcs</code> takes a <code>google.cloud.storage.Bucket</code>. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. The constructor builds the bucket client's HTTP session (including any mTLS channel setup), so mTLS configuration errors raise from <code>GcsStorage(bucket)</code> rather than from the first call. It makes no network call.</li>
 <li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a fake for tests and trials. It holds a lock, so it is safe to share across threads.</li>
 </ul>
 <p>Object keys, the stored metadata keys, timeouts, and retries are on <a href="storage.html#metadata">Storage and operations</a>.</p>

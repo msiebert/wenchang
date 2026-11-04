@@ -27,7 +27,7 @@ If you have already resolved the identity yourself, `MemoryTools(client, identit
 
 `bind_tools` calls your resolver once and fixes that identity for the object's lifetime. A multi-tenant service binds per request, or per session if a session has one caller, never once per process. Binding runs the resolver and builds a small object.
 
-The store, the client, the resolver, and the policy are built once per process and shared, except where [Threads](#threads) says otherwise.
+The store, the client, the resolver, and the policy are built once per process and shared; [Threads](#threads) lists what is safe to share.
 
 If the resolver returns a `ResolutionFailure` or raises, or `resolve` is `async`, `bind_tools` raises `ResolverFailureError` (permanent). Render it like any tool error. The model then has no memory for that request.
 
@@ -135,7 +135,7 @@ class TokenResolver:
 
 
 # Built once per process and shared by every request. InMemoryStorage is safe to share
-# across threads; see the Threads section before sharing a GcsStorage.
+# across threads, as is a GcsStorage; see the Threads section.
 client = InProcessClient(MemoryStore(InMemoryStorage()))
 resolver = TokenResolver()
 policy = ScopePolicy({})
@@ -232,16 +232,19 @@ Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS rou
 | `InProcessClient` | Safe. It holds only its store. |
 | `MemoryTools` | Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request. |
 | `InMemoryStorage`, `InMemoryIndexCache` | Safe. Each guards its state with a lock. |
-| `GcsStorage` | Adds no state of its own: it holds the bucket and builds a new `Blob` for every call. Every call goes through the bucket's `storage.Client`. |
-| `google.cloud.storage.Client` and its `Bucket` | Not guaranteed. See below. |
+| `GcsStorage` | Safe. It adds no state of its own: it holds the bucket and builds a new `Blob` for every call. Its constructor builds the client's HTTP session on the constructing thread. |
+| `google.cloud.storage.Client` and its `Bucket` | Safe, with the caveats below. One client per process works; heavy concurrency can outgrow its connection pool. |
 | Your resolver, `IndexCache` functions, `on_call`, and `clock` | Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads. |
 
 The index cache's generation tokens already handle readers and writers racing on one entity, across threads and processes; your `get` and `set` need only be safe to call concurrently and linearizable per key ([Guarantees and limits](storage.md#cache-limits)).
 
-**`storage.Client` is not documented as thread-safe.** google-cloud-storage 3.14.1 sends every request from a client through one `google.auth.transport.requests.AuthorizedSession`, a `requests.Session` the client creates on first use without a lock. Neither google-cloud-storage, google-auth, nor requests, as installed, says that one session is safe to share across threads, and wenchang's tests do not cover one client shared across threads. To stay within what is documented, give each thread its own `storage.Client`:
+**One shared `storage.Client` is safe.** Build one per process and share it, its `Bucket`, and one `GcsStorage` across threads; it needs no extra clients and no locking. The basis is a reading of google-cloud-storage 3.14.1, google-auth, and requests, plus wenchang's integration tests, which stress one shared client against an emulator and re-verify this on upgrades. It is verified against google-cloud-storage 3.14.1, the version wenchang's lockfile resolves; older versions in the declared range (`>=2.18`) are not verified. In the source, the batch stack is thread-local, the bucket metadata cache is lock-guarded, and each request keeps its state in its own arguments and copied headers. The library's own `transfer_manager` shares one client across threads, which is an internal precedent rather than an API contract. `GcsStorage(bucket)` builds the client's HTTP session when it is constructed, so no request runs before the session is fully set up. The caveats:
 
-- **Direct calls.** Build the `storage.Client`, bucket, `GcsStorage`, `MemoryStore`, and `InProcessClient` once per thread, for example in a `threading.local`. Give every store the same `IndexCache`, so a write on one thread invalidates the index the others read.
-- **MCP.** Pass as `client` a `TransportClient` whose seven methods forward to a per-thread `InProcessClient` built the same way. The protocol is only those seven methods, so a small forwarding class satisfies it.
+- requests does not formally document `Session` as thread-safe.
+- Concurrent credential refreshes are unlocked, so threads can send duplicate token requests. They are redundant; every request still carries a valid token, which the tests check.
+- On the first call per bucket, the client starts a background daemon thread that calls `get_bucket` on the same shared client. This happens by default; the integration tests exercise it. Set `DISABLE_GCS_PYTHON_CLIENT_OTEL_BUCKET_METADATA=true` to turn it off.
+- A client used only through `GcsStorage` is safe under mutual TLS (`GOOGLE_API_USE_CLIENT_CERTIFICATE`, or an auto-detected workload certificate), because the session is built up front. One residual: on a 401 with a rotated client certificate, google-auth reconfigures the mTLS channel on the shared session while other threads may be mid-request, and google-auth documents that call as not thread-safe.
+- requests keeps 10 connections per host by default, and neither google-auth nor google-cloud-storage enlarges that. Above 10 concurrent calls, urllib3 discards the extra connections and logs "Connection pool is full, discarding connection". That costs latency, not correctness.
 
 ### Async hosts
 

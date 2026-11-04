@@ -101,6 +101,8 @@ class _StubBlob:
 class _StubBucket:
     """Minimal stand-in for google.cloud.storage.Bucket."""
 
+    client = None
+
     def __init__(
         self,
         get_blob_sequence: list[_StubBlob | None] | None = None,
@@ -653,6 +655,8 @@ class _StubListBlob:
 
 class _StubBucketForList:
     """Minimal stand-in for google.cloud.storage.Bucket, for list_blobs only."""
+
+    client = None
 
     def __init__(
         self,
