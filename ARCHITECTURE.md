@@ -769,7 +769,7 @@ planned piece.
   so every required fixture is checked from the first run even though only
   later cases use the last three; the optional fixture is the one departure
   from that rule, because requiring it would break existing subclasses
-  ([ADR 0044](docs/adr/0044-conformance-file-cap-case.md)). The fixture contract also requires that every
+  ([ADR 0045](docs/adr/0045-conformance-file-cap-case.md)). The fixture contract also requires that every
   mapped scope be writable through `client` under the credentials it was
   constructed with, and that a client's writes stamp strictly increasing
   `last_updated` within one test (the repo's reference run uses a ticking

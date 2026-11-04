@@ -123,13 +123,13 @@ Existing-test edits (per spec Allow-test-changes):
   "seven required fixtures" → seven required plus one optional, explicitly
   naming the departure from "every fixture required from the first run";
   validation order; floor `max(32, list_page_size + 2)`; case count 43 → 44;
-  the new case. New ADR `docs/adr/0044-conformance-file-cap-case.md`
+  the new case. New ADR `docs/adr/0045-conformance-file-cap-case.md`
   (renumber at PR time if taken): optional fixture with `None` default + skip;
   supersedes in part ADR 0039 decision 8 and its consequence; amends ADR 0021
   decision 7a and ADR 0023's "seven fixtures"; rejected: required fixture
   (breaks adopters), default 500 (500 writes per run, fails adopters with other
   caps), separate capped-client fixture (more adopter surface). One-line
-  "Amended by ADR 0044" notes on ADR 0021, 0023, 0039. review-pr.md.
+  "Amended by ADR 0045" notes on ADR 0021, 0023, 0039. review-pr.md.
 - general-purpose: `site-src/reference.md` conformance bullet mentions the
   optional fixture; regenerate `site/` with `uv run scripts/build_site.py`.
 

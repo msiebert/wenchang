@@ -69,7 +69,7 @@ what to do instead.
    falls under the transport error-parity contract but no conformance case
    exercises it: the suite has no cap fixture, and adding a required fixture
    would break every adopter's existing suite.
-   *Superseded in part by [ADR 0044](0044-conformance-file-cap-case.md):
+   *Superseded in part by [ADR 0045](0045-conformance-file-cap-case.md):
    an optional `max_files_per_entity` fixture runs a cap case.*
 
 ## Consequences
@@ -87,7 +87,7 @@ what to do instead.
   default cap calls it before every non-`system/` create.
 - A remote transport that drops or reshapes `FileQuotaExceededError` is not
   caught by the conformance suite. *Superseded in part by
-  [ADR 0044](0044-conformance-file-cap-case.md): an adopter that supplies
+  [ADR 0045](0045-conformance-file-cap-case.md): an adopter that supplies
   the cap fixture is checked.*
 
 Rejected:

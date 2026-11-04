@@ -38,7 +38,7 @@ All tests are in `tests/test_transport_conformance_self.py` unless noted.
 
 ## Architecture / ADR changes
 
-- New [ADR 0044](../../docs/adr/0044-conformance-file-cap-case.md): optional
+- New [ADR 0045](../../docs/adr/0045-conformance-file-cap-case.md): optional
   fixture with `None` default and skip.
 - Supersedes in part ADR 0039 decision 8 and its "not caught by the
   conformance suite" consequence; amends ADR 0021 decision 7a and ADR 0023's

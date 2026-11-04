@@ -36,12 +36,12 @@ AIE-1292 added a per-entity file cap and `FileQuotaExceededError(path, limit)`, 
 
 - `src/wenchang/testing/transport_conformance.py`: `MIN_FILES_PER_ENTITY`, `check_files_per_entity`, the fixture, the new case, the protocol-case check, the `expect_error` hint, and the module docstring.
 - New self-tests in `tests/`; existing-test edits (per `Allow-test-changes`) in `tests/test_transport_conformance_{self,cases_self,reference,cached}.py`.
-- Docs: ARCHITECTURE.md, new ADR (0044, amending 0021, 0023 and 0039), `review-pr.md`.
+- Docs: ARCHITECTURE.md, new ADR (0045, amending 0021, 0023 and 0039), `review-pr.md`.
 - `site-src/reference.md`, plus a regenerated `site/`.
 
 ## Open questions / assumptions
 
-- ADR number 0044 is next free and may be renumbered at PR time.
+- ADR number 0045 is next free and may be renumbered at PR time.
 - `wenchang.testing.__all__` stays unchanged, so `tests/test_testing_package.py` needs no edit.
 - Cap counting semantics are out of scope (core tests cover them in `tests/test_core_file_cap.py`).
 
