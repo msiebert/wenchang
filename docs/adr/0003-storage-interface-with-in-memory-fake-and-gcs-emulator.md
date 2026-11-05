@@ -48,6 +48,12 @@ threads, along with its `Client` and `Bucket`. Evidence:
 google-cloud-storage 3.14.1. `GcsStorage` builds the client's HTTP session at
 construction. See [ADR 0027](0027-mcp-host-adapter.md) decision 7 for caveats.
 
+**Amended (2026-11-04, AIE-1335) by [ADR 0047](0047-filesystem-storage-backend.md).**
+A third implementation, a local-filesystem backend for tests and local
+development, also sits behind the protocol and passes the same conformance
+suite. It is not a production provider and does not make the protocol a
+general-purpose storage abstraction.
+
 ## Consequences
 
 Unit tests run fast, with no network dependency, while still exercising

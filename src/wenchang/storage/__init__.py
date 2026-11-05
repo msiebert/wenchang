@@ -3,7 +3,7 @@
 A `Storage` implementation stores objects addressed by an opaque flat string
 key, each with bytes, a flat string metadata map, and a version token. This
 protocol is the only way the rest of wenchang touches storage; concrete
-backends (in-memory fake, GCS) live in sibling modules.
+backends (in-memory fake, filesystem, GCS) live in sibling modules.
 """
 
 from collections.abc import Mapping, Sequence

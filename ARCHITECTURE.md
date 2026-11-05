@@ -14,7 +14,8 @@ Today the repository holds the project skeleton (tooling, tests, docs) plus
 twelve implemented modules: the cross-cutting `errors` and `version_token`; the
 dependency-free `file_format`, `paths`, and `index_cache` (the optional
 adopter-supplied cache config for the memory index); the `storage` layer (an
-in-memory fake and a GCS implementation behind one protocol); `core`, which
+in-memory fake, a GCS implementation, and a local-filesystem backend behind
+one protocol); `core`, which
 implements all seven core operations (`read_file`, `write_file`,
 `replace_fact`, `list_prefix`, `append_line`, `delete_file`, and
 `get_memory_index`, with its value types `MemoryIndex` and
@@ -146,7 +147,7 @@ planned piece.
   metadata, a generation-backed version token): `Storage` (`get`, `put`,
   `put_if_version`, `delete_if_version`, `list_page`) and `StoredObject`
   (bytes, metadata map,
-  `VersionToken`), with two implementations behind it, held identical by one
+  `VersionToken`), with three implementations behind it, held identical by one
   shared conformance suite. `InMemoryStorage` is the unit-test fake; it is
   thread-safe, with one lock held across each method, because the MCP
   adapter calls the transport from concurrent worker threads.
@@ -160,8 +161,8 @@ planned piece.
   server/connection unavailability to
   `BackendUnavailableError`, and pins each `get` to the generation
   `get_blob` fetched so content and metadata always come from the same
-  write, retrying on a generation race. `put` is unconditional in both
-  implementations. `put_if_version(key, data, metadata, expected)` is the
+  write, retrying on a generation race. `put` is unconditional in every
+  implementation. `put_if_version(key, data, metadata, expected)` is the
   conditional put: `expected=None` commits only if no object exists at
   `key` (GCS `ifGenerationMatch=0`); a token commits only if it equals the
   object's current version; any other case raises the storage-internal
@@ -170,7 +171,7 @@ planned piece.
   canonical decimal form of a positive integer as a token (so `"0"` and
   other non-canonical strings fail the precondition locally, with no client
   call, rather than being read as "must not exist"). `delete_if_version(key,
-  expected)` is the only delete either implementation offers — there is no
+  expected)` is the only delete any implementation offers — there is no
   unconditional delete. It removes the object at `key` only if it is at
   `expected`; if the object is absent or at a different version, it raises
   `PreconditionFailedError(key)` and deletes nothing, the same signal
@@ -196,11 +197,35 @@ planned piece.
   [ADR 0010](docs/adr/0010-list-prefix-pagination.md), and
   [ADR 0012](docs/adr/0012-delete-file.md). Besides `StorageConformance`,
   the shared suite has an `EntityPurgeExportConformance` mixin that runs
-  `MemoryStore.purge` and `export` on both implementations (GCS against
+  `MemoryStore.purge` and `export` on all three implementations (GCS against
   fake-gcs-server); its concurrency cases are unit-only, because
   fake-gcs-server does not enforce `ifGenerationMatch` on DELETE. Purge
   uses `delete_if_version`, which is still the only delete (see
   [ADR 0038](docs/adr/0038-entity-purge-and-export.md)).
+  `FilesystemStorage(root)` (`wenchang.storage.filesystem`, not re-exported)
+  is the third implementation, for tests and local development, not a
+  production provider
+  ([ADR 0047](docs/adr/0047-filesystem-storage-backend.md)). Each key is
+  split on `/` and each segment percent-encoded (uppercase letters, a
+  leading `.`, and every byte outside `[a-z0-9_.-]` escaped, an empty
+  segment as a lone `%`), so `a` and `a/b` coexist, keys differing only by
+  case stay distinct on case-insensitive filesystems, and no key can leave
+  `root`. A segment encoding to over 200 bytes, the empty key, and a key
+  that is not valid UTF-8 raise `InvalidStorageKeyError` (a `ValueError`)
+  before any disk access. Per object, `<leaf>%obj` holds the body bytes and
+  `<leaf>%meta` holds a JSON sidecar with the metadata and version token;
+  the sidecar `os.replace` is the commit point and a body without a sidecar
+  is an invisible orphan. Tokens are `uuid4().hex`, so they never repeat
+  across delete or restart. Every method holds a per-instance
+  `threading.Lock` and an `fcntl.flock` on `root/.lock` (exclusive for
+  writes, shared for reads), so conditional writes and deletes have one
+  winner across threads, instances, and processes; POSIX local filesystems
+  only. `list_page` never opens a body: it walks the matching subtree,
+  sorts decoded keys, and reads only the sidecars of the page. `OSError` and
+  malformed sidecars map to `BackendUnavailableError`. Accepted limits: a
+  crash between the two `os.replace` calls of an overwrite pairs the new
+  body with the old sidecar, there is no `fsync`, and stale temp files are
+  not collected.
 - **index_cache** — the optional, adopter-supplied cache for the memory
   index; imports nothing from `wenchang`. `IndexCache(get, set, ttl=None,
   key_prefix=DEFAULT_KEY_PREFIX)` is a frozen value of two adopter callables,
@@ -1372,6 +1397,7 @@ flowchart TB
         storageiface[storage interface]
         gcs[GCS implementation]
         fake[in-memory fake]
+        fs[filesystem implementation]
     end
 
     prompts -.guides.-> tools
@@ -1383,6 +1409,7 @@ flowchart TB
     core --> storageiface
     storageiface --> gcs
     storageiface --> fake
+    storageiface --> fs
 ```
 
 `errors` and `version_token` are cross-cutting (imported by every layer
@@ -1587,14 +1614,17 @@ server, graders, and report end to end.
   fact lines and tolerated non-fact lines only. The body parser is
   lossless: `serialize_body(parse_body(s)) == s` for every string `s`.
 - **The storage root is the storage instance.** `{root}` in the path layout
-  is one storage instance — for GCS, one bucket — and every path a caller
+  is one storage instance — for GCS, one bucket; for `FilesystemStorage`, one
+  root directory — and every path a caller
   gives `core` is relative to it; the storage protocol takes that path as
   its key unchanged. A key prefix within a bucket, if ever needed, is
   addable without changing callers.
 - **Version tokens convert to and from a GCS generation in exactly one
   place.** The `Storage` protocol and every caller above it speak
   `VersionToken` only; `GcsStorage` is the sole module that turns a token
-  into (or out of) an integer generation.
+  into (or out of) an integer generation. `FilesystemStorage` has no
+  generation: its tokens are opaque random hex strings kept in each
+  object's sidecar and compared by string equality.
 - **Identity is validated at construction; credentials stay with the
   resolver.** Identity fields are validated as path segments at
   construction; the library never handles credentials, only the resolver

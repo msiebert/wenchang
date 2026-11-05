@@ -100,8 +100,8 @@ Terms as used throughout wenchang and its spec.
   that silently drops a scope fails.
 - **Version token / generation** — an opaque handle representing a file's
   current state, used for optimistic concurrency (compare-and-swap on
-  write). Currently backed by a GCS object generation number; callers never
-  parse, compare, or order it.
+  write). Backed by a GCS object generation number on GCS (a random
+  token on the filesystem backend); callers never parse, compare, or order it.
 - **Memory index** — the merged, metadata-only view across a set of scopes,
   returned by `get_memory_index` for session bootstrap, subject to a byte
   cap (default 64 KB, the store's `index_max_bytes`) and a documented
@@ -249,7 +249,7 @@ Terms as used throughout wenchang and its spec.
   results, passed back to resume listing after the last entry seen; callers
   never parse it, the same as a version token.
 - **Storage root** — the base a memory path is relative to; one storage
-  instance (for GCS, one bucket).
+  instance (for GCS, one bucket; for the filesystem backend, one directory).
 - **Recoverable error** — an error category whose instance carries its own
   repair material (e.g. current content and version); the caller corrects
   and retries in the same turn without asking the user. Includes
