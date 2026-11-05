@@ -250,6 +250,43 @@ gcloud storage buckets add-iam-policy-binding gs://hanlin-inkwell-memory --membe
 <p>Seeded files appear in the agent's index like any others, and the <code>system/</code> entries come first.</p>
 <h2 id="local">Run it without GCS<a class="headerlink" href="#local" title="Link to this section">#</a></h2>
 <p>For development, <code>InMemoryStorage()</code> from <code>wenchang.storage.memory</code> replaces <code>GcsStorage(bucket)</code>. Everything is lost when the process exits, and a stdio server starts a fresh process for every client session, so it forgets between sessions.</p>
+<p>To keep memory between runs without GCS, use <code>FilesystemStorage(root)</code> from <code>wenchang.storage.filesystem</code>. It stores each file in a local directory (POSIX only, for development and tests), so you can open the <code>%obj</code> files to read memory directly. This writes a file through a store over a temporary directory and checks the object on disk:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTC</span><span class="p">,</span> <span class="n">datetime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryStore</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.file_format</span><span class="w"> </span><span class="kn">import</span> <span class="n">FileMetadata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.paths</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">wenchang.storage.filesystem</span><span class="w"> </span><span class="kn">import</span> <span class="n">FilesystemStorage</span>
+
+<span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">tmp</span><span class="p">:</span>
+    <span class="n">root</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span> <span class="o">/</span> <span class="s2">"memory"</span>  <span class="c1"># created if missing; use a persistent path in practice</span>
+    <span class="n">store</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">(</span><span class="n">FilesystemStorage</span><span class="p">(</span><span class="n">root</span><span class="p">))</span>
+
+    <span class="n">path</span> <span class="o">=</span> <span class="n">build_path</span><span class="p">(</span><span class="s2">"user"</span><span class="p">,</span> <span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"preferences"</span><span class="p">,</span> <span class="s2">"prose-style"</span><span class="p">)</span>
+    <span class="n">store</span><span class="o">.</span><span class="n">write_file</span><span class="p">(</span>
+        <span class="n">path</span><span class="p">,</span>
+        <span class="s2">"- [stated] Writes in close third person, past tense.</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span>
+        <span class="n">FileMetadata</span><span class="p">(</span>
+            <span class="n">description</span><span class="o">=</span><span class="s2">"Prose style preferences"</span><span class="p">,</span>
+            <span class="n">aliases</span><span class="o">=</span><span class="p">(</span><span class="s2">"narration"</span><span class="p">,),</span>
+            <span class="n">sources</span><span class="o">=</span><span class="nb">frozenset</span><span class="p">(),</span>
+            <span class="n">last_updated</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">UTC</span><span class="p">),</span>
+        <span class="p">),</span>
+        <span class="kc">None</span><span class="p">,</span>  <span class="c1"># create</span>
+        <span class="n">source</span><span class="o">=</span><span class="s2">"local-dev"</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">memory</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">read_file</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">memory</span><span class="o">.</span><span class="n">content</span> <span class="o">==</span> <span class="s2">"- [stated] Writes in close third person, past tense.</span><span class="se">\n</span><span class="s2">"</span>
+
+    <span class="c1"># Each file is a plain body object beside a metadata sidecar.</span>
+    <span class="p">[</span><span class="n">body</span><span class="p">]</span> <span class="o">=</span> <span class="n">root</span><span class="o">.</span><span class="n">rglob</span><span class="p">(</span><span class="s2">"*</span><span class="si">%o</span><span class="s2">bj"</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">body</span><span class="o">.</span><span class="n">read_text</span><span class="p">()</span> <span class="o">==</span> <span class="n">memory</span><span class="o">.</span><span class="n">content</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">body</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">root</span><span class="p">))</span>
+</code></pre></div>
+
 <p>To test against the real GCS API locally, run the emulator the repository's integration tests use:</p>
 <div class="highlight"><pre><span></span><code>docker run -d --rm --name wenchang-fake-gcs -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443
 </code></pre></div>

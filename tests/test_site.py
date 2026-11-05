@@ -64,6 +64,19 @@ STALE_PHRASES = (
     "Python 3.12",
     "3.12 or newer",
     "3.12+",
+    "**GCS only.**",
+    "Storage other than GCS",
+    "Two ship with the library",
+    "Everything on this page goes through `MemoryStore` over `GcsStorage`",
+)
+BACKEND_PAGES = (
+    SITE_SRC / "reference.md",
+    SITE_SRC / "quickstart.md",
+    SITE_SRC / "status.md",
+    SITE_SRC / "index.md",
+    SITE_SRC / "integrate-without-mcp.md",
+    SITE_SRC / "storage.md",
+    SITE / "llms.txt",
 )
 BARE_INSTALL_RE = re.compile(
     r"(?:pip install|uv add|uv pip install|uv tool install)(?:\s+-\S+)*\s+(['\"]?)"
@@ -358,3 +371,40 @@ def test_stored_metadata_keys_documented() -> None:
     text = _read(SITE_SRC / "storage.md")
     missing = [key for key in STORED_METADATA_KEYS if f"`{key}`" not in text]
     assert not missing, f"site-src/storage.md does not name: {missing}"
+
+
+def test_storage_backends_named() -> None:
+    """Every page that lists storage backends names FilesystemStorage, and the
+    reference documents its import path and on-disk layout (AIE-1344, AC1, AC8, AC9).
+    """
+    missing = [
+        str(p.relative_to(ROOT)) for p in BACKEND_PAGES if "FilesystemStorage" not in _read(p)
+    ]
+    assert not missing, f"pages do not name FilesystemStorage: {missing}"
+    reference = _read(SITE_SRC / "reference.md")
+    absent = [
+        token
+        for token in (
+            "wenchang.storage.filesystem",
+            "%obj",
+            "%meta",
+            "GcsStorage",
+            "InMemoryStorage",
+        )
+        if token not in reference
+    ]
+    assert not absent, f"site-src/reference.md does not mention: {absent}"
+
+
+def test_product_readme_names_storage_backends() -> None:
+    """The product README no longer claims there is no swappable storage backend
+    (AIE-1344, AC9).
+    """
+    text = _read(ROOT / "docs" / "product" / "README.md")
+    assert "No swappable storage backend is provided" not in text
+
+
+def test_quickstart_includes_filesystem_snippet() -> None:
+    """The quickstart embeds the local_filesystem.py snippet (AIE-1344, AC3)."""
+    text = _read(SITE_SRC / "quickstart.md")
+    assert "<!--include python local_filesystem.py-->" in text

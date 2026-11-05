@@ -330,6 +330,10 @@
 <td>Safe. Each guards its state with a lock.</td>
 </tr>
 <tr>
+<td><code>FilesystemStorage</code></td>
+<td>Safe. A per-instance lock and a file lock on <code>root/.lock</code> serialize operations, so instances and processes on one root are safe too.</td>
+</tr>
+<tr>
 <td><code>GcsStorage</code></td>
 <td>Safe. It adds no state of its own: it holds the bucket and builds a new <code>Blob</code> for every call. Its constructor builds the client's HTTP session on the constructing thread.</td>
 </tr>
@@ -416,7 +420,7 @@
 <ul>
 <li><strong>The prompt.</strong> The model needs the memory prompt alongside the tools. Put <code>build_memory_prompt(slots)</code> from <code>wenchang.prompts</code> in your system prompt; it has <code>##</code> headings and no top-level heading. See <a href="prompts.html">Customizing the prompts</a>.</li>
 <li><strong>Identity.</strong> A resolver and a scope policy. See <a href="identity.html">Identity and multi-tenant auth</a>.</li>
-<li><strong>Storage.</strong> A <code>MemoryStore</code> over <code>GcsStorage</code>, or <code>InMemoryStorage</code> for tests. See <a href="storage.html">Storage and operations</a>.</li>
+<li><strong>Storage.</strong> A <code>MemoryStore</code> over <code>GcsStorage</code>, or <code>FilesystemStorage</code> or <code>InMemoryStorage</code> for tests and local use. See <a href="storage.html">Storage and operations</a>.</li>
 </ul>
 <nav class="page-nav" aria-label="Pages"><a rel="prev" href="integrate-existing-server.html"><small>Previous</small>Existing MCP server</a><a rel="next" href="identity.html"><small>Next</small>Identity</a></nav>
 </main>

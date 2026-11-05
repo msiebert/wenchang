@@ -87,7 +87,7 @@
 </li>
 </ul></details></nav>
 <h1 id="storage-and-operations">Storage and operations<a class="headerlink" href="#storage-and-operations" title="Link to this section">#</a></h1>
-<p>How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. Everything on this page goes through <code>MemoryStore</code> over <code>GcsStorage</code> (<code>wenchang.storage.gcs</code>), unless it says otherwise. The <a href="reference.html#storage">reference</a> has the <code>Storage</code> protocol and the store's signature.</p>
+<p>How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. This page describes the GCS backend, <code>GcsStorage</code> (<code>wenchang.storage.gcs</code>); the same <code>MemoryStore</code> operations apply to <code>FilesystemStorage</code> (<code>wenchang.storage.filesystem</code>) except where noted, and the bucket, IAM, timeout, and retry sections do not apply to it. The <a href="reference.html#storage">reference</a> has the <code>Storage</code> protocol and the store's signature.</p>
 <h2 id="bucket">The bucket<a class="headerlink" href="#bucket" title="Link to this section">#</a></h2>
 <p>Memory files are objects in one bucket. One <code>GcsStorage(bucket)</code> wraps one <code>google.cloud.storage.Bucket</code>. <a href="quickstart.html#bucket">Quickstart</a> creates one with <code>gcloud</code>. One <code>GcsStorage</code> and its client are safe to share across threads, as the MCP adapter does; see <a href="integrate-without-mcp.html#threads">Threads</a> for caveats.</p>
 <p>wenchang finds credentials through Application Default Credentials: locally <code>gcloud auth application-default login</code>, and on Google Cloud the attached service account. Whatever identity the server runs as needs to read, create, overwrite, delete, and list objects in the bucket. <code>roles/storage.objectUser</code> on the bucket grants those. Operator jobs that <a href="#erase">purge</a> need the same permissions.</p>
@@ -96,6 +96,7 @@
 <p>Bucket soft delete and object versioning keep deleted bytes recoverable. Set them to match your retention obligations; see <a href="#deleted-bytes">Deleted bytes in GCS</a>.</p>
 <h2 id="metadata">Objects and metadata<a class="headerlink" href="#metadata" title="Link to this section">#</a></h2>
 <p>Each memory file is one object. Its key is the file's path, <code>{scope}/{entity_id}/{area}/{name}.md</code> (see <a href="concepts.html#paths">Concepts</a>). Its body is the file content as UTF-8, with content type <code>text/markdown; charset=utf-8</code>. Its version is the object's generation.</p>
+<p>Under <code>FilesystemStorage</code>, the same file is <code>{key}%obj</code> holding the exact body, beside <code>{key}%meta</code>, a JSON sidecar with the version (a random string) and the metadata below. Each key segment is percent-encoded. You can read the <code>%obj</code> files directly; see <a href="reference.html#storage">Reference</a>.</p>
 <p>The file metadata is GCS custom metadata on the object, under four keys:</p>
 <div class="table-wrap"><table>
 <thead>
@@ -328,7 +329,7 @@
 <li><strong><code>purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -&gt; int</code></strong> deletes every object under <code>{scope}/{entity_id}/</code>.</li>
 <li><strong><code>export(scope, entity_id) -&gt; tuple[ExportedObject, ...]</code></strong> returns every object under that prefix, raw.</li>
 </ul>
-<p>Both are operator-only. They are not agent tools and not on the transport: <code>TransportClient</code>, <code>MemoryTools</code>, and the MCP adapter do not have them. Call them on a <code>MemoryStore</code> directly; <code>InProcessClient.store</code> returns the store a client wraps. Both work on <code>GcsStorage</code> and <code>InMemoryStorage</code>.</p>
+<p>Both are operator-only. They are not agent tools and not on the transport: <code>TransportClient</code>, <code>MemoryTools</code>, and the MCP adapter do not have them. Call them on a <code>MemoryStore</code> directly; <code>InProcessClient.store</code> returns the store a client wraps. Both work on <code>GcsStorage</code>, <code>InMemoryStorage</code>, and <code>FilesystemStorage</code>.</p>
 <p>To erase one user, for example under a GDPR erasure request:</p>
 <ol>
 <li><strong>Stop writers.</strong> Change your resolver so it no longer grants that user's scope, and let in-flight sessions end.</li>

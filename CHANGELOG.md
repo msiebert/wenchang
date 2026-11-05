@@ -6,6 +6,12 @@ the policy in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+### Added
+
+- `FilesystemStorage(root)` in `wenchang.storage.filesystem`: a
+  local-directory `Storage` backend for tests and local development, POSIX
+  only. Documented on the site with a runnable example.
+
 ## [0.1.1] - 2026-11-04
 
 ### Added

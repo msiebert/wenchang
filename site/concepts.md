@@ -1,6 +1,6 @@
 # Concepts
 
-How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the [reference](reference.md); for how files are stored in GCS see [Storage and operations](storage.md).
+How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the [reference](reference.md); for how files are stored (GCS, or a local directory) see [Storage and operations](storage.md).
 
 ## Path shape
 
@@ -64,7 +64,7 @@ There is no content search. `description` and `aliases` are the entire search su
 
 ## Optimistic concurrency
 
-Every file has an opaque `version` (the GCS generation under `GcsStorage`). Every mutating tool takes `expected_version`, the version the agent read; the write succeeds only if the file is still at that version. `write_file` with `expected_version=null` creates the file and fails if it already exists. A mismatch returns a recoverable `VersionConflictError` carrying the current content and version.
+Every file has an opaque `version` (the GCS generation under `GcsStorage`, a random string under `FilesystemStorage`). Every mutating tool takes `expected_version`, the version the agent read; the write succeeds only if the file is still at that version. `write_file` with `expected_version=null` creates the file and fails if it already exists. A mismatch returns a recoverable `VersionConflictError` carrying the current content and version.
 
 `replace_fact` re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but `old_string` still matches exactly once, it applies against the current content. `append_line` has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.
 

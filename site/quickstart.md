@@ -211,6 +211,45 @@ Seeded files appear in the agent's index like any others, and the `system/` entr
 
 For development, `InMemoryStorage()` from `wenchang.storage.memory` replaces `GcsStorage(bucket)`. Everything is lost when the process exits, and a stdio server starts a fresh process for every client session, so it forgets between sessions.
 
+To keep memory between runs without GCS, use `FilesystemStorage(root)` from `wenchang.storage.filesystem`. It stores each file in a local directory (POSIX only, for development and tests), so you can open the `%obj` files to read memory directly. This writes a file through a store over a temporary directory and checks the object on disk:
+
+```python
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+
+from wenchang.core import MemoryStore
+from wenchang.file_format import FileMetadata
+from wenchang.paths import build_path
+from wenchang.storage.filesystem import FilesystemStorage
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp) / "memory"  # created if missing; use a persistent path in practice
+    store = MemoryStore(FilesystemStorage(root))
+
+    path = build_path("user", "u-tianlong", "preferences", "prose-style")
+    store.write_file(
+        path,
+        "- [stated] Writes in close third person, past tense.\n",
+        FileMetadata(
+            description="Prose style preferences",
+            aliases=("narration",),
+            sources=frozenset(),
+            last_updated=datetime.now(UTC),
+        ),
+        None,  # create
+        source="local-dev",
+    )
+
+    memory = store.read_file(path)
+    assert memory.content == "- [stated] Writes in close third person, past tense.\n"
+
+    # Each file is a plain body object beside a metadata sidecar.
+    [body] = root.rglob("*%obj")
+    assert body.read_text() == memory.content
+    print(body.relative_to(root))
+```
+
 To test against the real GCS API locally, run the emulator the repository's integration tests use:
 
 ```

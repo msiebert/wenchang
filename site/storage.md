@@ -1,6 +1,6 @@
 # Storage and operations
 
-How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. Everything on this page goes through `MemoryStore` over `GcsStorage` (`wenchang.storage.gcs`), unless it says otherwise. The [reference](reference.md#storage) has the `Storage` protocol and the store's signature.
+How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. This page describes the GCS backend, `GcsStorage` (`wenchang.storage.gcs`); the same `MemoryStore` operations apply to `FilesystemStorage` (`wenchang.storage.filesystem`) except where noted, and the bucket, IAM, timeout, and retry sections do not apply to it. The [reference](reference.md#storage) has the `Storage` protocol and the store's signature.
 
 ## The bucket
 
@@ -15,6 +15,8 @@ Bucket soft delete and object versioning keep deleted bytes recoverable. Set the
 ## Objects and metadata
 
 Each memory file is one object. Its key is the file's path, `{scope}/{entity_id}/{area}/{name}.md` (see [Concepts](concepts.md#paths)). Its body is the file content as UTF-8, with content type `text/markdown; charset=utf-8`. Its version is the object's generation.
+
+Under `FilesystemStorage`, the same file is `{key}%obj` holding the exact body, beside `{key}%meta`, a JSON sidecar with the version (a random string) and the metadata below. Each key segment is percent-encoded. You can read the `%obj` files directly; see [Reference](reference.md#storage).
 
 The file metadata is GCS custom metadata on the object, under four keys:
 
@@ -231,7 +233,7 @@ Erasure requests and project or org deletion need everything stored for one enti
 - **`purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -> int`** deletes every object under `{scope}/{entity_id}/`.
 - **`export(scope, entity_id) -> tuple[ExportedObject, ...]`** returns every object under that prefix, raw.
 
-Both are operator-only. They are not agent tools and not on the transport: `TransportClient`, `MemoryTools`, and the MCP adapter do not have them. Call them on a `MemoryStore` directly; `InProcessClient.store` returns the store a client wraps. Both work on `GcsStorage` and `InMemoryStorage`.
+Both are operator-only. They are not agent tools and not on the transport: `TransportClient`, `MemoryTools`, and the MCP adapter do not have them. Call them on a `MemoryStore` directly; `InProcessClient.store` returns the store a client wraps. Both work on `GcsStorage`, `InMemoryStorage`, and `FilesystemStorage`.
 
 To erase one user, for example under a GDPR erasure request:
 

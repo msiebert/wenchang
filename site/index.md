@@ -136,7 +136,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - Search over file contents.
 - A command line tool or ready-made server.
 - A remote transport. The tools talk to storage in the same process.
-- Storage other than GCS, apart from an in-memory fake for tests.
+- A production storage backend other than GCS. `FilesystemStorage` and `InMemoryStorage` are for tests and local development.
 
 Version 0.1.1, MIT license, Python 3.11 or newer. See [Status and compatibility](status.md#limitations) for known limits.
 

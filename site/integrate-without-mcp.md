@@ -232,6 +232,7 @@ Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS rou
 | `InProcessClient` | Safe. It holds only its store. |
 | `MemoryTools` | Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request. |
 | `InMemoryStorage`, `InMemoryIndexCache` | Safe. Each guards its state with a lock. |
+| `FilesystemStorage` | Safe. A per-instance lock and a file lock on `root/.lock` serialize operations, so instances and processes on one root are safe too. |
 | `GcsStorage` | Safe. It adds no state of its own: it holds the bucket and builds a new `Blob` for every call. Its constructor builds the client's HTTP session on the constructing thread. |
 | `google.cloud.storage.Client` and its `Bucket` | Safe, with the caveats below. One client per process works; heavy concurrency can outgrow its connection pool. |
 | Your resolver, `IndexCache` functions, `on_call`, and `clock` | Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads. |
@@ -316,7 +317,7 @@ print(calls)
 
 - **The prompt.** The model needs the memory prompt alongside the tools. Put `build_memory_prompt(slots)` from `wenchang.prompts` in your system prompt; it has `##` headings and no top-level heading. See [Customizing the prompts](prompts.md).
 - **Identity.** A resolver and a scope policy. See [Identity and multi-tenant auth](identity.md).
-- **Storage.** A `MemoryStore` over `GcsStorage`, or `InMemoryStorage` for tests. See [Storage and operations](storage.md).
+- **Storage.** A `MemoryStore` over `GcsStorage`, or `FilesystemStorage` or `InMemoryStorage` for tests and local use. See [Storage and operations](storage.md).
 
 ---
 

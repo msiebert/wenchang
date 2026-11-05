@@ -703,10 +703,11 @@
 </tr>
 </tbody>
 </table></div>
-<p>Backends may raise <code>BackendUnavailableError</code> for timeouts and outages. Two ship with the library:</p>
+<p>Backends may raise <code>BackendUnavailableError</code> for timeouts and outages. Three ship with the library:</p>
 <ul>
 <li><strong><code>GcsStorage(bucket)</code></strong> in <code>wenchang.storage.gcs</code> takes a <code>google.cloud.storage.Bucket</code>. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. The constructor builds the bucket client's HTTP session (including any mTLS channel setup), so mTLS configuration errors raise from <code>GcsStorage(bucket)</code> rather than from the first call. It makes no network call.</li>
 <li><strong><code>InMemoryStorage()</code></strong> in <code>wenchang.storage.memory</code> is a fake for tests and trials. It holds a lock, so it is safe to share across threads.</li>
+<li><strong><code>FilesystemStorage(root)</code></strong> in <code>wenchang.storage.filesystem</code> (not re-exported from <code>wenchang.storage</code>) keeps objects in a local directory, for tests and local development rather than production. <code>root</code> is a <code>Path</code>, created if missing. POSIX and a local filesystem only. Each key segment is percent-encoded, with uppercase escaped, and directories mirror the key's segments. A key <code>a/b/c.md</code> is stored as <code>a/b/c.md%obj</code>, the exact body, plus <code>a/b/c.md%meta</code>, a JSON sidecar holding the version and metadata. Versions are random hex strings. It is safe to share across threads, and across instances and processes on one root, through a lock on <code>root/.lock</code>. Accepted limits: a crash between replacing the body and the sidecar can pair a new body with old metadata; a hand-edited body is visible on read but keeps its old version; nothing calls <code>fsync</code>; and stray <code>.tmp-</code> files are not cleaned up. An empty key, or a key segment that encodes to more than 200 bytes or is not valid UTF-8 (such as a lone surrogate), raises <code>InvalidStorageKeyError</code>.</li>
 </ul>
 <p>Object keys, the stored metadata keys, timeouts, and retries are on <a href="storage.html#metadata">Storage and operations</a>.</p>
 <h3 id="operator">Operator methods<a class="headerlink" href="#operator" title="Link to this section">#</a></h3>
