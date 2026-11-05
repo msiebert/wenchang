@@ -75,7 +75,11 @@ are extensible, what the `system/` area means, and that systems of record
 are never copied into memory. Scope
 priority is store configuration, not prompt text: it orders only the capped
 startup index, and by default every scope ranks equally. Any `Storage`
-implementation works in place of `InMemoryStorage`. For a worked example,
+implementation works in place of `InMemoryStorage`. For a persistent local
+store in tests or local development, use
+`FilesystemStorage(root)` from `wenchang.storage.filesystem`, which keeps
+readable files under a local directory and is safe across threads,
+instances, and processes on a POSIX filesystem. For a worked example,
 see the reference adopter in
 [evals/reference_adopter.py](evals/reference_adopter.py), which holds the
 prompt slots (including a reference `purpose`), scope priority, write

@@ -73,7 +73,7 @@
 </li>
 </ul></details></nav>
 <h1 id="concepts">Concepts<a class="headerlink" href="#concepts" title="Link to this section">#</a></h1>
-<p>How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the <a href="reference.html">reference</a>; for how files are stored in GCS see <a href="storage.html">Storage and operations</a>.</p>
+<p>How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the <a href="reference.html">reference</a>; for how files are stored (GCS, or a local directory) see <a href="storage.html">Storage and operations</a>.</p>
 <h2 id="paths">Path shape<a class="headerlink" href="#paths" title="Link to this section">#</a></h2>
 <p>Every memory file is stored at</p>
 <div class="highlight"><pre><span></span><code>{scope}/{entity_id}/{area}/{name}.md
@@ -157,7 +157,7 @@
 </table></div>
 <p>There is no content search. <code>description</code> and <code>aliases</code> are the entire search surface; the agent reads the index and matches on them.</p>
 <h2 id="concurrency">Optimistic concurrency<a class="headerlink" href="#concurrency" title="Link to this section">#</a></h2>
-<p>Every file has an opaque <code>version</code> (the GCS generation under <code>GcsStorage</code>). Every mutating tool takes <code>expected_version</code>, the version the agent read; the write succeeds only if the file is still at that version. <code>write_file</code> with <code>expected_version=null</code> creates the file and fails if it already exists. A mismatch returns a recoverable <code>VersionConflictError</code> carrying the current content and version.</p>
+<p>Every file has an opaque <code>version</code> (the GCS generation under <code>GcsStorage</code>, a random string under <code>FilesystemStorage</code>). Every mutating tool takes <code>expected_version</code>, the version the agent read; the write succeeds only if the file is still at that version. <code>write_file</code> with <code>expected_version=null</code> creates the file and fails if it already exists. A mismatch returns a recoverable <code>VersionConflictError</code> carrying the current content and version.</p>
 <p><code>replace_fact</code> re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but <code>old_string</code> still matches exactly once, it applies against the current content. <code>append_line</code> has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.</p>
 <h2 id="limits">Limits<a class="headerlink" href="#limits" title="Link to this section">#</a></h2>
 <div class="table-wrap"><table>

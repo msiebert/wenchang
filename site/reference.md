@@ -253,10 +253,11 @@ print(store.index_max_bytes, store.scope_priority)
 | `delete_if_version(key, expected)` | Delete only at `expected`; otherwise `PreconditionFailedError`. |
 | `list_page(prefix, start_after, limit)` | Up to `limit` objects whose key starts with `prefix`, ascending by key, never reading bodies. |
 
-Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
+Backends may raise `BackendUnavailableError` for timeouts and outages. Three ship with the library:
 
 - **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. The constructor builds the bucket client's HTTP session (including any mTLS channel setup), so mTLS configuration errors raise from `GcsStorage(bucket)` rather than from the first call. It makes no network call.
 - **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
+- **`FilesystemStorage(root)`** in `wenchang.storage.filesystem` (not re-exported from `wenchang.storage`) keeps objects in a local directory, for tests and local development rather than production. `root` is a `Path`, created if missing. POSIX and a local filesystem only. Each key segment is percent-encoded, with uppercase escaped, and directories mirror the key's segments. A key `a/b/c.md` is stored as `a/b/c.md%obj`, the exact body, plus `a/b/c.md%meta`, a JSON sidecar holding the version and metadata. Versions are random hex strings. It is safe to share across threads, and across instances and processes on one root, through a lock on `root/.lock`. Accepted limits: a crash between replacing the body and the sidecar can pair a new body with old metadata; a hand-edited body is visible on read but keeps its old version; nothing calls `fsync`; and stray `.tmp-` files are not cleaned up. An empty key, or a key segment that encodes to more than 200 bytes or is not valid UTF-8 (such as a lone surrogate), raises `InvalidStorageKeyError`.
 
 Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).
 

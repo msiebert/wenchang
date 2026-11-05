@@ -143,7 +143,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - Search over file contents.
 - A command line tool or ready-made server.
 - A remote transport. The tools talk to storage in the same process.
-- Storage other than GCS, apart from an in-memory fake for tests.
+- A production storage backend other than GCS. `FilesystemStorage` and `InMemoryStorage` are for tests and local development.
 
 Version 0.1.1, MIT license, Python 3.11 or newer. See [Status and compatibility](status.md#limitations) for known limits.
 
@@ -367,6 +367,45 @@ Seeded files appear in the agent's index like any others, and the `system/` entr
 
 For development, `InMemoryStorage()` from `wenchang.storage.memory` replaces `GcsStorage(bucket)`. Everything is lost when the process exits, and a stdio server starts a fresh process for every client session, so it forgets between sessions.
 
+To keep memory between runs without GCS, use `FilesystemStorage(root)` from `wenchang.storage.filesystem`. It stores each file in a local directory (POSIX only, for development and tests), so you can open the `%obj` files to read memory directly. This writes a file through a store over a temporary directory and checks the object on disk:
+
+```python
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+
+from wenchang.core import MemoryStore
+from wenchang.file_format import FileMetadata
+from wenchang.paths import build_path
+from wenchang.storage.filesystem import FilesystemStorage
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp) / "memory"  # created if missing; use a persistent path in practice
+    store = MemoryStore(FilesystemStorage(root))
+
+    path = build_path("user", "u-tianlong", "preferences", "prose-style")
+    store.write_file(
+        path,
+        "- [stated] Writes in close third person, past tense.\n",
+        FileMetadata(
+            description="Prose style preferences",
+            aliases=("narration",),
+            sources=frozenset(),
+            last_updated=datetime.now(UTC),
+        ),
+        None,  # create
+        source="local-dev",
+    )
+
+    memory = store.read_file(path)
+    assert memory.content == "- [stated] Writes in close third person, past tense.\n"
+
+    # Each file is a plain body object beside a metadata sidecar.
+    [body] = root.rglob("*%obj")
+    assert body.read_text() == memory.content
+    print(body.relative_to(root))
+```
+
 To test against the real GCS API locally, run the emulator the repository's integration tests use:
 
 ```
@@ -405,7 +444,7 @@ HTML version: <https://msiebert.github.io/wenchang/quickstart.html>
 
 # Concepts
 
-How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the [reference](reference.md); for how files are stored in GCS see [Storage and operations](storage.md).
+How wenchang addresses and versions memory files, and the limits it enforces. These hold on every integration path. For the tools themselves see the [reference](reference.md); for how files are stored (GCS, or a local directory) see [Storage and operations](storage.md).
 
 ## Path shape
 
@@ -469,7 +508,7 @@ There is no content search. `description` and `aliases` are the entire search su
 
 ## Optimistic concurrency
 
-Every file has an opaque `version` (the GCS generation under `GcsStorage`). Every mutating tool takes `expected_version`, the version the agent read; the write succeeds only if the file is still at that version. `write_file` with `expected_version=null` creates the file and fails if it already exists. A mismatch returns a recoverable `VersionConflictError` carrying the current content and version.
+Every file has an opaque `version` (the GCS generation under `GcsStorage`, a random string under `FilesystemStorage`). Every mutating tool takes `expected_version`, the version the agent read; the write succeeds only if the file is still at that version. `write_file` with `expected_version=null` creates the file and fails if it already exists. A mismatch returns a recoverable `VersionConflictError` carrying the current content and version.
 
 `replace_fact` re-reads and retries up to three times when a concurrent write races it, re-checking the match each time; if the file's version moved but `old_string` still matches exactly once, it applies against the current content. `append_line` has no automatic re-apply: a stale version is a conflict. Versions are opaque: never parse, compare, or order them.
 
@@ -908,6 +947,7 @@ Calls are synchronous. Under `GcsStorage` each one blocks on one or more GCS rou
 | `InProcessClient` | Safe. It holds only its store. |
 | `MemoryTools` | Safe; it never changes after construction. It holds one caller's identity, so share it only within that caller's request. |
 | `InMemoryStorage`, `InMemoryIndexCache` | Safe. Each guards its state with a lock. |
+| `FilesystemStorage` | Safe. A per-instance lock and a file lock on `root/.lock` serialize operations, so instances and processes on one root are safe too. |
 | `GcsStorage` | Safe. It adds no state of its own: it holds the bucket and builds a new `Blob` for every call. Its constructor builds the client's HTTP session on the constructing thread. |
 | `google.cloud.storage.Client` and its `Bucket` | Safe, with the caveats below. One client per process works; heavy concurrency can outgrow its connection pool. |
 | Your resolver, `IndexCache` functions, `on_call`, and `clock` | Yours. If tool calls run on several threads, as they always do over MCP, each must be safe to call from several threads. |
@@ -992,7 +1032,7 @@ print(calls)
 
 - **The prompt.** The model needs the memory prompt alongside the tools. Put `build_memory_prompt(slots)` from `wenchang.prompts` in your system prompt; it has `##` headings and no top-level heading. See [Customizing the prompts](prompts.md).
 - **Identity.** A resolver and a scope policy. See [Identity and multi-tenant auth](identity.md).
-- **Storage.** A `MemoryStore` over `GcsStorage`, or `InMemoryStorage` for tests. See [Storage and operations](storage.md).
+- **Storage.** A `MemoryStore` over `GcsStorage`, or `FilesystemStorage` or `InMemoryStorage` for tests and local use. See [Storage and operations](storage.md).
 
 ---
 
@@ -1246,7 +1286,7 @@ HTML version: <https://msiebert.github.io/wenchang/identity.html>
 
 # Storage and operations
 
-How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. Everything on this page goes through `MemoryStore` over `GcsStorage` (`wenchang.storage.gcs`), unless it says otherwise. The [reference](reference.md#storage) has the `Storage` protocol and the store's signature.
+How wenchang uses a GCS bucket, what that costs, and how to erase or export one entity's memory. This page describes the GCS backend, `GcsStorage` (`wenchang.storage.gcs`); the same `MemoryStore` operations apply to `FilesystemStorage` (`wenchang.storage.filesystem`) except where noted, and the bucket, IAM, timeout, and retry sections do not apply to it. The [reference](reference.md#storage) has the `Storage` protocol and the store's signature.
 
 ## The bucket
 
@@ -1261,6 +1301,8 @@ Bucket soft delete and object versioning keep deleted bytes recoverable. Set the
 ## Objects and metadata
 
 Each memory file is one object. Its key is the file's path, `{scope}/{entity_id}/{area}/{name}.md` (see [Concepts](concepts.md#paths)). Its body is the file content as UTF-8, with content type `text/markdown; charset=utf-8`. Its version is the object's generation.
+
+Under `FilesystemStorage`, the same file is `{key}%obj` holding the exact body, beside `{key}%meta`, a JSON sidecar with the version (a random string) and the metadata below. Each key segment is percent-encoded. You can read the `%obj` files directly; see [Reference](reference.md#storage).
 
 The file metadata is GCS custom metadata on the object, under four keys:
 
@@ -1477,7 +1519,7 @@ Erasure requests and project or org deletion need everything stored for one enti
 - **`purge(scope, entity_id, *, max_passes=PURGE_MAX_PASSES) -> int`** deletes every object under `{scope}/{entity_id}/`.
 - **`export(scope, entity_id) -> tuple[ExportedObject, ...]`** returns every object under that prefix, raw.
 
-Both are operator-only. They are not agent tools and not on the transport: `TransportClient`, `MemoryTools`, and the MCP adapter do not have them. Call them on a `MemoryStore` directly; `InProcessClient.store` returns the store a client wraps. Both work on `GcsStorage` and `InMemoryStorage`.
+Both are operator-only. They are not agent tools and not on the transport: `TransportClient`, `MemoryTools`, and the MCP adapter do not have them. Call them on a `MemoryStore` directly; `InProcessClient.store` returns the store a client wraps. Both work on `GcsStorage`, `InMemoryStorage`, and `FilesystemStorage`.
 
 To erase one user, for example under a GDPR erasure request:
 
@@ -2243,10 +2285,11 @@ print(store.index_max_bytes, store.scope_priority)
 | `delete_if_version(key, expected)` | Delete only at `expected`; otherwise `PreconditionFailedError`. |
 | `list_page(prefix, start_after, limit)` | Up to `limit` objects whose key starts with `prefix`, ascending by key, never reading bodies. |
 
-Backends may raise `BackendUnavailableError` for timeouts and outages. Two ship with the library:
+Backends may raise `BackendUnavailableError` for timeouts and outages. Three ship with the library:
 
 - **`GcsStorage(bucket)`** in `wenchang.storage.gcs` takes a `google.cloud.storage.Bucket`. One bucket is one storage instance. Metadata is GCS custom object metadata, the version is the object's generation, and conditional writes use generation preconditions. The constructor builds the bucket client's HTTP session (including any mTLS channel setup), so mTLS configuration errors raise from `GcsStorage(bucket)` rather than from the first call. It makes no network call.
 - **`InMemoryStorage()`** in `wenchang.storage.memory` is a fake for tests and trials. It holds a lock, so it is safe to share across threads.
+- **`FilesystemStorage(root)`** in `wenchang.storage.filesystem` (not re-exported from `wenchang.storage`) keeps objects in a local directory, for tests and local development rather than production. `root` is a `Path`, created if missing. POSIX and a local filesystem only. Each key segment is percent-encoded, with uppercase escaped, and directories mirror the key's segments. A key `a/b/c.md` is stored as `a/b/c.md%obj`, the exact body, plus `a/b/c.md%meta`, a JSON sidecar holding the version and metadata. Versions are random hex strings. It is safe to share across threads, and across instances and processes on one root, through a lock on `root/.lock`. Accepted limits: a crash between replacing the body and the sidecar can pair a new body with old metadata; a hand-edited body is visible on read but keeps its old version; nothing calls `fsync`; and stray `.tmp-` files are not cleaned up. An empty key, or a key segment that encodes to more than 200 bytes or is not valid UTF-8 (such as a lone surrogate), raises `InvalidStorageKeyError`.
 
 Object keys, the stored metadata keys, timeouts, and retries are on [Storage and operations](storage.md#metadata).
 
@@ -2929,7 +2972,7 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 ## Known limitations
 
 - **A library, not a server.** There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script or tool registration. The only server in the repository is the dev-only eval server (`python -m evals.server`), which uses in-memory storage.
-- **GCS only.** `GcsStorage` is the only durable backend. `InMemoryStorage` is a fake for tests and trials.
+- **One production backend.** `GcsStorage` is the only backend meant for production. `FilesystemStorage` (a local directory, POSIX only) and `InMemoryStorage` are for tests and local development.
 - **No remote transport.** The only `TransportClient` is `InProcessClient`, which calls a `MemoryStore` in the same process. Tools and storage access always run in your process.
 - **No content search.** Files are found through `description` and `aliases`. The quality of that metadata is what makes recall work.
 - **Not snapshots.** `list_prefix` and `get_memory_index` are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear. `export` has the same property.

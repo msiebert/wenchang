@@ -25,6 +25,7 @@ RUNNABLE = frozenset(
         "custom_schemas.py",
         "custom_store.py",
         "integrate_direct.py",
+        "local_filesystem.py",
         "ops_erase.py",
         "ops_restore.py",
         "prompt_extra.py",
@@ -66,7 +67,9 @@ def test_runnable_snippet_exits_zero(name: str, tmp_path: Path) -> None:
     assert result.returncode == 0, f"{name} exited {result.returncode}:\n{result.stderr}"
 
 
-@pytest.mark.parametrize("name", ["integrate_direct.py", "ops_erase.py", "ops_restore.py"])
+@pytest.mark.parametrize(
+    "name", ["integrate_direct.py", "local_filesystem.py", "ops_erase.py", "ops_restore.py"]
+)
 def test_outcome_snippets_assert(name: str) -> None:
     """An outcome snippet checks its result with at least one assert
     (AIE-1297, US8.6).

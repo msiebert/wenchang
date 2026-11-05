@@ -27,7 +27,7 @@ Versions follow SemVer over the public surface: the modules, functions, classes,
 ## Known limitations {#limitations}
 
 - **A library, not a server.** There is no CLI, console script, or ready-made server binary. You supply the identity resolver, scope policy, prompt slots, and a short server script or tool registration. The only server in the repository is the dev-only eval server (`python -m evals.server`), which uses in-memory storage.
-- **GCS only.** `GcsStorage` is the only durable backend. `InMemoryStorage` is a fake for tests and trials.
+- **One production backend.** `GcsStorage` is the only backend meant for production. `FilesystemStorage` (a local directory, POSIX only) and `InMemoryStorage` are for tests and local development.
 - **No remote transport.** The only `TransportClient` is `InProcessClient`, which calls a `MemoryStore` in the same process. Tools and storage access always run in your process.
 - **No content search.** Files are found through `description` and `aliases`. The quality of that metadata is what makes recall work.
 - **Not snapshots.** `list_prefix` and `get_memory_index` are not point-in-time snapshots: a file written or deleted while an index is being built may or may not appear. `export` has the same property.

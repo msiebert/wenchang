@@ -17,8 +17,9 @@ copilots) that need memory to persist across sessions and be shared,
 selectively, across scopes such as a user, a project, or an organization.
 An adopter integrates the library by supplying an identity resolver (who is
 calling, and with what role) and, optionally, scope-specific configuration
-text (Section 8 of the spec). No swappable storage backend is provided —
-GCS is assumed as the backing store.
+text (Section 8 of the spec). GCS is the production storage backend;
+in-memory and local-filesystem backends are provided for tests and local
+development.
 
 ## Source of truth
 

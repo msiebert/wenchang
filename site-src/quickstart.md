@@ -121,6 +121,10 @@ Seeded files appear in the agent's index like any others, and the `system/` entr
 
 For development, `InMemoryStorage()` from `wenchang.storage.memory` replaces `GcsStorage(bucket)`. Everything is lost when the process exits, and a stdio server starts a fresh process for every client session, so it forgets between sessions.
 
+To keep memory between runs without GCS, use `FilesystemStorage(root)` from `wenchang.storage.filesystem`. It stores each file in a local directory (POSIX only, for development and tests), so you can open the `%obj` files to read memory directly. This writes a file through a store over a temporary directory and checks the object on disk:
+
+<!--include python local_filesystem.py-->
+
 To test against the real GCS API locally, run the emulator the repository's integration tests use:
 
 ```
