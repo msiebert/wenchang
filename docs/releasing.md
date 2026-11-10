@@ -9,25 +9,25 @@ PyPI or any other package index. Release notes come from
 
 ## Installing a release
 
-The current release is `v0.1.1`. Install it by tag:
+The current release is `v0.1.2`. Install it by tag:
 
 ```
-pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"
+pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"
 ```
 
 With uv:
 
 ```
-uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"
-uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"
+uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"
+uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"
 ```
 
 Or install the release wheel by URL, which needs no git and no build step:
 
 ```
-pip install https://github.com/msiebert/wenchang/releases/download/v0.1.1/wenchang-0.1.1-py3-none-any.whl
-pip install "wenchang[mcp] @ https://github.com/msiebert/wenchang/releases/download/v0.1.1/wenchang-0.1.1-py3-none-any.whl"
+pip install https://github.com/msiebert/wenchang/releases/download/v0.1.2/wenchang-0.1.2-py3-none-any.whl
+pip install "wenchang[mcp] @ https://github.com/msiebert/wenchang/releases/download/v0.1.2/wenchang-0.1.2-py3-none-any.whl"
 ```
 
 The `[testing]` extra installs the same way.

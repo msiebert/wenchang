@@ -4,14 +4,14 @@
 
 | Item | Value |
 | --- | --- |
-| Version | 0.1.1 |
+| Version | 0.1.2 |
 | License | MIT |
 | Python | Python 3.11 or newer |
 | Dependencies | `google-cloud-storage>=2.18` |
 | `mcp` extra | `mcp>=2.2,<3`, for `wenchang.mcp`. Targets `mcp.server.mcpserver.MCPServer` only; FastMCP and mcp 1.x servers do not work. |
 | `testing` extra | `pytest>=8.3`, for the conformance suites in `wenchang.testing`. |
 
-wenchang is installed from git by release tag, for example `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"`. It is not published on PyPI. The base package works without the `mcp` extra; see [Integrate without MCP](integrate-without-mcp.md).
+wenchang is installed from git by release tag, for example `pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"`. It is not published on PyPI. The base package works without the `mcp` extra; see [Integrate without MCP](integrate-without-mcp.md).
 
 ## Releases and versioning {#releases}
 

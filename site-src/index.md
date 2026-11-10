@@ -12,7 +12,7 @@
 
 <p class="hero-lede">wenchang is a Python library that lets an AI agent keep what it learns. During a conversation the agent decides what is worth remembering and saves it as markdown files. In later conversations it reads them back. The files live in Google Cloud Storage.</p>
 
-<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"</code></pre>
+<pre class="install"><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"</code></pre>
 <p class="install-note">Not on PyPI. The install is one line, but the library does nothing until you configure storage, identity, and prompts. <a href="quickstart.html">Quickstart</a> covers that.</p>
 
 </div>
@@ -25,7 +25,7 @@ wenchang is a Python library that lets an AI agent keep what it learns. During a
 Install (not on PyPI):
 
 ```
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"
 ```
 
 The install is one line, but the library does nothing until you configure storage, identity, and prompts. [Quickstart](quickstart.md) covers that.
@@ -326,7 +326,7 @@ wenchang provides the primitives for agent memory. It is not a hosted service an
 - A production storage backend other than GCS. `FilesystemStorage` and `InMemoryStorage` are for tests and local development.
 <!--/md-->
 
-Version 0.1.1, MIT license, Python 3.11 or newer. See [Status and compatibility](status.md#limitations) for known limits.
+Version 0.1.2, MIT license, Python 3.11 or newer. See [Status and compatibility](status.md#limitations) for known limits.
 <!--html-->
 
 </section>

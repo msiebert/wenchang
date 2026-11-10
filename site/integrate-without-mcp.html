@@ -80,10 +80,10 @@
 <p>The memory tools are methods on a Python object. If your agent runs on another tool framework, or on your own loop over a model API, call them directly. Nothing is registered anywhere until you register it.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Link to this section">#</a></h2>
 <p>The base package is enough. It needs no <code>mcp</code>:</p>
-<div class="highlight"><pre><span></span><code>pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"
+<div class="highlight"><pre><span></span><code>pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"
 </code></pre></div>
 
-<p>With uv: <code>uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>.</p>
+<p>With uv: <code>uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"</code>.</p>
 <h2 id="methods">The tools are methods<a class="headerlink" href="#methods" title="Link to this section">#</a></h2>
 <p><code>wenchang.tools.bind_tools(client, resolver, credentials, policy, *, source, product=None, on_call=None)</code> resolves the caller's identity and returns a <code>MemoryTools</code> for that identity. On it:</p>
 <ul>
@@ -451,7 +451,7 @@
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.1.</p>
+<p>MIT licensed. Version 0.1.2.</p>
 <ul>
 <li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
 <li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>

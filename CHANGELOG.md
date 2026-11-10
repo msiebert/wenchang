@@ -6,6 +6,8 @@ the policy in [docs/releasing.md](docs/releasing.md).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-09
+
 ### Added
 
 - `FilesystemStorage(root)` in `wenchang.storage.filesystem`: a
@@ -93,6 +95,7 @@ First tagged release.
   integration path (new MCP server, existing MCP server, no MCP), with
   `llms.txt` for agents.
 
-[Unreleased]: https://github.com/msiebert/wenchang/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/msiebert/wenchang/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/msiebert/wenchang/releases/tag/v0.1.2
 [0.1.1]: https://github.com/msiebert/wenchang/releases/tag/v0.1.1
 [0.1.0]: https://github.com/msiebert/wenchang/releases/tag/v0.1.0
