@@ -232,7 +232,7 @@ The example serves streamable HTTP, where each request carries its own credentia
 
 ## Test your resolver
 
-`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.1"` adds pytest mixins in `wenchang.testing`. Subclass `ResolverConformance` and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an `Identity`, invalid ones give a `ResolutionFailure`, results are consistent, roles are known, and writes follow your policy. Details are in the [reference](reference.md#conformance).
+`pip install "wenchang[testing] @ git+https://github.com/msiebert/wenchang@v0.1.2"` adds pytest mixins in `wenchang.testing`. Subclass `ResolverConformance` and supply fixtures for your resolver, a valid and an invalid credential, your policy, the scopes a valid credential should get, and the roles you use. It checks that valid credentials give an `Identity`, invalid ones give a `ResolutionFailure`, results are consistent, roles are known, and writes follow your policy. Details are in the [reference](reference.md#conformance).
 
 ---
 

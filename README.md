@@ -12,18 +12,18 @@ Website: <https://msiebert.github.io/wenchang/>. For agents:
 ## Install
 
 Releases are git tags with GitHub Releases; wenchang is not on PyPI. Install
-the current release, `v0.1.1`, by tag:
+the current release, `v0.1.2`, by tag:
 
 ```
-pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"
-pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"
+pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"
+pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"
 ```
 
 With uv:
 
 ```
-uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"
-uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"
+uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"
+uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"
 ```
 
 Python 3.11 or newer. For installing the release wheel by URL, the
@@ -125,7 +125,7 @@ for a full example and the caveats.
 
 `wenchang.mcp` serves the tools and the memory prompt from an MCP server. It
 needs the optional `[mcp]` extra:
-`pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"`.
+`pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"`.
 
 ```python
 from wenchang.mcp import build_server

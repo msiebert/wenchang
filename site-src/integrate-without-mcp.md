@@ -7,10 +7,10 @@ The memory tools are methods on a Python object. If your agent runs on another t
 The base package is enough. It needs no `mcp`:
 
 ```
-pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"
+pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"
 ```
 
-With uv: `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"`.
+With uv: `uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"`.
 
 ## The tools are methods {#methods}
 

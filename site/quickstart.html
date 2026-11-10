@@ -83,11 +83,11 @@
 </ul>
 <h2 id="install">1. Install<a class="headerlink" href="#install" title="Link to this section">#</a></h2>
 <p>wenchang is not on PyPI. Each release is a git tag with a GitHub Release. Install a release by its tag into the environment the server will run in. The <code>mcp</code> extra adds the MCP adapter (<code>mcp&gt;=2.2,&lt;3</code>).</p>
-<div class="highlight"><pre><span></span><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"
+<div class="highlight"><pre><span></span><code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"
 </code></pre></div>
 
-<p>With uv: <code>uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>.</p>
-<p>Without MCP, the base package is enough: <code>pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>, or <code>uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>. See <a href="integrate-without-mcp.html">Integrate without MCP</a>.</p>
+<p>With uv: <code>uv add "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.2"</code>.</p>
+<p>Without MCP, the base package is enough: <code>pip install "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"</code>, or <code>uv add "wenchang @ git+https://github.com/msiebert/wenchang@v0.1.2"</code>. See <a href="integrate-without-mcp.html">Integrate without MCP</a>.</p>
 <p>What changed in each release is in the <a href="https://github.com/msiebert/wenchang/blob/main/CHANGELOG.md">changelog</a>.</p>
 <div class="callout callout-warn"><strong>Compatibility: mcp 2.x <code>MCPServer</code> only.</strong> The <code>mcp</code> extra installs <code>mcp&gt;=2.2,&lt;3</code>, and the adapter targets <code>mcp.server.mcpserver.MCPServer</code>. FastMCP servers and mcp 1.x servers do not work: with mcp 1.x installed, importing <code>wenchang.mcp</code> raises <code>ImportError</code>, and <code>register_memory_tools</code> raises <code>TypeError("server must be an MCPServer, not ...")</code> for any other server type. For another framework, see <a href="integrate-without-mcp.html">Integrate without MCP</a>.</div>
 
@@ -337,7 +337,7 @@ gcloud storage buckets add-iam-policy-binding gs://hanlin-inkwell-memory --membe
 </div>
 <footer class="site-footer">
 <div class="inner">
-<p>MIT licensed. Version 0.1.1.</p>
+<p>MIT licensed. Version 0.1.2.</p>
 <ul>
 <li><a href="https://github.com/msiebert/wenchang">GitHub repository</a></li>
 <li><a href="https://github.com/msiebert/wenchang/blob/main/LICENSE">License</a></li>
