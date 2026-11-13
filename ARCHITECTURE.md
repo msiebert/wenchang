@@ -1542,6 +1542,13 @@ imports it. The editable install makes it importable from any directory.
   run-level `operator_identity` summary, naming sources and never tokens
   ([ADR 0034](docs/adr/0034-operator-identity-check.md)).
 
+Eval arms vary the index tool name and whether the agent body carries the
+memory prompt ([ADR 0049](docs/adr/0049-index-tool-name-experiment.md)).
+`python -m evals set-arm` writes the gitignored `evals/arm.json`, which
+`evals.server` and `evals.agent` read; the server substitutes the name
+eval-side and the trace keeps `get_memory_index`. `new-run` records the arm,
+`merge-runs` refuses mixed arms, and `compare` tabulates runs.
+
 The runner workflow is `.claude/commands/run-evals.md`. It runs in a
 session launched with `evals/mcp.json`. Live runs never run in
 `make check`. The scripted-driver tests in `make check` exercise the

@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Final
 
+from evals.arm import DEFAULT_INDEX_TOOL, Arm, rename_index_tool
 from evals.reference_adopter import REFERENCE_SLOTS
 from wenchang.prompts import build_memory_prompt
 from wenchang.tools import TOOL_NAMES
@@ -27,32 +28,40 @@ EVAL_AGENT_PREAMBLE: Final[str] = (
     'address them as "you" and never call them "the user". Earlier turns of this '
     "conversation may be included above the newest one."
 )
+_DEFAULT_ARM: Final = Arm()
 _DESCRIPTION: Final = (
     "Eval subject for the wenchang memory harness. Spawned only by the /run-evals runner; "
     "never use it for other work."
 )
 
 
-def agent_tools() -> tuple[str, ...]:
+def agent_tools(arm: Arm = _DEFAULT_ARM) -> tuple[str, ...]:
     """The eval agent's allowlist: the seven memory tools on the eval server."""
-    return tuple(f"mcp__{MCP_SERVER_NAME}__{name}" for name in TOOL_NAMES)
+    return tuple(
+        f"mcp__{MCP_SERVER_NAME}__{arm.index_tool if name == DEFAULT_INDEX_TOOL else name}"
+        for name in TOOL_NAMES
+    )
 
 
-def render_agent_body() -> str:
-    """The agent's system prompt: the framing preamble, then the memory prompt."""
-    return EVAL_AGENT_PREAMBLE + "\n\n" + build_memory_prompt(REFERENCE_SLOTS)
+def render_agent_body(arm: Arm = _DEFAULT_ARM) -> str:
+    """The agent's system prompt: the framing preamble, then the memory prompt if the arm has it."""
+    if not arm.agent_prompt:
+        return EVAL_AGENT_PREAMBLE
+    return rename_index_tool(
+        EVAL_AGENT_PREAMBLE + "\n\n" + build_memory_prompt(REFERENCE_SLOTS), arm
+    )
 
 
-def render_agent_file() -> str:
+def render_agent_file(arm: Arm = _DEFAULT_ARM) -> str:
     """The full .claude/agents/wenchang-eval.md text."""
     front = "\n".join(
         [
             f"name: {AGENT_NAME}",
             f"description: {_DESCRIPTION}",
-            f"tools: {', '.join(agent_tools())}",
+            f"tools: {', '.join(agent_tools(arm))}",
             "model: inherit",
             "omitClaudeMd: true",
         ]
     )
-    text = f"---\n{front}\n---\n\n{render_agent_body()}"
+    text = f"---\n{front}\n---\n\n{render_agent_body(arm)}"
     return text if text.endswith("\n") else text + "\n"

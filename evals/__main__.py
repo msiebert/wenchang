@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import evals.agent
+from evals.arm import ARM_PATH, Arm, ArmError, load_arm, save_arm
+from evals.compare import compare_runs
 from evals.graders import GradeInputError
 from evals.report import (
     build_report,
@@ -29,6 +31,28 @@ def _render_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def _set_arm(args: argparse.Namespace) -> int:
+    arm_path: Path = args.arm_path
+    agent_out: Path = args.agent_out if args.agent_out is not None else evals.agent.AGENT_PATH
+    if args.reset:
+        arm = Arm()
+        arm_path.unlink(missing_ok=True)
+    else:
+        if args.index_tool is None:
+            print("set-arm requires --index-tool or --reset", file=sys.stderr)
+            return 2
+        try:
+            arm = Arm(index_tool=args.index_tool, agent_prompt=not args.no_agent_prompt)
+        except ArmError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        save_arm(arm, arm_path)
+    agent_out.parent.mkdir(parents=True, exist_ok=True)
+    agent_out.write_text(evals.agent.render_agent_file(arm))
+    print(agent_out)
+    return 0
+
+
 def _new_run(args: argparse.Namespace) -> int:
     try:
         check_model(args.model)
@@ -45,6 +69,17 @@ def _new_run(args: argparse.Namespace) -> int:
     if args.trials < 1:
         print("--trials must be at least 1", file=sys.stderr)
         return 2
+    try:
+        arm = load_arm(args.arm_path)
+    except ArmError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    if not arm.is_default:
+        print(
+            f"warning: running with a non-default arm: index tool {arm.index_tool}, "
+            f"agent prompt {'on' if arm.agent_prompt else 'off'}",
+            file=sys.stderr,
+        )
     selected = [by_id[i] for i in wanted]
     shard: tuple[int, int] | None = None
     if args.shard is not None:
@@ -58,7 +93,12 @@ def _new_run(args: argparse.Namespace) -> int:
             print(f"shard {args.shard} selects no scenarios", file=sys.stderr)
             return 2
     _, plan = new_run(
-        selected, model=args.model, trials=args.trials, runs_dir=args.runs_dir, shard=shard
+        selected,
+        model=args.model,
+        trials=args.trials,
+        runs_dir=args.runs_dir,
+        shard=shard,
+        arm=arm,
     )
     print(json.dumps(plan, indent=2))
     return 0
@@ -104,6 +144,17 @@ def _merge_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare(args: argparse.Namespace) -> int:
+    try:
+        markdown = compare_runs(args.run_dirs, args.baseline)
+    except GradeInputError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    args.out_file.write_text(markdown)
+    print(args.out_file)
+    return 0
+
+
 def _report(args: argparse.Namespace) -> int:
     try:
         build_report(args.run_dir)
@@ -122,12 +173,21 @@ def _parser() -> argparse.ArgumentParser:
     render.add_argument("--out", type=Path, default=None)
     render.set_defaults(handler=_render_agent)
 
+    set_arm = commands.add_parser("set-arm", help="set the eval arm and rewrite the agent file")
+    set_arm.add_argument("--index-tool", default=None)
+    set_arm.add_argument("--no-agent-prompt", action="store_true")
+    set_arm.add_argument("--reset", action="store_true")
+    set_arm.add_argument("--arm-path", type=Path, default=ARM_PATH)
+    set_arm.add_argument("--agent-out", type=Path, default=None)
+    set_arm.set_defaults(handler=_set_arm)
+
     plan = commands.add_parser("new-run", help="create a run and print the runner's plan")
     plan.add_argument("--model", default="sonnet")
     plan.add_argument("--trials", type=int, default=3)
     plan.add_argument("--scenarios-dir", type=Path, default=SCENARIO_DIR)
     plan.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     plan.add_argument("--shard", default=None, help="k/n: run only shard k of n")
+    plan.add_argument("--arm-path", type=Path, default=ARM_PATH)
     plan.add_argument("ids", nargs="*")
     plan.set_defaults(handler=_new_run)
 
@@ -145,6 +205,12 @@ def _parser() -> argparse.ArgumentParser:
     merge.add_argument("out_dir", type=Path)
     merge.add_argument("run_dirs", type=Path, nargs="+")
     merge.set_defaults(handler=_merge_runs)
+
+    compare = commands.add_parser("compare", help="compare runs across arms")
+    compare.add_argument("out_file", type=Path)
+    compare.add_argument("run_dirs", type=Path, nargs="+")
+    compare.add_argument("--baseline", type=Path, default=None)
+    compare.set_defaults(handler=_compare)
 
     report = commands.add_parser("report", help="write report.md and report.json for a run")
     report.add_argument("run_dir", type=Path)
