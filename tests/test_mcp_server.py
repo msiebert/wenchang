@@ -34,7 +34,8 @@ from wenchang.mcp import (
     memory_instructions,
     register_memory_tools,
 )
-from wenchang.prompts import build_memory_prompt
+from wenchang.prompts import PromptSlots, build_memory_prompt
+from wenchang.prompts.tool_guidance import PREAMBLE_TOOLS, tool_preambles
 from wenchang.scope import ScopePolicy
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.tools import (
@@ -131,6 +132,16 @@ def _text(result: CallToolResult) -> str:
     return item.text
 
 
+def _index_blocks(result: CallToolResult) -> list[str]:
+    """Texts of a successful get_memory_index result: payload JSON, then the prompt."""
+    assert len(result.content) == 2
+    texts: list[str] = []
+    for item in result.content:
+        assert isinstance(item, TextContent)
+        texts.append(item.text)
+    return texts
+
+
 def _payload(result: CallToolResult) -> dict[str, Any]:
     payload = result.structured_content
     assert payload is not None
@@ -179,9 +190,11 @@ def test_module_exports_and_keyword_only_parameters() -> None:
     keyword-only (AIE-1060, US3.1).
     """
     assert wmcp.__all__ == [
+        "MAX_TOOL_DESCRIPTION_CHARS",
         "PROMPT_RESOURCE_URI",
         "ToolCallRecord",
         "build_server",
+        "mcp_tool_descriptions",
         "memory_instructions",
         "register_memory_tools",
     ]
@@ -215,23 +228,37 @@ def test_prefix_applies_to_every_tool_name() -> None:
 @pytest.mark.parametrize("product", [None, "Mixpanel"], ids=["no-product", "product"])
 @pytest.mark.parametrize("prefix", [None, "mixpanel"], ids=["no-prefix", "prefix"])
 def test_descriptions_equal_tool_descriptions(product: str | None, prefix: str | None) -> None:
-    """Each listed description equals tool_descriptions(product)[name]
-    (AIE-1060, US3.4).
+    """Each listed description equals mcp_tool_descriptions(slots, product)[name],
+    and the tools without a preamble still equal tool_descriptions(product)[name]
+    (AIE-1060, US3.4; AIE-1382, AC1).
     """
     listed = _tools(_server(product=product, tool_prefix=prefix))
-    expected = tool_descriptions(product)
+    expected = wmcp.mcp_tool_descriptions(REFERENCE_SLOTS, product)
+    plain = tool_descriptions(product)
 
     for name in TOOL_NAMES:
         registered = name if prefix is None else f"{prefix}_{name}"
         assert listed[registered].description == expected[name]
+    for name in ("read_file", "list_prefix", "delete_file"):
+        registered = name if prefix is None else f"{prefix}_{name}"
+        assert listed[registered].description == plain[name]
 
 
 def test_description_first_lines_name_the_product() -> None:
-    """With product "Mixpanel", each description's first line contains it
-    (AIE-1060, US3.5).
+    """With product "Mixpanel", the first line of the mechanics text (after the
+    preamble, when there is one) contains it (AIE-1060, US3.5; AIE-1382).
     """
-    for tool in _tools(_server(product="Mixpanel")).values():
-        assert "Mixpanel" in tool.description.split("\n", 1)[0]
+    plain = tool_descriptions("Mixpanel")
+    for name, tool in _tools(_server(product="Mixpanel")).items():
+        description = cast(str, tool.description)
+        if name in PREAMBLE_TOOLS:
+            preamble, separator, mechanics = description.partition("\n\n")
+            assert separator
+            assert preamble == tool_preambles(REFERENCE_SLOTS)[name]
+            assert mechanics == plain[name]
+        else:
+            mechanics = description
+        assert "Mixpanel" in mechanics.split("\n", 1)[0]
 
 
 def test_input_schemas_mirror_memory_tools_signatures() -> None:
@@ -494,8 +521,9 @@ def test_register_on_adopter_server() -> None:
     tools, text, instructions = _with_client(server, body)
     assert returned is None
     assert set(tools) == {"ping", *TOOL_NAMES}
+    expected = wmcp.mcp_tool_descriptions(None, "Mixpanel")
     for name in TOOL_NAMES:
-        assert tools[name].description == tool_descriptions("Mixpanel")[name]
+        assert tools[name].description == expected[name]
     assert text == prompt
     assert instructions == prompt
 
@@ -758,7 +786,8 @@ def test_successful_results_have_no_path_or_prefix_keys() -> None:
 
     for result in _with_client(_server(), body):
         assert result.is_error is False
-        _assert_no_path_keys(json.loads(_text(result)))
+        first = _index_blocks(result)[0] if len(result.content) == 2 else _text(result)
+        _assert_no_path_keys(json.loads(first))
         _assert_no_path_keys(_payload(result))
 
 
@@ -1444,3 +1473,255 @@ def test_async_resolve_error_precedes_async_credentials_error() -> None:
 
     assert str(register_caught.value) == ASYNC_RESOLVE_MESSAGE
     assert str(build_caught.value) == ASYNC_RESOLVE_MESSAGE
+
+
+# --- AIE-1382: guidance in tool descriptions and the index result -----------------------
+
+LONG_SLOTS = PromptSlots(
+    purpose="Remember things for the user. " * 85,
+    scope_guidance=REFERENCE_SLOTS.scope_guidance,
+    seed_areas=REFERENCE_SLOTS.seed_areas,
+)
+UNPREFIXED_PLAIN_TOOLS = ("read_file", "list_prefix", "delete_file")
+
+
+def test_mcp_tool_descriptions_compose_preamble_and_mechanics() -> None:
+    """For the four preamble tools the served text is preamble, a blank line,
+    then tool_descriptions(product)[name] verbatim; the others are unchanged
+    (AIE-1382, AC1, AC2).
+    """
+    descriptions = wmcp.mcp_tool_descriptions(REFERENCE_SLOTS, "Mixpanel")
+    plain = tool_descriptions("Mixpanel")
+    preambles = tool_preambles(REFERENCE_SLOTS)
+
+    assert list(descriptions) == list(TOOL_NAMES)
+    for name in TOOL_NAMES:
+        if name in PREAMBLE_TOOLS:
+            assert descriptions[name] == f"{preambles[name]}\n\n{plain[name]}"
+        else:
+            assert descriptions[name] == plain[name]
+
+
+def test_mcp_tool_descriptions_default_arguments() -> None:
+    """With no arguments, mcp_tool_descriptions uses slots=None and no product
+    (AIE-1382, AC8).
+    """
+    descriptions = wmcp.mcp_tool_descriptions()
+
+    assert descriptions["get_memory_index"] == (
+        f"{tool_preambles(None)['get_memory_index']}\n\n{tool_descriptions()['get_memory_index']}"
+    )
+
+
+def test_mcp_tool_descriptions_is_read_only() -> None:
+    """Assigning to the returned mapping raises TypeError (AIE-1382, AC1)."""
+    descriptions = wmcp.mcp_tool_descriptions(REFERENCE_SLOTS)
+
+    with pytest.raises(TypeError):
+        descriptions["read_file"] = "x"  # pyright: ignore[reportIndexIssue]
+
+
+@pytest.mark.parametrize("product", [42, "", "  ", "a\nb", "a\ud800"])
+def test_mcp_tool_descriptions_bad_product_matches_tool_descriptions(product: object) -> None:
+    """An invalid product raises what tool_descriptions raises (AIE-1382)."""
+    with pytest.raises((TypeError, ValueError)) as expected:
+        tool_descriptions(product)  # pyright: ignore[reportArgumentType]
+    with pytest.raises((TypeError, ValueError)) as caught:
+        wmcp.mcp_tool_descriptions(REFERENCE_SLOTS, product)  # pyright: ignore[reportArgumentType]
+
+    assert type(caught.value) is type(expected.value)
+    assert str(caught.value) == str(expected.value)
+
+
+def test_max_tool_description_chars_is_2000() -> None:
+    """The exported limit is 2000 (AIE-1382, AC3)."""
+    assert wmcp.MAX_TOOL_DESCRIPTION_CHARS == 2000
+
+
+@pytest.mark.parametrize("product", [None, "Mixpanel"], ids=["no-product", "product"])
+def test_served_descriptions_fit_the_limit_with_headroom(product: str | None) -> None:
+    """With the reference slots every served description is within the limit and
+    under 1600 characters (AIE-1382, AC3).
+    """
+    listed = _tools(_server(product=product))
+
+    for name in TOOL_NAMES:
+        length = len(listed[name].description)
+        assert length <= wmcp.MAX_TOOL_DESCRIPTION_CHARS, name
+        assert length < 1600, name
+
+
+def test_generic_slotless_descriptions_fit_the_limit() -> None:
+    """Without slots every description is within the limit (AIE-1382, AC3)."""
+    for name, text in wmcp.mcp_tool_descriptions(None, "Mixpanel").items():
+        assert len(text) <= wmcp.MAX_TOOL_DESCRIPTION_CHARS, name
+
+
+def test_register_rejects_overlong_description() -> None:
+    """A purpose that pushes get_memory_index past the limit raises ValueError
+    naming the tool, the length, and the limit; nothing is registered
+    (AIE-1382, AC4).
+    """
+    server = MCPServer("host")
+    before = _snapshot(server)
+    length = len(wmcp.mcp_tool_descriptions(LONG_SLOTS)["get_memory_index"])
+    assert length > 2000
+
+    with pytest.raises(ValueError) as caught:
+        register_memory_tools(server, prompt="p", **_kwargs(slots=LONG_SLOTS))
+
+    message = str(caught.value)
+    assert "get_memory_index" in message
+    assert str(length) in message
+    assert "2000" in message
+    assert _snapshot(server) == before == (set(), set())
+
+
+def test_prefixed_overlong_message_names_the_unprefixed_tool() -> None:
+    """With a tool_prefix the error still names the unprefixed tool (AIE-1382, AC4)."""
+    server = MCPServer("host")
+
+    with pytest.raises(ValueError) as caught:
+        register_memory_tools(
+            server, prompt="p", **_kwargs(slots=LONG_SLOTS, tool_prefix="mixpanel")
+        )
+
+    assert "get_memory_index" in str(caught.value)
+    assert _snapshot(server) == (set(), set())
+
+
+def test_build_server_rejects_overlong_description() -> None:
+    """build_server raises ValueError for an over-long purpose (AIE-1382, AC4)."""
+    length = len(wmcp.mcp_tool_descriptions(LONG_SLOTS)["get_memory_index"])
+
+    with pytest.raises(ValueError) as caught:
+        build_server(**_kwargs(slots=LONG_SLOTS))
+
+    message = str(caught.value)
+    assert "get_memory_index" in message
+    assert str(length) in message
+    assert "2000" in message
+
+
+def test_register_serves_descriptions_for_given_slots() -> None:
+    """register_memory_tools with slots serves mcp_tool_descriptions(slots,
+    product) on an adopter server (AIE-1382, AC1).
+    """
+    prompt = build_memory_prompt(REFERENCE_SLOTS)
+    server = _adopter_server(prompt)
+    register_memory_tools(
+        server, prompt=prompt, **_kwargs(slots=REFERENCE_SLOTS, product="Mixpanel")
+    )
+
+    tools = _tools(server)
+
+    expected = wmcp.mcp_tool_descriptions(REFERENCE_SLOTS, "Mixpanel")
+    for name in TOOL_NAMES:
+        assert tools[name].description == expected[name]
+
+
+def test_tool_descriptions_and_memory_tools_descriptions_are_unchanged() -> None:
+    """tool_descriptions and MemoryTools.descriptions stay the cleaned docstrings
+    with no guidance preamble (AIE-1382, AC9).
+    """
+    plain = tool_descriptions()
+    from_class = bind_tools(
+        _client(), _UserResolver(), "alice", POLICY, source="mcp-smoke"
+    ).descriptions()
+
+    for name in TOOL_NAMES:
+        assert plain[name] == inspect.cleandoc(getattr(MemoryTools, name).__doc__)
+        assert from_class[name] == plain[name]
+    assert "[system]" not in plain["write_file"].split("\n\n", 1)[0]
+
+
+def test_successful_index_call_appends_the_prompt_block() -> None:
+    """A successful get_memory_index returns the payload JSON then the memory
+    prompt; structured content is unchanged (AIE-1382, AC5).
+    """
+
+    async def body(client: Client) -> CallToolResult:
+        return await _call(client, "get_memory_index", "alice")
+
+    result = _with_client(_server(), body)
+
+    payload_text, prompt_text = _index_blocks(result)
+    assert result.is_error is False
+    assert prompt_text == memory_instructions(REFERENCE_SLOTS)
+    assert json.loads(payload_text) == _payload(result)
+
+
+def test_index_observer_payload_is_unchanged() -> None:
+    """The on_call record for get_memory_index carries the structured payload
+    only, not the prompt (AIE-1382, AC5).
+    """
+    records: list[ToolCallRecord] = []
+
+    async def body(client: Client) -> CallToolResult:
+        return await _call(client, "get_memory_index", "alice")
+
+    result = _with_client(_server(on_call=records.append), body)
+
+    assert len(records) == 1
+    assert records[0].tool == "get_memory_index"
+    assert records[0].is_error is False
+    assert dict(records[0].result) == result.structured_content
+    assert memory_instructions(REFERENCE_SLOTS) not in json.dumps(dict(records[0].result))
+
+
+def test_prefixed_index_call_appends_the_prompt_block() -> None:
+    """The prompt block also follows a prefixed get_memory_index (AIE-1382, AC5)."""
+
+    async def body(client: Client) -> CallToolResult:
+        return await _call(client, "mixpanel_get_memory_index", "alice")
+
+    result = _with_client(_server(tool_prefix="mixpanel"), body)
+
+    assert _index_blocks(result)[1] == memory_instructions(REFERENCE_SLOTS)
+
+
+def test_failed_index_call_has_one_block() -> None:
+    """A get_memory_index that fails (credential extraction raises) returns one
+    block and is_error (AIE-1382, AC6).
+    """
+
+    def broken(ctx: Context[Any, Any]) -> object:
+        raise RuntimeError("no credentials")
+
+    async def body(client: Client) -> CallToolResult:
+        return await _call(client, "get_memory_index", "alice")
+
+    result = _with_client(_server(credentials_from_context=broken), body)
+
+    assert result.is_error is True
+    assert memory_instructions(REFERENCE_SLOTS) not in _text(result)
+    assert _payload(result)["error"] == "ResolverFailureError"
+
+
+def test_resolution_failure_index_call_has_one_block() -> None:
+    """An unknown user's get_memory_index returns one error block (AIE-1382, AC6)."""
+
+    async def body(client: Client) -> CallToolResult:
+        return await _call(client, "get_memory_index", "mallory")
+
+    result = _with_client(_server(), body)
+
+    assert result.is_error is True
+    assert len(result.content) == 1
+
+
+def test_other_tools_return_one_block_on_success() -> None:
+    """write_file, read_file, and list_prefix successes keep one content block
+    (AIE-1382, AC6).
+    """
+
+    async def body(client: Client) -> list[CallToolResult]:
+        return [
+            await _call(client, "write_file", "alice", **_write_args()),
+            await _call(client, "read_file", "alice", **FILE),
+            await _call(client, "list_prefix", "alice", scope="user", area="notes"),
+        ]
+
+    for result in _with_client(_server(), body):
+        assert result.is_error is False
+        assert memory_instructions(REFERENCE_SLOTS) not in _text(result)

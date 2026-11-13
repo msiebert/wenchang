@@ -47,7 +47,7 @@ EXPECTED_SECTION_MODULES = frozenset(
         "forgetting",
     }
 )
-NON_SECTION_MODULES = frozenset({"assemble", "slots"})
+NON_SECTION_MODULES = frozenset({"assemble", "slots", "tool_guidance"})
 PROMPTS_DIR = Path(next(iter(wenchang.prompts.__path__)))
 PROMPT_FILES = sorted(PROMPTS_DIR.rglob("*.py"))
 

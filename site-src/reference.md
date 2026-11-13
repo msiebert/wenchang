@@ -146,7 +146,9 @@ The server exposes the assembled memory prompt as an MCP resource:
 | MIME type | `text/markdown` |
 | Content | The same text as the server's `instructions`: `build_memory_prompt(slots)`. |
 
-Clients that drop server `instructions` can read the resource instead. The prompt is markdown with `##` headings and no H1; see [Customizing the prompts](prompts.md#fixed) for its sections.
+Clients that drop server `instructions` can read the resource instead. Over MCP, a successful `get_memory_index` call also returns the same prompt as a second text content block.
+
+`wenchang.mcp.mcp_tool_descriptions(slots=None, product=None) -> Mapping[str, str]` returns the tool descriptions the MCP server registers: the core descriptions plus the guidance preamble (see [Where the guidance goes](integrate-new-server.md#guidance)). With `slots`, `get_memory_index` starts with `slots.purpose`. `wenchang.mcp.MAX_TOOL_DESCRIPTION_CHARS` is 2000; `build_server` and `register_memory_tools` raise `ValueError` at startup if a description exceeds it. `register_memory_tools` takes an optional `slots` keyword for this. The prompt is markdown with `##` headings and no H1; see [Customizing the prompts](prompts.md#fixed) for its sections.
 
 ## Errors {#errors}
 

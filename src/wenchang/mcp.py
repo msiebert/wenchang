@@ -16,6 +16,7 @@ import logging
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
+from types import MappingProxyType
 from typing import Any, Final, TypeAlias, TypeVar, cast
 
 # mcp is an optional dependency; tell a missing install from an incompatible one.
@@ -26,7 +27,7 @@ if importlib.util.find_spec("mcp") is None:
     )
 try:
     from mcp.server.mcpserver import Context, MCPServer
-    from mcp.types import CallToolResult, TextContent
+    from mcp.types import CallToolResult, ContentBlock, TextContent
 except ImportError as exc:
     raise ImportError(
         "wenchang.mcp requires mcp>=2.2,<3, and the installed mcp is incompatible: "
@@ -39,6 +40,7 @@ from wenchang.errors import ResolverFailureError
 from wenchang.identity import Identity, IdentityResolver, check_resolver
 from wenchang.observer import ToolCallObserver, ToolCallRecord, check_observer, notify_observer
 from wenchang.prompts import PromptSlots, build_memory_prompt
+from wenchang.prompts.tool_guidance import PREAMBLE_TOOLS, tool_preambles
 from wenchang.scope import ScopePolicy
 from wenchang.tools import (
     TOOL_NAMES,
@@ -52,14 +54,17 @@ from wenchang.transport import TransportClient
 from wenchang.version_token import VersionToken
 
 __all__ = [
+    "MAX_TOOL_DESCRIPTION_CHARS",
     "PROMPT_RESOURCE_URI",
     "ToolCallRecord",
     "build_server",
+    "mcp_tool_descriptions",
     "memory_instructions",
     "register_memory_tools",
 ]
 
 PROMPT_RESOURCE_URI: Final[str] = "wenchang://memory-prompt"
+MAX_TOOL_DESCRIPTION_CHARS: Final[int] = 2000
 
 _C = TypeVar("_C")
 
@@ -82,6 +87,24 @@ def memory_instructions(slots: PromptSlots) -> str:
     return build_memory_prompt(slots)
 
 
+def mcp_tool_descriptions(
+    slots: PromptSlots | None = None, product: str | None = None
+) -> Mapping[str, str]:
+    """Descriptions as served over MCP: guidance preamble, a blank line, then the tool text.
+
+    Only the tools in PREAMBLE_TOOLS get a preamble. The length limit is
+    enforced at registration.
+    """
+    plain = tool_descriptions(product)
+    preambles = tool_preambles(slots)
+    return MappingProxyType(
+        {
+            name: f"{preambles[name]}\n\n{plain[name]}" if name in PREAMBLE_TOOLS else plain[name]
+            for name in TOOL_NAMES
+        }
+    )
+
+
 def _type_name(t: type) -> str:
     # A metaclass may make __name__ raise or return a str subclass.
     try:
@@ -98,6 +121,7 @@ def _validate(
     credentials_from_context: Callable[[Context[Any, Any]], _C],
     source: str,
     product: str | None,
+    slots: PromptSlots | None,
     tool_prefix: str | None,
     on_call: ToolCallObserver | None,
 ) -> tuple[dict[str, str], Mapping[str, str]]:
@@ -122,15 +146,23 @@ def _validate(
         if _TOOL_PREFIX.fullmatch(tool_prefix) is None:
             raise ValueError(_TOOL_PREFIX_RULE)
     names = {name: name if tool_prefix is None else f"{tool_prefix}_{name}" for name in TOOL_NAMES}
-    descriptions = tool_descriptions(product)
-    missing = [
-        name for name in TOOL_NAMES if name not in descriptions or not descriptions[name].strip()
-    ]
+    plain = tool_descriptions(product)
+    missing = [name for name in TOOL_NAMES if name not in plain or not plain[name].strip()]
     if missing:
         raise RuntimeError(
             f"memory tool descriptions are missing or empty for: {', '.join(missing)}; "
             "the tool docstrings may have been stripped (python -OO)"
         )
+    if slots is not None and not isinstance(cast(object, slots), PromptSlots):
+        raise TypeError(f"slots must be PromptSlots, not {_type_name(type(slots))}")
+    descriptions = mcp_tool_descriptions(slots, product)
+    for name in TOOL_NAMES:
+        length = len(descriptions[name])
+        if length > MAX_TOOL_DESCRIPTION_CHARS:
+            raise ValueError(
+                f"tool description for {name} is {length} characters; "
+                f"the limit is {MAX_TOOL_DESCRIPTION_CHARS} (shorten PromptSlots.purpose)"
+            )
     return names, descriptions
 
 
@@ -144,6 +176,7 @@ def register_memory_tools(
     credentials_from_context: Callable[[Context[Any, Any]], _C],
     source: str,
     product: str | None = None,
+    slots: PromptSlots | None = None,
     tool_prefix: str | None = None,
     on_call: ToolCallObserver | None = None,
 ) -> None:
@@ -167,6 +200,7 @@ def register_memory_tools(
         credentials_from_context=credentials_from_context,
         source=source,
         product=product,
+        slots=slots,
         tool_prefix=tool_prefix,
         on_call=on_call,
     )
@@ -212,8 +246,11 @@ def register_memory_tools(
         started = time.monotonic()
         payload, is_error = _run(ctx, op, tool)
         duration = time.monotonic() - started
+        content: list[ContentBlock] = [TextContent(type="text", text=json.dumps(payload))]
+        if name == "get_memory_index" and not is_error:
+            content.append(TextContent(type="text", text=prompt))
         result = CallToolResult(
-            content=[TextContent(type="text", text=json.dumps(payload))],
+            content=content,
             structured_content=payload,
             is_error=is_error,
         )
@@ -428,6 +465,7 @@ def build_server(
         credentials_from_context=credentials_from_context,
         source=source,
         product=product,
+        slots=slots,
         tool_prefix=tool_prefix,
         on_call=on_call,
     )
@@ -442,6 +480,7 @@ def build_server(
         credentials_from_context=credentials_from_context,
         source=source,
         product=product,
+        slots=slots,
         tool_prefix=tool_prefix,
         on_call=on_call,
     )

@@ -165,7 +165,8 @@ Terms as used throughout wenchang and its spec.
   renders the result. `wenchang.mcp` is the MCP host adapter
   (`register_memory_tools`, `build_server`), installed with the optional
   `wenchang[mcp]` extra; it also serves the memory prompt as the server's
-  instructions and as a resource.
+  instructions, as a resource, and as the second content block of a
+  successful `get_memory_index` result.
 - **Scope-relative address** — how the agent names a file to the tools:
   `(scope, area, name)`, with `name` excluding `.md`. The tool fills in the
   caller's own entity ID for that scope, so the agent never types an entity

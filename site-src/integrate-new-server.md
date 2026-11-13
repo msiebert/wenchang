@@ -30,6 +30,18 @@ Every argument is keyword-only. `build_server` checks them all before it creates
 
 The server's version is the installed wenchang version. [Names on the tools](prompts.md#naming) has more on `product`, `tool_prefix`, and `source`.
 
+## Where the guidance goes {#guidance}
+
+Some clients, including Claude Desktop and claude.ai, ignore the server's `instructions`. The server therefore also puts the core rules where every client sees them:
+
+- `get_memory_index`'s description starts with your `purpose`, then says to call it first and that its result includes the memory rules.
+- The descriptions of `write_file`, `append_line`, and `replace_fact` start with a short preamble: scope by the index's Scopes rules, label lines `[stated]`, `[observed]`, or `[inferred]`, never write a new `[system]` line, save facts as they arise, and never store financial account numbers, health diagnoses, or anything indicating a minor.
+- A successful `get_memory_index` call returns the full memory prompt as a second text content block.
+
+`instructions` and the `wenchang://memory-prompt` resource are unchanged. `wenchang.mcp.mcp_tool_descriptions(slots=None, product=None)` returns the descriptions the server registers. Startup raises `ValueError` if one exceeds `MAX_TOOL_DESCRIPTION_CHARS` (2000), which only a very long `purpose` can cause. The core `tool_descriptions()` and `MemoryTools.descriptions()` are unchanged, since a non-MCP integrator owns its system prompt.
+
+Two things help the agent find and use the tools. Keep `purpose` short and specific, because tool search matches on it. Give the connector a short, descriptive display name so the model recognizes when it applies.
+
 ## Credentials {#credentials}
 
 Every tool call runs `credentials_from_context(ctx)`, passes the result to your resolver, and binds that caller's own tools. `ctx.headers` holds the request headers on HTTP and is `None` on stdio. Return the raw value and leave verification to the resolver. If the function raises, the call fails with a permanent `ResolverFailureError`, and only the exception's type is logged, since its message may carry the credential.

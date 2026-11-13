@@ -62,11 +62,13 @@ def test_mcp_reexports_the_shared_record() -> None:
 
 
 def test_mcp_all_is_unchanged() -> None:
-    """wenchang.mcp.__all__ is unchanged (AIE-1296, US4.2)."""
+    """wenchang.mcp.__all__ is the pinned seven names (AIE-1296, US4.2; AIE-1382)."""
     assert wmcp.__all__ == [
+        "MAX_TOOL_DESCRIPTION_CHARS",
         "PROMPT_RESOURCE_URI",
         "ToolCallRecord",
         "build_server",
+        "mcp_tool_descriptions",
         "memory_instructions",
         "register_memory_tools",
     ]

@@ -55,6 +55,8 @@
 <nav class="toc toc-inline" aria-label="On this page"><details><summary>On this page</summary><ul>
 <li><a href="#arguments">Arguments</a>
 </li>
+<li><a href="#guidance">Where the guidance goes</a>
+</li>
 <li><a href="#credentials">Credentials</a>
 </li>
 <li><a href="#transports">Transports</a>
@@ -133,6 +135,15 @@
 </tbody>
 </table></div>
 <p>The server's version is the installed wenchang version. <a href="prompts.html#naming">Names on the tools</a> has more on <code>product</code>, <code>tool_prefix</code>, and <code>source</code>.</p>
+<h2 id="guidance">Where the guidance goes<a class="headerlink" href="#guidance" title="Link to this section">#</a></h2>
+<p>Some clients, including Claude Desktop and claude.ai, ignore the server's <code>instructions</code>. The server therefore also puts the core rules where every client sees them:</p>
+<ul>
+<li><code>get_memory_index</code>'s description starts with your <code>purpose</code>, then says to call it first and that its result includes the memory rules.</li>
+<li>The descriptions of <code>write_file</code>, <code>append_line</code>, and <code>replace_fact</code> start with a short preamble: scope by the index's Scopes rules, label lines <code>[stated]</code>, <code>[observed]</code>, or <code>[inferred]</code>, never write a new <code>[system]</code> line, save facts as they arise, and never store financial account numbers, health diagnoses, or anything indicating a minor.</li>
+<li>A successful <code>get_memory_index</code> call returns the full memory prompt as a second text content block.</li>
+</ul>
+<p><code>instructions</code> and the <code>wenchang://memory-prompt</code> resource are unchanged. <code>wenchang.mcp.mcp_tool_descriptions(slots=None, product=None)</code> returns the descriptions the server registers. Startup raises <code>ValueError</code> if one exceeds <code>MAX_TOOL_DESCRIPTION_CHARS</code> (2000), which only a very long <code>purpose</code> can cause. The core <code>tool_descriptions()</code> and <code>MemoryTools.descriptions()</code> are unchanged, since a non-MCP integrator owns its system prompt.</p>
+<p>Two things help the agent find and use the tools. Keep <code>purpose</code> short and specific, because tool search matches on it. Give the connector a short, descriptive display name so the model recognizes when it applies.</p>
 <h2 id="credentials">Credentials<a class="headerlink" href="#credentials" title="Link to this section">#</a></h2>
 <p>Every tool call runs <code>credentials_from_context(ctx)</code>, passes the result to your resolver, and binds that caller's own tools. <code>ctx.headers</code> holds the request headers on HTTP and is <code>None</code> on stdio. Return the raw value and leave verification to the resolver. If the function raises, the call fails with a permanent <code>ResolverFailureError</code>, and only the exception's type is logged, since its message may carry the credential.</p>
 <h2 id="transports">Transports<a class="headerlink" href="#transports" title="Link to this section">#</a></h2>
@@ -158,6 +169,8 @@
 </main>
 <aside class="toc toc-side" aria-label="On this page"><p class="toc-title">On this page</p><ul>
 <li><a href="#arguments">Arguments</a>
+</li>
+<li><a href="#guidance">Where the guidance goes</a>
 </li>
 <li><a href="#credentials">Credentials</a>
 </li>

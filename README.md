@@ -153,9 +153,14 @@ server.run("stdio")  # or serve it over HTTP with mcp
 ```
 
 The server's `instructions` are the assembled memory prompt, and the same
-text is served as the resource `wenchang://memory-prompt` for clients that
-drop `instructions`. To add the memory tools to a server you already run,
-with your own auth, middleware, and tools:
+text is served as the resource `wenchang://memory-prompt`. Clients that ignore
+`instructions` (Claude Desktop, claude.ai) still get the core rules: the tool
+descriptions carry a short preamble, and a successful `get_memory_index` call
+returns the full memory prompt as a second text block. Keep `purpose` short
+and specific, since tool search matches on it, and give the connector a
+descriptive display name. To add the memory tools to a server you already run,
+with your own auth, middleware, and tools (pass `slots=` so the descriptions
+carry the guidance):
 
 ```python
 from mcp.server.mcpserver import MCPServer
@@ -166,6 +171,7 @@ server = MCPServer("my-host", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,
+    slots=slots,
     client=client,
     resolver=resolver,
     policy=policy,

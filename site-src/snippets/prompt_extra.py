@@ -26,6 +26,7 @@ server = MCPServer("inkwell-memory", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,  # the same text as the instructions
+    slots=slots,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
     resolver=SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")})),
     policy=ScopePolicy({}),
