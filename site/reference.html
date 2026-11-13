@@ -515,7 +515,8 @@
 </tr>
 </tbody>
 </table></div>
-<p>Clients that drop server <code>instructions</code> can read the resource instead. The prompt is markdown with <code>##</code> headings and no H1; see <a href="prompts.html#fixed">Customizing the prompts</a> for its sections.</p>
+<p>Clients that drop server <code>instructions</code> can read the resource instead. Over MCP, a successful <code>get_memory_index</code> call also returns the same prompt as a second text content block.</p>
+<p><code>wenchang.mcp.mcp_tool_descriptions(slots=None, product=None) -&gt; Mapping[str, str]</code> returns the tool descriptions the MCP server registers: the core descriptions plus the guidance preamble (see <a href="integrate-new-server.html#guidance">Where the guidance goes</a>). With <code>slots</code>, <code>get_memory_index</code> starts with <code>slots.purpose</code>. <code>wenchang.mcp.MAX_TOOL_DESCRIPTION_CHARS</code> is 2000; <code>build_server</code> and <code>register_memory_tools</code> raise <code>ValueError</code> at startup if a description exceeds it. <code>register_memory_tools</code> takes an optional <code>slots</code> keyword for this. The prompt is markdown with <code>##</code> headings and no H1; see <a href="prompts.html#fixed">Customizing the prompts</a> for its sections.</p>
 <h2 id="errors">Errors<a class="headerlink" href="#errors" title="Link to this section">#</a></h2>
 <p>Every failure renders through <code>render_error</code>. Over MCP it is the payload of an error result (<code>isError</code> true); without MCP you call <code>render_error</code> yourself. The payload has this shape:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>

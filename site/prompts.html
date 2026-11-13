@@ -69,7 +69,7 @@
 </ul></details></nav>
 <h1 id="customizing-the-prompts">Customizing the prompts<a class="headerlink" href="#customizing-the-prompts" title="Link to this section">#</a></h1>
 <p>The agent behaves the way the memory prompt tells it to. wenchang ships most of that prompt and leaves four slots for you to fill in. You also choose how the tools are named and described.</p>
-<p>You can read the finished prompt in two places: it is the MCP server's <code>instructions</code>, and it is the resource <code>wenchang://memory-prompt</code>. In Python, <code>build_memory_prompt(slots)</code> returns it as markdown with <code>##</code> headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. <a href="#full-prompt">The full prompt</a> shows the whole text.</p>
+<p>You can read the finished prompt in three places over MCP: it is the server's <code>instructions</code>, it is the resource <code>wenchang://memory-prompt</code>, and it is the second text block of a successful <code>get_memory_index</code> result, for clients that ignore <code>instructions</code>. Your <code>purpose</code> also opens the <code>get_memory_index</code> tool description, so keep it short and specific. In Python, <code>build_memory_prompt(slots)</code> returns it as markdown with <code>##</code> headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. <a href="#full-prompt">The full prompt</a> shows the whole text.</p>
 <h2 id="slots">The four slots<a class="headerlink" href="#slots" title="Link to this section">#</a></h2>
 <p><code>wenchang.prompts.PromptSlots</code> holds the text that is specific to your deployment. The example below configures an assistant for novelists. Every field is a string and must not be empty. The generic sections of the prompt only say "shared scope", "private scope", and "the <code>system/</code> area", so your slots have to say which of your scopes are which.</p>
 <div class="table-wrap"><table>
@@ -251,6 +251,7 @@
 <span class="n">register_memory_tools</span><span class="p">(</span>
     <span class="n">server</span><span class="p">,</span>
     <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>  <span class="c1"># the same text as the instructions</span>
+    <span class="n">slots</span><span class="o">=</span><span class="n">slots</span><span class="p">,</span>
     <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">())),</span>
     <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">Identity</span><span class="p">(</span><span class="n">grants</span><span class="o">=</span><span class="p">{</span><span class="s2">"user"</span><span class="p">:</span> <span class="n">ScopeGrant</span><span class="p">(</span><span class="s2">"u-tianlong"</span><span class="p">,</span> <span class="s2">"owner"</span><span class="p">)})),</span>
     <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({}),</span>

@@ -41,6 +41,7 @@ server = MCPServer("hanlin-tools", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,
+    slots=slots,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
     resolver=SandboxResolver(identity),
     policy=ScopePolicy({}),

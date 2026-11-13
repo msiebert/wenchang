@@ -473,6 +473,7 @@ def build_eval_server(state: EvalState | None = None) -> MCPServer:
     register_memory_tools(
         server,
         prompt=build_memory_prompt(REFERENCE_SLOTS),
+        slots=REFERENCE_SLOTS,
         client=_ActiveClient(state),
         resolver=_ActiveResolver(state),
         policy=REFERENCE_POLICY,

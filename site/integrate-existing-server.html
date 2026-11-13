@@ -70,7 +70,7 @@
 
 <p>Install with the extra: <code>pip install "wenchang[mcp] @ git+https://github.com/msiebert/wenchang@v0.1.1"</code>.</p>
 <h2 id="register">Register the tools<a class="headerlink" href="#register" title="Link to this section">#</a></h2>
-<p><code>register_memory_tools</code> takes the server, then keyword arguments: <code>prompt</code>, <code>client</code>, <code>resolver</code>, <code>policy</code>, <code>credentials_from_context</code>, <code>source</code>, and optionally <code>product</code>, <code>tool_prefix</code>, and <code>on_call</code>. They mean the same as for <a href="integrate-new-server.html#arguments"><code>build_server</code></a>, except that you pass the prompt text instead of the slots.</p>
+<p><code>register_memory_tools</code> takes the server, then keyword arguments: <code>prompt</code>, <code>client</code>, <code>resolver</code>, <code>policy</code>, <code>credentials_from_context</code>, <code>source</code>, and optionally <code>slots</code>, <code>product</code>, <code>tool_prefix</code>, and <code>on_call</code>. Pass <code>slots</code> so the tool descriptions carry the core memory guidance; see <a href="integrate-new-server.html#guidance">Where the guidance goes</a>. They mean the same as for <a href="integrate-new-server.html#arguments"><code>build_server</code></a>, except that you pass the prompt text instead of the slots.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">mcp.server.mcpserver</span><span class="w"> </span><span class="kn">import</span> <span class="n">Context</span><span class="p">,</span> <span class="n">MCPServer</span>
@@ -114,6 +114,7 @@
 <span class="n">register_memory_tools</span><span class="p">(</span>
     <span class="n">server</span><span class="p">,</span>
     <span class="n">prompt</span><span class="o">=</span><span class="n">prompt</span><span class="p">,</span>
+    <span class="n">slots</span><span class="o">=</span><span class="n">slots</span><span class="p">,</span>
     <span class="n">client</span><span class="o">=</span><span class="n">InProcessClient</span><span class="p">(</span><span class="n">MemoryStore</span><span class="p">(</span><span class="n">InMemoryStorage</span><span class="p">())),</span>
     <span class="n">resolver</span><span class="o">=</span><span class="n">SandboxResolver</span><span class="p">(</span><span class="n">identity</span><span class="p">),</span>
     <span class="n">policy</span><span class="o">=</span><span class="n">ScopePolicy</span><span class="p">({}),</span>

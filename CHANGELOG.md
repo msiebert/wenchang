@@ -11,6 +11,21 @@ the policy in [docs/releasing.md](docs/releasing.md).
 - `FilesystemStorage(root)` in `wenchang.storage.filesystem`: a
   local-directory `Storage` backend for tests and local development, POSIX
   only. Documented on the site with a runnable example.
+- `wenchang.mcp.mcp_tool_descriptions(slots=None, product=None)`,
+  `MAX_TOOL_DESCRIPTION_CHARS` (2000), and a `slots=` keyword on
+  `register_memory_tools`. Startup raises `ValueError` if a tool description
+  exceeds the limit.
+
+### Changed
+
+- MCP servers put core memory guidance where clients that ignore `instructions`
+  (Claude Desktop, claude.ai) can see it. `get_memory_index`'s description
+  starts with `PromptSlots.purpose`, `write_file`, `append_line`, and
+  `replace_fact` start with a short rules preamble, and a successful
+  `get_memory_index` call returns the full memory prompt as a second text
+  block. `instructions` and `wenchang://memory-prompt` are unchanged, as are
+  `tool_descriptions()` and `MemoryTools.descriptions()`. Adopters calling
+  `register_memory_tools` should pass `slots=`.
 
 ## [0.1.1] - 2026-11-04
 

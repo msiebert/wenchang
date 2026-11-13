@@ -2,7 +2,7 @@
 
 The agent behaves the way the memory prompt tells it to. wenchang ships most of that prompt and leaves four slots for you to fill in. You also choose how the tools are named and described.
 
-You can read the finished prompt in two places: it is the MCP server's `instructions`, and it is the resource `wenchang://memory-prompt`. In Python, `build_memory_prompt(slots)` returns it as markdown with `##` headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. [The full prompt](#full-prompt) shows the whole text.
+You can read the finished prompt in three places over MCP: it is the server's `instructions`, it is the resource `wenchang://memory-prompt`, and it is the second text block of a successful `get_memory_index` result, for clients that ignore `instructions`. Your `purpose` also opens the `get_memory_index` tool description, so keep it short and specific. In Python, `build_memory_prompt(slots)` returns it as markdown with `##` headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. [The full prompt](#full-prompt) shows the whole text.
 
 ## The four slots
 
@@ -129,6 +129,7 @@ server = MCPServer("inkwell-memory", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,  # the same text as the instructions
+    slots=slots,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
     resolver=SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")})),
     policy=ScopePolicy({}),

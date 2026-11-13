@@ -309,7 +309,7 @@ For Claude Code, put this in the project's `.mcp.json`:
 claude mcp add memory -e WENCHANG_BUCKET=hanlin-inkwell-memory -e WENCHANG_ORG=o-hanlin-press -e WENCHANG_PROJECT=p-ninth-examination -e WENCHANG_USER=u-tianlong -- /path/to/venv/bin/python /path/to/server.py
 ```
 
-The server sends the memory prompt as its `instructions`, and also serves it as the resource `wenchang://memory-prompt` for clients that ignore `instructions`. In Claude Code the tools show up as `mcp__memory__get_memory_index`, `mcp__memory__read_file`, and so on. `/mcp` shows whether the server connected.
+The server sends the memory prompt as its `instructions`, and also serves it as the resource `wenchang://memory-prompt` and as the second block of each `get_memory_index` result, for clients that ignore `instructions`. In Claude Code the tools show up as `mcp__memory__get_memory_index`, `mcp__memory__read_file`, and so on. `/mcp` shows whether the server connected.
 
 ## 5. Try it
 
@@ -584,6 +584,18 @@ Every argument is keyword-only. `build_server` checks them all before it creates
 
 The server's version is the installed wenchang version. [Names on the tools](prompts.md#naming) has more on `product`, `tool_prefix`, and `source`.
 
+## Where the guidance goes
+
+Some clients, including Claude Desktop and claude.ai, ignore the server's `instructions`. The server therefore also puts the core rules where every client sees them:
+
+- `get_memory_index`'s description starts with your `purpose`, then says to call it first and that its result includes the memory rules.
+- The descriptions of `write_file`, `append_line`, and `replace_fact` start with a short preamble: scope by the index's Scopes rules, label lines `[stated]`, `[observed]`, or `[inferred]`, never write a new `[system]` line, save facts as they arise, and never store financial account numbers, health diagnoses, or anything indicating a minor.
+- A successful `get_memory_index` call returns the full memory prompt as a second text content block.
+
+`instructions` and the `wenchang://memory-prompt` resource are unchanged. `wenchang.mcp.mcp_tool_descriptions(slots=None, product=None)` returns the descriptions the server registers. Startup raises `ValueError` if one exceeds `MAX_TOOL_DESCRIPTION_CHARS` (2000), which only a very long `purpose` can cause. The core `tool_descriptions()` and `MemoryTools.descriptions()` are unchanged, since a non-MCP integrator owns its system prompt.
+
+Two things help the agent find and use the tools. Keep `purpose` short and specific, because tool search matches on it. Give the connector a short, descriptive display name so the model recognizes when it applies.
+
 ## Credentials
 
 Every tool call runs `credentials_from_context(ctx)`, passes the result to your resolver, and binds that caller's own tools. `ctx.headers` holds the request headers on HTTP and is `None` on stdio. Return the raw value and leave verification to the resolver. If the function raises, the call fails with a permanent `ResolverFailureError`, and only the exception's type is logged, since its message may carry the credential.
@@ -626,7 +638,7 @@ Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msi
 
 ## Register the tools
 
-`register_memory_tools` takes the server, then keyword arguments: `prompt`, `client`, `resolver`, `policy`, `credentials_from_context`, `source`, and optionally `product`, `tool_prefix`, and `on_call`. They mean the same as for [`build_server`](integrate-new-server.md#arguments), except that you pass the prompt text instead of the slots.
+`register_memory_tools` takes the server, then keyword arguments: `prompt`, `client`, `resolver`, `policy`, `credentials_from_context`, `source`, and optionally `slots`, `product`, `tool_prefix`, and `on_call`. Pass `slots` so the tool descriptions carry the core memory guidance; see [Where the guidance goes](integrate-new-server.md#guidance). They mean the same as for [`build_server`](integrate-new-server.md#arguments), except that you pass the prompt text instead of the slots.
 
 ```python
 import logging
@@ -672,6 +684,7 @@ server = MCPServer("hanlin-tools", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,
+    slots=slots,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
     resolver=SandboxResolver(identity),
     policy=ScopePolicy({}),
@@ -1709,7 +1722,7 @@ HTML version: <https://msiebert.github.io/wenchang/storage.html>
 
 The agent behaves the way the memory prompt tells it to. wenchang ships most of that prompt and leaves four slots for you to fill in. You also choose how the tools are named and described.
 
-You can read the finished prompt in two places: it is the MCP server's `instructions`, and it is the resource `wenchang://memory-prompt`. In Python, `build_memory_prompt(slots)` returns it as markdown with `##` headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. [The full prompt](#full-prompt) shows the whole text.
+You can read the finished prompt in three places over MCP: it is the server's `instructions`, it is the resource `wenchang://memory-prompt`, and it is the second text block of a successful `get_memory_index` result, for clients that ignore `instructions`. Your `purpose` also opens the `get_memory_index` tool description, so keep it short and specific. In Python, `build_memory_prompt(slots)` returns it as markdown with `##` headings and no top-level heading, so a host can nest it in its own system prompt. Without MCP, that is how you give it to the model. [The full prompt](#full-prompt) shows the whole text.
 
 ## The four slots
 
@@ -1836,6 +1849,7 @@ server = MCPServer("inkwell-memory", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,  # the same text as the instructions
+    slots=slots,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
     resolver=SandboxResolver(Identity(grants={"user": ScopeGrant("u-tianlong", "owner")})),
     policy=ScopePolicy({}),
@@ -2178,7 +2192,9 @@ The server exposes the assembled memory prompt as an MCP resource:
 | MIME type | `text/markdown` |
 | Content | The same text as the server's `instructions`: `build_memory_prompt(slots)`. |
 
-Clients that drop server `instructions` can read the resource instead. The prompt is markdown with `##` headings and no H1; see [Customizing the prompts](prompts.md#fixed) for its sections.
+Clients that drop server `instructions` can read the resource instead. Over MCP, a successful `get_memory_index` call also returns the same prompt as a second text content block.
+
+`wenchang.mcp.mcp_tool_descriptions(slots=None, product=None) -> Mapping[str, str]` returns the tool descriptions the MCP server registers: the core descriptions plus the guidance preamble (see [Where the guidance goes](integrate-new-server.md#guidance)). With `slots`, `get_memory_index` starts with `slots.purpose`. `wenchang.mcp.MAX_TOOL_DESCRIPTION_CHARS` is 2000; `build_server` and `register_memory_tools` raise `ValueError` at startup if a description exceeds it. `register_memory_tools` takes an optional `slots` keyword for this. The prompt is markdown with `##` headings and no H1; see [Customizing the prompts](prompts.md#fixed) for its sections.
 
 ## Errors
 

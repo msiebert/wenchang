@@ -203,7 +203,7 @@ gcloud storage buckets add-iam-policy-binding gs://hanlin-inkwell-memory --membe
 <div class="highlight"><pre><span></span><code>claude mcp add memory -e WENCHANG_BUCKET=hanlin-inkwell-memory -e WENCHANG_ORG=o-hanlin-press -e WENCHANG_PROJECT=p-ninth-examination -e WENCHANG_USER=u-tianlong -- /path/to/venv/bin/python /path/to/server.py
 </code></pre></div>
 
-<p>The server sends the memory prompt as its <code>instructions</code>, and also serves it as the resource <code>wenchang://memory-prompt</code> for clients that ignore <code>instructions</code>. In Claude Code the tools show up as <code>mcp__memory__get_memory_index</code>, <code>mcp__memory__read_file</code>, and so on. <code>/mcp</code> shows whether the server connected.</p>
+<p>The server sends the memory prompt as its <code>instructions</code>, and also serves it as the resource <code>wenchang://memory-prompt</code> and as the second block of each <code>get_memory_index</code> result, for clients that ignore <code>instructions</code>. In Claude Code the tools show up as <code>mcp__memory__get_memory_index</code>, <code>mcp__memory__read_file</code>, and so on. <code>/mcp</code> shows whether the server connected.</p>
 <h2 id="try">5. Try it<a class="headerlink" href="#try" title="Link to this section">#</a></h2>
 <p>Tell the agent something worth keeping:</p>
 <blockquote>

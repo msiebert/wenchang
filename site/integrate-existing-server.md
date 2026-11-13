@@ -8,7 +8,7 @@ Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msi
 
 ## Register the tools
 
-`register_memory_tools` takes the server, then keyword arguments: `prompt`, `client`, `resolver`, `policy`, `credentials_from_context`, `source`, and optionally `product`, `tool_prefix`, and `on_call`. They mean the same as for [`build_server`](integrate-new-server.md#arguments), except that you pass the prompt text instead of the slots.
+`register_memory_tools` takes the server, then keyword arguments: `prompt`, `client`, `resolver`, `policy`, `credentials_from_context`, `source`, and optionally `slots`, `product`, `tool_prefix`, and `on_call`. Pass `slots` so the tool descriptions carry the core memory guidance; see [Where the guidance goes](integrate-new-server.md#guidance). They mean the same as for [`build_server`](integrate-new-server.md#arguments), except that you pass the prompt text instead of the slots.
 
 ```python
 import logging
@@ -54,6 +54,7 @@ server = MCPServer("hanlin-tools", instructions=prompt)
 register_memory_tools(
     server,
     prompt=prompt,
+    slots=slots,
     client=InProcessClient(MemoryStore(InMemoryStorage())),
     resolver=SandboxResolver(identity),
     policy=ScopePolicy({}),

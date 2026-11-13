@@ -1311,6 +1311,17 @@ planned piece.
   priority is not prompt text: it is `MemoryStore(scope_priority=...)`,
   which orders only the capped startup index and defaults to one flat tier.
   `prompts` imports nothing from `wenchang` outside its own package.
+  `wenchang.prompts.tool_guidance` is a prompts-layer module that is not a
+  section and not in `SECTION_ORDER` or `__all__` (import the module). It
+  holds `WRITE_PREAMBLE`, `GET_MEMORY_INDEX_CALL_FIRST`,
+  `GET_MEMORY_INDEX_GENERIC`, `PREAMBLE_TOOLS` (`get_memory_index`,
+  `write_file`, `append_line`, `replace_fact`), and
+  `tool_preambles(slots)`, a read-only mapping from those names to short
+  behavioral text that the MCP adapter prefixes to tool descriptions. The
+  index preamble is `slots.purpose` plus the call-first sentence (the
+  generic sentence when `slots` is `None`); the write preamble is shared and
+  reads no slot, so it holds no adopter text. See
+  [ADR 0048](docs/adr/0048-guidance-in-tool-descriptions-and-index-result.md).
   `evals/reference_adopter.py` is the Section 9 reference adopter fixture
   (slots, scope priority, write policy, identities, seed areas and files),
   and `tests/test_reference_adopter_end_to_end.py` is the tool-layer
@@ -1323,19 +1334,37 @@ planned piece.
   installed `mcp` raises one saying so. No other module imports
   it or `mcp`.
   - **`register_memory_tools(server, *, prompt, client, resolver, policy,
-    credentials_from_context, source, product=None, tool_prefix=None,
-    on_call=None)`** adds the seven tools and the prompt resource
-    `wenchang://memory-prompt` (`text/markdown`) to an adopter's
-    `MCPServer`.
+    credentials_from_context, source, product=None, slots=None,
+    tool_prefix=None, on_call=None)`** adds the seven tools and the prompt
+    resource `wenchang://memory-prompt` (`text/markdown`) to an adopter's
+    `MCPServer`. `slots` (a `PromptSlots` or `None`) only shapes the served
+    tool descriptions (below); a non-`PromptSlots` value raises `TypeError`.
   - **`build_server(*, slots, ..., name="wenchang")`** constructs an
     `MCPServer` whose `instructions` are `memory_instructions(slots)` (the
-    assembled prompt, built once) and registers onto it. The server runs
-    over stdio with `server.run("stdio")`.
+    assembled prompt, built once) and registers onto it, passing `slots`
+    through. The server runs over stdio with `server.run("stdio")`.
   - **Tool registration.** Each tool is a docstring-less wrapper whose
     parameters mirror the `MemoryTools` method, plus an injected
     keyword-only `ctx`. It is registered with an explicit name, prefixed
     `f"{tool_prefix}_{name}"` when set, and with
-    `description=tool_descriptions(product)[name]`.
+    `description=mcp_tool_descriptions(slots, product)[name]`.
+  - **Served descriptions.** `mcp_tool_descriptions(slots=None,
+    product=None)` returns a read-only mapping in `TOOL_NAMES` order. For
+    `get_memory_index`, `write_file`, `append_line`, and `replace_fact` the
+    text is the `tool_guidance` preamble, a blank line, then
+    `tool_descriptions(product)[name]` verbatim; `read_file`, `list_prefix`,
+    and `delete_file` equal `tool_descriptions(product)[name]`. This exists
+    because some clients drop `instructions` and others truncate
+    descriptions. `tool_descriptions` and `MemoryTools.descriptions()` do
+    not include the preambles. `MAX_TOOL_DESCRIPTION_CHARS = 2000` caps each
+    served description; registration raises `ValueError` naming the tool,
+    its length, and the limit.
+  - **Index result.** A successful `get_memory_index` call returns two
+    `TextContent` blocks: the JSON payload, then the `prompt` passed to
+    `register_memory_tools`. `structured_content` and the `on_call` payload
+    are the payload alone. Error results and every other tool return one
+    block. See
+    [ADR 0048](docs/adr/0048-guidance-in-tool-descriptions-and-index-result.md).
   - **Per-call binding.** Every call runs four steps:
     1. `credentials_from_context(ctx)` returns the raw credential, which the
        resolver verifies; headers and `_meta` are never an identity
@@ -1364,7 +1393,8 @@ planned piece.
     [ADR 0043](docs/adr/0043-shared-tool-call-observer.md)).
   - **Startup checks.** Every argument, the prefix rule (1 to 64 of
     `[A-Za-z0-9_-]`, letter or digit at both ends), non-blank descriptions
-    (which fail under `python -OO`), and name or URI collisions with what
+    (which fail under `python -OO`), served descriptions over
+    `MAX_TOOL_DESCRIPTION_CHARS`, and name or URI collisions with what
     the server already has are all checked before anything is registered.
     `resolver` is checked for `IdentityResolver` conformance and then with
     `check_resolver`, which rejects a detectably async `resolve` with
@@ -1492,7 +1522,8 @@ imports it. The editable install makes it importable from any directory.
   ([ADR 0034](docs/adr/0034-operator-identity-check.md)).
 - **evals.server**: a stdio MCP server, `python -m evals.server`. It
   mounts the seven memory tools with `wenchang.mcp.register_memory_tools`
-  over a resettable in-memory store, plus three harness tools:
+  (passing `slots=REFERENCE_SLOTS`, so `get_memory_index` serves the
+  reference purpose) over a resettable in-memory store, plus three harness tools:
   `eval_reset`, `eval_record_turn`, and `eval_dump`.
 - **evals.subagent_transcript**: reads the subagent's reply from its Claude
   Code transcript, by `agent_id`, for `eval_record_turn`

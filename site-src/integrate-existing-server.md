@@ -13,7 +13,7 @@ Install with the extra: `pip install "wenchang[mcp] @ git+https://github.com/msi
 
 ## Register the tools {#register}
 
-`register_memory_tools` takes the server, then keyword arguments: `prompt`, `client`, `resolver`, `policy`, `credentials_from_context`, `source`, and optionally `product`, `tool_prefix`, and `on_call`. They mean the same as for [`build_server`](integrate-new-server.md#arguments), except that you pass the prompt text instead of the slots.
+`register_memory_tools` takes the server, then keyword arguments: `prompt`, `client`, `resolver`, `policy`, `credentials_from_context`, `source`, and optionally `slots`, `product`, `tool_prefix`, and `on_call`. Pass `slots` so the tool descriptions carry the core memory guidance; see [Where the guidance goes](integrate-new-server.md#guidance). They mean the same as for [`build_server`](integrate-new-server.md#arguments), except that you pass the prompt text instead of the slots.
 
 <!--include python custom_embed.py-->
 

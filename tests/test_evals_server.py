@@ -31,7 +31,7 @@ from evals.server import (
 )
 from evals.subagent_transcript import SubagentTranscriptError
 from wenchang.core import MemoryStore
-from wenchang.mcp import PROMPT_RESOURCE_URI, ToolCallRecord
+from wenchang.mcp import PROMPT_RESOURCE_URI, ToolCallRecord, mcp_tool_descriptions
 from wenchang.prompts import build_memory_prompt
 from wenchang.storage.memory import InMemoryStorage
 from wenchang.tools import TOOL_NAMES, tool_descriptions
@@ -148,7 +148,8 @@ def state(tmp_path: Path) -> EvalState:
 
 def test_tool_surface_is_memory_tools_plus_harness(state: EvalState) -> None:
     """The server lists TOOL_NAMES plus the harness tools, with the reference
-    product's descriptions (AIE-1170, US1.1).
+    product's descriptions; get_memory_index leads with the reference slots'
+    purpose (AIE-1170, US1.1; AIE-1382).
     """
 
     async def body(client: Client) -> dict[str, str | None]:
@@ -160,8 +161,10 @@ def test_tool_surface_is_memory_tools_plus_harness(state: EvalState) -> None:
     assert set(tools) == {*TOOL_NAMES, *HARNESS_TOOL_NAMES}
     assert HARNESS_TOOL_NAMES == ("eval_reset", "eval_record_turn", "eval_dump")
     for name in TOOL_NAMES:
-        assert tools[name] == tool_descriptions(REFERENCE_PRODUCT)[name]
-        assert tools[name] == bound.descriptions()[name]
+        assert tools[name] == mcp_tool_descriptions(REFERENCE_SLOTS, REFERENCE_PRODUCT)[name]
+        assert bound.descriptions()[name] == tool_descriptions(REFERENCE_PRODUCT)[name]
+    index_description = tools["get_memory_index"] or ""
+    assert " ".join(REFERENCE_SLOTS.purpose.split()) in " ".join(index_description.split())
 
 
 def test_instructions_are_neutral_and_prompt_is_a_resource(state: EvalState) -> None:
