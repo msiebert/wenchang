@@ -30,6 +30,9 @@ from evals.server import (
     EvalState,
     build_eval_server,
 )
+from evals.server import (
+    main as server_main,
+)
 from evals.subagent_transcript import SubagentTranscriptError
 from wenchang.core import MemoryStore
 from wenchang.mcp import PROMPT_RESOURCE_URI, ToolCallRecord, mcp_tool_descriptions
@@ -1005,17 +1008,47 @@ def test_instructions_are_the_same_for_every_arm(tmp_path: Path, arm: Arm) -> No
     assert server.instructions == EVAL_SERVER_INSTRUCTIONS
 
 
-def test_no_arm_uses_load_arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """arm=None takes the arm from load_arm (AIE-1384, plan: build_eval_server)."""
-    monkeypatch.setattr("evals.server.load_arm", lambda: RENAMED)
-
-    server = build_eval_server(EvalState(runs_root=tmp_path / "runs"))
-
-    async def main() -> set[str]:
+def _tool_names(server: Any) -> set[str]:
+    async def run() -> set[str]:
         with anyio.fail_after(30):
             async with Client(server) as client:
                 return {t.name for t in (await client.list_tools()).tools}
 
-    names = anyio.run(main)
-    assert "load_memory" in names
-    assert "get_memory_index" not in names
+    return anyio.run(run)
+
+
+def test_no_arm_is_the_default_and_ignores_load_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """arm=None means the default arm; build_eval_server never consults
+    load_arm or the arm file (AIE-1384).
+    """
+    monkeypatch.setattr("evals.server.load_arm", lambda: RENAMED)
+
+    server = build_eval_server(EvalState(runs_root=tmp_path / "runs"), arm=None)
+
+    names = _tool_names(server)
+    assert "get_memory_index" in names
+    assert "load_memory" not in names
+
+
+def test_main_serves_the_arm_from_load_arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() reads the arm with load_arm and passes it to build_eval_server
+    (AIE-1384).
+    """
+    captured: list[Arm | None] = []
+
+    class _Server:
+        def run(self, transport: str) -> None:
+            captured.append(None)
+
+    def fake_build(state: EvalState | None = None, arm: Arm | None = None) -> Any:
+        captured.append(arm)
+        return _Server()
+
+    monkeypatch.setattr("evals.server.load_arm", lambda: RENAMED)
+    monkeypatch.setattr("evals.server.build_eval_server", fake_build)
+
+    server_main(["--runs-root", str(tmp_path / "runs"), "--transcripts-root", str(tmp_path / "t")])
+
+    assert captured[0] == RENAMED

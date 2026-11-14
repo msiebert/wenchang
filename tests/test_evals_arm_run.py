@@ -194,7 +194,7 @@ def test_new_run_with_the_default_arm_prints_no_arm_warning(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The default arm produces no arm warning on stderr (AIE-1384, FR-005)."""
-    _new_run(tmp_path)
+    _new_run(tmp_path, "--arm-path", str(tmp_path / "absent.json"))
 
     err = capsys.readouterr().err
     assert "load_memory" not in err

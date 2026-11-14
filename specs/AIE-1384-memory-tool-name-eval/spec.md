@@ -1,6 +1,6 @@
 Linear: AIE-1384
 
-Allow-test-changes: update (not weaken or remove) tests/test_evals_report.py::test_new_run_writes_metadata_and_plan — its expected run.json dict gains the default arm {"index_tool": "get_memory_index", "agent_prompt": true} required by AC9. No test is deleted or skipped.
+Allow-test-changes: update (not weaken or remove) tests/test_evals_report.py::test_new_run_writes_metadata_and_plan — its expected run.json dict gains the default arm {"index_tool": "get_memory_index", "agent_prompt": true} required by AC9. tests/test_evals_server.py::test_no_arm_uses_load_arm (added on this branch) is replaced by test_no_arm_is_the_default_and_ignores_load_arm and test_main_serves_the_arm_from_load_arm for the new contract (build_eval_server(arm=None) is the default arm and never reads arm.json; only main() calls load_arm). No test is deleted or skipped.
 
 # Feature Specification: Eval arms to compare names for the memory index tool
 
@@ -79,7 +79,7 @@ Tests are unit tests unless noted and cite `AIE-1384`.
 
 | # | Given | When | Then |
 | - | ----- | ---- | ---- |
-| 1 | No `evals/arm.json` | The eval server is built, the agent file is rendered, or `new-run` runs | Behavior is identical to today: index tool is `get_memory_index`; agent body is preamble plus memory prompt; the committed `.claude/agents/wenchang-eval.md` is unchanged; `run.json` records the default arm |
+| 1 | No `evals/arm.json` | The eval server is started (`main()`), the agent file is rendered, or `new-run` runs | Behavior is identical to today: index tool is `get_memory_index`; agent body is preamble plus memory prompt; the committed `.claude/agents/wenchang-eval.md` is unchanged; `run.json` records the default arm |
 | 2 | `python -m evals set-arm --index-tool load_memory --no-agent-prompt` | It runs | `evals/arm.json` is `{"index_tool": "load_memory", "agent_prompt": false}`; `.claude/agents/wenchang-eval.md` is regenerated: the tools line has `mcp__wenchang__load_memory` in place of `mcp__wenchang__get_memory_index` (same position), and the body is `EVAL_AGENT_PREAMBLE` only (it names no memory tool) |
 | 3 | An arm with `agent_prompt` true and index tool X | The agent is rendered | The body is preamble plus memory prompt with every `get_memory_index` replaced by X |
 | 4 | An invalid name (not matching `^[a-z][a-z0-9_]{0,63}$`, or equal to another memory tool name or a harness tool name) | `set-arm` runs | It exits 2 with a message naming the problem and writes nothing |

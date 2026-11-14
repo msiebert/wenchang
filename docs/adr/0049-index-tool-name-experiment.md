@@ -4,10 +4,9 @@ Date: 2026-11-13
 
 ## Status
 
-Proposed. Builds on [ADR 0028](0028-behavioral-eval-harness.md) (the eval
+Accepted. Builds on [ADR 0028](0028-behavioral-eval-harness.md) (the eval
 harness) and [ADR 0048](0048-guidance-in-tool-descriptions-and-index-result.md)
-(rules delivered in the `get_memory_index` result). The decision is pending the
-live runs.
+(rules delivered in the `get_memory_index` result).
 
 ## Context
 
@@ -27,8 +26,9 @@ public API.
 
 - **Arms.** An arm is an index tool name plus an `agent_prompt` on/off switch.
   It lives in the gitignored `evals/arm.json`, written only by
-  `python -m evals set-arm` and read by the eval server and the agent
-  renderer. No file means the default arm (`get_memory_index`, prompt on), and
+  `python -m evals set-arm` and read by the eval server's `main()` and the agent
+  renderer (`build_eval_server(arm=None)` uses the default arm and never reads
+  the file, so tests are independent of a local `arm.json`). No file means the default arm (`get_memory_index`, prompt on), and
   every output is unchanged. Names are validated in `evals/arm.py`.
 - **Name substitution is eval-side.** The eval server replaces
   `get_memory_index` with the arm's name in tool descriptions and in the
@@ -75,9 +75,11 @@ Rejected alternatives:
 
 ## Decision outcome (Result)
 
-Pending. This section will be filled in after the live runs: the `compare`
-table (saved as `specs/AIE-1384-memory-tool-name-eval/eval-report.md`) and
-whether the rule says to keep or rename.
+Keep `get_memory_index`. No candidate met the rule. Baseline call-first was
+87.9%; candidates were 81.8% to 84.8%. `index_read_first` was 100% in all arms,
+and the call-first misses were sessions with no memory call at all, which a
+name cannot change. Full table and reading:
+[eval-report.md](../../specs/AIE-1384-memory-tool-name-eval/eval-report.md).
 
 ## Consequences
 
@@ -90,5 +92,5 @@ whether the rule says to keep or rename.
   pin.
 - Substitution also renames mentions in prose. Accepted, since only the name
   should vary.
-- If a name wins, the rename is a follow-up with its own ADR and a CHANGELOG
-  breaking-change entry.
+- No rename ships. The result covers a Claude Code subagent only; other
+  clients may differ.

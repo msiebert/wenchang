@@ -487,10 +487,10 @@ def _apply_arm(server: MCPServer, arm: Arm) -> None:
 def build_eval_server(state: EvalState | None = None, arm: Arm | None = None) -> MCPServer:
     """The eval server: memory tools on state's active store, plus the harness tools.
 
-    The index tool is named for arm, which defaults to load_arm().
+    The index tool is named for arm, which defaults to the default Arm().
     """
     state = EvalState() if state is None else state
-    arm = load_arm() if arm is None else arm
+    arm = Arm() if arm is None else arm
     server = MCPServer(
         "wenchang", instructions=EVAL_SERVER_INSTRUCTIONS, version=wenchang.__version__
     )
@@ -574,7 +574,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--transcripts-root", type=Path, default=default_projects_root())
     args = parser.parse_args(argv)
     state = EvalState(runs_root=args.runs_root, transcripts_root=args.transcripts_root)
-    build_eval_server(state).run("stdio")
+    build_eval_server(state, load_arm()).run("stdio")
 
 
 if __name__ == "__main__":

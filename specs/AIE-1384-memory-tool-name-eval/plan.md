@@ -69,8 +69,10 @@ def render_agent_file(arm: Arm = Arm()) -> str: ...
 def build_eval_server(state: EvalState | None = None, arm: Arm | None = None) -> MCPServer: ...
 ```
 
-- `arm=None` means `load_arm()`. `main()` uses `load_arm()`, so a bad
-  `arm.json` fails startup with `ArmError`.
+- `arm=None` means the default `Arm()`; `build_eval_server` never reads
+  `arm.json`, so tests do not depend on a developer's local file. Only
+  `main()` calls `load_arm()`, so a bad `arm.json` fails startup with
+  `ArmError`.
 - The registered index tool is renamed to `arm.index_tool`. Tool descriptions
   and the result's prompt block go through `rename_index_tool`.
 - The `on_call` observer and trace still use the canonical `get_memory_index`.

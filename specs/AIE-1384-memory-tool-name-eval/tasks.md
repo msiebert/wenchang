@@ -35,7 +35,7 @@ of the code tasks. Live runs are human only.
     `evals/__main__.py`.
   - Given fixture runs, Then each metric, the deltas, and the exit-2 case for
     differing scenario sets are as in AC10.
-- [ ] T6 — Run procedure and ignore rule (AC11).
+- [x] T6 — Run procedure and ignore rule (AC11).
   - implementer: `.claude/commands/run-evals.md` (preflight uses the arm's
     index tool; arm procedure section), `.gitignore` (`evals/arm.json`).
 - [x] T7 — Docs (doc-updater).
@@ -43,15 +43,14 @@ of the code tasks. Live runs are human only.
     alternatives rejected); decision filled in at T8.
   - Evals docs: arms, `set-arm`, `compare`.
   - Draft `review-pr.md`.
-- [ ] T7b — `make check` green (AC13).
-- [ ] HUMAN CHECKPOINT — live runs, one fresh session per arm, in a session
+- [x] T7b — `make check` green (AC13).
+- [x] HUMAN CHECKPOINT — live runs, one fresh session per arm, in a session
   launched as `/run-evals` requires. For each of the five arms:
   `set-arm`, relaunch, `new-run` with the panel ids (Sonnet 5.5 (`--model sonnet`), 3 trials),
   `grade`, then `set-arm --reset`. Optional: default arm with the agent prompt
   on.
-- [ ] T8 — `eval-report.md` and the decision (AC12).
+- [x] T8 — `eval-report.md` and the decision (AC12).
   - Run `compare` over the five runs, baseline `get_memory_index`; save the
     output as `specs/AIE-1384-memory-tool-name-eval/eval-report.md`.
   - Apply the decision rule; record the result in the ADR.
-- [ ] T9 — Conditional: the rename. Likely a follow-up issue (ADR, CHANGELOG
-  breaking-change entry, every mention updated).
+- [-] T9 — Not needed: the decision was to keep `get_memory_index`.

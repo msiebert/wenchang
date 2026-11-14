@@ -9,7 +9,7 @@ stored in gitignored `evals/arm.json` via `python -m evals set-arm`. The eval
 server renames the tool by substitution; the trace keeps the canonical name, so
 scenarios and graders are unchanged. `new-run` records the arm, `merge-runs`
 refuses mixed arms, and `compare` builds one table. No `src/` or public API
-change. The live runs and the rename decision are still to do.
+change. The live runs are done and the decision is to keep the name.
 
 ## Acceptance criteria → tests
 
@@ -20,7 +20,7 @@ change. The live runs and the rename decision are still to do.
 | AC9: arm in `run.json`, report header, `merge-runs` check, old runs read as default | `tests/test_evals_arm_run.py` |
 | AC10: `compare` metrics, deltas, exit 2 on differing scenario sets | `tests/test_evals_compare.py` |
 | AC11: preflight uses the arm's index tool; arm procedure documented | `.claude/commands/run-evals.md` (doc, no test) |
-| AC12: live runs, `eval-report.md`, decision ADR | Pending human live runs |
+| AC12: live runs, `eval-report.md`, decision ADR | Done: [eval-report.md](eval-report.md); decision keep `get_memory_index` (ADR 0049) |
 | AC13: `make check` | Green, 6521 passed |
 
 Test changes: one existing test updated under `Allow-test-changes:` in the
@@ -31,14 +31,15 @@ weakened.
 ## Architecture / ADR changes
 
 - [ADR 0049](../../docs/adr/0049-index-tool-name-experiment.md), status
-  Proposed: experiment design and decision rule. Its Result section is filled
-  in after the live runs.
+  Accepted: experiment design, decision rule, and result (keep the name;
+  candidates 81.8% to 84.8% call-first vs 87.9% baseline; index-read-first 100%
+  in all arms).
 - `ARCHITECTURE.md`, "Outside the library: `evals/`": short paragraph on arms,
   `set-arm`, and `compare`.
 
 ## Deviations from spec
 
-- None.
+- `build_eval_server(arm=None)` is the default `Arm()` and never reads `arm.json`; only `main()` calls `load_arm()`, so a developer's local `arm.json` cannot break the test suite.
 
 ## Look closely at
 
@@ -54,8 +55,4 @@ weakened.
 
 ## Follow-ups
 
-- Human: run the five arms live (one fresh session each), save `compare`
-  output as `eval-report.md`, apply the rule, and fill in ADR 0049.
-- Conditional: if a name wins, a separate issue for the rename (ADR, CHANGELOG
-  breaking-change entry, every mention).
 - Widen guard hook rule 4 to cover `evals/`.

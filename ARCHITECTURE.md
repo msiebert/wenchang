@@ -1545,7 +1545,7 @@ imports it. The editable install makes it importable from any directory.
 Eval arms vary the index tool name and whether the agent body carries the
 memory prompt ([ADR 0049](docs/adr/0049-index-tool-name-experiment.md)).
 `python -m evals set-arm` writes the gitignored `evals/arm.json`, which
-`evals.server` and `evals.agent` read; the server substitutes the name
+`evals.agent` and the eval server's `main()` read (`build_eval_server` itself defaults to the default arm); the server substitutes the name
 eval-side and the trace keeps `get_memory_index`. `new-run` records the arm,
 `merge-runs` refuses mixed arms, and `compare` tabulates runs.
 
