@@ -22,6 +22,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import CallToolResult, TextContent
 
 import wenchang
+from evals.arm import DEFAULT_INDEX_TOOL, HARNESS_TOOL_NAMES, Arm, load_arm, rename_index_tool
 from evals.graders import (
     StoredFile,
     StoreDump,
@@ -73,7 +74,6 @@ EVAL_SOURCE: Final = AGENT_SOURCE
 # and nothing here should tell the agent it is being evaluated. register_memory_tools
 # therefore logs its "instructions lack the prompt" warning at every start.
 EVAL_SERVER_INSTRUCTIONS: Final[str] = "Memory tools for this workspace."
-HARNESS_TOOL_NAMES: Final[tuple[str, ...]] = ("eval_reset", "eval_record_turn", "eval_dump")
 
 
 @dataclass(frozen=True)
@@ -464,15 +464,39 @@ def _error(message: str) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=message)], is_error=True)
 
 
-def build_eval_server(state: EvalState | None = None) -> MCPServer:
-    """The eval server: memory tools on state's active store, plus the harness tools."""
+def _apply_arm(server: MCPServer, arm: Arm) -> None:
+    """Rename the index tool and rewrite every memory tool description for arm.
+
+    Uses the private tool manager, as register_memory_tools does; the mcp<3 pin
+    keeps it stable. The trace keeps the canonical name because the observer
+    receives it from the wrapper, not from the registered name.
+    """
+    if arm.is_default:
+        return
+    tools = server._tool_manager._tools  # pyright: ignore[reportPrivateUsage]
+    renamed: dict[str, Any] = {}
+    for name, tool in tools.items():
+        new_name = arm.index_tool if name == DEFAULT_INDEX_TOOL else name
+        renamed[new_name] = tool.model_copy(
+            update={"name": new_name, "description": rename_index_tool(tool.description, arm)}
+        )
+    tools.clear()
+    tools.update(renamed)
+
+
+def build_eval_server(state: EvalState | None = None, arm: Arm | None = None) -> MCPServer:
+    """The eval server: memory tools on state's active store, plus the harness tools.
+
+    The index tool is named for arm, which defaults to the default Arm().
+    """
     state = EvalState() if state is None else state
+    arm = Arm() if arm is None else arm
     server = MCPServer(
         "wenchang", instructions=EVAL_SERVER_INSTRUCTIONS, version=wenchang.__version__
     )
     register_memory_tools(
         server,
-        prompt=build_memory_prompt(REFERENCE_SLOTS),
+        prompt=rename_index_tool(build_memory_prompt(REFERENCE_SLOTS), arm),
         slots=REFERENCE_SLOTS,
         client=_ActiveClient(state),
         resolver=_ActiveResolver(state),
@@ -482,6 +506,7 @@ def build_eval_server(state: EvalState | None = None) -> MCPServer:
         product=REFERENCE_PRODUCT,
         on_call=state.record_call,
     )
+    _apply_arm(server, arm)
 
     def eval_reset(scenario_path: str, trial_dir: str) -> CallToolResult:
         try:
@@ -549,7 +574,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--transcripts-root", type=Path, default=default_projects_root())
     args = parser.parse_args(argv)
     state = EvalState(runs_root=args.runs_root, transcripts_root=args.transcripts_root)
-    build_eval_server(state).run("stdio")
+    build_eval_server(state, load_arm()).run("stdio")
 
 
 if __name__ == "__main__":

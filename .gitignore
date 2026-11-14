@@ -216,3 +216,6 @@ __marimo__/
 
 # Behavioral eval run output
 evals/runs/
+
+# Behavioral eval arm selection
+evals/arm.json

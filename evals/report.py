@@ -17,6 +17,7 @@ from types import MappingProxyType
 from typing import Any, Final, cast
 
 import evals.agent
+from evals.arm import Arm, ArmError
 from evals.graders import (
     GradeInputError,
     StoreDump,
@@ -46,10 +47,15 @@ __all__ = [
     "build_report",
     "check_model",
     "grade_trial",
+    "judge_verdicts",
+    "load_grade",
+    "load_run",
+    "load_run_arm",
     "merge_runs",
     "new_run",
     "parse_shard",
     "shard_scenarios",
+    "trial_scenario",
     "turn_prompt",
     "uses_reply_kinds",
 ]
@@ -66,6 +72,7 @@ def check_model(model: str) -> None:
 
 
 GIT_TIMEOUT_S: Final = 10
+_DEFAULT_ARM: Final = Arm()
 _NEWLINE: Final = "\n"
 
 
@@ -120,8 +127,11 @@ def new_run(
     runs_dir: Path = RUNS_DIR,
     now: datetime | None = None,
     shard: tuple[int, int] | None = None,
+    arm: Arm = _DEFAULT_ARM,
 ) -> tuple[Path, dict[str, Any]]:
     """Create the run and trial dirs; return the run dir and the runner's plan.
+
+    run.json records arm.
 
     A shard run's dir ends in -shard<k>of<n>, so sibling shards started in the
     same second do not collide, and its run.json records the shard.
@@ -153,6 +163,7 @@ def new_run(
             "scenarios": [s.id for s in scenarios],
             "git_commit": _git_commit(),
             "agent_sha256": _agent_sha256(),
+            "arm": arm.to_json(),
             **({"shard": f"{shard[0]}/{shard[1]}"} if shard is not None else {}),
         },
     )
@@ -461,6 +472,21 @@ def _load_run(run_dir: Path) -> dict[str, Any]:
     return run
 
 
+def load_run_arm(run_dir: Path) -> Arm:
+    """The arm recorded in run.json; the default arm when it has none."""
+    run = _load_run(run_dir)
+    return _arm_of(run_dir / "run.json", run)
+
+
+def _arm_of(path: Path, run: Mapping[str, Any]) -> Arm:
+    if "arm" not in run:
+        return Arm()
+    try:
+        return Arm.from_json(run["arm"])
+    except ArmError as exc:
+        raise GradeInputError(f"{path}: invalid arm: {exc}") from None
+
+
 _REPLY_FIELDS: Final[Mapping[str, type]] = MappingProxyType(
     {"session": int, "turn": int, "phrase": str}
 )
@@ -679,6 +705,13 @@ def merge_runs(out_dir: Path, run_dirs: Sequence[Path]) -> tuple[str, dict[str, 
                 raise GradeInputError(
                     f"{run_dir}: {key} {run[key]!r} differs from {run_dirs[0]}'s {first[key]!r}"
                 )
+    arm = _arm_of(run_dirs[0] / "run.json", first)
+    for run_dir, run in zip(run_dirs, runs, strict=True):
+        other = _arm_of(run_dir / "run.json", run)
+        if other != arm:
+            raise GradeInputError(
+                f"{run_dir}: arm {other.to_json()!r} differs from {run_dirs[0]}'s {arm.to_json()!r}"
+            )
     seen: dict[str, Path] = {}
     for run_dir, run in zip(run_dirs, runs, strict=True):
         for ident in run["scenarios"]:
@@ -694,6 +727,7 @@ def merge_runs(out_dir: Path, run_dirs: Sequence[Path]) -> tuple[str, dict[str, 
             "run_id": out_dir.name,
             "created": datetime.now(UTC).isoformat(),
             **{key: first[key] for key in _MATCHED_RUN_FIELDS},
+            "arm": arm.to_json(),
             "scenarios": sorted(seen),
             "sources": [str(d) for d in run_dirs],
         },
@@ -740,10 +774,13 @@ def _markdown(
     totals: Mapping[str, int],
     identity: Mapping[str, Any],
 ) -> str:
+    arm = _arm_of(Path("run.json"), run)
     lines = [
         f"# Eval report: {run['run_id']}",
         "",
         f"- Model: {run['model']}",
+        f"- Index tool: {arm.index_tool}",
+        f"- Agent prompt: {'on' if arm.agent_prompt else 'off'}",
         f"- Trials per scenario: {run['trials']}",
         f"- Created: {run['created']}",
         f"- Git commit: {run['git_commit']}",
@@ -807,3 +844,9 @@ def _markdown(
         if invalid:
             lines += ["", f"Trials with an invalid judge.json: {', '.join(map(str, invalid))}"]
     return "\n".join(lines) + "\n"
+
+
+trial_scenario = _trial_scenario
+judge_verdicts = _judge_verdicts
+load_run = _load_run
+load_grade = _load_grade

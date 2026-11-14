@@ -60,6 +60,11 @@ user to relaunch with that command.
    `evals/runs/preflight-<k>of<n>/` instead, so concurrent shards never
    share a preflight dir.
 3. Spawn `Agent(subagent_type="wenchang-eval", description="eval preflight", prompt="Call get_memory_index first. After it returns, reply with the exact names of every tool you can call, and finish your reply with this line on its own, as the last line: WENCHANG-PREFLIGHT-END")`.
+   The index tool is the one named by the run's arm: `"arm"."index_tool"`
+   in `run.json`, default `get_memory_index`. For another arm, use that
+   name in place of `get_memory_index` in the prompt above and in check
+   (a) below. Check (c) stays `get_memory_index`, because the trace always
+   records the canonical name.
 4. Call `mcp__wenchang__eval_record_turn(session=1, turn=1, user=<that prompt>, reply=<the Agent result>, agent_id=<its agentId>)`, as in step 3.2.
 5. Call `mcp__wenchang__eval_dump`, then read `trace.json` and
    `transcript.json` in that preflight dir.
@@ -159,6 +164,38 @@ third person ("the user said"). These counts are a separate signal and
 never change a pass count. A judge fail in such a trial is co-occurrence,
 not proof the addressee caused it. Counts from runs before 2026-10-20
 include auto-mode handback summaries (ADR 0035).
+
+## Arms
+
+An arm is a variant of the setup under test: the name of the index tool
+and whether the agent gets the memory prompt. `set-arm` writes the
+gitignored `evals/arm.json` and regenerates
+`.claude/agents/wenchang-eval.md`. The eval server reads the arm at
+startup, and the agent file loads at session start. So each arm needs a
+fresh session launched with the step 0 command.
+
+Example: comparing index tool names. The candidates are
+`get_memory_index` (baseline), `load_memory`,
+`get_memory_rules_and_index`, `start_memory_session`, and
+`get_memory_entrypoint`. For each one:
+
+1. Run `uv run python -m evals set-arm --index-tool <name> --no-agent-prompt`.
+2. Relaunch the session with the step 0 command.
+3. Run `uv run python -m evals new-run --model sonnet --trials 3
+   remembering-stated-name remembering-observed-once
+   remembering-stated-role remembering-fact-about-user
+   remembering-preference-mid-task recall-across-sessions
+   filing-new-acronym privacy-account-number forgetting-one-fact
+   curated-correction`. It records the arm in `run.json` and warns when
+   the arm is not the default.
+4. Run the preflight, then run and grade the trials as usual.
+
+After all arms, run `uv run python -m evals set-arm --reset` to restore
+the default. Then compare the runs, with the baseline arm's run first:
+
+```
+uv run python -m evals compare <out file> <run dir> ... --baseline <baseline run dir>
+```
 
 ## Parallel shards
 

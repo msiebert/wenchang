@@ -16,6 +16,7 @@ from mcp import StdioServerParameters
 from mcp.client import Client
 from mcp.types import CallToolResult
 
+from evals.arm import Arm, rename_index_tool
 from evals.graders import load_store_dump, load_trace, load_transcript, order_key
 from evals.reference_adopter import (
     REFERENCE_PRODUCT,
@@ -28,6 +29,9 @@ from evals.server import (
     HARNESS_TOOL_NAMES,
     EvalState,
     build_eval_server,
+)
+from evals.server import (
+    main as server_main,
 )
 from evals.subagent_transcript import SubagentTranscriptError
 from wenchang.core import MemoryStore
@@ -886,3 +890,165 @@ def test_reset_writes_an_empty_transcript_file(tmp_path: Path, state: EvalState)
     state.reset(load_scenario(scenario), trial)
 
     assert json.loads((trial / "transcript.json").read_text()) == {"turns": []}
+
+
+RENAMED = Arm("load_memory")
+
+
+def _run_arm(state: EvalState, arm: Arm, body: Callable[[Client], Awaitable[_T]]) -> _T:
+    async def main() -> _T:
+        with anyio.fail_after(30):
+            async with Client(build_eval_server(state, arm=arm)) as client:
+                return await body(client)
+
+    return anyio.run(main)
+
+
+def _tools(state: EvalState, arm: Arm) -> dict[str, Any]:
+    async def body(client: Client) -> dict[str, Any]:
+        return {t.name: t for t in (await client.list_tools()).tools}
+
+    return _run_arm(state, arm, body)
+
+
+def test_renamed_arm_lists_the_renamed_index_tool(tmp_path: Path) -> None:
+    """Arm("load_memory") lists load_memory instead of get_memory_index; all other
+    tools keep their names, and descriptions and schemas differ only by the
+    rename (AIE-1384, AC5).
+    """
+    default = _tools(EvalState(runs_root=tmp_path / "a"), Arm())
+    renamed = _tools(EvalState(runs_root=tmp_path / "b"), RENAMED)
+
+    assert "load_memory" in renamed
+    assert "get_memory_index" not in renamed
+    others = {*TOOL_NAMES, *HARNESS_TOOL_NAMES} - {"get_memory_index"}
+    assert others < set(renamed)
+    assert set(renamed) == (set(default) - {"get_memory_index"}) | {"load_memory"}
+    for name in TOOL_NAMES:
+        new_name = "load_memory" if name == "get_memory_index" else name
+        expected = rename_index_tool(default[name].description or "", RENAMED)
+        assert renamed[new_name].description == expected
+        assert renamed[new_name].input_schema == default[name].input_schema
+    assert "get_memory_index" not in (renamed["load_memory"].description or "")
+    for name in HARNESS_TOOL_NAMES:
+        assert renamed[name].description == default[name].description
+
+
+def test_renamed_index_tool_returns_the_same_payload_and_renamed_prompt(
+    tmp_path: Path,
+) -> None:
+    """load_memory returns the default payload as structured content and, as
+    content, the JSON then the memory prompt with the tool name renamed
+    (AIE-1384, AC6).
+    """
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+
+    async def body(client: Client) -> CallToolResult:
+        await _reset(client, scenario, tmp_path / "runs" / "t")
+        name = (
+            "load_memory"
+            if "load_memory" in {t.name for t in (await client.list_tools()).tools}
+            else "get_memory_index"
+        )
+        return await client.call_tool(name, {})
+
+    default = _run_arm(EvalState(runs_root=tmp_path / "runs"), Arm(), body)
+    renamed = _run_arm(EvalState(runs_root=tmp_path / "runs"), RENAMED, body)
+
+    assert not renamed.is_error
+    assert len(renamed.content) == len(default.content) == 2
+    blocks = [cast(Any, c).text for c in renamed.content]
+    default_blocks = [cast(Any, c).text for c in default.content]
+
+    def without_seed_time(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                k: without_seed_time(v)
+                for k, v in cast(dict[str, Any], value).items()
+                if k != "last_updated"
+            }
+        if isinstance(value, list):
+            return [without_seed_time(v) for v in cast(list[Any], value)]
+        return value
+
+    assert without_seed_time(json.loads(blocks[0])) == without_seed_time(
+        json.loads(default_blocks[0])
+    )
+    assert blocks[1] == rename_index_tool(default_blocks[1], RENAMED)
+    assert "get_memory_index" not in blocks[1]
+    assert without_seed_time(renamed.structured_content) == without_seed_time(
+        default.structured_content
+    )
+
+
+def test_renamed_index_call_is_traced_under_the_canonical_name(tmp_path: Path) -> None:
+    """The trace names the renamed index tool get_memory_index (AIE-1384, AC7)."""
+    state = EvalState(runs_root=tmp_path / "runs")
+    scenario = _scenario(tmp_path, SEEDED, "seeded", identity="member")
+    trial = state.runs_root / "t"
+
+    async def body(client: Client) -> None:
+        await _reset(client, scenario, trial)
+        await client.call_tool("load_memory", {})
+        await client.call_tool("eval_dump", {})
+
+    _run_arm(state, RENAMED, body)
+
+    assert [c.tool for c in state.trace()] == ["get_memory_index"]
+    assert [c.tool for c in load_trace(trial / "trace.json")] == ["get_memory_index"]
+
+
+@pytest.mark.parametrize("arm", [Arm(), RENAMED])
+def test_instructions_are_the_same_for_every_arm(tmp_path: Path, arm: Arm) -> None:
+    """server.instructions equals EVAL_SERVER_INSTRUCTIONS for each arm
+    (AIE-1384, AC8).
+    """
+    server = build_eval_server(EvalState(runs_root=tmp_path / "runs"), arm=arm)
+
+    assert server.instructions == EVAL_SERVER_INSTRUCTIONS
+
+
+def _tool_names(server: Any) -> set[str]:
+    async def run() -> set[str]:
+        with anyio.fail_after(30):
+            async with Client(server) as client:
+                return {t.name for t in (await client.list_tools()).tools}
+
+    return anyio.run(run)
+
+
+def test_no_arm_is_the_default_and_ignores_load_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """arm=None means the default arm; build_eval_server never consults
+    load_arm or the arm file (AIE-1384).
+    """
+    monkeypatch.setattr("evals.server.load_arm", lambda: RENAMED)
+
+    server = build_eval_server(EvalState(runs_root=tmp_path / "runs"), arm=None)
+
+    names = _tool_names(server)
+    assert "get_memory_index" in names
+    assert "load_memory" not in names
+
+
+def test_main_serves_the_arm_from_load_arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() reads the arm with load_arm and passes it to build_eval_server
+    (AIE-1384).
+    """
+    captured: list[Arm | None] = []
+
+    class _Server:
+        def run(self, transport: str) -> None:
+            captured.append(None)
+
+    def fake_build(state: EvalState | None = None, arm: Arm | None = None) -> Any:
+        captured.append(arm)
+        return _Server()
+
+    monkeypatch.setattr("evals.server.load_arm", lambda: RENAMED)
+    monkeypatch.setattr("evals.server.build_eval_server", fake_build)
+
+    server_main(["--runs-root", str(tmp_path / "runs"), "--transcripts-root", str(tmp_path / "t")])
+
+    assert captured[0] == RENAMED

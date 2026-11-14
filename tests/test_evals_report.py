@@ -143,6 +143,7 @@ def test_new_run_writes_metadata_and_plan(tmp_path: Path) -> None:
         "scenarios": ["alpha", "beta"],
         "git_commit": head,
         "agent_sha256": hashlib.sha256(evals.agent.AGENT_PATH.read_bytes()).hexdigest(),
+        "arm": {"index_tool": "get_memory_index", "agent_prompt": True},
     }
     for ident in ("alpha", "beta"):
         for k in (1, 2):
